@@ -5,10 +5,23 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from archive import AttentionArchiveConverter, ArchiveConfig
+from archive import (
+    AttentionArchiveConverter,
+    ArchiveConfig,
+    TraceArchiveConfig,
+    TraceArchiveConverter,
+)
 from build import BuildConfig, GraphDatasetBuilder
 from cache import AttentionDataset, AttentionSample, NPZ_FIELDS, save_attention_sample
-from graphs import build_original_graph
+from features import (
+    HIDDEN_FIELDS,
+    STAT_FIELDS,
+    load_node_features,
+    save_hidden_features,
+    save_token_stats,
+    teacher_forced_stats,
+)
+from graphs import build_original_graph, dense_edge_attr
 
 
 def sample():
@@ -25,19 +38,70 @@ def sample():
     )
 
 
+def write_split(root: Path):
+    s = sample()
+    (root / "attention").mkdir(parents=True)
+    save_attention_sample(s, root / "attention" / "r1.npz")
+    (root / "manifest.json").write_text(
+        '{"attention_floor":0.01,"num_layers":1,"num_heads":1,"count":1}'
+    )
+    (root / "index.jsonl").write_text(
+        '{"sample_id":"r1","source_id":"s1","path":"attention/r1.npz"}\n'
+    )
+    return s
+
+
 class CoreTests(unittest.TestCase):
-    def test_npz_has_exactly_six_fields(self):
+    def test_npz_has_exactly_six_attention_fields(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "sample.npz"
             save_attention_sample(sample(), path)
             with np.load(path) as arrays:
                 self.assertEqual(set(arrays.files), set(NPZ_FIELDS))
 
-    def test_original_graph_matches_threshold_union(self):
+    def test_hidden_and_stats_are_small_separate_modalities(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            s = write_split(root)
+            hidden = torch.arange(2 * 4 * 3).reshape(2, 4, 3).float()
+            save_hidden_features(root / "hidden/r1.npz", s.token_ids, [1, 3], hidden)
+            save_token_stats(
+                root / "token_stats/r1.npz",
+                s.token_ids,
+                torch.tensor([0.0, -1.0, -2.0, -3.0]),
+                torch.tensor([0.0, 1.0, 2.0, 3.0]),
+            )
+            with np.load(root / "hidden/r1.npz") as arrays:
+                self.assertEqual(set(arrays.files), set(HIDDEN_FIELDS))
+            with np.load(root / "token_stats/r1.npz") as arrays:
+                self.assertEqual(set(arrays.files), set(STAT_FIELDS))
+            restored = next(iter(AttentionDataset(root)))
+            x = load_node_features(root, restored, "all")
+            self.assertEqual(x.shape, (4, 1 + 6 + 2))
+
+    def test_teacher_forced_stats_match_direct_distribution(self):
+        logits = torch.tensor([
+            [[2.0, 0.0, -1.0], [0.0, 2.0, -1.0], [1.0, 0.0, 2.0]]
+        ])
+        tokens = torch.tensor([0, 1, 2])
+        log_prob, entropy = teacher_forced_stats(logits, tokens, chunk_size=1)
+        direct = torch.log_softmax(logits[0, :2], dim=-1)
+        expected_lp = torch.tensor([0.0, direct[0, 1], direct[1, 2]])
+        expected_h = torch.tensor([
+            0.0,
+            -(direct[0].exp() * direct[0]).sum(),
+            -(direct[1].exp() * direct[1]).sum(),
+        ])
+        self.assertTrue(torch.allclose(log_prob, expected_lp, atol=1e-6))
+        self.assertTrue(torch.allclose(entropy, expected_h, atol=1e-6))
+
+    def test_original_graph_keeps_old_semantics_without_dense_storage(self):
         graph = build_original_graph(sample(), 0.05)
         self.assertEqual(graph.edge_index.tolist(), [[1, 0], [2, 3]])
         self.assertEqual(graph.edge_type.tolist(), [0, 0])
-        self.assertEqual(graph.edge_attr.shape, (2, 1))
+        dense = dense_edge_attr(graph, 1)
+        self.assertEqual(dense.shape, (2, 1))
+        self.assertTrue(torch.allclose(dense[:, 0].float(), torch.tensor([0.08, 0.10]), atol=1e-3))
 
     def test_formal_converter_and_builder_use_same_canonical_interface(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -71,20 +135,37 @@ class CoreTests(unittest.TestCase):
             self.assertTrue((archive / "train" / "labels.jsonl").is_file())
 
             output = root / "graphs"
-            GraphDatasetBuilder(
-                BuildConfig(
-                    archive / "train",
-                    output,
-                    kind="original",
-                    tau=0.05,
-                    device="cpu",
-                )
-            ).run()
+            GraphDatasetBuilder(BuildConfig(
+                archive / "train", output, kind="original", tau=0.05,
+                node_features="attention", device="cpu"
+            )).run()
             graph = torch.load(output / "graphs" / "train-1.pt", weights_only=True)
             self.assertEqual(
                 set(graph),
-                {"response_idx", "token_ids", "x", "edge_index", "edge_type", "edge_attr"},
+                {"response_idx", "x", "edge_index", "edge_type", "edge_ptr", "edge_channel", "edge_value"},
             )
+
+    def test_legacy_trace_converter_keeps_only_hidden_and_token_stats(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            traces = root / "traces"
+            traces.mkdir()
+            torch.save(
+                {
+                    "example_id": "e1",
+                    "input_ids": torch.tensor([1, 2, 3]),
+                    "selected_hidden_layers": torch.tensor([4, 8]),
+                    "hidden_states": torch.randn(2, 3, 5),
+                    "token_log_prob": torch.tensor([0.0, -1.0, -2.0]),
+                    "next_token_entropy": torch.tensor([0.0, 0.5, 0.7]),
+                    "feature_record": {"unused": 1},
+                },
+                traces / "legacy.pt",
+            )
+            out = root / "features"
+            TraceArchiveConverter(TraceArchiveConfig(traces, out)).run()
+            self.assertTrue((out / "hidden/e1.npz").is_file())
+            self.assertTrue((out / "token_stats/e1.npz").is_file())
 
 
 if __name__ == "__main__":
