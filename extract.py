@@ -1,19 +1,14 @@
-"""Extract compact, label-free attention artifacts from a causal language model."""
-
-from dataclasses import dataclass
 import json
-import math
 from pathlib import Path
-from typing import Any
 
 import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from cache import AttentionSample, save_attention_sample
-from ragtruth import load_ragtruth_samples, tokenize_ragtruth_sample
+from data import save_feature
 
 
+SYSTEM_PROMPT = "You are a helpful assistant."
 DTYPES = {
     "float16": torch.float16,
     "bfloat16": torch.bfloat16,
@@ -21,223 +16,175 @@ DTYPES = {
 }
 
 
-@dataclass(frozen=True)
-class ExtractionConfig:
-    model_path: str
-    dataset_path: str | Path
-    output_dir: str | Path
-    split: str
-    generator_model: str = "llama-2-7b-chat"
-    task_type: str = "all"
-    floor: float = 0.01
-    dtype: str = "float16"
-    device: str = "cuda"
-    limit: int | None = None
+def _read_jsonl(path):
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
 
 
-class AttentionCollector:
-    def __init__(
-        self,
-        *,
-        num_layers: int,
-        num_heads: int,
-        num_tokens: int,
-        response_idx: int,
-        floor: float,
-        dtype: torch.dtype,
-    ) -> None:
-        self.num_layers = num_layers
-        self.num_heads = num_heads
-        self.num_tokens = num_tokens
-        self.response_idx = response_idx
-        self.floor = floor
-        self.dtype = dtype
-        self.diagonals: list[torch.Tensor | None] = [None] * num_layers
-        self.row_counts: list[torch.Tensor] = []
-        self.column_indices: list[torch.Tensor] = []
-        self.values: list[torch.Tensor] = []
+def _name(value):
+    return "".join(c for c in value.casefold() if c.isalnum())
 
-    def consume(self, layer_index: int, attention: torch.Tensor) -> None:
-        if attention.ndim != 3 or tuple(attention.shape[1:]) != (self.num_tokens, self.num_tokens):
-            raise ValueError("layer attention must have shape [heads, tokens, tokens]")
-        if attention.shape[0] != self.num_heads:
-            raise ValueError("layer attention head count changed")
-        self.diagonals[layer_index] = attention.diagonal(dim1=-2, dim2=-1).to(
-            dtype=self.dtype,
-            device="cpu",
+
+def load_ragtruth(dataset_dir, split, generator_model, task="all"):
+    dataset_dir = Path(dataset_dir)
+    sources = {str(x["source_id"]): x for x in _read_jsonl(dataset_dir / "source_info.jsonl")}
+    requested = _name(generator_model)
+
+    rows = []
+    for response in _read_jsonl(dataset_dir / "response.jsonl"):
+        if response["split"] != split or _name(response["model"]) != requested:
+            continue
+        if str(response.get("quality", "")).casefold() != "good":
+            continue
+        source = sources[str(response["source_id"])]
+        if task != "all" and source["task_type"].casefold() != task.casefold():
+            continue
+        rows.append((response, source))
+    return rows
+
+
+def encode_example(tokenizer, prompt, response):
+    rendered = tokenizer.apply_chat_template(
+        [{"role": "system", "content": SYSTEM_PROMPT},
+         {"role": "user", "content": prompt}],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    full_text = rendered + response
+    encoded = tokenizer(full_text, add_special_tokens=False, return_offsets_mapping=True)
+    boundary = len(rendered)
+    response_idx = next(i for i, (start, _) in enumerate(encoded["offset_mapping"]) if start >= boundary)
+    return torch.tensor(encoded["input_ids"], dtype=torch.long), response_idx, encoded["offset_mapping"], boundary
+
+
+def token_labels(offsets, boundary, labels):
+    y = torch.zeros(len(offsets), dtype=torch.long)
+    for span in labels:
+        start = boundary + int(span["start"])
+        end = boundary + int(span["end"])
+        for i, (left, right) in enumerate(offsets):
+            if right > start and left < end:
+                y[i] = 1
+    return y
+
+
+def compress_attention(attentions, response_idx, floor, dtype):
+    """Dense model attention -> response-only CSR + diagonal."""
+    diagonal = []
+    row_counts = []
+    sources = []
+    weights = []
+
+    for attention in attentions:
+        a = attention[0]
+        heads, tokens, _ = a.shape
+        diagonal.append(a.diagonal(dim1=-2, dim2=-1).to(dtype=dtype, device="cpu"))
+
+        response = a[:, response_idx:, :]
+        target = torch.arange(response_idx, tokens, device=a.device)
+        source = torch.arange(tokens, device=a.device)
+        keep = (response.float() > floor) & (source[None, None, :] < target[None, :, None])
+        flat = keep.reshape(-1, tokens)
+        where = torch.nonzero(flat, as_tuple=False)
+        row_counts.append(flat.sum(1, dtype=torch.long).cpu())
+        sources.append(where[:, 1].to(torch.int32).cpu())
+        weights.append(response[keep].to(dtype=dtype, device="cpu"))
+
+    counts = torch.cat(row_counts)
+    row_ptr = torch.cat((torch.zeros(1, dtype=torch.long), counts.cumsum(0)))
+    return (
+        torch.stack(diagonal),
+        row_ptr,
+        torch.cat(sources),
+        torch.cat(weights),
+    )
+
+
+def extract_ragtruth(
+    model_path,
+    dataset_dir,
+    output_dir,
+    split,
+    generator_model="llama-2-7b-chat",
+    task="all",
+    floor=0.01,
+    dtype="float16",
+    device="cuda",
+    hidden_layers=(),
+    limit=None,
+):
+    """Extract minimal graph-building features and separate evaluation labels."""
+    output_dir = Path(output_dir)
+    feature_dir = output_dir / "features" / split
+    label_dir = output_dir / "labels" / split
+    feature_dir.mkdir(parents=True, exist_ok=True)
+    label_dir.mkdir(parents=True, exist_ok=True)
+
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    storage_dtype = DTYPES[dtype]
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path,
+        torch_dtype=storage_dtype,
+        attn_implementation="eager",
+        device_map={"": device},
+        low_cpu_mem_usage=True,
+    ).eval()
+
+    rows = load_ragtruth(dataset_dir, split, generator_model, task)
+    if limit is not None:
+        rows = rows[:limit]
+
+    for response, source in tqdm(rows, desc=f"extract {split}"):
+        token_ids, response_idx, offsets, boundary = encode_example(
+            tokenizer, source["prompt"], response["response"]
         )
-        response_attention = attention[:, self.response_idx :, :]
-        source_indices = torch.arange(self.num_tokens, device=attention.device)
-        target_indices = torch.arange(self.response_idx, self.num_tokens, device=attention.device)
-        mask = (response_attention.to(torch.float32) > self.floor) & (
-            source_indices[None, None, :] < target_indices[None, :, None]
-        )
-        flattened_mask = mask.reshape(-1, self.num_tokens)
-        coordinates = torch.nonzero(flattened_mask, as_tuple=False)
-        self.row_counts.append(flattened_mask.sum(dim=1, dtype=torch.int64).cpu())
-        self.column_indices.append(coordinates[:, 1].to(dtype=torch.int32, device="cpu"))
-        self.values.append(response_attention[mask].to(dtype=self.dtype, device="cpu"))
+        input_ids = token_ids.unsqueeze(0).to(device)
 
-    def finalize(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        if any(value is None for value in self.diagonals):
-            raise ValueError("not all layer attentions were collected")
-        row_counts = torch.cat(self.row_counts)
-        return (
-            torch.stack([value for value in self.diagonals if value is not None]),
-            torch.cat([torch.zeros(1, dtype=torch.int64), row_counts.cumsum(dim=0)]),
-            torch.cat(self.column_indices)
-            if self.column_indices
-            else torch.empty(0, dtype=torch.int32),
-            torch.cat(self.values) if self.values else torch.empty(0, dtype=self.dtype),
-        )
-
-
-class AttentionExtractor:
-    def __init__(self, config: ExtractionConfig) -> None:
-        self.config = config
-
-    def run(self) -> None:
-        if self.config.dtype not in DTYPES:
-            raise ValueError("dtype must be float16, bfloat16, or float32")
-        if not math.isfinite(self.config.floor) or not 0 < self.config.floor <= 1:
-            raise ValueError("floor must be finite and in (0, 1]")
-        if self.config.limit is not None and (
-            type(self.config.limit) is not int or self.config.limit <= 0
-        ):
-            raise ValueError("limit must be a positive integer or None")
-        dtype = DTYPES[self.config.dtype]
-        samples = load_ragtruth_samples(
-            self.config.dataset_path,
-            split=self.config.split,
-            generator_model=self.config.generator_model,
-            task_type=self.config.task_type,
-        )
-        if self.config.limit is not None:
-            samples = samples[:self.config.limit]
-        if not samples:
-            raise ValueError("no matching samples found")
-        output_dir = Path(self.config.output_dir)
-        if output_dir.exists():
-            if not output_dir.is_dir() or any(output_dir.iterdir()):
-                raise FileExistsError("output directory must be empty")
-        tokenizer = AutoTokenizer.from_pretrained(self.config.model_path)
-        model = AutoModelForCausalLM.from_pretrained(
-            self.config.model_path,
-            torch_dtype=dtype,
-            attn_implementation="eager",
-            low_cpu_mem_usage=True,
-            device_map={"": self.config.device},
-        ).eval()
-        output_dir.mkdir(parents=True, exist_ok=True)
-        index_rows: list[dict[str, str]] = []
-        layer_count = len(model.model.layers)
-        head_count: int | None = None
-        for sample in tqdm(samples, desc=f"RAGTruth {self.config.split}"):
-            token_ids, response_idx = tokenize_ragtruth_sample(
-                tokenizer,
-                prompt=sample.prompt,
-                response=sample.response,
+        with torch.inference_mode():
+            outputs = model.model(
+                input_ids=input_ids,
+                attention_mask=torch.ones_like(input_ids),
+                output_attentions=True,
+                output_hidden_states=bool(hidden_layers),
+                use_cache=False,
+                return_dict=True,
             )
-            context_limit = model.config.max_position_embeddings
-            if context_limit is not None and token_ids.numel() > int(context_limit):
-                raise ValueError("full context length exceeds model context limit")
-            collector: AttentionCollector | None = None
 
-            def collect_attention(
-                _: torch.nn.Module,
-                __: tuple[Any, ...],
-                output: tuple[Any, ...],
-                layer_index: int,
-            ) -> tuple[Any, ...]:
-                nonlocal collector, head_count
-                attention = output[1]
-                if attention.ndim != 4 or attention.shape[0] != 1:
-                    raise ValueError(
-                        "Llama decoder layer must return "
-                        "[batch, heads, tokens, tokens] attention"
-                    )
-                layer_attention = attention[0]
-                if collector is None:
-                    head_count = int(layer_attention.shape[0])
-                    collector = AttentionCollector(
-                        num_layers=layer_count,
-                        num_heads=head_count,
-                        num_tokens=token_ids.numel(),
-                        response_idx=response_idx,
-                        floor=self.config.floor,
-                        dtype=dtype,
-                    )
-                collector.consume(layer_index, layer_attention)
-                compact = list(output)
-                compact[1] = None
-                return tuple(compact)
+        diagonal, row_ptr, source_index, attention_weight = compress_attention(
+            outputs.attentions, response_idx, floor, storage_dtype
+        )
 
-            hooks = [
-                layer.self_attn.register_forward_hook(
-                    lambda module, args, output, index=index: collect_attention(
-                        module,
-                        args,
-                        output,
-                        index,
-                    )
-                )
-                for index, layer in enumerate(model.model.layers)
-            ]
-            try:
-                input_ids = token_ids.unsqueeze(0).to(self.config.device)
-                with torch.no_grad():
-                    model.model(
-                        input_ids=input_ids,
-                        attention_mask=torch.ones_like(input_ids),
-                        return_dict=True,
-                        use_cache=False,
-                        output_attentions=True,
-                    )
-            finally:
-                for hook in hooks:
-                    hook.remove()
-            if collector is None:
-                raise ValueError("model produced no layer attentions")
-            diagonal, row_ptr, columns, values = collector.finalize()
-            artifact = AttentionSample(
-                sample.response_id,
-                sample.source_id,
-                response_idx,
-                token_ids,
-                diagonal,
-                row_ptr,
-                columns,
-                values,
-                self.config.floor,
-            )
-            filename = f"{sample.response_id}.pt"
-            save_attention_sample(artifact, output_dir / filename)
-            index_rows.append(
-                {
-                    "sample_id": sample.response_id,
-                    "source_id": sample.source_id,
-                    "path": filename,
-                }
-            )
-        manifest = {
-            "schema": "attention-response-csr-v1",
-            "observer_model": self.config.model_path,
-            "tokenizer": getattr(tokenizer, "name_or_path", self.config.model_path),
-            "num_layers": layer_count,
-            "num_heads": head_count,
-            "dtype": self.config.dtype,
-            "floor": self.config.floor,
-            "channel_order": "layer,head",
-            "split": self.config.split,
-            "generator_model": self.config.generator_model,
-            "task_type": self.config.task_type,
-            "input_policy": "full_context_no_truncation",
-            "count": len(index_rows),
+        sample = {
+            "sample_id": str(response["id"]),
+            "source_id": str(response["source_id"]),
+            "response_idx": response_idx,
+            "token_ids": token_ids,
+            "attention_diagonal": diagonal,
+            "row_ptr": row_ptr,
+            "source_index": source_index,
+            "attention_weight": attention_weight,
+            "attention_floor": float(floor),
         }
-        (output_dir / "manifest.json").write_text(
-            json.dumps(manifest, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        with (output_dir / "index.jsonl").open("w", encoding="utf-8") as handle:
-            for row in index_rows:
-                handle.write(json.dumps(row) + "\n")
+
+        if hidden_layers:
+            model_layers = len(outputs.hidden_states) - 1
+            resolved = [model_layers - 1 if layer == -1 else layer for layer in hidden_layers]
+            sample["hidden_layers"] = torch.tensor(resolved, dtype=torch.long)
+            sample["hidden_states"] = torch.stack([
+                outputs.hidden_states[layer + 1][0].to(dtype=storage_dtype, device="cpu")
+                for layer in resolved
+            ])
+
+        save_feature(sample, feature_dir / f"{response['id']}.pt")
+
+        y_token = token_labels(offsets, boundary, response.get("labels", []))
+        torch.save({
+            "sample_id": str(response["id"]),
+            "task": str(source["task_type"]),
+            "y_token": y_token,
+            "response_label": int(y_token[response_idx:].any()),
+        }, label_dir / f"{response['id']}.pt")
+
+        del outputs
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()

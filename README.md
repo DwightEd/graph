@@ -1,144 +1,184 @@
-# 稀疏注意力图构建
+# Attention Graph Research
 
-本工具不使用、不写出标签。RAGTruth 的 JSON 读取会解析整行，但图缓存、图文件、索引和 manifest 不保存标签字段；legacy cache loader 只在白名单字段中取值，明确忽略 `y_token`。
+这个仓库只做四件事：**特征抽取、构图、统计、可视化**。数据对象保持最小，不在每个 `.pt` 里保存 schema、commit、绝对路径、manifest 或描述性统计。
 
-唯一入口是 `main.py`：它只解析 CLI 参数，构造 `ExtractionConfig` 或 `BuildConfig`，调用 `run()`，并打印一行摘要。
+## 现有数据在哪里
 
-```text
-CLI 参数 -> ExtractionConfig -> AttentionExtractor.run() -> attention cache
-CLI 参数 -> BuildConfig      -> GraphDatasetBuilder.run() -> graph files/index/manifest
-```
-
-| 文件 | 职责 |
-| --- | --- |
-| `main.py` | `extract` 与 `build` 的唯一 CLI 入口。 |
-| `extract.py` | 按样本提取并保存稀疏注意力缓存。 |
-| `cache.py` | 固定 cache schema 的校验、保存与加载。 |
-| `build.py` | 枚举 cache，逐样本构图并写图数据集。 |
-| `graphs.py` | 三种 token graph 的构图函数。 |
-| `hypergraph.py` | attention hypergraph 的构图函数。 |
-| `ragtruth.py` | 读取 RAGTruth 样本并完成 prompt/response 分词。 |
-| `tests/` | 不依赖二进制 fixture 的单元测试。 |
-| `README.md` | 数据契约、构建命令与运行约束。 |
-| `requirements.txt` | 运行时依赖及 Transformers 版本锁定。 |
-
-## `attention-response-csr-v1` cache 契约
-
-记 `N` 为 token 数，`R=N-response_idx` 为 response token 数，`L` 为层数，`H` 为头数，`C=L*H` 为通道数，`M` 为 CSR 中的保留条目数。通道顺序为 layer-major、head-minor。
-
-| 字段 | shape | dtype | 含义 |
-| --- | --- | --- | --- |
-| `schema` | 标量 | `str` | 固定为 `attention-response-csr-v1`。 |
-| `sample_id` | 标量 | `str` | response 样本标识。 |
-| `source_id` | 标量 | `str` | 原始 source 标识。 |
-| `response_idx` | 标量 | `int` | response 在 `token_ids` 中的起始位置。 |
-| `token_ids` | `[N]` | `int64` | 全上下文 token id。 |
-| `attention_diagonal` | `[L,H,N]` | `float16`、`bfloat16` 或 `float32` | 每通道的 self-attention 对角线。 |
-| `response_row_ptr` | `[C*R+1]` | `int64` | CSR 行指针。 |
-| `response_column_indices` | `[M]` | `int32` | CSR 源 token 索引。 |
-| `response_values` | `[M]` | 与抽取 dtype 相同的浮点型 | 保留的 attention 值。 |
-| `attention_floor` | 标量 | `float` | 抽取保留阈值。 |
-
-对于 layer、head 和 response target，CSR 行号是
-
-```text
-row = (layer * H + head) * R + (target - response_idx)
-```
-
-每行 `response_column_indices` 严格递增，且严格因果：`column < target`。抽取时的选择始终是 `attention.to(float32) > floor`；保存后的半精度值可能等于量化后的 floor，不能由存储 dtype 的直接比较反推选择结果。
-
-## 图契约
-
-构图在 `--device`（通常是 GPU）逐样本进行；每张图立即转为 CPU 再 `torch.save`，不会在 CPU 或 GPU 累积整个 split。合法 cache 即使 CSR 为空，或阈值后没有边/超边，也会输出空图。
-
-### TokenGraph
-
-令 `E` 为边数，`T` 为所选边对应的稀疏 trace 条目数。
-
-| 字段 | shape | dtype | 含义 |
-| --- | --- | --- | --- |
-| `sample_id`, `source_id`, `response_idx` | 标量 | `str`, `str`, `int` | 来自 cache 的标识与切分点。 |
-| `token_ids` | `[N]` | `int64` | 节点 token id。 |
-| `node_attr` | `[N,C]` | cache `attention_diagonal` 的浮点 dtype | 通道化 diagonal 特征。 |
-| `edge_index` | `[2,E]` | `int64` | 行 0 为 source，行 1 为 response target。 |
-| `edge_type` | `[E]` | `int8` | `0`=prompt→response，`1`=response-history→response。 |
-| `edge_attr`（仅 `original`） | `[E,C]` | cache `response_values` 的浮点 dtype | 每边的 dense 通道值。 |
-| `edge_weight`（top-k） | `[E]` | `float32` | 已保留通道值（缺失计零）的通道均值。 |
-| `trace_ptr`（channels） | `[E+1]` | `int64` | 每条 top-k 边在 trace 中的 CSR 指针。 |
-| `trace_channel`（channels） | `[T]` | `int32` | 稀疏值的 channel 编号。 |
-| `trace_value`（channels） | `[T]` | cache `response_values` 的浮点 dtype | 稀疏 channel 值。 |
-
-`original` 和 `hypergraph` 的阈值选择都严格使用 `selection = response_values.to(torch.float32) > float(tau)`；权重仍保留原始 dtype。`tau` 必须有限、在 `[0,1]` 且不小于 cache 的 `attention_floor`。`relation_topk`/`relation_topk_channels` 在已保留条目中分别选择每个 target 的 prompt 和 history 前 `k_prompt`/`k_history` 条，并非完整注意力上的 top-k。
-
-### AttentionHypergraph
-
-令 `Q` 为超边数，`I` 为 incidence 数。
-
-| 字段 | shape | dtype | 含义 |
-| --- | --- | --- | --- |
-| `sample_id`, `source_id`, `response_idx`, `token_ids`, `node_attr` | 同 TokenGraph | 同 TokenGraph | 节点及来源信息。 |
-| `incidence_index` | `[2,I]` | `int64` | 行 0 为 token 节点，行 1 为 hyperedge id。 |
-| `incidence_weight` | `[I]` | cache `response_values` 的浮点 dtype | source attention 或 target diagonal 权重。 |
-| `hyperedge_target` | `[Q]` | `int64` | 每个超边的 response target。 |
-| `hyperedge_channel` | `[Q]` | `int32` | 每个超边所属通道。 |
-| `hyperedge_type` | `[Q]` | `int8` | `0`=prompt source，`1`=response-history source。 |
-
-一个 `(channel, response target, edge_type)` 组合形成一条超边：它包含该类型下超过 `tau` 的 source token，以及 target token 自身。
-
-## 直接构建现有 cache
-
-下列命令在前台显示 `tqdm` 进度。输出根目录固定为远端数据目录；目标目录必须不存在或为空，输入 cache 目录必须存在且至少有一个顶层 `.pt` 文件。
-
-```bash
-GRAPH_ROOT=/share/home/tm902089733300000/a903202310/lys/data/feature_extraction/ragtruth_sparse_graph_v1
-CACHE_ROOT=/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876
-
-PYTHONPATH=. python main.py build \
-  --cache-dir "$CACHE_ROOT/train" \
-  --output-dir "$GRAPH_ROOT/relation_topk_channels/train" \
-  --kind relation_topk_channels --k-prompt 8 --k-history 8 --device cuda
-
-PYTHONPATH=. python main.py build \
-  --cache-dir "$CACHE_ROOT/test" \
-  --output-dir "$GRAPH_ROOT/relation_topk_channels/test" \
-  --kind relation_topk_channels --k-prompt 8 --k-history 8 --device cuda
-```
-
-现有正式 raw cache 根目录是
+当前正式 attention cache：
 
 ```text
 /share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876
 ```
 
-其中 `train` 有 2,497 个样本、`test` 有 449 个样本，raw cache 合计 31,791,710,510 B（约 29.61 GiB）。旧 dense 图目录是
+目录下有 `train/` 和 `test/`。这是 **response-query sparse attention CSR**，不是完整 `[L,H,N,N]` dense attention。
+
+旧属性图：
 
 ```text
 /share/home/tm902089733300000/a903202310/lys/data/feature_extraction/ragtruth_original_attribute_graphs/fresh_attention_c8847872bedf_20260731T074520Z_p876_tau0p05
 ```
 
-旧 dense 图合计 158,239,660,436 B（约 147.37 GiB），其中 dense `edge_attr` 约占 93.10%。本地旧 `ragtruth_graph.tar.gz` 为 7,294,690,891 B（约 7.29 GB / 6.79 GiB），它不是 raw cache。
+旧图包含大量复现 metadata 和 `[E,L*H]` dense `edge_attr`。它可以用于兼容实验，但不再作为新研究的数据接口；新图应从 raw attention cache 重新构造。
 
-## 抽取与依赖
+## 最小 feature 接口
 
-`requirements.txt` 固定 `transformers==4.46.3`。抽取契约依赖该版本中 Llama decoder layer 的 eager attention 输出：加载模型时使用 `attn_implementation="eager"`，前向调用 `output_attentions=True`、`use_cache=False`，并从每层返回的 `[batch, heads, tokens, tokens]` attention 收集数据。升级 transformers 前须重新验证该返回契约。
+新抽取只保存：
 
-```bash
-pip install -r requirements.txt
-NEW_CACHE_ROOT=/share/home/tm902089733300000/a903202310/lys/data/feature_extraction/ragtruth_attention_cache_v1
+```python
+{
+    "sample_id": str,
+    "source_id": str,
+    "response_idx": int,
+    "token_ids": Tensor[N],
+    "attention_diagonal": Tensor[L,H,N],
+    "row_ptr": Tensor[L*H*R + 1],
+    "source_index": Tensor[M],
+    "attention_weight": Tensor[M],
+    "attention_floor": float,
 
-PYTHONPATH=. python main.py extract \
-  --model-path /share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct \
-  --dataset-path /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset \
-  --output-dir "$NEW_CACHE_ROOT/train" --split train \
-  --generator-model llama-2-7b-chat --floor .01 --dtype float16 --device cuda
-
-PYTHONPATH=. python main.py extract \
-  --model-path /share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct \
-  --dataset-path /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset \
-  --output-dir "$NEW_CACHE_ROOT/test" --split test \
-  --generator-model llama-2-7b-chat --floor .01 --dtype float16 --device cuda
-
-PYTHONPATH=. python -m unittest discover -s tests
+    # 只有请求 hidden layer 时才存在
+    "hidden_layers": Tensor[K],
+    "hidden_states": Tensor[K,N,D],
+}
 ```
 
-每个 graph 文件是 `{"schema": ..., "graph": graph.to_dict()}`；同级 `index.jsonl` 每行包含 `sample_id`、`source_id`、相对 `path`、`num_nodes` 和 `num_edges` 或 `num_hyperedges`，`manifest.json` 记录构建参数。
+其中 `R=N-response_idx`。CSR 行号：
+
+```text
+row = (layer * H + head) * R + (target - response_idx)
+```
+
+因此 `data.attention_entries(sample)` 可以直接展开为：
+
+```text
+layer, head, source, target, weight
+```
+
+这些字段只表示 attention 边。节点由 `token_ids` 的位置得到，Prompt/Response 由 `response_idx` 得到，节点属性由 `attention_diagonal` 或可选 `hidden_states` 得到。
+
+### 标签单独保存
+
+抽取时标签写到 `labels/<split>/<sample_id>.pt`：
+
+```python
+{
+    "sample_id": str,
+    "task": str,
+    "y_token": Tensor[N],
+    "response_label": int,
+}
+```
+
+图构建完全不读取标签。
+
+## 最小 token graph 接口
+
+所有普通token图只保存共同必需字段：
+
+```python
+{
+    "sample_id": str,
+    "source_id": str,
+    "response_idx": int,
+    "token_ids": Tensor[N],
+    "x": Tensor[N,F],
+    "edge_index": Tensor[2,E],
+    "edge_type": Tensor[E],       # 0=Prompt->Response, 1=Response->Response
+    ...                            # 构图方法真正需要的边属性
+}
+```
+
+没有 `node_role`，因为它可由 `response_idx` 直接计算；没有 `split`，因为目录已经区分；没有 `tau`/路径/commit/schema，因为它们是实验配置而不是图本身。
+
+## 已实现的构图
+
+### `original`
+
+复现原属性图：任一 layer/head 上 `attention > tau` 就建立 token-pair 边，`edge_attr[E,L*H]` 保留各通道超过阈值的值。它主要用于与旧CHARM实现对齐。
+
+### `multiplex`
+
+每个 `(layer, head, source, target)` attention 都是一条独立有向边。保存：
+
+```text
+edge_index, edge_weight, edge_channel, edge_type
+```
+
+这是研究 layer/head-specific topology 最直接的表示。默认不再二次阈值，直接使用 cache 已经保留的所有 sparse attention。
+
+### `support`
+
+对每个 `(layer, head, response target)` 按 attention 从大到小选择，直到累计质量达到 `mass`（默认0.8）。用于研究 support collapse 和弱边是否有用。如果 cache floor 截断了尾部，小于 floor 的部分无法恢复。
+
+### `relation_topk`
+
+对每个 `(layer, head, response target)` 分别保留前 `k_prompt` 个 Prompt source 和前 `k_history` 个 Response source。用于显式研究 Prompt→Response 与 Response→Response 模式。
+
+### `hypergraph`
+
+每个 `(layer/head, response target, PR/RR relation)` 构成一条超边，source token 为成员，并加入target自身。用于研究共同attention support，而不是pairwise边。
+
+## 节点属性可以独立控制
+
+所有构图函数都有：
+
+```text
+node_feature = diagonal | hidden | none
+```
+
+这样可以直接做：
+
+```text
+固定拓扑 + 不同节点属性
+固定节点属性 + 不同拓扑
+```
+
+从而回答究竟是连接关系、attention权重还是hidden state更重要。
+
+## 使用现有 cache 构图
+
+`data.load_feature()` 兼容当前 `fresh_attention...` 的旧字段，所以**不用重新提取已有attention**。
+
+```bash
+CACHE=/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876
+OUT=/share/home/tm902089733300000/a903202310/lys/data/feature_extraction/graph_research
+
+python main.py build --features "$CACHE/train" --output "$OUT/original/train" --kind original --tau .05
+python main.py build --features "$CACHE/train" --output "$OUT/multiplex/train" --kind multiplex
+python main.py build --features "$CACHE/train" --output "$OUT/support80/train" --kind support --mass .8
+python main.py build --features "$CACHE/train" --output "$OUT/relation_topk/train" --kind relation_topk --k-prompt 8 --k-history 8
+python main.py build --features "$CACHE/train" --output "$OUT/hypergraph/train" --kind hypergraph --tau .05
+```
+
+## 重新抽取 attention / hidden states
+
+```bash
+python main.py extract \
+  --model /share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct \
+  --dataset /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset \
+  --output /share/home/tm902089733300000/a903202310/lys/data/feature_extraction/graph_features \
+  --split train \
+  --generator-model llama-2-7b-chat \
+  --floor .01 \
+  --hidden-layers 7,15,23,31
+```
+
+不需要hidden state时省略 `--hidden-layers`，文件会更小。
+
+## 统计和可视化
+
+```python
+from data import load_feature, load_graph
+from stats import channel_stats, graph_stats
+from visualize import plot_layer_head, plot_token_graph
+
+sample = load_feature(".../attention_10005.pt")
+metrics = channel_stats(sample)
+plot_layer_head(sample, "concentration")
+
+graph = load_graph(".../10005.pt")
+print(graph_stats(graph))
+plot_token_graph(graph)
+```
+
+`channel_stats` 当前提供 `prompt_mass / response_mass / concentration / support_size / response_mean_lag`，用于先研究正确与错误的图模式，再决定后续无监督模型。

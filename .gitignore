@@ -1,5 +1,4 @@
 __pycache__/
 *.pyc
-outputs/
 *.pt
-*.tar.gz
+outputs/

@@ -1,206 +1,193 @@
-"""Convert retained-attention CSR caches into token graphs."""
-
-from dataclasses import dataclass
-import math
-from typing import Any
-
 import torch
 
-
-@dataclass
-class TokenGraph:
-    sample_id: Any
-    source_id: Any
-    response_idx: int
-    token_ids: torch.Tensor
-    node_attr: torch.Tensor
-    edge_index: torch.Tensor
-    edge_type: torch.Tensor
-    edge_weight: torch.Tensor | None = None
-    edge_attr: torch.Tensor | None = None
-    trace_ptr: torch.Tensor | None = None
-    trace_channel: torch.Tensor | None = None
-    trace_value: torch.Tensor | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {name: value for name, value in self.__dict__.items() if value is not None}
+from data import attention_entries, node_features
 
 
-def _cache_entries(sample: Any) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, int, int]:
-    """Return each retained CSR entry as (source, target, channel, value)."""
-    token_count = sample.token_ids.numel()
-    response_count = token_count - sample.response_idx
-    channel_count = sample.attention_diagonal.shape[0] * sample.attention_diagonal.shape[1]
-    counts = sample.response_row_ptr[1:] - sample.response_row_ptr[:-1]
-    row_ids = torch.repeat_interleave(
-        torch.arange(counts.numel(), device=sample.token_ids.device), counts
-    )
-    channels = row_ids // response_count
-    targets = sample.response_idx + row_ids % response_count
-    sources = sample.response_column_indices.to(torch.int64)
-    return sources, targets, channels, channel_count, token_count
-
-
-def _validated_tau(attention_floor: float, tau: float) -> float:
-    """Validate a graph threshold and return its Python float value."""
-    try:
-        threshold = float(tau)
-    except (TypeError, ValueError) as error:
-        raise ValueError("tau must be a finite number in [0, 1]") from error
-    if not math.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
-        raise ValueError("tau must be finite and within [0, 1]")
-    if threshold < attention_floor:
-        raise ValueError("tau must be at least the retained cache attention_floor")
-    return threshold
-
-
-def _base_graph(sample: Any) -> tuple[dict[str, Any], int]:
-    channel_count = sample.attention_diagonal.shape[0] * sample.attention_diagonal.shape[1]
-    node_attr = sample.attention_diagonal.reshape(channel_count, -1).transpose(0, 1).contiguous()
+def _base(sample, node_feature, hidden_layer):
     return {
-        "sample_id": sample.sample_id,
-        "source_id": sample.source_id,
-        "response_idx": sample.response_idx,
-        "token_ids": sample.token_ids,
-        "node_attr": node_attr,
-    }, channel_count
+        "sample_id": sample["sample_id"],
+        "source_id": sample["source_id"],
+        "response_idx": sample["response_idx"],
+        "token_ids": sample["token_ids"],
+        "x": node_features(sample, node_feature, hidden_layer),
+    }
 
 
-def _select_relation_topk(
-    candidate_indices: torch.Tensor,
-    pair_targets: torch.Tensor,
-    retained_mean: torch.Tensor,
-    limit: int,
-) -> torch.Tensor:
-    if limit <= 0:
-        return candidate_indices[:0]
-
-    score_order = torch.argsort(retained_mean[candidate_indices], descending=True, stable=True)
-    score_sorted = candidate_indices[score_order]
-    target_order = torch.argsort(pair_targets[score_sorted], stable=True)
-    ordered_indices = score_sorted[target_order]
-    ordered_targets = pair_targets[ordered_indices]
-    positions = torch.arange(ordered_indices.numel(), device=ordered_indices.device)
-    starts = torch.ones(ordered_indices.numel(), dtype=torch.bool, device=ordered_indices.device)
-    starts[1:] = ordered_targets[1:] != ordered_targets[:-1]
-    group_starts = torch.cummax(
-        torch.where(starts, positions, torch.zeros_like(positions)), dim=0
-    ).values
-    return ordered_indices[(positions - group_starts) < limit]
+def _relation(source, response_idx):
+    return (source >= response_idx).to(torch.int8)
 
 
-def build_original_graph(sample: Any, tau: float) -> TokenGraph:
-    """Build the compatibility graph from cache entries retained above ``tau``."""
-    tau = _validated_tau(sample.attention_floor, tau)
-
-    base, channel_count = _base_graph(sample)
-    sources, targets, channels, _, token_count = _cache_entries(sample)
-    values = sample.response_values
-    entry_pairs = targets * token_count + sources
-    selection = values.to(torch.float32) > float(tau)
-    selected_pairs = torch.unique(entry_pairs[selection], sorted=True)
-    edge_count = selected_pairs.numel()
-    edge_sources = selected_pairs % token_count
-    edge_targets = selected_pairs // token_count
-    edge_index = torch.stack((edge_sources, edge_targets))
-    edge_type = (edge_sources >= sample.response_idx).to(torch.int8)
-    edge_attr = torch.zeros(
-        (edge_count, channel_count), dtype=values.dtype, device=values.device
-    )
-
-    if edge_count:
-        positions = torch.searchsorted(selected_pairs, entry_pairs)
-        matches = positions < edge_count
-        matches &= selected_pairs[positions.clamp(max=edge_count - 1)] == entry_pairs
-        matches &= selection
-        edge_attr[positions[matches], channels[matches]] = values[matches]
-
-    return TokenGraph(
-        **base,
-        edge_index=edge_index,
-        edge_type=edge_type,
-        edge_attr=edge_attr,
-    )
+def _channel(entries, heads):
+    return (entries["layer"] * heads + entries["head"]).to(torch.int32)
 
 
-def build_relation_topk_graph(
-    sample: Any,
-    k_prompt: int,
-    k_history: int,
-    with_channels: bool = False,
-) -> TokenGraph:
-    """Select relation top-k edges within the retained cache, not full attention.
-
-    Scores are the mean over channels of values retained in the CSR cache;
-    missing channel entries contribute zero.  Consequently this function cannot
-    claim an exact top-k over attention values absent from that cache.
-    """
-    if k_prompt < 0 or k_history < 0:
-        raise ValueError("k_prompt and k_history must be non-negative")
-    base, channel_count = _base_graph(sample)
-    sources, targets, channels, _, token_count = _cache_entries(sample)
-    values = sample.response_values
-    entry_pairs = targets * token_count + sources
-    unique_pairs, inverse = torch.unique(entry_pairs, sorted=True, return_inverse=True)
-    retained_sums = torch.zeros(
-        unique_pairs.numel(), dtype=torch.float32, device=values.device
-    )
-    retained_sums.index_add_(0, inverse, values.to(torch.float32))
-    retained_mean = retained_sums / channel_count
-    pair_sources = unique_pairs % token_count
-    pair_targets = unique_pairs // token_count
-
-    pair_indices = torch.arange(unique_pairs.numel(), device=values.device)
-    prompt_indices = _select_relation_topk(
-        pair_indices[pair_sources < sample.response_idx], pair_targets, retained_mean, k_prompt
-    )
-    history_indices = _select_relation_topk(
-        pair_indices[pair_sources >= sample.response_idx], pair_targets, retained_mean, k_history
-    )
-    chosen_indices = torch.cat((prompt_indices, history_indices))
-    edge_type = torch.cat(
-        (
-            torch.zeros(prompt_indices.numel(), dtype=torch.int8, device=values.device),
-            torch.ones(history_indices.numel(), dtype=torch.int8, device=values.device),
-        )
-    )
-    group_order = torch.argsort(pair_targets[chosen_indices] * 2 + edge_type, stable=True)
-    chosen_indices = chosen_indices[group_order]
-    edge_type = edge_type[group_order]
-
-    chosen_pairs = unique_pairs[chosen_indices]
-    edge_sources = chosen_pairs % token_count
-    edge_targets = chosen_pairs // token_count
-    edge_index = torch.stack((edge_sources, edge_targets))
-    graph = TokenGraph(
-        **base,
-        edge_index=edge_index,
-        edge_type=edge_type,
-        edge_weight=retained_mean[chosen_indices],
-    )
-
-    if not with_channels:
-        return graph
-
-    edge_for_pair = torch.full(
-        (unique_pairs.numel(),), -1, dtype=torch.int64, device=values.device
-    )
-    edge_for_pair[chosen_indices] = torch.arange(chosen_indices.numel(), device=values.device)
-    traced_edges = edge_for_pair[inverse]
-    traced_mask = traced_edges >= 0
-    traced_edges = traced_edges[traced_mask]
-    trace_order = torch.argsort(traced_edges, stable=True)
-    traced_edges = traced_edges[trace_order]
-    trace_channel = channels[traced_mask][trace_order].to(torch.int32)
-    trace_value = values[traced_mask][trace_order]
-    trace_counts = torch.bincount(traced_edges, minlength=chosen_indices.numel())
-    trace_ptr = torch.cat(
-        (
-            torch.zeros(1, dtype=torch.int64, device=values.device),
-            trace_counts.cumsum(0),
-        )
-    )
-    graph.trace_ptr = trace_ptr
-    graph.trace_channel = trace_channel
-    graph.trace_value = trace_value
+def build_multiplex(sample, tau=None, node_feature="diagonal", hidden_layer=-1):
+    """Keep retained layer/head attention as directed multi-edges."""
+    e = attention_entries(sample)
+    keep = torch.ones(len(e["weight"]), dtype=torch.bool) if tau is None else e["weight"].float() > tau
+    source, target = e["source"][keep], e["target"][keep]
+    graph = _base(sample, node_feature, hidden_layer)
+    graph.update({
+        "edge_index": torch.stack((source, target)),
+        "edge_weight": e["weight"][keep].float(),
+        "edge_channel": _channel({key: value[keep] for key, value in e.items()}, sample["attention_diagonal"].shape[1]),
+        "edge_type": _relation(source, sample["response_idx"]),
+    })
     return graph
+
+
+def build_original(sample, tau=0.05, node_feature="diagonal", hidden_layer=-1):
+    """Original threshold-union graph with dense L*H edge attributes."""
+    if tau < sample["attention_floor"]:
+        raise ValueError("tau cannot be below the stored attention floor")
+    e = attention_entries(sample)
+    keep = e["weight"].float() > tau
+    source, target = e["source"][keep], e["target"][keep]
+    weight = e["weight"][keep].float()
+
+    tokens = len(sample["token_ids"])
+    heads = sample["attention_diagonal"].shape[1]
+    channels = sample["attention_diagonal"].shape[0] * heads
+    channel = (e["layer"][keep] * heads + e["head"][keep]).long()
+
+    pair, inverse = torch.unique(target * tokens + source, sorted=True, return_inverse=True)
+    edge_source, edge_target = pair % tokens, pair // tokens
+    edge_attr = torch.zeros((len(pair), channels), dtype=torch.float32)
+    edge_attr[inverse, channel] = weight
+
+    graph = _base(sample, node_feature, hidden_layer)
+    graph.update({
+        "edge_index": torch.stack((edge_source, edge_target)),
+        "edge_attr": edge_attr,
+        "edge_type": _relation(edge_source, sample["response_idx"]),
+    })
+    return graph
+
+
+def _support_mask(sample, mass):
+    """Smallest observed support whose cumulative mass reaches `mass`."""
+    e = attention_entries(sample)
+    weight = e["weight"].float()
+    if not len(weight):
+        return torch.zeros(0, dtype=torch.bool)
+
+    by_weight = torch.argsort(weight, descending=True, stable=True)
+    order = by_weight[torch.argsort(e["row"][by_weight], stable=True)]
+    row = e["row"][order]
+    w = weight[order]
+
+    starts = torch.ones(len(order), dtype=torch.bool)
+    starts[1:] = row[1:] != row[:-1]
+    cumulative = w.cumsum(0)
+    before_group = torch.where(starts, cumulative - w, torch.zeros_like(w))
+    before_group = torch.cummax(before_group, dim=0).values
+    within_group = cumulative - before_group
+    keep_ordered = within_group - w < mass
+
+    keep = torch.zeros(len(order), dtype=torch.bool)
+    keep[order] = keep_ordered
+    return keep
+
+
+def build_support(sample, mass=0.8, node_feature="diagonal", hidden_layer=-1):
+    """Per layer/head/target mass-cover graph, preserving channel identity."""
+    e = attention_entries(sample)
+    keep = _support_mask(sample, mass)
+    source, target = e["source"][keep], e["target"][keep]
+    graph = _base(sample, node_feature, hidden_layer)
+    graph.update({
+        "edge_index": torch.stack((source, target)),
+        "edge_weight": e["weight"][keep].float(),
+        "edge_channel": _channel({key: value[keep] for key, value in e.items()}, sample["attention_diagonal"].shape[1]),
+        "edge_type": _relation(source, sample["response_idx"]),
+    })
+    return graph
+
+
+def _segmented_topk(row, score, relation, k_prompt, k_history):
+    group = row * 2 + relation.long()
+    by_score = torch.argsort(score, descending=True, stable=True)
+    order = by_score[torch.argsort(group[by_score], stable=True)]
+    ordered_group = group[order]
+
+    starts = torch.ones(len(order), dtype=torch.bool)
+    starts[1:] = ordered_group[1:] != ordered_group[:-1]
+    pos = torch.arange(len(order))
+    start_pos = torch.where(starts, pos, torch.zeros_like(pos))
+    start_pos = torch.cummax(start_pos, dim=0).values
+    rank = pos - start_pos
+
+    limits = torch.where(ordered_group % 2 == 0, k_prompt, k_history)
+    keep = torch.zeros(len(order), dtype=torch.bool)
+    keep[order] = rank < limits
+    return keep
+
+
+def build_relation_topk(sample, k_prompt=8, k_history=8, node_feature="diagonal", hidden_layer=-1):
+    """Top-k Prompt and response-history sources for every channel/target row."""
+    e = attention_entries(sample)
+    relation = _relation(e["source"], sample["response_idx"])
+    keep = _segmented_topk(e["row"], e["weight"].float(), relation, k_prompt, k_history)
+    source, target = e["source"][keep], e["target"][keep]
+
+    graph = _base(sample, node_feature, hidden_layer)
+    graph.update({
+        "edge_index": torch.stack((source, target)),
+        "edge_weight": e["weight"][keep].float(),
+        "edge_channel": _channel({key: value[keep] for key, value in e.items()}, sample["attention_diagonal"].shape[1]),
+        "edge_type": relation[keep],
+    })
+    return graph
+
+
+def build_hypergraph(sample, tau=0.05, node_feature="diagonal", hidden_layer=-1):
+    """One typed hyperedge for each (channel, target, PR-or-RR) group."""
+    if tau < sample["attention_floor"]:
+        raise ValueError("tau cannot be below the stored attention floor")
+    e = attention_entries(sample)
+    keep = e["weight"].float() > tau
+    source = e["source"][keep]
+    target = e["target"][keep]
+    weight = e["weight"][keep].float()
+    heads = sample["attention_diagonal"].shape[1]
+    channel = (e["layer"][keep] * heads + e["head"][keep]).long()
+    relation = _relation(source, sample["response_idx"]).long()
+
+    if not len(source):
+        groups = torch.empty(0, dtype=torch.long)
+        inverse = groups
+    else:
+        group_key = (channel * len(sample["token_ids"]) + target) * 2 + relation
+        groups, inverse = torch.unique(group_key, sorted=True, return_inverse=True)
+
+    hyperedge = torch.arange(len(groups), dtype=torch.long)
+    hyperedge_type = (groups % 2).to(torch.int8)
+    q = groups // 2
+    hyperedge_target = q % len(sample["token_ids"])
+    hyperedge_channel = (q // len(sample["token_ids"])).to(torch.int32)
+
+    incidence_node = torch.cat((source, hyperedge_target))
+    incidence_edge = torch.cat((inverse, hyperedge))
+    diagonal = sample["attention_diagonal"].reshape(-1, len(sample["token_ids"]))
+    target_weight = diagonal[hyperedge_channel.long(), hyperedge_target].float()
+
+    graph = _base(sample, node_feature, hidden_layer)
+    graph.update({
+        "incidence_index": torch.stack((incidence_node, incidence_edge)),
+        "incidence_weight": torch.cat((weight, target_weight)),
+        "hyperedge_target": hyperedge_target,
+        "hyperedge_channel": hyperedge_channel,
+        "hyperedge_type": hyperedge_type,
+    })
+    return graph
+
+
+def build_graph(sample, kind, **kwargs):
+    builders = {
+        "original": build_original,
+        "multiplex": build_multiplex,
+        "support": build_support,
+        "relation_topk": build_relation_topk,
+        "hypergraph": build_hypergraph,
+    }
+    return builders[kind](sample, **kwargs)
