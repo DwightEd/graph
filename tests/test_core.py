@@ -1,3 +1,5 @@
+import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,7 +14,7 @@ from archive import (
     TraceArchiveConverter,
 )
 from build import BuildConfig, GraphDatasetBuilder
-from cache import AttentionDataset, AttentionSample, NPZ_FIELDS, save_attention_sample
+from cache import AttentionDataset, AttentionSample, NPZ_FIELDS, index_row, save_attention_sample, sha256, write_split_index
 from features import (
     HIDDEN_FIELDS,
     STAT_FIELDS,
@@ -41,14 +43,17 @@ def sample():
 def write_split(root: Path):
     s = sample()
     (root / "attention").mkdir(parents=True)
-    save_attention_sample(s, root / "attention" / "r1.npz")
-    (root / "manifest.json").write_text(
-        '{"attention_floor":0.01,"num_layers":1,"num_heads":1,"count":1}'
-    )
-    (root / "index.jsonl").write_text(
-        '{"sample_id":"r1","source_id":"s1","path":"attention/r1.npz"}\n'
+    path = root / "attention" / "r1.npz"
+    save_attention_sample(s, path)
+    write_split_index(
+        root, [index_row(root, s, path)], attention_floor=0.01, num_layers=1, num_heads=1,
+        alignment="post_token_query_at_same_position",
     )
     return s
+
+
+def fingerprint(value):
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 class CoreTests(unittest.TestCase):
@@ -112,8 +117,21 @@ class CoreTests(unittest.TestCase):
                 value = sample()
                 torch.save(
                     {
+                        "attention_cache_schema": "ragtruth-all-layers-all-heads-sparse-response-csr-v1",
                         "response_id": f"{split}-1",
                         "source_id": f"source-{split}",
+                        "split": split,
+                        "cache_dtype": "torch.float16",
+                        "attention_cache_fingerprint": fingerprint({
+                            "attention_cache_schema": "ragtruth-all-layers-all-heads-sparse-response-csr-v1",
+                            "split": split, "cache_dtype": "torch.float16", "attention_floor": value.attention_floor,
+                            "num_hidden_layers": 1, "num_attention_heads": 1,
+                            "model_path": "/models/Meta-Llama-3.1-8B-Instruct", "generator_model": "llama-2-7b-chat",
+                        }),
+                        "num_attention_layers": 1,
+                        "num_attention_heads": 1,
+                        "quality": "good",
+                        "was_truncated": False,
                         "response_idx": value.response_idx,
                         "token_ids": value.token_ids,
                         "attention_diagonal": value.attention_diagonal,
@@ -126,6 +144,22 @@ class CoreTests(unittest.TestCase):
                     },
                     formal / split / f"attention_{split}-1.pt",
                 )
+                filename = f"attention_{split}-1.pt"
+                spec = {
+                    "attention_cache_schema": "ragtruth-all-layers-all-heads-sparse-response-csr-v1",
+                    "split": split,
+                    "cache_dtype": "torch.float16",
+                    "attention_floor": value.attention_floor,
+                    "num_hidden_layers": 1,
+                    "num_attention_heads": 1,
+                    "model_path": "/models/Meta-Llama-3.1-8B-Instruct",
+                    "generator_model": "llama-2-7b-chat",
+                }
+                (formal / split / "manifest.json").write_text(json.dumps({
+                    "state": "complete", "cache_file_names": [filename], "matched_samples": 1,
+                    "cache_files": 1, "cache_files_sha256": {filename: sha256(formal / split / filename)},
+                    "attention_cache_spec": spec, "attention_cache_fingerprint": fingerprint(spec),
+                }))
 
             archive = root / "archive"
             AttentionArchiveConverter(ArchiveConfig(formal, archive)).run()

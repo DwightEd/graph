@@ -1,14 +1,13 @@
 """Extract canonical attention, hidden-state and token-stat features in one pass."""
 
 from dataclasses import dataclass
-import json
 from pathlib import Path
 
 import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from cache import AttentionSample, save_attention_sample
+from cache import AttentionSample, index_row, save_attention_sample, write_split_index
 from features import save_hidden_features, save_token_stats, teacher_forced_stats
 from ragtruth import load_ragtruth_samples, tokenize_ragtruth_sample
 
@@ -63,14 +62,13 @@ class AttentionExtractor:
         self.config = config
 
     def run(self):
-        tokenizer = AutoTokenizer.from_pretrained(self.config.model_path)
-        model = AutoModelForCausalLM.from_pretrained(
-            self.config.model_path,
-            torch_dtype=torch.float16,
-            attn_implementation="eager",
-            low_cpu_mem_usage=True,
-            device_map={"": self.config.device},
-        ).eval()
+        if not 0 < self.config.floor <= 1:
+            raise ValueError("floor must be in (0,1]")
+        if self.config.limit is not None and (isinstance(self.config.limit, bool) or not isinstance(self.config.limit, int) or self.config.limit < 1):
+            raise ValueError("limit must be a positive integer")
+        output = Path(self.config.output_dir)
+        if output.exists() and any(output.iterdir()):
+            raise FileExistsError("output_dir must be empty")
         samples = load_ragtruth_samples(
             self.config.dataset_path,
             split=self.config.split,
@@ -79,8 +77,16 @@ class AttentionExtractor:
         )
         if self.config.limit is not None:
             samples = samples[: self.config.limit]
-
-        output = Path(self.config.output_dir)
+        if not samples:
+            raise ValueError("no RAGTruth samples matched extraction filters")
+        tokenizer = AutoTokenizer.from_pretrained(self.config.model_path)
+        model = AutoModelForCausalLM.from_pretrained(
+            self.config.model_path,
+            torch_dtype=torch.float16,
+            attn_implementation="eager",
+            low_cpu_mem_usage=True,
+            device_map={"": self.config.device},
+        ).eval()
         (output / "attention").mkdir(parents=True, exist_ok=True)
         if self.config.hidden_layers:
             (output / "hidden").mkdir(exist_ok=True)
@@ -141,7 +147,8 @@ class AttentionExtractor:
                 values,
                 self.config.floor,
             )
-            save_attention_sample(sample, output / "attention" / f"{item.response_id}.npz")
+            attention_path = output / "attention" / f"{item.response_id}.npz"
+            save_attention_sample(sample, attention_path)
             save_token_stats(
                 output / "token_stats" / f"{item.response_id}.npz",
                 token_ids,
@@ -155,24 +162,13 @@ class AttentionExtractor:
                     hidden_layers,
                     torch.stack([hidden[layer] for layer in hidden_layers]),
                 )
-            rows.append({
-                "sample_id": item.response_id,
-                "source_id": item.source_id,
-                "path": f"attention/{item.response_id}.npz",
-            })
+            rows.append(index_row(output, sample, attention_path))
             del result, token_log_prob, entropy
 
-        manifest = {
-            "attention_floor": self.config.floor,
-            "num_layers": L,
-            "num_heads": H,
-            "hidden_layers": list(hidden_layers),
-            "count": len(rows),
-        }
-        (output / "manifest.json").write_text(
-            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        return write_split_index(
+            output, rows, attention_floor=self.config.floor, num_layers=L, num_heads=H,
+            alignment="post_token_query_at_same_position", extra={
+                "hidden_layers": list(hidden_layers), "observer_model": Path(self.config.model_path).name,
+                "generator_model": self.config.generator_model,
+            },
         )
-        (output / "index.jsonl").write_text(
-            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
-        )
-        return manifest

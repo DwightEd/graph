@@ -36,8 +36,12 @@ class GraphDatasetBuilder:
     def run(self):
         if self.config.node_features not in NODE_FEATURE_MODES:
             raise ValueError(f"unknown node feature mode: {self.config.node_features}")
-        dataset = AttentionDataset(self.config.cache_dir, self.config.device)
-        output = Path(self.config.output_dir)
+        cache, output = Path(self.config.cache_dir), Path(self.config.output_dir)
+        if cache.resolve() == output.resolve():
+            raise ValueError("cache_dir and output_dir must differ")
+        if output.exists() and any(output.iterdir()):
+            raise FileExistsError("output_dir must be empty")
+        dataset = AttentionDataset(cache, self.config.device)
         graphs_dir = output / "graphs"
         graphs_dir.mkdir(parents=True, exist_ok=True)
 
