@@ -1,4 +1,4 @@
-"""Token graph views built from the canonical sparse attention cache."""
+"""Token graph views built from canonical sparse attention."""
 
 from dataclasses import dataclass
 import torch
@@ -7,21 +7,20 @@ import torch
 @dataclass
 class TokenGraph:
     response_idx: int
-    token_ids: torch.Tensor
     x: torch.Tensor
     edge_index: torch.Tensor
     edge_type: torch.Tensor
     edge_weight: torch.Tensor | None = None
-    edge_attr: torch.Tensor | None = None
-    trace_ptr: torch.Tensor | None = None
-    trace_channel: torch.Tensor | None = None
-    trace_value: torch.Tensor | None = None
+    edge_ptr: torch.Tensor | None = None
+    edge_channel: torch.Tensor | None = None
+    edge_value: torch.Tensor | None = None
 
     def to_dict(self):
         return {name: value for name, value in self.__dict__.items() if value is not None}
 
 
 def _entries(sample):
+    """Decode retained CSR entries into source, target and channel vectors."""
     R = sample.num_response_tokens
     counts = sample.response_row_ptr[1:] - sample.response_row_ptr[:-1]
     rows = torch.repeat_interleave(torch.arange(counts.numel(), device=counts.device), counts)
@@ -31,17 +30,42 @@ def _entries(sample):
     return sources, targets, channels
 
 
-def _base(sample):
-    x = sample.attention_diagonal.reshape(sample.num_channels, sample.num_tokens).T.contiguous()
-    return {
-        "response_idx": sample.response_idx,
-        "token_ids": sample.token_ids,
-        "x": x,
-    }
+def attention_node_features(sample):
+    return sample.attention_diagonal.reshape(sample.num_channels, sample.num_tokens).T.contiguous()
 
 
-def build_original_graph(sample, tau: float = 0.05) -> TokenGraph:
-    """Reproduce the old threshold-union attributed graph."""
+def _base(sample, x):
+    if x is None:
+        x = attention_node_features(sample)
+    return {"response_idx": sample.response_idx, "x": x}
+
+
+def _sparse_edge_channels(pair, channel, value, selected_pairs, keep):
+    """Store per-edge attention channels sparsely instead of dense [E,L*H]."""
+    E = len(selected_pairs)
+    if E == 0:
+        device = value.device
+        return (
+            torch.zeros(1, dtype=torch.long, device=device),
+            torch.empty(0, dtype=torch.int32, device=device),
+            value[:0],
+        )
+
+    edge_id = torch.searchsorted(selected_pairs, pair)
+    valid = keep & (edge_id < E)
+    valid &= selected_pairs[edge_id.clamp(max=E - 1)] == pair
+    edge_id = edge_id[valid]
+    order = torch.argsort(edge_id, stable=True)
+    edge_id = edge_id[order]
+    counts = torch.bincount(edge_id, minlength=E)
+    edge_ptr = torch.cat(
+        (torch.zeros(1, dtype=torch.long, device=value.device), counts.cumsum(0))
+    )
+    return edge_ptr, channel[valid][order].to(torch.int32), value[valid][order]
+
+
+def build_original_graph(sample, tau: float = 0.05, x=None) -> TokenGraph:
+    """Reproduce old threshold-union topology with sparse channel attributes."""
     if tau < sample.attention_floor:
         raise ValueError("tau cannot be lower than attention_floor")
 
@@ -53,21 +77,31 @@ def build_original_graph(sample, tau: float = 0.05) -> TokenGraph:
 
     edge_source = selected % sample.num_tokens
     edge_target = selected // sample.num_tokens
-    edge_index = torch.stack((edge_source, edge_target))
-    edge_type = (edge_source >= sample.response_idx).to(torch.int8)
-    edge_attr = torch.zeros(
-        (len(selected), sample.num_channels), dtype=value.dtype, device=value.device
+    edge_ptr, edge_channel, edge_value = _sparse_edge_channels(
+        pair, channel, value, selected, keep
     )
-
-    if len(selected):
-        edge_id = torch.searchsorted(selected, pair)
-        valid = keep & (edge_id < len(selected))
-        valid &= selected[edge_id.clamp(max=len(selected) - 1)] == pair
-        edge_attr[edge_id[valid], channel[valid]] = value[valid]
-
     return TokenGraph(
-        **_base(sample), edge_index=edge_index, edge_type=edge_type, edge_attr=edge_attr
+        **_base(sample, x),
+        edge_index=torch.stack((edge_source, edge_target)),
+        edge_type=(edge_source >= sample.response_idx).to(torch.int8),
+        edge_ptr=edge_ptr,
+        edge_channel=edge_channel,
+        edge_value=edge_value,
     )
+
+
+def dense_edge_attr(graph: TokenGraph, num_channels: int) -> torch.Tensor:
+    """Materialize legacy dense [E,C] edge_attr only when old code needs it."""
+    E = graph.edge_index.shape[1]
+    dtype = graph.edge_value.dtype if graph.edge_value is not None else torch.float32
+    device = graph.edge_index.device
+    dense = torch.zeros((E, num_channels), dtype=dtype, device=device)
+    if graph.edge_value is None or not E:
+        return dense
+    counts = graph.edge_ptr[1:] - graph.edge_ptr[:-1]
+    edge_id = torch.repeat_interleave(torch.arange(E, device=device), counts)
+    dense[edge_id, graph.edge_channel.long()] = graph.edge_value
+    return dense
 
 
 def _topk(indices, targets, score, k):
@@ -80,9 +114,9 @@ def _topk(indices, targets, score, k):
 
 
 def build_relation_topk_graph(
-    sample, k_prompt=8, k_history=8, with_channels=False
+    sample, k_prompt=8, k_history=8, with_channels=False, x=None
 ) -> TokenGraph:
-    """Keep the strongest prompt and response-history pairs for each target."""
+    """Keep strongest prompt and response-history token pairs for each target."""
     source, target, channel = _entries(sample)
     value = sample.response_values
     pair = target * sample.num_tokens + source
@@ -96,16 +130,14 @@ def build_relation_topk_graph(
     pair_target = unique_pair // sample.num_tokens
     ids = torch.arange(len(unique_pair), device=value.device)
     prompt = _topk(ids[pair_source < sample.response_idx], pair_target, score, k_prompt)
-    history = _topk(
-        ids[pair_source >= sample.response_idx], pair_target, score, k_history
-    )
+    history = _topk(ids[pair_source >= sample.response_idx], pair_target, score, k_history)
     chosen = torch.cat((prompt, history))
 
     chosen_pair = unique_pair[chosen]
     edge_source = chosen_pair % sample.num_tokens
     edge_target = chosen_pair // sample.num_tokens
     graph = TokenGraph(
-        **_base(sample),
+        **_base(sample, x),
         edge_index=torch.stack((edge_source, edge_target)),
         edge_type=(edge_source >= sample.response_idx).to(torch.int8),
         edge_weight=score[chosen],
@@ -113,19 +145,16 @@ def build_relation_topk_graph(
     if not with_channels:
         return graph
 
-    pair_to_edge = torch.full(
-        (len(unique_pair),), -1, dtype=torch.long, device=value.device
-    )
+    pair_to_edge = torch.full((len(unique_pair),), -1, dtype=torch.long, device=value.device)
     pair_to_edge[chosen] = torch.arange(len(chosen), device=value.device)
     traced_edge = pair_to_edge[inverse]
     mask = traced_edge >= 0
-    traced_edge = traced_edge[mask]
-    order = torch.argsort(traced_edge)
-    traced_edge = traced_edge[order]
+    order = torch.argsort(traced_edge[mask], stable=True)
+    traced_edge = traced_edge[mask][order]
     counts = torch.bincount(traced_edge, minlength=len(chosen))
-    graph.trace_ptr = torch.cat(
+    graph.edge_ptr = torch.cat(
         (torch.zeros(1, dtype=torch.long, device=value.device), counts.cumsum(0))
     )
-    graph.trace_channel = channel[mask][order].to(torch.int32)
-    graph.trace_value = value[mask][order]
+    graph.edge_channel = channel[mask][order].to(torch.int32)
+    graph.edge_value = value[mask][order]
     return graph
