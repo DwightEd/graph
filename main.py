@@ -1,7 +1,14 @@
 """Command-line entry point for attention extraction and graph building."""
 
 import argparse
+import json
 
+from archive import (
+    ArchiveConfig,
+    ArtifactInspector,
+    AttentionArchiveConverter,
+    AttentionArchiveVerifier,
+)
 from build import GRAPH_KINDS, BuildConfig, GraphDatasetBuilder
 from extract import AttentionExtractor, ExtractionConfig
 
@@ -37,6 +44,17 @@ def main(argv: list[str] | None = None) -> None:
     build_parser.add_argument("--k-history", type=int, default=8)
     build_parser.add_argument("--device", default="cuda")
     build_parser.add_argument("--limit", type=int)
+    build_parser.add_argument("--split", choices=("train", "test"))
+
+    inspect_parser = subcommands.add_parser("inspect")
+    inspect_parser.add_argument("--artifact-dir", required=True)
+
+    archive_parser = subcommands.add_parser("archive-attention")
+    archive_parser.add_argument("--formal-root", required=True)
+    archive_parser.add_argument("--output-root", required=True)
+
+    verify_parser = subcommands.add_parser("verify-attention")
+    verify_parser.add_argument("--archive-root", required=True)
 
     arguments = parser.parse_args(argv)
     if arguments.command == "extract":
@@ -56,6 +74,32 @@ def main(argv: list[str] | None = None) -> None:
         print(f"extract: {arguments.output_dir}")
         return
 
+    if arguments.command == "inspect":
+        print(json.dumps(ArtifactInspector(arguments.artifact_dir).run(), indent=2, sort_keys=True))
+        return
+
+    if arguments.command == "archive-attention":
+        summary = AttentionArchiveConverter(ArchiveConfig(
+            formal_root=arguments.formal_root,
+            output_root=arguments.output_root,
+        )).run()
+        print(
+            f"archive-attention: {summary['count']} samples, "
+            f"{summary['source_bytes']} B -> {summary['payload_bytes']} B "
+            f"(size_ratio={summary['size_ratio']:.3f}, "
+            f"saved_percent={(1 - summary['size_ratio']) * 100:.1f}%, "
+            f"manifest_bytes={summary['manifest_bytes']})"
+        )
+        return
+
+    if arguments.command == "verify-attention":
+        summary = AttentionArchiveVerifier(arguments.archive_root).run()
+        print(
+            f"verify-attention: {summary['count']} samples "
+            f"(train={summary['splits']['train']}, test={summary['splits']['test']})"
+        )
+        return
+
     config = BuildConfig(
         cache_dir=arguments.cache_dir,
         output_dir=arguments.output_dir,
@@ -65,6 +109,7 @@ def main(argv: list[str] | None = None) -> None:
         k_history=arguments.k_history,
         device=arguments.device,
         limit=arguments.limit,
+        split=arguments.split,
     )
     summary = GraphDatasetBuilder(config).run()
     print(f"build {summary['kind']}: {summary['count']} graphs")

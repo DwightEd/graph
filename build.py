@@ -1,6 +1,8 @@
 """Build one label-free token graph artifact at a time from attention caches."""
 
 from dataclasses import dataclass
+import hashlib
+from itertools import chain, islice
 import json
 import math
 from pathlib import Path
@@ -9,6 +11,7 @@ from typing import Any
 import torch
 from tqdm import tqdm
 
+from archive import AttentionArchiveStore
 from cache import load_attention_sample
 from graphs import build_original_graph, build_relation_topk_graph
 from hypergraph import build_attention_hypergraph
@@ -32,6 +35,7 @@ class BuildConfig:
     k_history: int = 8
     device: str = "cuda"
     limit: int | None = None
+    split: str | None = None
 
 
 class GraphDatasetBuilder:
@@ -48,6 +52,8 @@ class GraphDatasetBuilder:
             raise ValueError("cache_dir and output_dir must differ")
         if not cache_dir.is_dir():
             raise ValueError("cache_dir must be an existing directory")
+        if self.config.split is not None:
+            return self._run_canonical(cache_dir, output_dir)
         cache_paths = sorted(cache_dir.glob("*.pt"))
         if not cache_paths:
             raise ValueError("cache_dir must contain at least one top-level .pt file")
@@ -81,6 +87,37 @@ class GraphDatasetBuilder:
         )
         return {"kind": self.config.kind, "count": len(cache_paths), "output_dir": str(output_dir)}
 
+    def _run_canonical(self, cache_dir: Path, output_dir: Path) -> dict[str, Any]:
+        store = AttentionArchiveStore(cache_dir, self.config.split, device=self.config.device)
+        iterator = iter(store)
+        first_sample = next(iterator, None)
+        if first_sample is None:
+            raise ValueError("canonical split must contain at least one attention sample")
+        if self.config.kind in ("original", "hypergraph") and self.config.tau < first_sample.attention_floor:
+            raise ValueError("tau must be at least the retained cache attention_floor")
+        if output_dir.exists() and (not output_dir.is_dir() or any(output_dir.iterdir())):
+            raise FileExistsError("output_dir already contains files")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        graphs_dir = output_dir / "graphs"
+        graphs_dir.mkdir()
+        count = 0
+        samples = chain((first_sample,), iterator)
+        if self.config.limit is not None:
+            samples = islice(samples, self.config.limit)
+        with (output_dir / "index.jsonl").open("w", encoding="utf-8") as index_file:
+            for sample in tqdm(samples, desc=f"build {self.config.kind} {self.config.split}"):
+                graph, schema = self._build_graph(sample)
+                graph_path = graphs_dir / f"{sample.sample_id}.graph.pt"
+                torch.save({"schema": schema, "graph": self._cpu_graph_dict(graph.to_dict())}, graph_path)
+                index_file.write(json.dumps(self._index_row(sample, graph, graph_path, output_dir)) + "\n")
+                count += 1
+        manifest = self._manifest(cache_dir, count)
+        manifest["input_split"] = self.config.split
+        manifest["input_manifest_sha256"] = self._sha256(cache_dir / "manifest.json")
+        manifest["input_index_sha256"] = self._sha256(cache_dir / "index.jsonl")
+        (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        return {"kind": self.config.kind, "count": count, "output_dir": str(output_dir)}
+
     def _validate_config(self) -> None:
         if self.config.kind not in GRAPH_KINDS:
             raise ValueError(f"kind must be one of: {', '.join(GRAPH_KINDS)}")
@@ -98,6 +135,8 @@ class GraphDatasetBuilder:
             or self.config.limit <= 0
         ):
             raise ValueError("limit must be None or a positive integer")
+        if self.config.split is not None and self.config.split not in ("train", "test"):
+            raise ValueError("split must be train or test")
 
     def _validate_cache_threshold(self, cache_path: Path) -> None:
         if self.config.kind not in ("original", "hypergraph"):
@@ -170,3 +209,11 @@ class GraphDatasetBuilder:
             name: value.detach().cpu() if isinstance(value, torch.Tensor) else value
             for name, value in graph.items()
         }
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()

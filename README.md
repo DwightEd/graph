@@ -1,19 +1,23 @@
 # 稀疏注意力图构建
 
-本工具不使用、不写出标签。RAGTruth 的 JSON 读取会解析整行，但图缓存、图文件、索引和 manifest 不保存标签字段；legacy cache loader 只在白名单字段中取值，明确忽略 `y_token`。
+构图特征与图文件不使用标签。`extract`/`build` 不写标签，且图索引和 manifest
+不保存标签字段；`archive-attention` 仅将正式 RAGTruth cache 中的 `y_token` 转成
+隔离的 `labels/{train,test}.jsonl` sidecar，构图不读取该 sidecar。
 
-唯一入口是 `main.py`：它只解析 CLI 参数，构造 `ExtractionConfig` 或 `BuildConfig`，调用 `run()`，并打印一行摘要。
+唯一入口是 `main.py`：它只解析 CLI 参数，构造相应配置并调用 `run()`，最后打印一行摘要。
 
 ```text
 CLI 参数 -> ExtractionConfig -> AttentionExtractor.run() -> attention cache
 CLI 参数 -> BuildConfig      -> GraphDatasetBuilder.run() -> graph files/index/manifest
+CLI 参数 -> ArchiveConfig    -> AttentionArchiveConverter.run() -> canonical archive
 ```
 
 | 文件 | 职责 |
 | --- | --- |
-| `main.py` | `extract` 与 `build` 的唯一 CLI 入口。 |
+| `main.py` | `extract`、`build`、`inspect`、`archive-attention` 与 `verify-attention` 的唯一 CLI 入口。 |
 | `extract.py` | 按样本提取并保存稀疏注意力缓存。 |
 | `cache.py` | 固定 cache schema 的校验、保存与加载。 |
+| `archive.py` | 正式 attention cache 的完整性校验、最小化归档、读取和验证。 |
 | `build.py` | 枚举 cache，逐样本构图并写图数据集。 |
 | `graphs.py` | 三种 token graph 的构图函数。 |
 | `hypergraph.py` | attention hypergraph 的构图函数。 |
@@ -90,7 +94,7 @@ row = (layer * H + head) * R + (target - response_idx)
 下列命令在前台显示 `tqdm` 进度。输出根目录固定为远端数据目录；目标目录必须不存在或为空，输入 cache 目录必须存在且至少有一个顶层 `.pt` 文件。
 
 ```bash
-GRAPH_ROOT=/share/home/tm902089733300000/a903202310/lys/data/feature_extraction/ragtruth_sparse_graph_v1
+GRAPH_ROOT=/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/graphs/llama31_8b_instruct__llama2_good_all__fullctx__c8847872bedf
 CACHE_ROOT=/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876
 
 PYTHONPATH=. python main.py build \
@@ -113,7 +117,7 @@ PYTHONPATH=. python main.py build \
 其中 `train` 有 2,497 个样本、`test` 有 449 个样本，raw cache 合计 31,791,710,510 B（约 29.61 GiB）。旧 dense 图目录是
 
 ```text
-/share/home/tm902089733300000/a903202310/lys/data/feature_extraction/ragtruth_original_attribute_graphs/fresh_attention_c8847872bedf_20260731T074520Z_p876_tau0p05
+/share/home/tm902089733300000/a903202310/lys/data/feature_extraction/ragtruth_original_attribute_graphs/fresh_attention_c8847872bedf_20260731T074520Z_p876_tau0p05  # legacy
 ```
 
 旧 dense 图合计 158,239,660,436 B（约 147.37 GiB），其中 dense `edge_attr` 约占 93.10%。本地旧 `ragtruth_graph.tar.gz` 为 7,294,690,891 B（约 7.29 GB / 6.79 GiB），它不是 raw cache。
@@ -124,7 +128,7 @@ PYTHONPATH=. python main.py build \
 
 ```bash
 pip install -r requirements.txt
-NEW_CACHE_ROOT=/share/home/tm902089733300000/a903202310/lys/data/feature_extraction/ragtruth_attention_cache_v1
+NEW_CACHE_ROOT=/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b_instruct__llama2_good_all__fullctx__c8847872bedf
 
 PYTHONPATH=. python main.py extract \
   --model-path /share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct \
@@ -142,3 +146,37 @@ PYTHONPATH=. python -m unittest discover -s tests
 ```
 
 每个 graph 文件是 `{"schema": ..., "graph": graph.to_dict()}`；同级 `index.jsonl` 每行包含 `sample_id`、`source_id`、相对 `path`、`num_nodes` 和 `num_edges` 或 `num_hyperedges`，`manifest.json` 记录构建参数。
+
+
+## Canonical RAGTruth attention archive
+
+本转换的 feature/graph 是 label-free；labels 仅保存在隔离的
+`labels/{train,test}.jsonl` sidecar，builder 不读取它们。不会删除 formal 源 cache
+或已有旧图。
+
+正式源 cache：
+
+```text
+/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876
+```
+
+转换会校验 complete split manifest、文件 SHA256、源码一致的 replay
+fingerprint 和逐样本 float16 契约；全部先写入同父 staging，内部
+`verify-attention` 成功后才原子 rename。示例：
+
+```bash
+TRACE_ID=llama31_8b_instruct__llama2_good_all__fullctx__c8847872bedf
+FORMAL_ROOT=/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876
+TRACE_ROOT=/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/$TRACE_ID
+GRAPH_ROOT=/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/graphs/$TRACE_ID
+
+PYTHONPATH=. python main.py inspect --artifact-dir "$FORMAL_ROOT"
+PYTHONPATH=. python main.py archive-attention --formal-root "$FORMAL_ROOT" --output-root "$TRACE_ROOT"
+PYTHONPATH=. python main.py verify-attention --archive-root "$TRACE_ROOT"
+PYTHONPATH=. python main.py build --cache-dir "$TRACE_ROOT" --split train --output-dir "$GRAPH_ROOT/relation_topk_channels/train" --kind relation_topk_channels --device cuda
+PYTHONPATH=. python main.py build --cache-dir "$TRACE_ROOT" --split test --output-dir "$GRAPH_ROOT/relation_topk_channels/test" --kind relation_topk_channels --device cuda
+```
+
+canonical NPZ 只含六个张量：`token_ids:int32`、`response_idx:int32`、
+`attention_diagonal:float16`、`response_row_ptr:int32`、
+`response_column_indices:int32`、`response_values:float16`。

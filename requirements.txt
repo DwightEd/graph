@@ -2,3 +2,4 @@ torch>=2.2,<2.9
 transformers==4.46.3
 accelerate>=0.26,<2
 tqdm>=4.66
+numpy>=1.26
