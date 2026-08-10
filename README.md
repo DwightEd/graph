@@ -1,174 +1,177 @@
 # Attention Graph Lab
 
-这个仓库负责一条清晰的数据链：**模型特征抽取 → 最小化存储 → 不同构图 → 下游分析/训练**。
-
-## 1. 目录与数据层次
-
-一个 canonical split：
+本仓库把 RAGTruth 的注意力缓存转换为可校验的 canonical attention，再从同一份缓存构建稀疏图。入口是 `main.py`：参数解析后分别调用归档、抽取、校验或构图类。
 
 ```text
-train/
+正式 attention cache ──archive-attention──> canonical archive/{train,test}
+RAGTruth + 观察模型 ──extract──────────────> canonical split
+canonical split ──────build───────────────> graph dataset
+```
+
+`extract` 以观察模型的一次前向同时写 attention、token statistics，以及按需的 hidden states；`archive-attention` 则将已存在的正式 cache 转成相同的 canonical attention。当前正式 cache 的观察模型为 `Meta-Llama-3.1-8B-Instruct`，而 RAGTruth 响应筛选的生成器标识是 `llama-2-7b-chat`；两者不是同一概念。
+
+## Canonical attention split
+
+每个 split 的目录为：
+
+```text
+<canonical_root>/<train|test>/
 ├── manifest.json
 ├── index.jsonl
-├── labels.jsonl              # 可选；构图不读取
-├── attention/
-│   └── <sample_id>.npz
-├── hidden/                   # 可选
-│   └── <sample_id>.npz
-└── token_stats/              # 可选
-    └── <sample_id>.npz
+├── labels.jsonl                    # 归档正式 cache 时存在；构图不读取
+├── attention/<sample_id>.npz       # 必需
+├── hidden/<sample_id>.npz          # 可选，独立 sidecar
+└── token_stats/<sample_id>.npz     # 可选，独立 sidecar
 ```
 
-`index.jsonl` 只负责 `sample_id / source_id / attention path`。不同模态通过相同 `sample_id` 和 `token_ids` 对齐。
+`index.jsonl` 的每行严格包含 `sample_id`、`source_id`、相对 `path`、`sha256` 和 `bytes`。`manifest.json` 记录 split 的 `index_sha256`、attention 几何、`attention_floor` 和对齐方式；读取时会校验索引，构图时还会校验每个 NPZ 的哈希。
 
-## 2. Attention：唯一 6 字段接口
+每个 `attention/<sample_id>.npz` **恰好**有以下六个字段：
 
-每个 attention NPZ **只保存 6 个数组**：
-
-| 字段 | shape | dtype | 含义 |
+| 字段 | 形状 | dtype | 含义 |
 | --- | --- | --- | --- |
-| `token_ids` | `[N]` | `int32` | prompt+response token id |
+| `token_ids` | `[N]` | `int32` | prompt 与 response 的 token ID |
 | `response_idx` | `[]` | `int32` | 第一个 response token 的位置 |
-| `attention_diagonal` | `[L,H,N]` | `float16` | 每层每头的 attention 对角线 |
-| `response_row_ptr` | `[L*H*R+1]` | `int32` | response-query attention 的 CSR 行指针 |
-| `response_column_indices` | `[M]` | `int32` | source token 位置；source 可来自 prompt 或 response history |
+| `attention_diagonal` | `[L,H,N]` | `float16` | 每层每头完整 attention 对角线 |
+| `response_row_ptr` | `[L*H*R+1]` | `int32` | response-query 稀疏 attention 的 CSR 行指针 |
+| `response_column_indices` | `[M]` | `int32` | 每项的早先 source token 位置 |
 | `response_values` | `[M]` | `float16` | 对应 attention 权重 |
 
-其中 `R=N-response_idx`，CSR 行号：
+这里 `R=N-response_idx`，CSR 行号为 `((layer * H + head) * R + target - response_idx)`。attention 的对齐约定为 `post_token_query_at_same_position`：位于 `t` 的 response query 对应同一 token 位置 `t`，并且 CSR 只允许指向严格更早的 token。下游若采用“预测下一个 token”的时间语义，必须自行处理这一个位置的偏移，不能把两种对齐混为一谈。
 
-```text
-row = (layer * H + head) * R + (target - response_idx)
-```
+`attention_floor` 属于 split manifest，而不重复存入 NPZ。写入 CSR 的是 response-query、非对角且 `attention > floor` 的值；未出现的值只可解释为 `<= floor`，并不等于精确的零。`tau` 是之后构图时的阈值：对 `original` 与 `hypergraph`，必须满足 `tau >= attention_floor`。`floor` 决定有损存储，`tau` 决定从已存数据中选择哪些关系，二者不可互换。
 
-因此 `layer / head / target / source / weight` 都可从 CSR 解码，不重复保存。
-
-`attention_floor` 不放在每个样本，而放在 `manifest.json`。当前旧正式 RAGTruth cache 使用 `floor=0.01`：只有 response-query 的非对角 attention `> floor` 才进入 CSR；没出现的值只能解释为 `<= floor`，不能当成精确 0。`attention_diagonal` 完整保留。
-
-## 3. Hidden states 与 logits 统计
-
-Hidden state 单独保存，不塞进 attention 文件：
+可选 sidecar 不改变 attention 的六字段契约：
 
 ```text
 hidden/<sample_id>.npz
-  token_ids         [N]      int32
-  hidden_layer_ids  [K]      int16
-  hidden_states     [K,N,D]  float16
-```
+  token_ids [N] int32; hidden_layer_ids [K] int16; hidden_states [K,N,D] float16
 
-Logits 不长期保存完整 `[N,V]` Tensor。抽取后立即压成两个 token-level 统计：
-
-```text
 token_stats/<sample_id>.npz
-  token_ids       [N]  int32
-  token_log_prob  [N]  float32
-  entropy         [N]  float32
+  token_ids [N] int32; token_log_prob [N] float32; entropy [N] float32
 ```
 
-其中：
+完整 logits 不落盘；位置 0 的两个 token statistics 都为 0。加载 sidecar 时会用 `token_ids` 与 attention 样本对齐。
 
-```text
-token_log_prob[t] = log p(x_t | x_<t)
-entropy[t]        = H(p(. | x_<t))
-```
+## 命令
 
-位置 0 没有前一个预测位置，两个值均置 0；所有 response token 都有效，因为 `response_idx > 0`。
-
-## 4. 已有数据迁移
-
-正式 RAGTruth attention cache：
-
-```text
-/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876
-```
-
-转换成 canonical 结构：
+从仓库根目录运行（必要时以 `PYTHONPATH=.` 让模块可见）。新抽取的 split 输出到传入的 `--output-dir`：
 
 ```bash
-PYTHONPATH=. python main.py archive-attention \
-  --formal-root /share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876 \
-  --output-root /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b
-```
-
-旧 HaluEval/BoolQ `token_trace_v2` 或其他包含 `hidden_states / token_log_prob / entropy / logits` 的 PT，可一次性提取需要字段：
-
-```bash
-PYTHONPATH=. python main.py archive-features \
-  --trace-dir /path/to/extraction/traces \
-  --output-dir /path/to/canonical_split
-```
-
-如果旧 trace 只有完整 logits，转换器会计算 `token_log_prob` 与 `entropy` 后只保存这两个紧凑统计。
-
-旧属性图不再作为长期原始数据保存；它从 canonical attention 重新构建即可。
-
-## 5. 重新抽取模型特征
-
-一次 forward 同时抽 attention、token stats，并可选抽指定 hidden layers：
-
-```bash
-PYTHONPATH=. python main.py extract \
-  --model-path /share/home/.../Meta-Llama-3.1-8B-Instruct \
-  --dataset-path /share/home/.../RAGTruth/dataset \
-  --output-dir /share/home/.../model_traces/new_run/train \
+python main.py extract \
+  --model-path /models/Meta-Llama-3.1-8B-Instruct \
+  --dataset-path /data/RAGTruth/dataset \
+  --output-dir /data/model_traces/run/train \
   --split train \
-  --floor .01 \
+  --generator-model llama-2-7b-chat \
+  --floor 0.01 \
   --hidden-layers 7,15,23,31 \
   --device cuda
 ```
 
-不指定 `--hidden-layers` 时只保存 attention + token stats，避免无意间产生大体积 hidden-state 数据。
-
-## 6. 构图
+省略 `--hidden-layers` 时仍写 attention 和 `token_stats`，但不写 `hidden/`。归档已有正式 cache 时，输出根目录将含 `train/` 与 `test/`：
 
 ```bash
-PYTHONPATH=. python main.py build \
-  --cache-dir /share/home/.../model_traces/new_run/train \
-  --output-dir /share/home/.../graphs/original/train \
-  --kind original \
-  --tau .05 \
-  --node-features attention \
-  --device cuda
+python main.py archive-attention \
+  --formal-root /path/to/formal_cache \
+  --output-root /data/RAGTruth/model_traces/llama31_8b
+python main.py verify-attention \
+  --archive-root /data/RAGTruth/model_traces/llama31_8b
 ```
 
-当前图视图：
+旧 PT feature trace 可仅转换为独立 sidecar：
 
-- `original`：复现旧 threshold-union topology；
-- `relation_topk`：每个 response target 分别保留 prompt/history top-k；
-- `relation_topk_channels`：top-k 边同时保留 layer/head channel 值；
-- `hypergraph`：按 `(layer, head, response target, PR/RR)` 构造超边。
+```bash
+python main.py archive-features --trace-dir /path/to/traces --output-dir /path/to/split
+```
 
-节点特征可选：
+## 图数据集
+
+图构建读取一个 canonical split，并写入：
 
 ```text
-none
-attention
-hidden
-stats
-attention+hidden
-attention+stats
-hidden+stats
-all
+<graph_root>/<train|test>/
+├── manifest.json
+├── index.jsonl
+└── graphs/<sample_id>.pt
 ```
 
-不同节点特征只改变 `x`，不改变同一种构图方法的 topology。
+`manifest.json` 绑定输入 attention 的 manifest/index 哈希，并记录自己 `index_sha256`、构图参数及对齐方式。所有图均为 topology-only：绝不存 `x`、`token_ids`、`labels`、`y` 或 `y_token`；`num_nodes=N` 始终保留，包括没有边的孤立 token。隐状态、统计特征和任何学习得到的 embedding 都是下游按需加载或训练产生的输出，不是图缓存的一部分。图从不构造或保存稠密邻接矩阵。
 
-## 7. 原属性图的存储优化
+| `--kind` | 稀疏布局 | 语义 |
+| --- | --- | --- |
+| `original` | `num_nodes`, `response_idx`, `edge_index [2,E]`, `edge_type [E]`, `edge_ptr [E+1]`, `edge_channel [T]`, `edge_value [T]` | `attention > tau` 的旧 threshold-union 拓扑；每条边的 layer/head 值以 CSR 形式保存 |
+| `relation_topk` | `num_nodes`, `response_idx`, `edge_index [2,E]`, `edge_type [E]`, `edge_weight [E]` | 每个 response target 分别按平均通道分数选择 prompt 与 response-history 的 top-k |
+| `relation_topk_channels` | `relation_topk` 的字段加 `edge_ptr [E+1]`, `edge_channel [T]`, `edge_value [T]` | top-k 拓扑加逐通道的稀疏注意力值 |
+| `hypergraph` | `num_nodes`, `response_idx`, `incidence_index [2,I]`, `incidence_weight [I]`, `hyperedge_target [Q]`, `hyperedge_channel [Q]`, `hyperedge_type [Q]` | 按 `(layer, head, response target, prompt/history)` 建立超边；以 node–hyperedge incidence 表示 |
 
-旧属性图保存 `edge_attr [E,L*H]` dense Tensor，是主要磁盘开销。新 `original` 图保持完全相同的 threshold-union 边语义，但每条边的 layer/head 属性改为稀疏表示：
+`edge_type` / `hyperedge_type` 为 0（prompt→response）或 1（response-history→response）。`original`、`relation_topk_channels` 的通道属性都使用 `edge_ptr` 分段的 COO/CSR 式稀疏表示；`hypergraph` 使用 incidence COO。只有兼容旧代码时，才在内存中调用 `graphs.dense_edge_attr()` 临时物化稠密 `[E,L*H]`。
+
+relation top-k 仅在 `floor` 后保留的 CSR 项上评分，并以缺失通道为 0 计入通道平均；因此它不是对完整稠密 attention 的精确 top-k。
+
+例如构建带通道的 relation top-k 图：
+
+```bash
+python main.py build \
+  --cache-dir /data/RAGTruth/model_traces/llama31_8b/train \
+  --output-dir /data/RAGTruth/graphs/llama31_8b/relation_topk_channels/train \
+  --kind relation_topk_channels --k-prompt 8 --k-history 8 --device cuda
+```
+
+`--tau` 仅用于 `original` 与 `hypergraph`；relation top-k 使用 `--k-prompt` 和 `--k-history`。
+
+## 可复现重建与清理
+
+[`scripts/rebuild_ragtruth.sh`](scripts/rebuild_ragtruth.sh) 依次归档、校验，并为 `train` 和 `test` 构建 `relation_topk_channels`。默认输出布局是：
 
 ```text
-edge_index    [2,E]
-edge_type     [E]       0=Prompt→Response, 1=Response→Response
-edge_ptr      [E+1]
-edge_channel  [T]
-edge_value    [T]
+$CANONICAL_ROOT/{train,test}/...       # 默认 .../data/RAGTruth/model_traces/llama31_8b
+$GRAPH_ROOT/{train,test}/...           # 默认 .../data/RAGTruth/graphs/llama31_8b/relation_topk_channels
 ```
 
-需要运行旧 CHARM 风格代码时，`graphs.dense_edge_attr()` 可临时恢复 `[E,L*H]`；不再把这个巨大 dense Tensor长期写盘。
+`rebuild_ragtruth.sh` 只用于全新的输出：`CANONICAL_ROOT` 和 `GRAPH_ROOT` 两个最终 root 都必须尚未存在，且二者互不包含。它先在与最终 root 相邻、确定的 PID staging path 中完成归档、校验和两个 split 的构图，全部成功后再按先 canonical、后 graph 的顺序改名发布。对于普通可捕获失败（包括两次 rename），失败时会将 canonical 回退并只清理自己的 staging path，不发布部分构建结果。SIGKILL 或极端 rename 失败仍可能留下完整 canonical 或 `.staging.<pid>`；恢复时应先核验，再移除 staging 或只为 `GRAPH_ROOT` 单独重构，因此该过程不声称绝对原子。
 
-## 8. 两个阈值
+可覆盖路径和参数后执行：
 
-- `floor`：**特征存储阈值**。模型原始 dense attention 中 response-query 非对角项只有 `> floor` 才保存；这是有损压缩。
-- `tau`：**构图阈值**。在已经保存的 attention 上决定哪些 token pair 成为边/超边。
+```bash
+FORMAL_ROOT=/path/to/formal_cache \
+CANONICAL_ROOT=/data/RAGTruth/model_traces/llama31_8b \
+GRAPH_ROOT=/data/RAGTruth/graphs/llama31_8b/relation_topk_channels \
+bash scripts/rebuild_ragtruth.sh
+```
 
-必须有 `tau >= floor` 才能精确重建 threshold graph。
+[`scripts/cleanup_legacy_ragtruth.sh`](scripts/cleanup_legacy_ragtruth.sh) 会先校验 canonical archive，默认仅打印待删目录（dry run）：
+
+```bash
+bash scripts/cleanup_legacy_ragtruth.sh
+```
+
+确认删除默认的 legacy graph 目录必须显式设置：
+
+```bash
+DRY_RUN=0 CONFIRM_DELETE=DELETE_RAGTRUTH_LEGACY \
+bash scripts/cleanup_legacy_ragtruth.sh
+```
+
+若还要删除 formal cache，另加 `DELETE_FORMAL=1`；脚本拒绝 canonical archive、本体重叠路径以及 `$SAFE_ROOT` 外的目标。
+
+清理脚本的删除对象始终是固定路径：
+
+```text
+$SAFE_ROOT=/share/home/tm902089733300000/a903202310/lys
+legacy graph=/share/home/tm902089733300000/a903202310/lys/data/feature_extraction/ragtruth_original_attribute_graphs/fresh_attention_c8847872bedf_20260731T074520Z_p876_tau0p05
+formal cache=/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876
+```
+
+只有 `CANONICAL_ROOT` 和 `GRAPH_ROOT` 用来选择替代数据并进行验证；固定的删除对象不会跟随 `FORMAL_ROOT` override 改变。如果固定 formal cache 存在，脚本在任何 legacy 删除前会校验其两个 split manifest 与 canonical 记录的来源 SHA256。
+
+## t-SNE 分析
+
+安装分析依赖并启动 notebook：
+
+```bash
+python -m pip install -r requirements-analysis.txt
+jupyter lab notebooks/graph_tsne.ipynb
+```
+
+`notebooks/graph_tsne.ipynb` 从 canonical attention 和已有图中提取 routing、节点时序摘要及其组合，分别拟合 t-SNE，并在一张三面板图中显示。routing 对每个 response token 取 4 个固定指标：incoming mass、prompt share、归一化 entropy、history lag；再按 mean/std/slope 汇总为每样本 12 维。它先用图 manifest 的 `index_sha256` 校验 `index.jsonl`，再计算全部 embedding，最后才读 `labels.jsonl`；标签只控制颜色，绝不参与特征、标准化、PCA 或 t-SNE 拟合。`combined` 先将 routing 和 node 两个 block 分别标准化，再按各自维度的 `sqrt` 缩放，使两者的总尺度等权。notebook 还校验 attention ↔ graph provenance 和逐文件哈希。
