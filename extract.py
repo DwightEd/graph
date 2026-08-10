@@ -1,15 +1,15 @@
-"""Extract the six canonical attention arrays directly from a causal LM."""
+"""Extract canonical attention, hidden-state and token-stat features in one pass."""
 
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Any
 
 import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from cache import AttentionSample, save_attention_sample
+from features import save_hidden_features, save_token_stats, teacher_forced_stats
 from ragtruth import load_ragtruth_samples, tokenize_ragtruth_sample
 
 
@@ -22,6 +22,7 @@ class ExtractionConfig:
     generator_model: str = "llama-2-7b-chat"
     task_type: str = "all"
     floor: float = 0.01
+    hidden_layers: tuple[int, ...] = ()
     device: str = "cuda"
     limit: int | None = None
 
@@ -80,37 +81,50 @@ class AttentionExtractor:
             samples = samples[: self.config.limit]
 
         output = Path(self.config.output_dir)
-        attention_dir = output / "attention"
-        attention_dir.mkdir(parents=True, exist_ok=True)
+        (output / "attention").mkdir(parents=True, exist_ok=True)
+        if self.config.hidden_layers:
+            (output / "hidden").mkdir(exist_ok=True)
+        (output / "token_stats").mkdir(exist_ok=True)
+
         rows = []
         L, H = len(model.model.layers), int(model.config.num_attention_heads)
+        hidden_layers = tuple(sorted(set(self.config.hidden_layers)))
+        if any(layer < 0 or layer >= L for layer in hidden_layers):
+            raise ValueError(f"hidden layers must be in [0,{L - 1}]")
 
         for item in tqdm(samples, desc=f"extract {self.config.split}"):
             token_ids, response_idx = tokenize_ragtruth_sample(
                 tokenizer, prompt=item.prompt, response=item.response
             )
-            collector = AttentionCollector(
-                L, H, len(token_ids), response_idx, self.config.floor
-            )
-
+            collector = AttentionCollector(L, H, len(token_ids), response_idx, self.config.floor)
+            hidden = {}
             hooks = []
+
             for layer_id, layer in enumerate(model.model.layers):
-                def hook(_module, _args, result, layer_id=layer_id):
+                def attention_hook(_module, _args, result, layer_id=layer_id):
                     collector.consume(layer_id, result[1][0])
                     result = list(result)
                     result[1] = None
                     return tuple(result)
-                hooks.append(layer.self_attn.register_forward_hook(hook))
+
+                hooks.append(layer.self_attn.register_forward_hook(attention_hook))
+                if layer_id in hidden_layers:
+                    def hidden_hook(_module, _args, result, layer_id=layer_id):
+                        hidden[layer_id] = result[0][0].detach().half().cpu()
+                    hooks.append(layer.register_forward_hook(hidden_hook))
 
             try:
                 ids = token_ids.unsqueeze(0).to(self.config.device)
                 with torch.no_grad():
-                    model.model(
+                    result = model(
                         input_ids=ids,
                         attention_mask=torch.ones_like(ids),
                         output_attentions=True,
+                        output_hidden_states=False,
                         use_cache=False,
+                        return_dict=True,
                     )
+                token_log_prob, entropy = teacher_forced_stats(result.logits, ids[0])
             finally:
                 for hook in hooks:
                     hook.remove()
@@ -127,18 +141,32 @@ class AttentionExtractor:
                 values,
                 self.config.floor,
             )
-            relative = Path("attention") / f"{item.response_id}.npz"
-            save_attention_sample(sample, output / relative)
+            save_attention_sample(sample, output / "attention" / f"{item.response_id}.npz")
+            save_token_stats(
+                output / "token_stats" / f"{item.response_id}.npz",
+                token_ids,
+                token_log_prob,
+                entropy,
+            )
+            if hidden_layers:
+                save_hidden_features(
+                    output / "hidden" / f"{item.response_id}.npz",
+                    token_ids,
+                    hidden_layers,
+                    torch.stack([hidden[layer] for layer in hidden_layers]),
+                )
             rows.append({
                 "sample_id": item.response_id,
                 "source_id": item.source_id,
-                "path": relative.as_posix(),
+                "path": f"attention/{item.response_id}.npz",
             })
+            del result, token_log_prob, entropy
 
         manifest = {
             "attention_floor": self.config.floor,
             "num_layers": L,
             "num_heads": H,
+            "hidden_layers": list(hidden_layers),
             "count": len(rows),
         }
         (output / "manifest.json").write_text(
