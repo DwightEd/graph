@@ -1,4 +1,4 @@
-"""One-time conversion of the existing formal RAGTruth attention cache."""
+"""One-time conversion of existing PT artifacts to the canonical feature layout."""
 
 from dataclasses import dataclass
 import json
@@ -9,12 +9,19 @@ import torch
 from tqdm import tqdm
 
 from cache import AttentionDataset, AttentionSample, save_attention_sample
+from features import save_hidden_features, save_token_stats, teacher_forced_stats
 
 
 @dataclass(frozen=True)
 class ArchiveConfig:
     formal_root: str | Path
     output_root: str | Path
+
+
+@dataclass(frozen=True)
+class TraceArchiveConfig:
+    trace_dir: str | Path
+    output_dir: str | Path
 
 
 def _positive_runs(y_token: torch.Tensor, response_idx: int) -> list[list[int]]:
@@ -43,7 +50,7 @@ def _formal_sample(raw: dict[str, Any]) -> AttentionSample:
 
 
 def convert_formal_split(source_dir: str | Path, output_dir: str | Path) -> dict[str, Any]:
-    """Convert one formal train/test directory to the six-field archive."""
+    """Convert one formal RAGTruth attention split to the six-field archive."""
     source_dir, output_dir = Path(source_dir), Path(output_dir)
     paths = sorted(source_dir.glob("attention_*.pt"))
     if not paths:
@@ -51,8 +58,7 @@ def convert_formal_split(source_dir: str | Path, output_dir: str | Path) -> dict
     if not paths:
         raise ValueError(f"no attention .pt files found in {source_dir}")
 
-    attention_dir = output_dir / "attention"
-    attention_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "attention").mkdir(parents=True, exist_ok=True)
     index_rows, label_rows = [], []
     floor = layers = heads = None
 
@@ -60,7 +66,6 @@ def convert_formal_split(source_dir: str | Path, output_dir: str | Path) -> dict
         raw = torch.load(path, map_location="cpu", weights_only=True)
         sample = _formal_sample(raw)
         sample.validate()
-
         if floor is None:
             floor = sample.attention_floor
             layers, heads = sample.num_layers, sample.num_heads
@@ -115,15 +120,90 @@ class AttentionArchiveConverter:
         }
 
 
+def _first(raw: dict[str, Any], *names):
+    for name in names:
+        if name in raw:
+            return raw[name]
+    return None
+
+
+def convert_trace_dir(trace_dir: str | Path, output_dir: str | Path) -> dict[str, Any]:
+    """Convert legacy hidden/logit traces without copying engineering metadata."""
+    trace_dir, output_dir = Path(trace_dir), Path(output_dir)
+    paths = sorted(trace_dir.glob("*.pt"))
+    if not paths:
+        paths = sorted(trace_dir.rglob("*.pt"))
+    if not paths:
+        raise ValueError(f"no trace .pt files found in {trace_dir}")
+
+    rows = []
+    for path in tqdm(paths, desc="convert feature traces"):
+        raw = torch.load(path, map_location="cpu", weights_only=True)
+        sample_id = str(_first(raw, "example_id", "response_id", "sample_id") or path.stem)
+        token_ids = _first(raw, "input_ids", "token_ids")
+        if token_ids is None:
+            continue
+        token_ids = torch.as_tensor(token_ids).flatten()
+
+        has_hidden = False
+        hidden = _first(raw, "hidden_states")
+        if hidden is not None:
+            hidden = torch.as_tensor(hidden)
+            if hidden.ndim == 2:
+                hidden = hidden.unsqueeze(0)
+            layer_ids = _first(raw, "selected_hidden_layers", "hidden_layer_ids")
+            if layer_ids is None:
+                layer_ids = torch.arange(hidden.shape[0])
+            save_hidden_features(
+                output_dir / "hidden" / f"{sample_id}.npz",
+                token_ids,
+                torch.as_tensor(layer_ids).flatten().tolist(),
+                hidden,
+            )
+            has_hidden = True
+
+        has_stats = False
+        log_prob = _first(raw, "token_log_prob")
+        entropy = _first(raw, "next_token_entropy", "entropy")
+        if log_prob is None or entropy is None:
+            logits = _first(raw, "logits")
+            if logits is not None:
+                log_prob, entropy = teacher_forced_stats(logits, token_ids)
+        if log_prob is not None and entropy is not None:
+            save_token_stats(
+                output_dir / "token_stats" / f"{sample_id}.npz",
+                token_ids,
+                log_prob,
+                entropy,
+            )
+            has_stats = True
+
+        if has_hidden or has_stats:
+            rows.append({"sample_id": sample_id, "hidden": has_hidden, "token_stats": has_stats})
+
+    (output_dir / "feature_index.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
+    )
+    return {"count": len(rows), "output_dir": str(output_dir)}
+
+
+class TraceArchiveConverter:
+    def __init__(self, config: TraceArchiveConfig) -> None:
+        self.config = config
+
+    def run(self) -> dict[str, Any]:
+        return convert_trace_dir(self.config.trace_dir, self.config.output_dir)
+
+
 class AttentionArchiveStore(AttentionDataset):
-    """Backward-compatible name for code that opens an archive root + split."""
+    """Backward-compatible name for archive-root + split loading."""
 
     def __init__(self, root: str | Path, split: str, device: str | torch.device = "cpu") -> None:
         super().__init__(Path(root) / split, device=device)
 
 
 class AttentionArchiveVerifier:
-    """Lightweight structural check: load every sample once."""
+    """Lightweight structural check: load every canonical attention sample once."""
 
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
@@ -139,7 +219,7 @@ class AttentionArchiveVerifier:
 
 
 class ArtifactInspector:
-    """Show the actual fields and tensor shapes of one formal sample per split."""
+    """Show actual fields and tensor shapes of one formal sample per split."""
 
     def __init__(self, formal_root: str | Path) -> None:
         self.formal_root = Path(formal_root)
