@@ -1,4 +1,4 @@
-"""Small CLI for attention extraction, conversion and graph construction."""
+"""Small CLI for feature extraction, migration and graph construction."""
 
 import argparse
 import json
@@ -8,9 +8,18 @@ from archive import (
     ArtifactInspector,
     AttentionArchiveConverter,
     AttentionArchiveVerifier,
+    TraceArchiveConfig,
+    TraceArchiveConverter,
 )
 from build import GRAPH_KINDS, BuildConfig, GraphDatasetBuilder
 from extract import AttentionExtractor, ExtractionConfig
+from features import NODE_FEATURE_MODES
+
+
+def _layers(value: str) -> tuple[int, ...]:
+    if not value.strip():
+        return ()
+    return tuple(int(item) for item in value.split(","))
 
 
 def main(argv=None):
@@ -25,12 +34,17 @@ def main(argv=None):
     p.add_argument("--generator-model", default="llama-2-7b-chat")
     p.add_argument("--task-type", default="all")
     p.add_argument("--floor", type=float, default=0.01)
+    p.add_argument("--hidden-layers", default="", help="0-based decoder layers, e.g. 7,15,23,31")
     p.add_argument("--device", default="cuda")
     p.add_argument("--limit", type=int)
 
     p = command.add_parser("archive-attention")
     p.add_argument("--formal-root", required=True)
     p.add_argument("--output-root", required=True)
+
+    p = command.add_parser("archive-features")
+    p.add_argument("--trace-dir", required=True)
+    p.add_argument("--output-dir", required=True)
 
     p = command.add_parser("inspect")
     p.add_argument("--artifact-dir", required=True)
@@ -45,6 +59,7 @@ def main(argv=None):
     p.add_argument("--tau", type=float, default=0.05)
     p.add_argument("--k-prompt", type=int, default=8)
     p.add_argument("--k-history", type=int, default=8)
+    p.add_argument("--node-features", choices=NODE_FEATURE_MODES, default="attention")
     p.add_argument("--device", default="cuda")
     p.add_argument("--limit", type=int)
 
@@ -58,13 +73,14 @@ def main(argv=None):
             args.generator_model,
             args.task_type,
             args.floor,
+            _layers(args.hidden_layers),
             args.device,
             args.limit,
         )).run()
     elif args.command == "archive-attention":
-        result = AttentionArchiveConverter(
-            ArchiveConfig(args.formal_root, args.output_root)
-        ).run()
+        result = AttentionArchiveConverter(ArchiveConfig(args.formal_root, args.output_root)).run()
+    elif args.command == "archive-features":
+        result = TraceArchiveConverter(TraceArchiveConfig(args.trace_dir, args.output_dir)).run()
     elif args.command == "inspect":
         result = ArtifactInspector(args.artifact_dir).run()
     elif args.command == "verify-attention":
@@ -77,6 +93,7 @@ def main(argv=None):
             args.tau,
             args.k_prompt,
             args.k_history,
+            args.node_features,
             args.device,
             args.limit,
         )).run()
