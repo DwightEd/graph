@@ -45,3 +45,15 @@ class RagTruthTests(unittest.TestCase):
         self.assertEqual(response_idx, len("system:user:question|"))
         self.assertEqual(token_ids.tolist()[response_idx:], list(range(response_idx, len(token_ids))))
 
+    def test_tokenizer_rejects_mismatched_token_and_offset_counts(self) -> None:
+        class MismatchedTokenizer(FakeTokenizer):
+            def __call__(self, text, add_special_tokens, return_offsets_mapping):
+                return {
+                    "input_ids": [0, 1, 2, 3],
+                    "offset_mapping": [(0, 1), (1, 2), (2, 3)],
+                }
+
+        with self.assertRaisesRegex(ValueError, "same length"):
+            tokenize_ragtruth_sample(
+                MismatchedTokenizer(), prompt="question", response="answer"
+            )

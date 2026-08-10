@@ -14,7 +14,7 @@ class AttentionHypergraphTests(unittest.TestCase):
         columns = torch.tensor([0, 1, 0, 2, 1, 1, 2, 0, 3], dtype=torch.int32)
         values = torch.tensor([0.6, 0.5, 0.7, 0.8, 0.5, 0.9, 0.7, 0.9, 0.9])
         diagonal = torch.tensor(
-            [[[10.0, 11.0, 12.0, 13.0, 14.0], [20.0, 21.0, 22.0, 23.0, 24.0]]]
+            [[[0.10, 0.11, 0.12, 0.13, 0.14], [0.20, 0.21, 0.22, 0.23, 0.24]]]
         )
         return AttentionSample(
             sample_id="sample-1",
@@ -25,7 +25,7 @@ class AttentionHypergraphTests(unittest.TestCase):
             response_row_ptr=row_ptr,
             response_column_indices=columns,
             response_values=values,
-            attention_floor=0.5,
+            attention_floor=0.49,
         )
 
     def test_builds_typed_thresholded_hyperedges_in_deterministic_order(self) -> None:
@@ -37,7 +37,7 @@ class AttentionHypergraphTests(unittest.TestCase):
         torch.testing.assert_close(
             graph.node_attr,
             torch.tensor(
-                [[10.0, 20.0], [11.0, 21.0], [12.0, 22.0], [13.0, 23.0], [14.0, 24.0]]
+                [[0.10, 0.20], [0.11, 0.21], [0.12, 0.22], [0.13, 0.23], [0.14, 0.24]]
             ),
         )
         torch.testing.assert_close(
@@ -50,8 +50,8 @@ class AttentionHypergraphTests(unittest.TestCase):
         )
         torch.testing.assert_close(
             graph.incidence_weight,
-            torch.tensor([0.6, 12.0, 0.7, 13.0, 0.8, 13.0, 0.9, 22.0,
-                          0.7, 23.0, 0.9, 24.0, 0.9, 24.0]),
+            torch.tensor([0.6, 0.12, 0.7, 0.13, 0.8, 0.13, 0.9, 0.22,
+                          0.7, 0.23, 0.9, 0.24, 0.9, 0.24]),
         )
         torch.testing.assert_close(
             graph.hyperedge_target,
@@ -91,7 +91,25 @@ class AttentionHypergraphTests(unittest.TestCase):
 
     def test_rejects_a_threshold_below_the_sparse_attention_floor(self) -> None:
         with self.assertRaisesRegex(ValueError, "attention_floor"):
-            build_attention_hypergraph(self.make_sample(), tau=0.49)
+            build_attention_hypergraph(self.make_sample(), tau=0.48)
+
+    def test_compares_half_values_in_float32_before_thresholding(self) -> None:
+        sample = self.make_sample()
+        sample.attention_floor = 0.005
+        sample.attention_diagonal = sample.attention_diagonal.to(torch.float16)
+        sample.response_values = torch.tensor([0.01], dtype=torch.float16)
+        sample.response_row_ptr = torch.tensor([0, 1, 1, 1, 1, 1, 1], dtype=torch.int64)
+        sample.response_column_indices = torch.tensor([0], dtype=torch.int32)
+
+        graph = build_attention_hypergraph(sample, tau=0.01)
+
+        self.assertEqual(graph.hyperedge_target.tolist(), [2])
+        self.assertEqual(graph.incidence_weight.dtype, torch.float16)
+
+    def test_rejects_nonfinite_or_out_of_range_tau(self) -> None:
+        for tau in (float("nan"), float("inf"), -0.1, 1.1):
+            with self.subTest(tau=tau), self.assertRaisesRegex(ValueError, "finite"):
+                build_attention_hypergraph(self.make_sample(), tau=tau)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """Convert retained-attention CSR caches into token graphs."""
 
 from dataclasses import dataclass
+import math
 from typing import Any
 
 import torch
@@ -40,6 +41,19 @@ def _cache_entries(sample: Any) -> tuple[torch.Tensor, torch.Tensor, torch.Tenso
     return sources, targets, channels, channel_count, token_count
 
 
+def _validated_tau(attention_floor: float, tau: float) -> float:
+    """Validate a graph threshold and return its Python float value."""
+    try:
+        threshold = float(tau)
+    except (TypeError, ValueError) as error:
+        raise ValueError("tau must be a finite number in [0, 1]") from error
+    if not math.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
+        raise ValueError("tau must be finite and within [0, 1]")
+    if threshold < attention_floor:
+        raise ValueError("tau must be at least the retained cache attention_floor")
+    return threshold
+
+
 def _base_graph(sample: Any) -> tuple[dict[str, Any], int]:
     channel_count = sample.attention_diagonal.shape[0] * sample.attention_diagonal.shape[1]
     node_attr = sample.attention_diagonal.reshape(channel_count, -1).transpose(0, 1).contiguous()
@@ -52,16 +66,39 @@ def _base_graph(sample: Any) -> tuple[dict[str, Any], int]:
     }, channel_count
 
 
+def _select_relation_topk(
+    candidate_indices: torch.Tensor,
+    pair_targets: torch.Tensor,
+    retained_mean: torch.Tensor,
+    limit: int,
+) -> torch.Tensor:
+    if limit <= 0:
+        return candidate_indices[:0]
+
+    score_order = torch.argsort(retained_mean[candidate_indices], descending=True, stable=True)
+    score_sorted = candidate_indices[score_order]
+    target_order = torch.argsort(pair_targets[score_sorted], stable=True)
+    ordered_indices = score_sorted[target_order]
+    ordered_targets = pair_targets[ordered_indices]
+    positions = torch.arange(ordered_indices.numel(), device=ordered_indices.device)
+    starts = torch.ones(ordered_indices.numel(), dtype=torch.bool, device=ordered_indices.device)
+    starts[1:] = ordered_targets[1:] != ordered_targets[:-1]
+    group_starts = torch.cummax(
+        torch.where(starts, positions, torch.zeros_like(positions)), dim=0
+    ).values
+    return ordered_indices[(positions - group_starts) < limit]
+
+
 def build_original_graph(sample: Any, tau: float) -> TokenGraph:
     """Build the compatibility graph from cache entries retained above ``tau``."""
-    if tau < sample.attention_floor:
-        raise ValueError("tau must be at least the retained cache attention_floor")
+    tau = _validated_tau(sample.attention_floor, tau)
 
     base, channel_count = _base_graph(sample)
     sources, targets, channels, _, token_count = _cache_entries(sample)
     values = sample.response_values
     entry_pairs = targets * token_count + sources
-    selected_pairs = torch.unique(entry_pairs[values > tau], sorted=True)
+    selection = values.to(torch.float32) > float(tau)
+    selected_pairs = torch.unique(entry_pairs[selection], sorted=True)
     edge_count = selected_pairs.numel()
     edge_sources = selected_pairs % token_count
     edge_targets = selected_pairs // token_count
@@ -75,7 +112,7 @@ def build_original_graph(sample: Any, tau: float) -> TokenGraph:
         positions = torch.searchsorted(selected_pairs, entry_pairs)
         matches = positions < edge_count
         matches &= selected_pairs[positions.clamp(max=edge_count - 1)] == entry_pairs
-        matches &= values > tau
+        matches &= selection
         edge_attr[positions[matches], channels[matches]] = values[matches]
 
     return TokenGraph(
@@ -98,46 +135,38 @@ def build_relation_topk_graph(
     missing channel entries contribute zero.  Consequently this function cannot
     claim an exact top-k over attention values absent from that cache.
     """
+    if k_prompt < 0 or k_history < 0:
+        raise ValueError("k_prompt and k_history must be non-negative")
     base, channel_count = _base_graph(sample)
     sources, targets, channels, _, token_count = _cache_entries(sample)
     values = sample.response_values
     entry_pairs = targets * token_count + sources
     unique_pairs, inverse = torch.unique(entry_pairs, sorted=True, return_inverse=True)
     retained_sums = torch.zeros(
-        unique_pairs.numel(), dtype=values.dtype, device=values.device
+        unique_pairs.numel(), dtype=torch.float32, device=values.device
     )
-    retained_sums.index_add_(0, inverse, values)
+    retained_sums.index_add_(0, inverse, values.to(torch.float32))
     retained_mean = retained_sums / channel_count
     pair_sources = unique_pairs % token_count
     pair_targets = unique_pairs // token_count
 
-    selected_indices: list[torch.Tensor] = []
-    selected_types: list[torch.Tensor] = []
-    for target in range(sample.response_idx, token_count):
-        target_matches = pair_targets == target
-        for relation_type, limit in ((0, k_prompt), (1, k_history)):
-            if limit <= 0:
-                continue
-            if relation_type == 0:
-                relation_matches = pair_sources < sample.response_idx
-            else:
-                relation_matches = pair_sources >= sample.response_idx
-            candidates = torch.nonzero(target_matches & relation_matches).flatten()
-            take = min(limit, candidates.numel())
-            if not take:
-                continue
-            order = torch.argsort(retained_mean[candidates], descending=True, stable=True)
-            selected_indices.append(candidates[order[:take]])
-            selected_types.append(
-                torch.full((take,), relation_type, dtype=torch.int8, device=values.device)
-            )
-
-    if selected_indices:
-        chosen_indices = torch.cat(selected_indices)
-        edge_type = torch.cat(selected_types)
-    else:
-        chosen_indices = torch.empty(0, dtype=torch.int64, device=values.device)
-        edge_type = torch.empty(0, dtype=torch.int8, device=values.device)
+    pair_indices = torch.arange(unique_pairs.numel(), device=values.device)
+    prompt_indices = _select_relation_topk(
+        pair_indices[pair_sources < sample.response_idx], pair_targets, retained_mean, k_prompt
+    )
+    history_indices = _select_relation_topk(
+        pair_indices[pair_sources >= sample.response_idx], pair_targets, retained_mean, k_history
+    )
+    chosen_indices = torch.cat((prompt_indices, history_indices))
+    edge_type = torch.cat(
+        (
+            torch.zeros(prompt_indices.numel(), dtype=torch.int8, device=values.device),
+            torch.ones(history_indices.numel(), dtype=torch.int8, device=values.device),
+        )
+    )
+    group_order = torch.argsort(pair_targets[chosen_indices] * 2 + edge_type, stable=True)
+    chosen_indices = chosen_indices[group_order]
+    edge_type = edge_type[group_order]
 
     chosen_pairs = unique_pairs[chosen_indices]
     edge_sources = chosen_pairs % token_count

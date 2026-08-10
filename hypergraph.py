@@ -1,10 +1,24 @@
 """Thresholded, typed attention hypergraphs built from sparse response attention."""
 
 from dataclasses import dataclass
+import math
 
 import torch
 
 from cache import AttentionSample
+
+
+def _validated_tau(attention_floor: float, tau: float) -> float:
+    """Validate a hypergraph threshold and return its Python float value."""
+    try:
+        threshold = float(tau)
+    except (TypeError, ValueError) as error:
+        raise ValueError("tau must be a finite number in [0, 1]") from error
+    if not math.isfinite(threshold) or not 0.0 <= threshold <= 1.0:
+        raise ValueError("tau must be finite and within [0, 1]")
+    if threshold < attention_floor:
+        raise ValueError("tau must be at least attention_floor for exact thresholding")
+    return threshold
 
 
 @dataclass
@@ -37,8 +51,7 @@ class AttentionHypergraph:
 
 def build_attention_hypergraph(sample: AttentionSample, tau: float) -> AttentionHypergraph:
     """Build typed prompt/response-history hyperedges from retained attention entries."""
-    if tau < sample.attention_floor:
-        raise ValueError("tau must be at least attention_floor for exact thresholding")
+    tau = _validated_tau(sample.attention_floor, tau)
     sample.validate()
 
     num_tokens = sample.num_tokens
@@ -50,10 +63,10 @@ def build_attention_hypergraph(sample: AttentionSample, tau: float) -> Attention
     rows = torch.arange(num_channels * num_response_tokens, device=row_counts.device)
     entry_rows = torch.repeat_interleave(rows, row_counts)
     source_tokens = sample.response_column_indices.to(torch.int64)
-    retained = sample.response_values > tau
-    entry_rows = entry_rows[retained]
-    source_tokens = source_tokens[retained]
-    source_weights = sample.response_values[retained]
+    selection = sample.response_values.to(torch.float32) > float(tau)
+    entry_rows = entry_rows[selection]
+    source_tokens = source_tokens[selection]
+    source_weights = sample.response_values[selection]
 
     if source_tokens.numel() == 0:
         return AttentionHypergraph(

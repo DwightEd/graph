@@ -64,13 +64,159 @@ class FakeModel(torch.nn.Module):
         self.model = FakeBackbone([FakeLayer(first), FakeLayer(second)])
         self.config = type("Config", (), {"num_attention_heads": 1, "max_position_embeddings": max_position_embeddings})()
         self.forward_called = False
+        self.to_calls = []
 
     def forward(self, *args, **kwargs):
         self.forward_called = True
         return self.model(*args, **kwargs)
 
+    def to(self, *args, **kwargs):
+        self.to_calls.append((args, kwargs))
+        return self
+
 
 class ExtractTests(unittest.TestCase):
+    def _write_matching_dataset(self, root: Path) -> Path:
+        dataset = root / "dataset"
+        dataset.mkdir()
+        (dataset / "source_info.jsonl").write_text(
+            json.dumps({"source_id": "s", "prompt": "q", "task_type": "qa"}) + "\n"
+        )
+        (dataset / "response.jsonl").write_text(
+            json.dumps({
+                "id": "r",
+                "source_id": "s",
+                "response": "a",
+                "split": "test",
+                "model": "llama-2-7b-chat",
+                "quality": "good",
+            })
+            + "\n"
+        )
+        return dataset
+
+    def test_extractor_validates_floor_and_limit_before_loading_models(self) -> None:
+        invalid_options = (
+            {"floor": float("nan")},
+            {"floor": 0},
+            {"floor": 1.1},
+            {"limit": 0},
+            {"limit": -1},
+            {"limit": 1.5},
+            {"limit": True},
+        )
+        for options in invalid_options:
+            with self.subTest(options=options), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                config = ExtractionConfig(
+                    model_path="observer",
+                    dataset_path=root / "dataset",
+                    output_dir=root / "out",
+                    split="test",
+                    dtype="float32",
+                    device="cpu",
+                    **options,
+                )
+                with patch("extract.AutoTokenizer.from_pretrained") as tokenizer_loader, patch(
+                    "extract.AutoModelForCausalLM.from_pretrained"
+                ) as model_loader:
+                    with self.assertRaises(ValueError):
+                        AttentionExtractor(config).run()
+
+                tokenizer_loader.assert_not_called()
+                model_loader.assert_not_called()
+
+    def test_extractor_stops_before_model_load_for_zero_matching_samples(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dataset = root / "dataset"
+            dataset.mkdir()
+            (dataset / "source_info.jsonl").write_text(
+                json.dumps({"source_id": "s", "prompt": "q", "task_type": "qa"}) + "\n"
+            )
+            (dataset / "response.jsonl").write_text(
+                json.dumps({
+                    "id": "r",
+                    "source_id": "s",
+                    "response": "a",
+                    "split": "train",
+                    "model": "llama-2-7b-chat",
+                    "quality": "good",
+                })
+                + "\n"
+            )
+            output = root / "out"
+            config = ExtractionConfig(
+                model_path="observer",
+                dataset_path=dataset,
+                output_dir=output,
+                split="test",
+                dtype="float32",
+                device="cpu",
+            )
+            with patch("extract.AutoTokenizer.from_pretrained") as tokenizer_loader, patch(
+                "extract.AutoModelForCausalLM.from_pretrained"
+            ) as model_loader:
+                with self.assertRaisesRegex(ValueError, "matching samples"):
+                    AttentionExtractor(config).run()
+
+        tokenizer_loader.assert_not_called()
+        model_loader.assert_not_called()
+        self.assertFalse(output.exists())
+
+    def test_extractor_rejects_nonempty_output_before_model_load(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dataset = self._write_matching_dataset(root)
+            output = root / "out"
+            output.mkdir()
+            (output / "previous.pt").write_bytes(b"artifact")
+            config = ExtractionConfig(
+                model_path="observer",
+                dataset_path=dataset,
+                output_dir=output,
+                split="test",
+                dtype="float32",
+                device="cpu",
+            )
+            with patch("extract.AutoTokenizer.from_pretrained") as tokenizer_loader, patch(
+                "extract.AutoModelForCausalLM.from_pretrained"
+            ) as model_loader:
+                with self.assertRaises(FileExistsError):
+                    AttentionExtractor(config).run()
+
+        tokenizer_loader.assert_not_called()
+        model_loader.assert_not_called()
+
+    def test_extractor_uses_low_ram_device_mapped_model_loading(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dataset = self._write_matching_dataset(root)
+            output = root / "out"
+            output.mkdir()
+            config = ExtractionConfig(
+                model_path="observer",
+                dataset_path=dataset,
+                output_dir=output,
+                split="test",
+                dtype="float32",
+                device="cpu",
+            )
+            model = FakeModel()
+            with patch("extract.AutoTokenizer.from_pretrained", return_value=FakeTokenizer()), patch(
+                "extract.AutoModelForCausalLM.from_pretrained", return_value=model
+            ) as model_loader:
+                AttentionExtractor(config).run()
+
+        model_loader.assert_called_once_with(
+            "observer",
+            torch_dtype=torch.float32,
+            attn_implementation="eager",
+            low_cpu_mem_usage=True,
+            device_map={"": "cpu"},
+        )
+        self.assertEqual(model.to_calls, [])
+
     def test_collector_compacts_diagonal_and_causal_response_values(self) -> None:
         collector = AttentionCollector(num_layers=1, num_heads=1, num_tokens=4, response_idx=2, floor=.25, dtype=torch.float32)
         attention = torch.tensor([[[.1, .2, .3, .4], [.2, .2, .3, .3], [.3, .2, .2, .3], [.4, .3, .2, .1]]])
