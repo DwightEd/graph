@@ -171,12 +171,12 @@ class CoreTests(unittest.TestCase):
             output = root / "graphs"
             GraphDatasetBuilder(BuildConfig(
                 archive / "train", output, kind="original", tau=0.05,
-                node_features="attention", device="cpu"
+                device="cpu"
             )).run()
             graph = torch.load(output / "graphs" / "train-1.pt", weights_only=True)
             self.assertEqual(
                 set(graph),
-                {"response_idx", "x", "edge_index", "edge_type", "edge_ptr", "edge_channel", "edge_value"},
+                {"num_nodes", "response_idx", "edge_index", "edge_type", "edge_ptr", "edge_channel", "edge_value"},
             )
 
     def test_legacy_trace_converter_keeps_only_hidden_and_token_stats(self):

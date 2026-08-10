@@ -3,13 +3,12 @@
 from dataclasses import dataclass
 import torch
 
-from graphs import attention_node_features
-
+from graphs import _validate_tau
 
 @dataclass
 class AttentionHypergraph:
+    num_nodes: int
     response_idx: int
-    x: torch.Tensor
     incidence_index: torch.Tensor
     incidence_weight: torch.Tensor
     hyperedge_target: torch.Tensor
@@ -20,11 +19,8 @@ class AttentionHypergraph:
         return self.__dict__.copy()
 
 
-def build_attention_hypergraph(sample, tau: float = 0.05, x=None) -> AttentionHypergraph:
-    if tau < sample.attention_floor:
-        raise ValueError("tau cannot be lower than attention_floor")
-    if x is None:
-        x = attention_node_features(sample)
+def build_attention_hypergraph(sample, tau: float = 0.05) -> AttentionHypergraph:
+    _validate_tau(sample, tau)
 
     C, N, R = sample.num_channels, sample.num_tokens, sample.num_response_tokens
     counts = sample.response_row_ptr[1:] - sample.response_row_ptr[:-1]
@@ -37,8 +33,8 @@ def build_attention_hypergraph(sample, tau: float = 0.05, x=None) -> AttentionHy
     if not len(source):
         empty = torch.empty(0, dtype=torch.long, device=source.device)
         return AttentionHypergraph(
+            sample.num_tokens,
             sample.response_idx,
-            x,
             torch.empty((2, 0), dtype=torch.long, device=source.device),
             weight,
             empty,
@@ -57,11 +53,11 @@ def build_attention_hypergraph(sample, tau: float = 0.05, x=None) -> AttentionHy
     node = torch.cat((source, target))
     hedge = torch.cat((hyperedge_id, torch.arange(len(unique_group), device=source.device)))
     incidence_weight = torch.cat((weight, target_weight))
-    order = torch.argsort(hedge)
+    order = torch.argsort(hedge, stable=True)
 
     return AttentionHypergraph(
+        sample.num_tokens,
         sample.response_idx,
-        x,
         torch.stack((node[order], hedge[order])),
         incidence_weight[order],
         target,

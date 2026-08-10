@@ -1,13 +1,15 @@
 """Token graph views built from canonical sparse attention."""
 
 from dataclasses import dataclass
+from math import isfinite
+from numbers import Real
 import torch
 
 
 @dataclass
 class TokenGraph:
+    num_nodes: int
     response_idx: int
-    x: torch.Tensor
     edge_index: torch.Tensor
     edge_type: torch.Tensor
     edge_weight: torch.Tensor | None = None
@@ -30,14 +32,20 @@ def _entries(sample):
     return sources, targets, channels
 
 
-def attention_node_features(sample):
-    return sample.attention_diagonal.reshape(sample.num_channels, sample.num_tokens).T.contiguous()
+def _validate_tau(sample, tau) -> None:
+    if (
+        isinstance(tau, bool)
+        or not isinstance(tau, Real)
+        or not isfinite(tau)
+        or not sample.attention_floor <= tau <= 1
+    ):
+        raise ValueError("tau must be a finite real number in [attention_floor, 1]")
 
 
-def _base(sample, x):
-    if x is None:
-        x = attention_node_features(sample)
-    return {"response_idx": sample.response_idx, "x": x}
+def _validate_topk_limits(k_prompt, k_history) -> None:
+    for name, value in (("k_prompt", k_prompt), ("k_history", k_history)):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"{name} must be a non-negative integer")
 
 
 def _sparse_edge_channels(pair, channel, value, selected_pairs, keep):
@@ -64,10 +72,9 @@ def _sparse_edge_channels(pair, channel, value, selected_pairs, keep):
     return edge_ptr, channel[valid][order].to(torch.int32), value[valid][order]
 
 
-def build_original_graph(sample, tau: float = 0.05, x=None) -> TokenGraph:
+def build_original_graph(sample, tau: float = 0.05) -> TokenGraph:
     """Reproduce old threshold-union topology with sparse channel attributes."""
-    if tau < sample.attention_floor:
-        raise ValueError("tau cannot be lower than attention_floor")
+    _validate_tau(sample, tau)
 
     source, target, channel = _entries(sample)
     value = sample.response_values
@@ -81,7 +88,8 @@ def build_original_graph(sample, tau: float = 0.05, x=None) -> TokenGraph:
         pair, channel, value, selected, keep
     )
     return TokenGraph(
-        **_base(sample, x),
+        sample.num_tokens,
+        sample.response_idx,
         edge_index=torch.stack((edge_source, edge_target)),
         edge_type=(edge_source >= sample.response_idx).to(torch.int8),
         edge_ptr=edge_ptr,
@@ -105,18 +113,22 @@ def dense_edge_attr(graph: TokenGraph, num_channels: int) -> torch.Tensor:
 
 
 def _topk(indices, targets, score, k):
-    chosen = []
-    for target in torch.unique(targets[indices]):
-        local = indices[targets[indices] == target]
-        order = torch.argsort(score[local], descending=True)
-        chosen.append(local[order[:k]])
-    return torch.cat(chosen) if chosen else indices[:0]
+    """Select top-k edges per target with source-order tie breaking."""
+    if not len(indices) or k == 0:
+        return indices[:0]
+    ranked = indices[torch.argsort(score[indices], descending=True, stable=True)]
+    ranked = ranked[torch.argsort(targets[ranked], stable=True)]
+    starts = torch.where(
+        torch.cat((torch.ones(1, dtype=torch.bool, device=ranked.device), targets[ranked][1:] != targets[ranked][:-1])),
+        torch.arange(len(ranked), device=ranked.device),
+        0,
+    ).cummax(0).values
+    return ranked[torch.arange(len(ranked), device=ranked.device) - starts < k]
 
 
-def build_relation_topk_graph(
-    sample, k_prompt=8, k_history=8, with_channels=False, x=None
-) -> TokenGraph:
+def build_relation_topk_graph(sample, k_prompt=8, k_history=8, with_channels=False) -> TokenGraph:
     """Keep strongest prompt and response-history token pairs for each target."""
+    _validate_topk_limits(k_prompt, k_history)
     source, target, channel = _entries(sample)
     value = sample.response_values
     pair = target * sample.num_tokens + source
@@ -132,12 +144,15 @@ def build_relation_topk_graph(
     prompt = _topk(ids[pair_source < sample.response_idx], pair_target, score, k_prompt)
     history = _topk(ids[pair_source >= sample.response_idx], pair_target, score, k_history)
     chosen = torch.cat((prompt, history))
+    group_order = pair_target[chosen] * 2 + (pair_source[chosen] >= sample.response_idx)
+    chosen = chosen[torch.argsort(group_order, stable=True)]
 
     chosen_pair = unique_pair[chosen]
     edge_source = chosen_pair % sample.num_tokens
     edge_target = chosen_pair // sample.num_tokens
     graph = TokenGraph(
-        **_base(sample, x),
+        sample.num_tokens,
+        sample.response_idx,
         edge_index=torch.stack((edge_source, edge_target)),
         edge_type=(edge_source >= sample.response_idx).to(torch.int8),
         edge_weight=score[chosen],

@@ -13,7 +13,6 @@ from archive import (
 )
 from build import GRAPH_KINDS, BuildConfig, GraphDatasetBuilder
 from extract import AttentionExtractor, ExtractionConfig
-from features import NODE_FEATURE_MODES
 
 
 def _layers(value: str) -> tuple[int, ...]:
@@ -59,7 +58,6 @@ def main(argv=None):
     p.add_argument("--tau", type=float, default=0.05)
     p.add_argument("--k-prompt", type=int, default=8)
     p.add_argument("--k-history", type=int, default=8)
-    p.add_argument("--node-features", choices=NODE_FEATURE_MODES, default="attention")
     p.add_argument("--device", default="cuda")
     p.add_argument("--limit", type=int)
 
@@ -93,7 +91,6 @@ def main(argv=None):
             args.tau,
             args.k_prompt,
             args.k_history,
-            args.node_features,
             args.device,
             args.limit,
         )).run()
