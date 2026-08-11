@@ -24,7 +24,9 @@ canonical split ──────build─────────────�
 └── token_stats/<sample_id>.npz     # 可选，独立 sidecar
 ```
 
-`index.jsonl` 的每行严格包含 `sample_id`、`source_id`、相对 `path`、`sha256` 和 `bytes`。`manifest.json` 记录 split 的 `index_sha256`、attention 几何、`attention_floor` 和对齐方式；读取时会校验索引，构图时还会校验每个 NPZ 的哈希。
+`index.jsonl` 至少包含 `sample_id`、`source_id`、相对 `path`、`sha256` 和 `bytes`。已完成的 canonical archive 可用 `enrich-index` 原地补充 `split / task_type / data_source / generator_model / temperature / quality`，不会重写 NPZ；若图已经构建，可同时用 `--graph-root` 刷新 graph manifest 中绑定 canonical JSON 的输入哈希。研究访问接口见 [`docs/research_data_access.md`](docs/research_data_access.md)。
+
+`manifest.json` 记录 split 的 `index_sha256`、attention 几何、`attention_floor` 和对齐方式；读取时会校验索引，构图时还会校验每个 NPZ 的哈希。
 
 每个 `attention/<sample_id>.npz` **恰好**有以下六个字段：
 
@@ -77,6 +79,15 @@ python main.py archive-attention \
   --output-root /data/RAGTruth/model_traces/llama31_8b
 python main.py verify-attention \
   --archive-root /data/RAGTruth/model_traces/llama31_8b
+```
+
+已重构完成后，仅补 research metadata：
+
+```bash
+python main.py enrich-index \
+  --canonical-root /data/RAGTruth/model_traces/llama31_8b \
+  --dataset-path /data/RAGTruth/dataset \
+  --graph-root /data/RAGTruth/graphs/llama31_8b/original_tau0p05
 ```
 
 旧 PT feature trace 可仅转换为独立 sidecar：
@@ -140,30 +151,7 @@ GRAPH_ROOT=/data/RAGTruth/graphs/llama31_8b/relation_topk_channels \
 bash scripts/rebuild_ragtruth.sh
 ```
 
-[`scripts/cleanup_legacy_ragtruth.sh`](scripts/cleanup_legacy_ragtruth.sh) 会先校验 canonical archive，默认仅打印待删目录（dry run）：
-
-```bash
-bash scripts/cleanup_legacy_ragtruth.sh
-```
-
-确认删除默认的 legacy graph 目录必须显式设置：
-
-```bash
-DRY_RUN=0 CONFIRM_DELETE=DELETE_RAGTRUTH_LEGACY \
-bash scripts/cleanup_legacy_ragtruth.sh
-```
-
-若还要删除 formal cache，另加 `DELETE_FORMAL=1`；脚本拒绝 canonical archive、本体重叠路径以及 `$SAFE_ROOT` 外的目标。
-
-清理脚本的删除对象始终是固定路径：
-
-```text
-$SAFE_ROOT=/share/home/tm902089733300000/a903202310/lys
-legacy graph=/share/home/tm902089733300000/a903202310/lys/data/feature_extraction/ragtruth_original_attribute_graphs/fresh_attention_c8847872bedf_20260731T074520Z_p876_tau0p05
-formal cache=/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876
-```
-
-只有 `CANONICAL_ROOT` 和 `GRAPH_ROOT` 用来选择替代数据并进行验证；固定的删除对象不会跟随 `FORMAL_ROOT` override 改变。如果固定 formal cache 存在，脚本在任何 legacy 删除前会校验其两个 split manifest 与 canonical 记录的来源 SHA256。
+[`scripts/cleanup_legacy_ragtruth.sh`](scripts/cleanup_legacy_ragtruth.sh) 会先校验 canonical archive，默认仅打印待删目录（dry run）。该脚本当前针对 `relation_topk_channels` replacement graph；如果你的 replacement 是 `original_tau0p05`，请使用显式校验后再手工删除旧目录，而不要直接运行该清理脚本。
 
 ## t-SNE 分析
 
