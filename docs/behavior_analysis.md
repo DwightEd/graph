@@ -1,100 +1,59 @@
-# Token-level behavior analysis
+# Token behavior analysis
 
-This analysis is designed for studying *how* a response transitions into hallucination, rather than only asking whether hallucinated and correct samples separate globally under t-SNE.
+`scripts/analyze_behavior.py` studies one canonical split through
+`BehaviorAnalysis`. It uses `ResearchDataset` for canonical attention,
+provenance-bound graph loading, and evaluation labels; it has no separate
+cache or data loader.
 
-## Research design
+The 11 token features in `behavior.token_behavior_features` are defined only
+on an **original threshold graph**: the four routing descriptors plus incoming,
+prompt, and history edge counts/densities. A `relation_topk` graph changes the
+retained-edge cardinality by construction, so it is rejected rather than being
+silently interpreted as topology. Omit `--graph-root` to construct that
+original graph directly from each canonical attention sample; pass `--tau` to
+choose the threshold, otherwise the canonical attention floor is used. If a
+graph root is supplied, its manifest must declare `kind: original` and must
+already match the canonical split.
 
-The analysis keeps graph feature extraction label-free. `positive_runs` is read only after token-level graph behavior features are computed, and is used to locate hallucination spans for visualization and aligned comparisons.
-
-For each response token, `behavior.token_behavior_features` returns 11 features:
-
-| Feature | Meaning | Expected hallucination signature to test |
-| --- | --- | --- |
-| `incoming_mass` | Sum of mean-channel retained incoming edge weights | overall routing strength changes |
-| `prompt_mass_share` | Fraction of incoming mass from prompt tokens | decreases if grounding weakens |
-| `normalized_entropy` | Normalized entropy of incoming edge weights | decreases if routing concentrates |
-| `history_lag` | Attention-weighted normalized distance to response-history sources | decreases if dependencies become more local |
-| `in_degree` | Number of retained incoming edges | decreases if the graph becomes sparser |
-| `prompt_degree` | Number of retained prompt-to-response edges | decreases if prompt connectivity weakens |
-| `history_degree` | Number of retained response-history edges | measures self-history connectivity |
-| `in_density` | `in_degree / number_of_possible_previous_sources` | length-normalized sparsity |
-| `prompt_density` | `prompt_degree / prompt_length` | length-normalized prompt connectivity |
-| `history_density` | `history_degree / available_response_history` | local self-history connectivity |
-| `history_edge_share` | Fraction of incoming edges coming from response history | increases if the response becomes self-dependent |
-
-The original 4-column `token_routing_features` and `graph_tsne.ipynb` are unchanged. The first four columns above are exactly the existing routing features, so old t-SNE results remain comparable.
-
-## 1. Single-sample case study
-
-Use one sample to inspect token-level trajectories, hallucination spans, and the sparse routing map.
+## Single response and token t-SNE
 
 ```bash
 python scripts/analyze_behavior.py single \
-  --attention-root /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b/test \
-  --graph-root /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/graphs/llama31_8b/relation_topk_channels/test \
-  --sample-id <hallucinated_sample_id> \
-  --output-dir outputs/behavior/<hallucinated_sample_id>
+  --split-root /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b/test \
+  --sample-id <sample_id> \
+  --output-dir outputs/behavior/<sample_id>
 ```
 
-Outputs:
+The optional `--graph-root` is useful when a verified original graph archive is
+already available. It is not required for the case study.
 
-- `behavior.csv`: one row per response token, including token ID, hallucination flag, and all 11 behavior features.
-- `run_summary.csv`: mean feature values in `pre`, `error`, `post`, and `error_minus_pre` windows for every hallucination span.
-- `behavior.png`: normalized behavior trajectories, retained edge counts, incoming mass, and sparse source-to-target routing map. Hallucination spans are shaded.
-- `metadata.json`: sample ID, source ID, response length, positive runs, and feature names.
+For a response of at least four tokens, `token_tsne.png` embeds one point per
+response token from only the standardized 11 behavior columns. It does not use
+PCA. Perplexity is `min(30, max(2, (R - 1) // 3))`, with a fixed seed. The left
+panel adds hallucination labels only after the coordinates were computed; the
+right panel colors the same path by normalized response position. Consecutive
+tokens are joined so the plot is a trajectory, not a bag of independent
+points. `token_tsne.npz` stores coordinates and response positions.
 
-A fully correct sample can be overlaid using normalized response position:
+Other single-response outputs are `behavior.csv`, `run_summary.csv`,
+`behavior.png`, and `metadata.json`. Add `--control-sample-id` to overlay a
+fully correct response at normalized position.
 
-```bash
-python scripts/analyze_behavior.py single \
-  --attention-root /path/to/canonical/test \
-  --graph-root /path/to/graphs/test \
-  --sample-id <hallucinated_sample_id> \
-  --control-sample-id <fully_correct_sample_id> \
-  --output-dir outputs/behavior/pair
-```
-
-This additionally writes `error_vs_control.png`.
-
-## 2. Hallucination-onset alignment
-
-To test whether a pattern is systematic rather than a single anecdotal case, align many samples at hallucination onset (`relative_position = 0`).
+## Onset alignment
 
 ```bash
 python scripts/analyze_behavior.py align \
-  --attention-root /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b/test \
-  --graph-root /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/graphs/llama31_8b/relation_topk_channels/test \
-  --radius 12 \
-  --run-policy first \
+  --split-root /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b/test \
+  --radius 12 --run-policy first \
   --output-dir outputs/behavior/onset_test
 ```
 
-By default each hallucination event is paired with a fully correct control. Matching first prefers the same `source_id` and the nearest response length. If no correct sample shares that source, it falls back to the globally nearest response length. The control center is placed at the same normalized response position as the hallucination onset.
+This is a label-conditioned exploratory diagnostic, not an unsupervised or
+online detector. It aligns labeled hallucination onsets and optionally compares
+each one with a length-matched fully correct response. It writes raw windows,
+an aggregate table and plot, matched event records, and metadata.
 
-Outputs:
-
-- `onset_alignment.npz`: raw aligned error and control windows.
-- `onset_summary.csv`: mean, population standard deviation, valid count, and error-minus-control difference for every feature and relative token position.
-- `onset_alignment.png`: aggregate trajectories for the five main hypotheses (`prompt_mass_share`, `normalized_entropy`, `history_lag`, `in_density`, `history_edge_share`).
-- `matched_events.csv`: every error/control pairing and alignment position.
-- `metadata.json`: analysis settings and event count.
-
-Use `--run-policy all` to treat every hallucination span as a separate event. Use `--no-controls` for a pure within-error onset analysis. `--max-events N` provides a deterministic small run for debugging.
-
-## Recommended interpretation sequence
-
-1. **Case discovery:** inspect several single hallucinated samples and identify repeatable changes around the labeled span.
-2. **Within-sample transition:** use `error_minus_pre` to test whether the response changes state when hallucination begins.
-3. **Matched control:** check that the same change is not simply the normal effect of progressing later in a response.
-4. **Onset aggregation:** align many events at token 0 and test whether the same transition appears consistently.
-5. **Global visualization:** use the existing t-SNE notebook only after the local behavior signature has been characterized.
-
-The main hypotheses can therefore be tested as directional transitions around hallucination onset:
-
-- weaker prompt grounding: `prompt_mass_share ↓`, `prompt_density ↓`;
-- stronger self-history reliance: `history_edge_share ↑`, possibly `history_density ↑`;
-- sparser routing: `in_degree ↓`, `in_density ↓`;
-- more local routing: `history_lag ↓`;
-- more concentrated routing: `normalized_entropy ↓`.
-
-These are hypotheses to validate statistically, not assumptions built into the feature extraction.
+Canonical attention uses `post_token_query_at_same_position`: features at
+response position `t` are extracted after token `t` has been read by the
+observer. Therefore neither the token t-SNE nor the onset trajectories support
+a claim of online next-token prediction without a separately causal cache.

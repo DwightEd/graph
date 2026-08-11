@@ -29,11 +29,11 @@ WINDOW_NAMES = ("pre", "error", "post")
 
 
 def token_behavior_features(graph, num_channels: int) -> torch.Tensor:
-    """Return [response_tokens, 11] routing and topology behavior features.
+    """Return [response_tokens, 11] original-threshold routing/topology features.
 
     The first four columns are exactly ``token_routing_features``. The added
-    columns expose retained-edge counts and length-normalized densities so
-    samples with different prompt/response lengths can be compared.
+    columns describe threshold-retained edge counts and length-normalized
+    densities; they are not meaningful for cardinality-capped top-k graphs.
     """
     routing = token_routing_features(graph, num_channels)
     edge_index = torch.as_tensor(_field(graph, "edge_index"))
