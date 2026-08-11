@@ -185,6 +185,14 @@ python -m pip install -r requirements-analysis.txt
 jupyter lab notebooks/graph_tsne.ipynb
 ```
 
+### Projection scopes
+
+These visualizations have different point populations and must not be mixed:
+
+- `GraphTSNEAnalysis`: one pooled-split point per response graph, represented by a 36-D summary of 12-D structural token states.
+- `NodeTSNEVisualizer`: one pooled-split point per response token, represented by its 12-D `ResearchSample.structural_features()` state. Sampling, scaling, and t-SNE are label-free; `dataset.labels()` is read afterward only for coloring and saved annotations.
+- `SampleGraphVisualizer` and `BehaviorAnalysis.single()`: one point per response token within a selected response. The first uses 12-D structural states; the second uses a separate 11-D behavior representation.
+
 `GraphTSNEAnalysis(split_root, output_dir, graph_root=None, tau=.01, node_feature_mode="attention", seed=0).run()` 每个回答生成一个点：`ResearchSample.structural_features(graph)` 的 12 个原始阈值图状态（含 channel-edge density）按 mean/std/slope 汇总为 36 维 `topology` 描述符；node 特征也按相同方式汇总；`combined` 分别标准化两个 block 后按各自维度的 `sqrt` 缩放，使总尺度等权。高维输入先 PCA 到最多 50 维，再拟合 t-SNE。`node_feature_mode` 不能为 `none`。
 
 有两种明确的图来源：

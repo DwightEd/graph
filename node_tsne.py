@@ -22,7 +22,6 @@ class NodeTSNEVisualizer:
         self,
         split_root,
         *,
-        labels_path=None,
         device="cpu",
         verify_hashes=False,
         random_state=0,
@@ -30,13 +29,6 @@ class NodeTSNEVisualizer:
         self.dataset = ResearchDataset(
             split_root, device=device, verify_hashes=verify_hashes
         )
-        self.labels = self.dataset.label_store(labels_path)
-        missing = set(self.dataset.sample_ids).difference(self.labels.rows)
-        if missing:
-            raise ValueError(
-                f"labels are missing {len(missing)} dataset sample IDs; "
-                f"first: {sorted(missing)[:3]}"
-            )
         self.random_state = int(random_state)
         self.last_result = None
 
@@ -56,37 +48,31 @@ class NodeTSNEVisualizer:
             sample_ids = sample_ids[:max_samples]
 
         features = []
-        labels = []
         node_sample_ids = []
         response_positions = []
         task_types = []
         data_sources = []
 
         for sample_id in sample_ids:
-            view = self.dataset[sample_id].graph_view(self.labels)
-            node_features = view["response_features"].numpy().astype(np.float32, copy=False)
-            node_labels = view["response_labels"].numpy().astype(np.int64, copy=False)
+            sample = self.dataset[sample_id]
+            node_features = (
+                sample.structural_features().cpu().numpy().astype(np.float32, copy=False)
+            )
             count = len(node_features)
             if count == 0:
                 continue
 
             features.append(node_features)
-            labels.append(node_labels)
             node_sample_ids.append(np.full(count, str(sample_id), dtype=object))
             response_positions.append(np.arange(count, dtype=np.int32))
-            task_types.append(
-                np.full(count, view["metadata"].get("task_type"), dtype=object)
-            )
-            data_sources.append(
-                np.full(count, view["metadata"].get("data_source"), dtype=object)
-            )
+            task_types.append(np.full(count, sample.task_type, dtype=object))
+            data_sources.append(np.full(count, sample.data_source, dtype=object))
 
         if not features:
             raise ValueError("no response-token node states were collected")
 
         output = {
             "features": np.concatenate(features, axis=0),
-            "labels": np.concatenate(labels, axis=0),
             "sample_id": np.concatenate(node_sample_ids, axis=0),
             "response_position": np.concatenate(response_positions, axis=0),
             "task_type": np.concatenate(task_types, axis=0),
@@ -108,7 +94,6 @@ class NodeTSNEVisualizer:
                 )
                 for key in (
                     "features",
-                    "labels",
                     "sample_id",
                     "response_position",
                     "task_type",
@@ -120,7 +105,7 @@ class NodeTSNEVisualizer:
         return output
 
     def fit(self, *, max_samples=None, max_nodes=None, perplexity=30.0):
-        """Fit one common t-SNE over nodes pooled from all selected sample graphs."""
+        """Fit one common t-SNE, then load labels only for its presentation."""
         from sklearn.manifold import TSNE
         from sklearn.preprocessing import StandardScaler
 
@@ -143,6 +128,22 @@ class NodeTSNEVisualizer:
             random_state=self.random_state,
         ).fit_transform(scaled)
         result["perplexity"] = actual_perplexity
+        label_store = self.dataset.labels()
+        labels_by_sample = {
+            sample_id: label_store.response_labels(self.dataset[sample_id])
+            .cpu()
+            .numpy()
+            for sample_id in np.unique(result["sample_id"])
+        }
+        result["labels"] = np.asarray(
+            [
+                labels_by_sample[sample_id][position]
+                for sample_id, position in zip(
+                    result["sample_id"], result["response_position"]
+                )
+            ],
+            dtype=np.int64,
+        )
         self.last_result = result
         return result
 

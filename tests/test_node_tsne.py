@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from cache import AttentionSample, index_row, save_attention_sample, write_split_index
@@ -73,7 +74,7 @@ class NodeTSNETests(unittest.TestCase):
             result = viewer.collect()
 
             self.assertEqual(result["features"].shape, (4, len(STRUCTURAL_FEATURE_NAMES)))
-            self.assertEqual(result["labels"].tolist(), [0, 1, 0, 0])
+            self.assertNotIn("labels", result)
             self.assertEqual(result["sample_id"].tolist(), ["r1", "r1", "r2", "r2"])
             self.assertEqual(result["response_position"].tolist(), [0, 1, 0, 1])
             self.assertEqual(result["total_nodes_before_sampling"], 4)
@@ -87,11 +88,31 @@ class NodeTSNETests(unittest.TestCase):
             result = viewer.collect(max_nodes=3)
 
             self.assertEqual(result["features"].shape, (3, len(STRUCTURAL_FEATURE_NAMES)))
-            self.assertEqual(len(result["labels"]), 3)
             self.assertEqual(len(result["sample_id"]), 3)
             self.assertEqual(len(result["response_position"]), 3)
             self.assertEqual(result["total_nodes_before_sampling"], 4)
             self.assertEqual(result["selected_nodes"], 3)
+
+    def test_labels_do_not_change_selection_features_or_coordinates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._write_split(root)
+            first = NodeTSNEVisualizer(root, random_state=7).fit(perplexity=2)
+
+            (root / "labels.jsonl").write_text(
+                "".join(
+                    [
+                        json.dumps({"sample_id": "r1", "positive_runs": []}) + "\n",
+                        json.dumps({"sample_id": "r2", "positive_runs": [[0, 2]]}) + "\n",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            second = NodeTSNEVisualizer(root, random_state=7).fit(perplexity=2)
+
+            for name in ("sample_id", "response_position", "features", "coordinates"):
+                np.testing.assert_equal(first[name], second[name])
+            self.assertNotEqual(first["labels"].tolist(), second["labels"].tolist())
 
 
 if __name__ == "__main__":

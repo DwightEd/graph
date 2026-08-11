@@ -100,7 +100,13 @@ y_full = labels.token_labels(sample)
 
 `ResearchDataset` binds a graph cache to its canonical split on construction. A graph manifest must match the canonical manifest and index hashes, and its sample IDs must match exactly. Loading a graph always checks its file size, and `verify_hashes=True` additionally checks the graph SHA256. Hidden states and token statistics must carry the same `token_ids` as canonical attention. Label tensors are created on the sample attention device.
 
-## Graph t-SNE
+## Projection scopes and graph t-SNE
+
+The project has three non-interchangeable t-SNE scopes:
+
+- `GraphTSNEAnalysis`: one pooled-split point per response graph, using a 36-D summary of its 12-D structural token states.
+- `NodeTSNEVisualizer`: one pooled-split point per response token, using the 12-D state from `ResearchSample.structural_features()`. It selects nodes, standardizes, and embeds without labels, then calls `dataset.labels()` only to color and save the fitted coordinates.
+- `SampleGraphVisualizer` and `BehaviorAnalysis.single()`: one point per response token within one selected response. The first uses 12-D structural states; the latter uses a distinct 11-D token-behavior representation.
 
 `GraphTSNEAnalysis` uses `ResearchDataset` and `ResearchSample` only. It summarizes the 12 original-threshold structural token states with mean, standard deviation, and slope, producing a 36-dimensional `topology` descriptor per response. With `graph_root=None`, it builds `sample.original_graph(tau)` from canonical CSR; a supplied cache must have manifest kind `original` and matching `parameters.tau`. Labels are read only after t-SNE has been fitted, for plot colors.
 
