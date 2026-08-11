@@ -102,6 +102,6 @@ y_full = labels.token_labels(sample)
 
 ## Graph t-SNE
 
-`GraphTSNEAnalysis` uses `ResearchDataset` and `ResearchSample` only. It summarizes the 11 original-threshold token behavior features with mean, standard deviation, and slope, producing a 33-dimensional `topology` descriptor per response. With `graph_root=None`, it builds `sample.original_graph(tau)` from canonical CSR; a supplied cache must have manifest kind `original` and matching `parameters.tau`. Labels are read only after t-SNE has been fitted, for plot colors.
+`GraphTSNEAnalysis` uses `ResearchDataset` and `ResearchSample` only. It summarizes the 12 original-threshold structural token states with mean, standard deviation, and slope, producing a 36-dimensional `topology` descriptor per response. With `graph_root=None`, it builds `sample.original_graph(tau)` from canonical CSR; a supplied cache must have manifest kind `original` and matching `parameters.tau`. Labels are read only after t-SNE has been fitted, for plot colors.
 
 `positive_runs` preserves the binary token-level label used for evaluation. It does not preserve all original RAGTruth character-span annotation fields such as `label_type`, `meta`, or span text; those remain in the original RAGTruth `response.jsonl`.

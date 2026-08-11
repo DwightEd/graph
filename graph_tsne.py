@@ -9,7 +9,6 @@ from sklearn.manifold import TSNE
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
-from behavior import token_behavior_features
 from descriptors import temporal_summary
 from research_dataset import ResearchDataset
 
@@ -48,8 +47,8 @@ class GraphTSNEAnalysis:
 
         for sample in tqdm(dataset, desc="t-SNE descriptors", unit="sample"):
             attention = sample.attention()
-            graph = sample.original_graph(self.tau).to_dict() if self.graph_root is None else sample.graph("graph")
-            topology = token_behavior_features(graph, attention.num_channels)
+            graph = sample.original_graph(self.tau) if self.graph_root is None else sample.graph("graph")
+            topology = sample.structural_features(graph)
             node_features = sample.node_features(self.node_feature_mode)
             sample_ids.append(sample.sample_id)
             response_tokens.append(attention.num_response_tokens)

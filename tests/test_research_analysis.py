@@ -83,7 +83,7 @@ class ResearchAnalysisTests(unittest.TestCase):
             self.assertEqual(viewer.error_sample_ids, ["e1"])
             self.assertEqual(set(viewer.correct_sample_ids), {"c1", "c2"})
             result = viewer.analyze("e1")
-            self.assertEqual(result["features"].shape, (2, len(GRAPH_FEATURE_NAMES)))
+            self.assertEqual(result["response_features"].shape, (2, len(GRAPH_FEATURE_NAMES)))
             self.assertEqual(result["positive_runs"], [[0, 1]])
             self.assertEqual(viewer.match_correct("e1"), "c1")
 

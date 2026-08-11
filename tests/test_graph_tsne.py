@@ -78,7 +78,7 @@ class GraphTSNETests(unittest.TestCase):
             for name in ("topology", "node", "combined"):
                 np.testing.assert_allclose(first_coordinates[name], second_coordinates[name])
 
-    def test_topology_descriptor_has_33_dimensions(self):
+    def test_topology_descriptor_has_36_dimensions(self):
         with tempfile.TemporaryDirectory() as directory:
             root = write_canonical_split(Path(directory) / "split")
             dimensions = []
@@ -90,7 +90,7 @@ class GraphTSNETests(unittest.TestCase):
             with patch.object(GraphTSNEAnalysis, "_embed", side_effect=embed):
                 GraphTSNEAnalysis(root, Path(directory) / "output").run()
 
-            self.assertEqual(dimensions[0], 33)
+            self.assertEqual(dimensions[0], 36)
 
     def test_none_node_features_are_rejected_at_the_boundary(self):
         with tempfile.TemporaryDirectory() as directory:
