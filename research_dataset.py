@@ -39,7 +39,7 @@ class ResearchDataset:
             raise ValueError("graph provenance does not match canonical manifest")
         if manifest.get("input_index_sha256") != sha256(self.root / "index.jsonl"):
             raise ValueError("graph provenance does not match canonical index")
-        with (root / "index.jsonl").open(encoding="utf-8") as handle:
+        with index_path.open(encoding="utf-8") as handle:
             rows = [json.loads(line) for line in handle if line.strip()]
         graph_ids = {str(row["sample_id"]) for row in rows}
         if manifest.get("count") != len(rows) or len(graph_ids) != len(rows):
@@ -202,19 +202,19 @@ class ResearchSample:
         return build_original_graph(sample, sample.attention_floor if tau is None else tau)
 
     def attention_edges(self):
-        """Decode CSR to human-readable layer/head/source/target/weight vectors."""
+        """Decode CSR to layer/head/source/target/weight vectors."""
         sample = self.attention()
-        R = sample.num_response_tokens
+        response_count = sample.num_response_tokens
         counts = sample.response_row_ptr[1:] - sample.response_row_ptr[:-1]
         row = torch.repeat_interleave(
             torch.arange(counts.numel(), device=counts.device), counts
         )
-        channel = row // R
+        channel = row // response_count
         return {
             "layer": channel // sample.num_heads,
             "head": channel % sample.num_heads,
             "source": sample.response_column_indices.long(),
-            "target": sample.response_idx + row % R,
+            "target": sample.response_idx + row % response_count,
             "weight": sample.response_values,
         }
 
@@ -248,7 +248,11 @@ class LabelStore:
     def response_labels(self, sample: ResearchSample):
         self._check_dataset(sample)
         attention = sample.attention()
-        labels = torch.zeros(attention.num_response_tokens, dtype=torch.long, device=attention.token_ids.device)
+        labels = torch.zeros(
+            attention.num_response_tokens,
+            dtype=torch.long,
+            device=attention.token_ids.device,
+        )
         for start, end in self.positive_runs(sample.sample_id):
             labels[start:end] = 1
         return labels
@@ -256,7 +260,11 @@ class LabelStore:
     def token_labels(self, sample: ResearchSample):
         self._check_dataset(sample)
         attention = sample.attention()
-        labels = torch.zeros(attention.num_tokens, dtype=torch.long, device=attention.token_ids.device)
+        labels = torch.zeros(
+            attention.num_tokens,
+            dtype=torch.long,
+            device=attention.token_ids.device,
+        )
         labels[attention.response_idx:] = self.response_labels(sample)
         return labels
 
