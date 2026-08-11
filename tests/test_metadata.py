@@ -5,7 +5,7 @@ from pathlib import Path
 
 import torch
 
-from cache import AttentionDataset, AttentionSample, index_row, save_attention_sample, write_split_index
+from cache import AttentionDataset, AttentionSample, index_row, save_attention_sample, sha256, write_split_index
 from metadata import RESEARCH_INDEX_FIELDS, enrich_ragtruth_indices
 from research_dataset import LabelStore, ResearchDataset
 
@@ -44,6 +44,17 @@ class MetadataTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            graph_split = root / "graphs" / "train"
+            graph_split.mkdir(parents=True)
+            graph_index = graph_split / "index.jsonl"
+            graph_index.write_text(json.dumps({"sample_id": "r1", "path": "graphs/r1.pt"}) + "\n")
+            (graph_split / "manifest.json").write_text(json.dumps({
+                "count": 1,
+                "index_sha256": sha256(graph_index),
+                "input_manifest_sha256": sha256(split / "manifest.json"),
+                "input_index_sha256": sha256(split / "index.jsonl"),
+            }))
+
             dataset = root / "dataset"
             dataset.mkdir()
             (dataset / "source_info.jsonl").write_text(json.dumps({
@@ -64,8 +75,9 @@ class MetadataTests(unittest.TestCase):
                 "response": "answer",
             }) + "\n", encoding="utf-8")
 
-            result = enrich_ragtruth_indices(root / "canonical", dataset)
+            result = enrich_ragtruth_indices(root / "canonical", dataset, root / "graphs")
             self.assertEqual(result["splits"], {"train": 1})
+            self.assertEqual(result["graphs"], {"train": 1})
 
             row = json.loads((split / "index.jsonl").read_text(encoding="utf-8"))
             self.assertEqual(tuple(row), RESEARCH_INDEX_FIELDS)
@@ -73,6 +85,10 @@ class MetadataTests(unittest.TestCase):
             self.assertEqual(row["data_source"], "CNN/DM")
             self.assertEqual(row["generator_model"], "llama-2-7b-chat")
             self.assertEqual(row["temperature"], 0.7)
+
+            graph_manifest = json.loads((graph_split / "manifest.json").read_text())
+            self.assertEqual(graph_manifest["input_manifest_sha256"], sha256(split / "manifest.json"))
+            self.assertEqual(graph_manifest["input_index_sha256"], sha256(split / "index.jsonl"))
 
             self.assertEqual(len(AttentionDataset(split)), 1)
             research = ResearchDataset(split)
