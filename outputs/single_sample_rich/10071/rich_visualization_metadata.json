@@ -1,0 +1,27 @@
+{
+  "sample_id": "10071",
+  "positive_runs": [
+    [
+      81,
+      84
+    ],
+    [
+      85,
+      87
+    ]
+  ],
+  "response_nodes": 134,
+  "rich_response_dimensions": 32,
+  "source_role_dimensions": 12,
+  "pre_window": 10,
+  "post_window": 10,
+  "matched_control_sample_id": "6771",
+  "metrics": {
+    "hallucination_nodes": 5,
+    "pre_error_nodes": 11,
+    "normal_nodes": 129,
+    "silhouette_error_vs_normal": -0.09919025748968124,
+    "centroid_distance_error_vs_pre": 3.0701751708984375
+  },
+  "representation_note": "Response projection is incoming-only and causal with respect to the current response position. All-token source-role projection is descriptive and uses future response queries."
+}
