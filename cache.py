@@ -20,6 +20,10 @@ NPZ_DTYPES = {
     "attention_diagonal": np.dtype("float16"), "response_row_ptr": np.dtype("int32"),
     "response_column_indices": np.dtype("int32"), "response_values": np.dtype("float16"),
 }
+CORE_INDEX_FIELDS = {"sample_id", "source_id", "path", "sha256", "bytes"}
+RESEARCH_METADATA_FIELDS = {
+    "split", "task_type", "data_source", "generator_model", "temperature", "quality"
+}
 
 
 def sha256(path: Path) -> str:
@@ -148,11 +152,18 @@ def load_attention_sample(path: str | Path, *, sample_id: str, source_id: str,
     return sample
 
 
-def index_row(root: Path, sample: AttentionSample, path: Path) -> dict[str, Any]:
-    return {
+def index_row(root: Path, sample: AttentionSample, path: Path,
+              metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    row = {
         "sample_id": sample.sample_id, "source_id": sample.source_id,
         "path": path.relative_to(root).as_posix(), "sha256": sha256(path), "bytes": path.stat().st_size,
     }
+    if metadata:
+        unknown = set(metadata).difference(RESEARCH_METADATA_FIELDS)
+        if unknown:
+            raise ValueError(f"unknown research index fields: {sorted(unknown)}")
+        row.update(metadata)
+    return row
 
 
 def write_split_index(root: str | Path, rows: list[dict[str, Any]], *, attention_floor: float,
@@ -186,10 +197,15 @@ class AttentionDataset:
         if sha256(index) != self.manifest["index_sha256"]:
             raise ValueError("index_sha256 does not match index.jsonl")
         self.rows = [json.loads(line) for line in index.read_text(encoding="utf-8").splitlines() if line.strip()]
-        if len(self.rows) != self.manifest["count"] or len({row["sample_id"] for row in self.rows}) != len(self.rows):
+        if len(self.rows) != self.manifest["count"] or len({str(row["sample_id"]) for row in self.rows}) != len(self.rows):
             raise ValueError("canonical index count or sample IDs are invalid")
-        if any(set(row) != {"sample_id", "source_id", "path", "sha256", "bytes"} for row in self.rows):
-            raise ValueError("canonical index rows have the wrong fields")
+        for row in self.rows:
+            fields = set(row)
+            if not CORE_INDEX_FIELDS.issubset(fields):
+                raise ValueError("canonical index row is missing core fields")
+            unknown = fields.difference(CORE_INDEX_FIELDS | RESEARCH_METADATA_FIELDS)
+            if unknown:
+                raise ValueError(f"canonical index row has unknown fields: {sorted(unknown)}")
         self.attention_floor = float(self.manifest["attention_floor"])
 
     def __len__(self) -> int:
