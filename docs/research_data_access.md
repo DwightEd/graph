@@ -28,12 +28,15 @@ The attention NPZ format is unchanged.
 
 ## Enrich an already-built archive
 
-This command only rewrites `index.jsonl` and `manifest.json`. It does not touch any attention NPZ, graph PT, hidden-state NPZ, or token-stat NPZ.
+This command only rewrites canonical `index.jsonl` / `manifest.json`. It does not touch any attention NPZ, graph PT, hidden-state NPZ, or token-stat NPZ.
+
+If a graph cache was already built, pass `--graph-root`: the command verifies that graph and canonical sample IDs match, then refreshes the graph manifest's `input_manifest_sha256` and `input_index_sha256`. Graph `.pt` files are not rebuilt.
 
 ```bash
 python main.py enrich-index \
   --canonical-root /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b \
-  --dataset-path /path/to/RAGTruth/dataset
+  --dataset-path /path/to/RAGTruth/dataset \
+  --graph-root /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/graphs/llama31_8b/original_tau0p05
 
 python main.py verify-attention \
   --archive-root /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b
