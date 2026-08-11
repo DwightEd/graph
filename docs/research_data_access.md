@@ -36,7 +36,7 @@ If a graph cache was already built, pass `--graph-root`. Before writing either a
 python main.py enrich-index \
   --canonical-root /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b \
   --dataset-path /path/to/RAGTruth/dataset \
-  --graph-root /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/graphs/llama31_8b/original_tau0p05
+  --graph-root /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/graphs/llama31_8b/original_tau0p01
 
 python main.py verify-attention \
   --archive-root /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b
@@ -52,7 +52,7 @@ from research_dataset import ResearchDataset
 train = ResearchDataset(
     "/share/home/.../model_traces/llama31_8b/train",
     graph_roots={
-        "original": "/share/home/.../graphs/llama31_8b/original_tau0p05/train",
+        "original": "/share/home/.../graphs/llama31_8b/original_tau0p01/train",
     },
     device="cpu",
 )

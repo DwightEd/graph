@@ -87,7 +87,7 @@ python main.py verify-attention \
 python main.py enrich-index \
   --canonical-root /data/RAGTruth/model_traces/llama31_8b \
   --dataset-path /data/RAGTruth/dataset \
-  --graph-root /data/RAGTruth/graphs/llama31_8b/original_tau0p05
+  --graph-root /data/RAGTruth/graphs/llama31_8b/original_tau0p01
 ```
 
 旧 PT feature trace 可仅转换为独立 sidecar：
@@ -151,15 +151,45 @@ GRAPH_ROOT=/data/RAGTruth/graphs/llama31_8b/relation_topk_channels \
 bash scripts/rebuild_ragtruth.sh
 ```
 
-[`scripts/cleanup_legacy_ragtruth.sh`](scripts/cleanup_legacy_ragtruth.sh) 会先校验 canonical archive，默认仅打印待删目录（dry run）。该脚本当前针对 `relation_topk_channels` replacement graph；如果你的 replacement 是 `original_tau0p05`，请使用显式校验后再手工删除旧目录，而不要直接运行该清理脚本。
+[`scripts/cleanup_legacy_ragtruth.sh`](scripts/cleanup_legacy_ragtruth.sh) 会先校验 canonical archive，默认仅打印待删目录（dry run）：
+
+```bash
+bash scripts/cleanup_legacy_ragtruth.sh
+```
+
+确认删除默认的 legacy graph 目录必须显式设置：
+
+```bash
+DRY_RUN=0 CONFIRM_DELETE=DELETE_RAGTRUTH_LEGACY \
+bash scripts/cleanup_legacy_ragtruth.sh
+```
+
+若还要删除 formal cache，另加 `DELETE_FORMAL=1`；脚本拒绝 canonical archive、本体重叠路径以及 `$SAFE_ROOT` 外的目标。
+
+清理脚本的删除对象始终是固定路径：
+
+```text
+$SAFE_ROOT=/share/home/tm902089733300000/a903202310/lys
+legacy graph=/share/home/tm902089733300000/a903202310/lys/data/feature_extraction/ragtruth_original_attribute_graphs/fresh_attention_c8847872bedf_20260731T074520Z_p876_tau0p05
+formal cache=/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876
+```
+
+只有 `CANONICAL_ROOT` 和 `GRAPH_ROOT` 用来选择替代数据并进行验证；固定的删除对象不会跟随 `FORMAL_ROOT` override 改变。如果固定 formal cache 存在，脚本在任何 legacy 删除前会校验其两个 split manifest 与 canonical 记录的来源 SHA256。该脚本只接受 `relation_topk_channels` replacement graph；若替代数据是 `original_tau0p01`，不要直接运行该清理脚本。
 
 ## t-SNE 分析
 
-安装分析依赖并启动 notebook：
+跨样本投影通过 `ResearchDataset` / `ResearchSample` 统一加载 canonical attention、可选缓存图和标签；notebook 本身不读取 manifest、index、NPZ 或 PT。安装分析依赖并启动 notebook：
 
 ```bash
 python -m pip install -r requirements-analysis.txt
 jupyter lab notebooks/graph_tsne.ipynb
 ```
 
-`notebooks/graph_tsne.ipynb` 从 canonical attention 和已有图中提取 routing、节点时序摘要及其组合，分别拟合 t-SNE，并在一张三面板图中显示。routing 对每个 response token 取 4 个固定指标：incoming mass、prompt share、归一化 entropy、history lag；再按 mean/std/slope 汇总为每样本 12 维。它先用图 manifest 的 `index_sha256` 校验 `index.jsonl`，再计算全部 embedding，最后才读 `labels.jsonl`；标签只控制颜色，绝不参与特征、标准化、PCA 或 t-SNE 拟合。`combined` 先将 routing 和 node 两个 block 分别标准化，再按各自维度的 `sqrt` 缩放，使两者的总尺度等权。notebook 还校验 attention ↔ graph provenance 和逐文件哈希。
+`GraphTSNEAnalysis(split_root, output_dir, graph_root=None, tau=.01, node_feature_mode="attention", seed=0).run()` 每个回答生成一个点：routing 的 4 个 token 指标（incoming mass、prompt share、归一化 entropy、history lag）按 mean/std/slope 汇总为 12 维；node 特征也按相同方式汇总；`combined` 分别标准化两个 block 后按各自维度的 `sqrt` 缩放，使总尺度等权。高维输入先 PCA 到最多 50 维，再拟合 t-SNE。
+
+有两种明确的图来源：
+
+- `graph_root=None`：对每个 `ResearchSample` 调用 `original_graph(tau)`，直接由 `<split_root>/attention/*.npz` 的 canonical CSR 现场构图；不需要预构建图缓存。
+- `graph_root=/.../original_tau0p01/<split>`：对每个样本调用 `sample.graph("graph")`，使用已验证 provenance 的缓存图。缓存必须是含 `edge_index` 的 token graph，hypergraph 不适用于 routing t-SNE。
+
+所有样本先完成特征、标准化、PCA 和 t-SNE，再调用 `dataset.labels()` 仅为颜色读取标签。输出目录固定保存 `graph_tsne.png`、`graph_tsne_response_length.png`（同一坐标按回答长度着色，用于排查长度混杂）和 `graph_tsne_coordinates.npz`（`sample_id`、`response_tokens`、`routing`、`node`、`combined`）。

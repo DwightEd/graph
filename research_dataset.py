@@ -92,6 +92,7 @@ class ResearchSample:
         self.dataset = dataset
         self.sample_id = sample_id
         self.row = dataset.rows[sample_id]
+        self._attention = None
 
     @property
     def source_id(self):
@@ -143,18 +144,21 @@ class ResearchSample:
         }
 
     def attention(self):
+        if self._attention is not None:
+            return self._attention
         path = self.dataset.root / self.row["path"]
         if not path.is_file() or path.stat().st_size != self.row["bytes"]:
             raise ValueError("attention sample byte count does not match index")
         if self.dataset.verify_hashes and sha256(path) != self.row["sha256"]:
             raise ValueError("attention sample SHA256 does not match index")
-        return load_attention_sample(
+        self._attention = load_attention_sample(
             path,
             sample_id=self.sample_id,
             source_id=self.source_id,
             attention_floor=self.dataset.attention_dataset.attention_floor,
             device=self.dataset.device,
         )
+        return self._attention
 
     def hidden(self):
         hidden = load_hidden_features(
