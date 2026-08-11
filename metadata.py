@@ -45,8 +45,62 @@ def _split_roots(root: Path) -> list[Path]:
     return roots
 
 
-def enrich_ragtruth_indices(canonical_root: str | Path, dataset_path: str | Path) -> dict[str, Any]:
-    """Rewrite index/manifest JSON only; attention NPZ files are never touched."""
+def _graph_split_root(graph_root: Path, split: str) -> Path:
+    if (graph_root / "manifest.json").is_file():
+        return graph_root
+    candidate = graph_root / split
+    if not (candidate / "manifest.json").is_file():
+        raise ValueError(f"graph root has no {split} split: {graph_root}")
+    return candidate
+
+
+def refresh_graph_provenance(canonical_root: str | Path, graph_root: str | Path) -> dict[str, int]:
+    """Refresh graph input hashes after canonical JSON-only enrichment.
+
+    Graph PT files and graph index rows are never changed. Before updating the graph manifest,
+    require the graph and canonical sample-id sets to match exactly.
+    """
+    canonical_root, graph_root = Path(canonical_root), Path(graph_root)
+    counts: dict[str, int] = {}
+
+    for canonical_split in _split_roots(canonical_root):
+        canonical_manifest = json.loads((canonical_split / "manifest.json").read_text(encoding="utf-8"))
+        split = str(canonical_manifest.get("split") or canonical_split.name)
+        graph_split = _graph_split_root(graph_root, split)
+
+        canonical_rows = _read_jsonl(canonical_split / "index.jsonl")
+        graph_rows = _read_jsonl(graph_split / "index.jsonl")
+        canonical_ids = {str(row["sample_id"]) for row in canonical_rows}
+        graph_ids = {str(row["sample_id"]) for row in graph_rows}
+        if canonical_ids != graph_ids or len(canonical_rows) != len(graph_rows):
+            raise ValueError(f"graph/canonical sample set mismatch for {split}")
+
+        graph_manifest_path = graph_split / "manifest.json"
+        graph_manifest = json.loads(graph_manifest_path.read_text(encoding="utf-8"))
+        if graph_manifest.get("count") != len(graph_rows):
+            raise ValueError(f"graph manifest count mismatch for {split}")
+        graph_index_sha256 = sha256(graph_split / "index.jsonl")
+        if graph_manifest.get("index_sha256") not in (None, graph_index_sha256):
+            raise ValueError(f"graph index hash mismatch for {split}")
+
+        graph_manifest["input_manifest_sha256"] = sha256(canonical_split / "manifest.json")
+        graph_manifest["input_index_sha256"] = sha256(canonical_split / "index.jsonl")
+        graph_manifest["index_sha256"] = graph_index_sha256
+        _atomic_write(
+            graph_manifest_path,
+            json.dumps(graph_manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        )
+        counts[split] = len(graph_rows)
+
+    return counts
+
+
+def enrich_ragtruth_indices(
+    canonical_root: str | Path,
+    dataset_path: str | Path,
+    graph_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Rewrite canonical index/manifest JSON only; NPZ/PT artifacts are never touched."""
     canonical_root, dataset_path = Path(canonical_root), Path(dataset_path)
     sources = {str(row["source_id"]): row for row in _read_jsonl(dataset_path / "source_info.jsonl")}
     responses = {str(row["id"]): row for row in _read_jsonl(dataset_path / "response.jsonl")}
@@ -118,4 +172,6 @@ def enrich_ragtruth_indices(canonical_root: str | Path, dataset_path: str | Path
         summary["splits"][str(resolved_split or split_root.name)] = len(enriched)
 
     summary["count"] = sum(summary["splits"].values())
+    if graph_root is not None:
+        summary["graphs"] = refresh_graph_provenance(canonical_root, graph_root)
     return summary
