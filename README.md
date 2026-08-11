@@ -193,3 +193,5 @@ jupyter lab notebooks/graph_tsne.ipynb
 - `graph_root=/.../original_tau0p01/<split>`：对每个样本调用 `sample.graph("graph")`，使用已验证 provenance 的缓存图。缓存必须是含 `edge_index` 的 token graph，hypergraph 不适用于 routing t-SNE。
 
 所有样本先完成特征、标准化、PCA 和 t-SNE，再调用 `dataset.labels()` 仅为颜色读取标签。输出目录固定保存 `graph_tsne.png`、`graph_tsne_response_length.png`（同一坐标按回答长度着色，用于排查长度混杂）和 `graph_tsne_coordinates.npz`（`sample_id`、`response_tokens`、`routing`、`node`、`combined`）。
+
+单个样本的 token 级视图使用 `notebooks/sample_behavior.ipynb`：先通过 `SampleBehaviorVisualizer` 选择和检查样本，再由 `BehaviorAnalysis.single()` 生成 `token_tsne.png`。每个点对应一个 response token，连续路径表示生成顺序；11 维图行为特征先完成标准化和 t-SNE，之后才读取 hallucination span 上色。
