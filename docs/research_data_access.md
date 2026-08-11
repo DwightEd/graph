@@ -100,4 +100,8 @@ y_full = labels.token_labels(sample)
 
 `ResearchDataset` binds a graph cache to its canonical split on construction. A graph manifest must match the canonical manifest and index hashes, and its sample IDs must match exactly. Loading a graph always checks its file size, and `verify_hashes=True` additionally checks the graph SHA256. Hidden states and token statistics must carry the same `token_ids` as canonical attention. Label tensors are created on the sample attention device.
 
+## Graph t-SNE
+
+`GraphTSNEAnalysis` uses `ResearchDataset` and `ResearchSample` only. It summarizes the 11 original-threshold token behavior features with mean, standard deviation, and slope, producing a 33-dimensional `topology` descriptor per response. With `graph_root=None`, it builds `sample.original_graph(tau)` from canonical CSR; a supplied cache must have manifest kind `original`. Labels are read only after t-SNE has been fitted, for plot colors.
+
 `positive_runs` preserves the binary token-level label used for evaluation. It does not preserve all original RAGTruth character-span annotation fields such as `label_type`, `meta`, or span text; those remain in the original RAGTruth `response.jsonl`.

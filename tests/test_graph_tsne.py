@@ -66,8 +66,8 @@ class GraphTSNETests(unittest.TestCase):
             self.assertEqual(first["samples"], 6)
             self.assertEqual(set(first), {"samples", "figure", "length_figure", "coordinates"})
             self.assertTrue(all(Path(first[name]).is_file() for name in ("figure", "length_figure", "coordinates")))
-            self.assertEqual(set(first_coordinates), {"sample_id", "response_tokens", "routing", "node", "combined"})
-            self.assertEqual(first_coordinates["routing"].shape, (6, 2))
+            self.assertEqual(set(first_coordinates), {"sample_id", "response_tokens", "topology", "node", "combined"})
+            self.assertEqual(first_coordinates["topology"].shape, (6, 2))
             self.assertEqual(first_coordinates["node"].shape, (6, 2))
             self.assertEqual(first_coordinates["combined"].shape, (6, 2))
 
@@ -75,8 +75,28 @@ class GraphTSNETests(unittest.TestCase):
             second = GraphTSNEAnalysis(root, Path(directory) / "second", tau=0.01, seed=7).run()
             with np.load(second["coordinates"]) as arrays:
                 second_coordinates = {name: arrays[name].copy() for name in arrays.files}
-            for name in ("routing", "node", "combined"):
+            for name in ("topology", "node", "combined"):
                 np.testing.assert_allclose(first_coordinates[name], second_coordinates[name])
+
+    def test_topology_descriptor_has_33_dimensions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = write_canonical_split(Path(directory) / "split")
+            dimensions = []
+
+            def embed(matrix, pre_scaled=False):
+                dimensions.append(matrix.shape[1])
+                return np.zeros((len(matrix), 2))
+
+            with patch.object(GraphTSNEAnalysis, "_embed", side_effect=embed):
+                GraphTSNEAnalysis(root, Path(directory) / "output").run()
+
+            self.assertEqual(dimensions[0], 33)
+
+    def test_none_node_features_are_rejected_at_the_boundary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = write_canonical_split(Path(directory) / "split")
+            with self.assertRaisesRegex(ValueError, "node_feature_mode"):
+                GraphTSNEAnalysis(root, Path(directory) / "output", node_feature_mode="none").run()
 
     def test_research_sample_memoizes_attention_for_related_accessors(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -110,14 +130,14 @@ class GraphTSNETests(unittest.TestCase):
 
             self.assertEqual(calls, [(f"r{index}", "graph") for index in range(6)])
 
-    def test_hypergraph_cache_is_rejected(self):
+    def test_non_original_graph_cache_is_rejected_before_graph_load(self):
         with tempfile.TemporaryDirectory() as directory:
             root = write_canonical_split(Path(directory) / "split")
-            graph_root = Path(directory) / "hypergraphs"
-            GraphDatasetBuilder(BuildConfig(root, graph_root, kind="hypergraph", tau=0.01, device="cpu")).run()
+            graph_root = Path(directory) / "topk"
+            GraphDatasetBuilder(BuildConfig(root, graph_root, kind="relation_topk", tau=0.01, device="cpu")).run()
 
             with patch.object(ResearchSample, "graph", side_effect=AssertionError("graph should not load")):
-                with self.assertRaisesRegex(ValueError, "edge_index"):
+                with self.assertRaisesRegex(ValueError, "original graph cache"):
                     GraphTSNEAnalysis(root, Path(directory) / "output", graph_root=graph_root, tau=0.01).run()
 
 

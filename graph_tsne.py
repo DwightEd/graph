@@ -9,12 +9,13 @@ from sklearn.manifold import TSNE
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
-from descriptors import temporal_summary, token_routing_features
+from behavior import token_behavior_features
+from descriptors import temporal_summary
 from research_dataset import ResearchDataset
 
 
 class GraphTSNEAnalysis:
-    """Project routing and node temporal summaries for every response in a split."""
+    """Project graph-topology and node temporal summaries for every response."""
 
     def __init__(
         self,
@@ -33,37 +34,37 @@ class GraphTSNEAnalysis:
         self.seed = seed
 
     def run(self):
+        if self.node_feature_mode == "none":
+            raise ValueError("node_feature_mode cannot be 'none' for graph t-SNE")
         graph_roots = None if self.graph_root is None else {"graph": self.graph_root}
         dataset = ResearchDataset(self.split_root, graph_roots=graph_roots, verify_hashes=True)
-        if self.graph_root is not None and dataset.graph_manifests["graph"].get("kind") == "hypergraph":
-            raise ValueError("t-SNE routing descriptors require a graph with edge_index")
-        sample_ids, response_tokens, routing_rows, node_rows = [], [], [], []
+        if self.graph_root is not None and dataset.graph_manifests["graph"].get("kind") != "original":
+            raise ValueError("graph t-SNE topology descriptors require an original graph cache")
+        sample_ids, response_tokens, topology_rows, node_rows = [], [], [], []
 
         for sample in tqdm(dataset, desc="t-SNE descriptors", unit="sample"):
             attention = sample.attention()
             graph = sample.original_graph(self.tau).to_dict() if self.graph_root is None else sample.graph("graph")
-            if "edge_index" not in graph:
-                raise ValueError("t-SNE routing descriptors require a graph with edge_index")
-            routing = token_routing_features(graph, attention.num_channels)
+            topology = token_behavior_features(graph, attention.num_channels)
             node_features = sample.node_features(self.node_feature_mode)
             sample_ids.append(sample.sample_id)
             response_tokens.append(attention.num_response_tokens)
-            routing_rows.append(temporal_summary(routing).cpu().numpy())
+            topology_rows.append(temporal_summary(topology).cpu().numpy())
             node_rows.append(
                 temporal_summary(node_features[attention.response_idx:]).cpu().numpy()
             )
 
-        routing = np.stack(routing_rows)
+        topology = np.stack(topology_rows)
         node = np.stack(node_rows)
         combined = np.concatenate(
             (
-                self._scale(routing) / np.sqrt(routing.shape[1]),
+                self._scale(topology) / np.sqrt(topology.shape[1]),
                 self._scale(node) / np.sqrt(node.shape[1]),
             ),
             axis=1,
         )
         embeddings = {
-            "routing": self._embed(routing),
+            "topology": self._embed(topology),
             "node": self._embed(node),
             "combined": self._embed(combined, pre_scaled=True),
         }

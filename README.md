@@ -185,13 +185,13 @@ python -m pip install -r requirements-analysis.txt
 jupyter lab notebooks/graph_tsne.ipynb
 ```
 
-`GraphTSNEAnalysis(split_root, output_dir, graph_root=None, tau=.01, node_feature_mode="attention", seed=0).run()` 每个回答生成一个点：routing 的 4 个 token 指标（incoming mass、prompt share、归一化 entropy、history lag）按 mean/std/slope 汇总为 12 维；node 特征也按相同方式汇总；`combined` 分别标准化两个 block 后按各自维度的 `sqrt` 缩放，使总尺度等权。高维输入先 PCA 到最多 50 维，再拟合 t-SNE。
+`GraphTSNEAnalysis(split_root, output_dir, graph_root=None, tau=.01, node_feature_mode="attention", seed=0).run()` 每个回答生成一个点：`behavior.token_behavior_features` 的 11 个 token 图行为特征（4 个 routing 指标和 7 个阈值保留边的拓扑计数/密度）按 mean/std/slope 汇总为 33 维 `topology` 描述符；node 特征也按相同方式汇总；`combined` 分别标准化两个 block 后按各自维度的 `sqrt` 缩放，使总尺度等权。高维输入先 PCA 到最多 50 维，再拟合 t-SNE。`node_feature_mode` 不能为 `none`。
 
 有两种明确的图来源：
 
 - `graph_root=None`：对每个 `ResearchSample` 调用 `original_graph(tau)`，直接由 `<split_root>/attention/*.npz` 的 canonical CSR 现场构图；不需要预构建图缓存。
-- `graph_root=/.../original_tau0p01/<split>`：对每个样本调用 `sample.graph("graph")`，使用已验证 provenance 的缓存图。缓存必须是含 `edge_index` 的 token graph，hypergraph 不适用于 routing t-SNE。
+- `graph_root=/.../original_tau0p01/<split>`：对每个样本调用 `sample.graph("graph")`，使用已验证 provenance 的 `original` 缓存图。`relation_topk`、`relation_topk_channels` 和 hypergraph 都不适用于 topology t-SNE。
 
-所有样本先完成特征、标准化、PCA 和 t-SNE，再调用 `dataset.labels()` 仅为颜色读取标签。输出目录固定保存 `graph_tsne.png`、`graph_tsne_response_length.png`（同一坐标按回答长度着色，用于排查长度混杂）和 `graph_tsne_coordinates.npz`（`sample_id`、`response_tokens`、`routing`、`node`、`combined`）。
+所有样本先完成特征、标准化、PCA 和 t-SNE，再调用 `dataset.labels()` 仅为颜色读取标签。输出目录固定保存 `graph_tsne.png`、`graph_tsne_response_length.png`（同一坐标按回答长度着色，用于排查长度混杂）和 `graph_tsne_coordinates.npz`（`sample_id`、`response_tokens`、`topology`、`node`、`combined`）。
 
 单个样本的 token 级视图使用 `notebooks/sample_behavior.ipynb`：先通过 `SampleBehaviorVisualizer` 选择和检查样本，再由 `BehaviorAnalysis.single()` 生成 `token_tsne.png`。每个点对应一个 response token，连续路径表示生成顺序；11 维图行为特征先完成标准化和 t-SNE，之后才读取 hallucination span 上色。
