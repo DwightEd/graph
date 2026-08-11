@@ -178,6 +178,9 @@ formal cache=/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-
 
 ## t-SNE 分析
 
+预先指定结构特征的配对 onset 验证流程见
+[`docs/onset_validation.md`](docs/onset_validation.md)。
+
 跨样本投影通过 `ResearchDataset` / `ResearchSample` 统一加载 canonical attention、可选缓存图和标签；notebook 本身不读取 manifest、index、NPZ 或 PT。安装分析依赖并启动 notebook：
 
 ```bash
