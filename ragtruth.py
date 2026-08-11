@@ -18,6 +18,11 @@ class RagTruthSample:
     prompt: str
     response: str
     split: str
+    task_type: str
+    data_source: str
+    generator_model: str
+    temperature: float | None
+    quality: str
 
 
 def _normalized_name(value: str) -> str:
@@ -63,6 +68,11 @@ def load_ragtruth_samples(
             prompt=str(source["prompt"]),
             response=str(response["response"]),
             split=str(response["split"]),
+            task_type=str(source["task_type"]),
+            data_source=str(source["source"]),
+            generator_model=str(response["model"]),
+            temperature=response.get("temperature"),
+            quality=str(response["quality"]),
         ))
     return samples
 
