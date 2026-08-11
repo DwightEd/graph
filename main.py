@@ -49,6 +49,7 @@ def main(argv=None):
     p = command.add_parser("enrich-index")
     p.add_argument("--canonical-root", required=True)
     p.add_argument("--dataset-path", required=True, help="RAGTruth dataset directory containing response.jsonl and source_info.jsonl")
+    p.add_argument("--graph-root", help="optional existing graph root; refreshes graph input hashes after JSON enrichment")
 
     p = command.add_parser("inspect")
     p.add_argument("--artifact-dir", required=True)
@@ -85,7 +86,7 @@ def main(argv=None):
     elif args.command == "archive-features":
         result = TraceArchiveConverter(TraceArchiveConfig(args.trace_dir, args.output_dir)).run()
     elif args.command == "enrich-index":
-        result = enrich_ragtruth_indices(args.canonical_root, args.dataset_path)
+        result = enrich_ragtruth_indices(args.canonical_root, args.dataset_path, args.graph_root)
     elif args.command == "inspect":
         result = ArtifactInspector(args.artifact_dir).run()
     elif args.command == "verify-attention":
