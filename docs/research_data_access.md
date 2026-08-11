@@ -30,7 +30,7 @@ The attention NPZ format is unchanged.
 
 This command only rewrites canonical `index.jsonl` / `manifest.json`. It does not touch any attention NPZ, graph PT, hidden-state NPZ, or token-stat NPZ.
 
-If a graph cache was already built, pass `--graph-root`: the command verifies that graph and canonical sample IDs match, then refreshes the graph manifest's `input_manifest_sha256` and `input_index_sha256`. Graph `.pt` files are not rebuilt.
+If a graph cache was already built, pass `--graph-root`. Before writing either archive, enrichment verifies the graph index hash, count, sample IDs, and that its input hashes match the current canonical archive. It then updates only the graph manifest's input hashes; graph `.pt` files are not rebuilt.
 
 ```bash
 python main.py enrich-index \
@@ -66,6 +66,9 @@ print(sample.observer_model)
 
 a = sample.attention()
 g = sample.graph("original")
+original = sample.original_graph()  # rebuild from canonical CSR at attention_floor
+x_hidden = sample.hidden()
+x_stats = sample.stats()
 x = sample.node_features("attention")
 edges = sample.attention_edges()
 ```
@@ -90,11 +93,11 @@ For example:
 means response token positions `3,4,5,9` are positive. Prompt positions are not included in these coordinates.
 
 ```python
-from research_dataset import LabelStore
-
-labels = LabelStore(train.root / "labels.jsonl")
+labels = train.labels()
 y_response = labels.response_labels(sample)
 y_full = labels.token_labels(sample)
 ```
+
+`ResearchDataset` binds a graph cache to its canonical split on construction. A graph manifest must match the canonical manifest and index hashes, and its sample IDs must match exactly. Loading a graph always checks its file size, and `verify_hashes=True` additionally checks the graph SHA256. Hidden states and token statistics must carry the same `token_ids` as canonical attention. Label tensors are created on the sample attention device.
 
 `positive_runs` preserves the binary token-level label used for evaluation. It does not preserve all original RAGTruth character-span annotation fields such as `label_type`, `meta`, or span text; those remain in the original RAGTruth `response.jsonl`.

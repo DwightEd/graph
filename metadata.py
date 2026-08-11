@@ -2,6 +2,7 @@
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
@@ -22,6 +23,23 @@ RESEARCH_INDEX_FIELDS = (
     "sha256",
     "bytes",
 )
+
+
+@dataclass
+class _EnrichmentPlan:
+    split_root: Path
+    index_path: Path
+    manifest_path: Path
+    manifest: dict[str, Any]
+    rows: list[dict[str, Any]]
+    enriched: list[dict[str, Any]]
+    split: str | None
+    task_types: set[str]
+    data_sources: set[str]
+    generator_models: set[str]
+    qualities: set[str]
+    old_manifest_sha256: str
+    old_index_sha256: str
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -54,45 +72,24 @@ def _graph_split_root(graph_root: Path, split: str) -> Path:
     return candidate
 
 
-def refresh_graph_provenance(canonical_root: str | Path, graph_root: str | Path) -> dict[str, int]:
-    """Refresh graph input hashes after canonical JSON-only enrichment.
-
-    Graph PT files and graph index rows are never changed. Before updating the graph manifest,
-    require the graph and canonical sample-id sets to match exactly.
-    """
-    canonical_root, graph_root = Path(canonical_root), Path(graph_root)
-    counts: dict[str, int] = {}
-
-    for canonical_split in _split_roots(canonical_root):
-        canonical_manifest = json.loads((canonical_split / "manifest.json").read_text(encoding="utf-8"))
-        split = str(canonical_manifest.get("split") or canonical_split.name)
-        graph_split = _graph_split_root(graph_root, split)
-
-        canonical_rows = _read_jsonl(canonical_split / "index.jsonl")
-        graph_rows = _read_jsonl(graph_split / "index.jsonl")
-        canonical_ids = {str(row["sample_id"]) for row in canonical_rows}
-        graph_ids = {str(row["sample_id"]) for row in graph_rows}
-        if canonical_ids != graph_ids or len(canonical_rows) != len(graph_rows):
-            raise ValueError(f"graph/canonical sample set mismatch for {split}")
-
-        graph_manifest_path = graph_split / "manifest.json"
-        graph_manifest = json.loads(graph_manifest_path.read_text(encoding="utf-8"))
-        if graph_manifest.get("count") != len(graph_rows):
-            raise ValueError(f"graph manifest count mismatch for {split}")
-        graph_index_sha256 = sha256(graph_split / "index.jsonl")
-        if graph_manifest.get("index_sha256") not in (None, graph_index_sha256):
-            raise ValueError(f"graph index hash mismatch for {split}")
-
-        graph_manifest["input_manifest_sha256"] = sha256(canonical_split / "manifest.json")
-        graph_manifest["input_index_sha256"] = sha256(canonical_split / "index.jsonl")
-        graph_manifest["index_sha256"] = graph_index_sha256
-        _atomic_write(
-            graph_manifest_path,
-            json.dumps(graph_manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        )
-        counts[split] = len(graph_rows)
-
-    return counts
+def _graph_preflight(graph_root: Path, split: str, old_manifest_sha256: str,
+                     old_index_sha256: str, canonical_rows: list[dict[str, Any]]) -> tuple[Path, dict[str, Any]]:
+    graph_split = _graph_split_root(graph_root, split)
+    graph_manifest_path = graph_split / "manifest.json"
+    graph_manifest = json.loads(graph_manifest_path.read_text(encoding="utf-8"))
+    graph_index = graph_split / "index.jsonl"
+    graph_rows = _read_jsonl(graph_index)
+    graph_ids = {str(row["sample_id"]) for row in graph_rows}
+    canonical_ids = {str(row["sample_id"]) for row in canonical_rows}
+    if graph_manifest.get("input_manifest_sha256") != old_manifest_sha256 or graph_manifest.get("input_index_sha256") != old_index_sha256:
+        raise ValueError(f"graph provenance does not match canonical archive for {split}")
+    if graph_manifest.get("index_sha256") != sha256(graph_index):
+        raise ValueError(f"graph index hash mismatch for {split}")
+    if graph_manifest.get("count") != len(graph_rows) or len(graph_ids) != len(graph_rows):
+        raise ValueError(f"graph manifest count mismatch for {split}")
+    if graph_ids != canonical_ids or len(graph_rows) != len(canonical_rows):
+        raise ValueError(f"graph/canonical sample set mismatch for {split}")
+    return graph_manifest_path, graph_manifest
 
 
 def enrich_ragtruth_indices(
@@ -105,7 +102,7 @@ def enrich_ragtruth_indices(
     sources = {str(row["source_id"]): row for row in _read_jsonl(dataset_path / "source_info.jsonl")}
     responses = {str(row["id"]): row for row in _read_jsonl(dataset_path / "response.jsonl")}
 
-    summary: dict[str, Any] = {"canonical_root": str(canonical_root), "splits": {}}
+    plans = []
     for split_root in _split_roots(canonical_root):
         index_path = split_root / "index.jsonl"
         manifest_path = split_root / "manifest.json"
@@ -157,21 +154,47 @@ def enrich_ragtruth_indices(
             generator_models.add(generator_model)
             qualities.add(quality)
 
-        _atomic_write(index_path, "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in enriched))
-        manifest.update({
+        plans.append(_EnrichmentPlan(
+            split_root, index_path, manifest_path, manifest, rows, enriched, resolved_split,
+            task_types, data_sources, generator_models, qualities,
+            sha256(manifest_path), sha256(index_path),
+        ))
+
+    graph_root_path = Path(graph_root) if graph_root is not None else None
+    graph_plans = {}
+    if graph_root_path is not None:
+        for plan in plans:
+            split = str(plan.split or plan.split_root.name)
+            graph_plans[split] = _graph_preflight(
+                graph_root_path, split, plan.old_manifest_sha256, plan.old_index_sha256, plan.rows
+            )
+
+    summary: dict[str, Any] = {"canonical_root": str(canonical_root), "splits": {}}
+    for plan in plans:
+        _atomic_write(plan.index_path, "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in plan.enriched))
+        plan.manifest.update({
             "dataset": "RAGTruth",
-            "split": resolved_split,
-            "index_sha256": sha256(index_path),
+            "split": plan.split,
+            "index_sha256": sha256(plan.index_path),
             "index_fields": list(RESEARCH_INDEX_FIELDS),
-            "task_types": sorted(task_types),
-            "data_sources": sorted(data_sources),
-            "generator_models": sorted(generator_models),
-            "qualities": sorted(qualities),
+            "task_types": sorted(plan.task_types),
+            "data_sources": sorted(plan.data_sources),
+            "generator_models": sorted(plan.generator_models),
+            "qualities": sorted(plan.qualities),
         })
-        _atomic_write(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
-        summary["splits"][str(resolved_split or split_root.name)] = len(enriched)
+        _atomic_write(plan.manifest_path, json.dumps(plan.manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+        split = str(plan.split or plan.split_root.name)
+        summary["splits"][split] = len(plan.enriched)
+        if split in graph_plans:
+            graph_manifest_path, graph_manifest = graph_plans[split]
+            graph_manifest["input_manifest_sha256"] = sha256(plan.manifest_path)
+            graph_manifest["input_index_sha256"] = sha256(plan.index_path)
+            _atomic_write(
+                graph_manifest_path,
+                json.dumps(graph_manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            )
 
     summary["count"] = sum(summary["splits"].values())
-    if graph_root is not None:
-        summary["graphs"] = refresh_graph_provenance(canonical_root, graph_root)
+    if graph_root_path is not None:
+        summary["graphs"] = {split: len(_read_jsonl(path.parent / "index.jsonl")) for split, (path, _) in graph_plans.items()}
     return summary

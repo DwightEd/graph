@@ -7,6 +7,7 @@ import torch
 
 from cache import AttentionDataset, load_attention_sample, sha256
 from features import load_hidden_features, load_node_features, load_token_stats
+from graphs import build_original_graph
 
 
 class ResearchDataset:
@@ -20,17 +21,32 @@ class ResearchDataset:
         self.manifest = self.attention_dataset.manifest
         self.rows = {str(row["sample_id"]): row for row in self.attention_dataset.rows}
         self.graph_roots = {name: Path(path) for name, path in (graph_roots or {}).items()}
-        self.graph_rows = {name: self._graph_index(root) for name, root in self.graph_roots.items()}
+        graph_data = {name: self._graph_index(root) for name, root in self.graph_roots.items()}
+        self.graph_rows = {name: rows for name, (rows, _) in graph_data.items()}
+        self.graph_manifests = {name: manifest for name, (_, manifest) in graph_data.items()}
 
         self.source_to_ids = {}
         for sample_id, row in self.rows.items():
             self.source_to_ids.setdefault(str(row["source_id"]), []).append(sample_id)
 
-    @staticmethod
-    def _graph_index(root):
+    def _graph_index(self, root):
+        manifest_path = root / "manifest.json"
+        index_path = root / "index.jsonl"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if sha256(index_path) != manifest.get("index_sha256"):
+            raise ValueError("graph index_sha256 does not match index.jsonl")
+        if manifest.get("input_manifest_sha256") != sha256(self.root / "manifest.json"):
+            raise ValueError("graph provenance does not match canonical manifest")
+        if manifest.get("input_index_sha256") != sha256(self.root / "index.jsonl"):
+            raise ValueError("graph provenance does not match canonical index")
         with (root / "index.jsonl").open(encoding="utf-8") as handle:
             rows = [json.loads(line) for line in handle if line.strip()]
-        return {str(row["sample_id"]): row for row in rows}
+        graph_ids = {str(row["sample_id"]) for row in rows}
+        if manifest.get("count") != len(rows) or len(graph_ids) != len(rows):
+            raise ValueError("graph manifest count or sample IDs are invalid")
+        if graph_ids != set(self.rows):
+            raise ValueError("graph/canonical sample ID sets do not match")
+        return {str(row["sample_id"]): row for row in rows}, manifest
 
     def __len__(self):
         return len(self.rows)
@@ -66,6 +82,9 @@ class ResearchDataset:
             for sample_id, row in self.rows.items()
             if all(row.get(key) == value for key, value in metadata.items())
         ]
+
+    def labels(self):
+        return LabelStore(self)
 
 
 class ResearchSample:
@@ -125,6 +144,8 @@ class ResearchSample:
 
     def attention(self):
         path = self.dataset.root / self.row["path"]
+        if not path.is_file() or path.stat().st_size != self.row["bytes"]:
+            raise ValueError("attention sample byte count does not match index")
         if self.dataset.verify_hashes and sha256(path) != self.row["sha256"]:
             raise ValueError("attention sample SHA256 does not match index")
         return load_attention_sample(
@@ -136,16 +157,25 @@ class ResearchSample:
         )
 
     def hidden(self):
-        return load_hidden_features(
+        hidden = load_hidden_features(
             self.dataset.root / "hidden" / f"{self.sample_id}.npz",
             device=self.dataset.device,
         )
+        self._check_sidecar_alignment(hidden[0], "hidden")
+        return hidden
 
     def stats(self):
-        return load_token_stats(
+        stats = load_token_stats(
             self.dataset.root / "token_stats" / f"{self.sample_id}.npz",
             device=self.dataset.device,
         )
+        self._check_sidecar_alignment(stats[0], "token_stats")
+        return stats
+
+    def _check_sidecar_alignment(self, token_ids, name):
+        reference = self.attention().token_ids
+        if not torch.equal(token_ids.to(reference.device), reference):
+            raise ValueError(f"{name} token_ids do not match attention token_ids")
 
     def node_features(self, mode="attention"):
         return load_node_features(self.dataset.root, self.attention(), mode=mode)
@@ -154,12 +184,18 @@ class ResearchSample:
         root = self.dataset.graph_roots[name]
         row = self.dataset.graph_rows[name][self.sample_id]
         path = root / row["path"]
+        if not path.is_file() or path.stat().st_size != row["bytes"]:
+            raise ValueError("graph byte count does not match index")
         if self.dataset.verify_hashes and "sha256" in row and sha256(path) != row["sha256"]:
             raise ValueError("graph SHA256 does not match index")
         graph = torch.load(path, map_location=self.dataset.device, weights_only=True)
         if int(graph["num_nodes"]) != self.attention().num_tokens:
             raise ValueError("graph and attention token counts do not match")
         return graph
+
+    def original_graph(self, tau=None):
+        sample = self.attention()
+        return build_original_graph(sample, sample.attention_floor if tau is None else tau)
 
     def attention_edges(self):
         """Decode CSR to human-readable layer/head/source/target/weight vectors."""
@@ -187,24 +223,39 @@ class ResearchSample:
 class LabelStore:
     """Optional evaluation-only access to token labels."""
 
-    def __init__(self, path):
-        with Path(path).open(encoding="utf-8") as handle:
+    def __init__(self, dataset: ResearchDataset):
+        self.dataset = dataset
+        path = dataset.root / "labels.jsonl"
+        if not path.is_file():
+            raise ValueError("labels.jsonl is missing")
+        expected_hash = dataset.manifest.get("labels_sha256")
+        if expected_hash is not None and sha256(path) != expected_hash:
+            raise ValueError("labels_sha256 does not match labels.jsonl")
+        with path.open(encoding="utf-8") as handle:
             rows = [json.loads(line) for line in handle if line.strip()]
         self.rows = {str(row["sample_id"]): row for row in rows}
+        if len(self.rows) != len(rows) or set(self.rows) != set(dataset.rows):
+            raise ValueError("label/canonical sample ID sets do not match")
 
     def positive_runs(self, sample_id):
         """Return response-relative hallucination token intervals [start, end)."""
         return self.rows[str(sample_id)]["positive_runs"]
 
     def response_labels(self, sample: ResearchSample):
+        self._check_dataset(sample)
         attention = sample.attention()
-        labels = torch.zeros(attention.num_response_tokens, dtype=torch.long)
+        labels = torch.zeros(attention.num_response_tokens, dtype=torch.long, device=attention.token_ids.device)
         for start, end in self.positive_runs(sample.sample_id):
             labels[start:end] = 1
         return labels
 
     def token_labels(self, sample: ResearchSample):
+        self._check_dataset(sample)
         attention = sample.attention()
-        labels = torch.zeros(attention.num_tokens, dtype=torch.long)
+        labels = torch.zeros(attention.num_tokens, dtype=torch.long, device=attention.token_ids.device)
         labels[attention.response_idx:] = self.response_labels(sample)
         return labels
+
+    def _check_dataset(self, sample: ResearchSample):
+        if sample.dataset is not self.dataset:
+            raise ValueError("labels belong to a different dataset")
