@@ -1,0 +1,177 @@
+"""Enrich an existing canonical archive with lightweight RAGTruth metadata."""
+
+import json
+import os
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Any
+
+from cache import sha256
+
+
+RESEARCH_INDEX_FIELDS = (
+    "sample_id",
+    "source_id",
+    "split",
+    "task_type",
+    "data_source",
+    "generator_model",
+    "temperature",
+    "quality",
+    "path",
+    "sha256",
+    "bytes",
+)
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    with path.open(encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    with NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+        handle.write(text)
+        temporary = Path(handle.name)
+    os.replace(temporary, path)
+
+
+def _split_roots(root: Path) -> list[Path]:
+    if (root / "manifest.json").is_file():
+        return [root]
+    roots = [root / split for split in ("train", "test") if (root / split / "manifest.json").is_file()]
+    if not roots:
+        raise ValueError("canonical_root must be a canonical split or a root containing train/test")
+    return roots
+
+
+def _graph_split_root(graph_root: Path, split: str) -> Path:
+    if (graph_root / "manifest.json").is_file():
+        return graph_root
+    candidate = graph_root / split
+    if not (candidate / "manifest.json").is_file():
+        raise ValueError(f"graph root has no {split} split: {graph_root}")
+    return candidate
+
+
+def refresh_graph_provenance(canonical_root: str | Path, graph_root: str | Path) -> dict[str, int]:
+    """Refresh graph input hashes after canonical JSON-only enrichment.
+
+    Graph PT files and graph index rows are never changed. Before updating the graph manifest,
+    require the graph and canonical sample-id sets to match exactly.
+    """
+    canonical_root, graph_root = Path(canonical_root), Path(graph_root)
+    counts: dict[str, int] = {}
+
+    for canonical_split in _split_roots(canonical_root):
+        canonical_manifest = json.loads((canonical_split / "manifest.json").read_text(encoding="utf-8"))
+        split = str(canonical_manifest.get("split") or canonical_split.name)
+        graph_split = _graph_split_root(graph_root, split)
+
+        canonical_rows = _read_jsonl(canonical_split / "index.jsonl")
+        graph_rows = _read_jsonl(graph_split / "index.jsonl")
+        canonical_ids = {str(row["sample_id"]) for row in canonical_rows}
+        graph_ids = {str(row["sample_id"]) for row in graph_rows}
+        if canonical_ids != graph_ids or len(canonical_rows) != len(graph_rows):
+            raise ValueError(f"graph/canonical sample set mismatch for {split}")
+
+        graph_manifest_path = graph_split / "manifest.json"
+        graph_manifest = json.loads(graph_manifest_path.read_text(encoding="utf-8"))
+        if graph_manifest.get("count") != len(graph_rows):
+            raise ValueError(f"graph manifest count mismatch for {split}")
+        graph_index_sha256 = sha256(graph_split / "index.jsonl")
+        if graph_manifest.get("index_sha256") not in (None, graph_index_sha256):
+            raise ValueError(f"graph index hash mismatch for {split}")
+
+        graph_manifest["input_manifest_sha256"] = sha256(canonical_split / "manifest.json")
+        graph_manifest["input_index_sha256"] = sha256(canonical_split / "index.jsonl")
+        graph_manifest["index_sha256"] = graph_index_sha256
+        _atomic_write(
+            graph_manifest_path,
+            json.dumps(graph_manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        )
+        counts[split] = len(graph_rows)
+
+    return counts
+
+
+def enrich_ragtruth_indices(
+    canonical_root: str | Path,
+    dataset_path: str | Path,
+    graph_root: str | Path | None = None,
+) -> dict[str, Any]:
+    """Rewrite canonical index/manifest JSON only; NPZ/PT artifacts are never touched."""
+    canonical_root, dataset_path = Path(canonical_root), Path(dataset_path)
+    sources = {str(row["source_id"]): row for row in _read_jsonl(dataset_path / "source_info.jsonl")}
+    responses = {str(row["id"]): row for row in _read_jsonl(dataset_path / "response.jsonl")}
+
+    summary: dict[str, Any] = {"canonical_root": str(canonical_root), "splits": {}}
+    for split_root in _split_roots(canonical_root):
+        index_path = split_root / "index.jsonl"
+        manifest_path = split_root / "manifest.json"
+        rows = _read_jsonl(index_path)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        expected_split = manifest.get("split")
+        if expected_split is None and split_root.name in ("train", "test"):
+            expected_split = split_root.name
+
+        enriched = []
+        task_types, data_sources, generator_models, qualities = set(), set(), set(), set()
+        resolved_split = expected_split
+        for row in rows:
+            sample_id, source_id = str(row["sample_id"]), str(row["source_id"])
+            response = responses.get(sample_id)
+            source = sources.get(source_id)
+            if response is None or source is None:
+                raise ValueError(f"RAGTruth metadata missing for sample {sample_id}")
+            if str(response["source_id"]) != source_id:
+                raise ValueError(f"source_id mismatch for sample {sample_id}")
+
+            split = str(response["split"])
+            if resolved_split is None:
+                resolved_split = split
+            if split != resolved_split:
+                raise ValueError(f"split mismatch for sample {sample_id}: {split} != {resolved_split}")
+
+            task_type = str(source["task_type"])
+            data_source = str(source["source"])
+            generator_model = str(response["model"])
+            quality = str(response["quality"])
+            temperature = response.get("temperature")
+
+            enriched.append({
+                "sample_id": sample_id,
+                "source_id": source_id,
+                "split": split,
+                "task_type": task_type,
+                "data_source": data_source,
+                "generator_model": generator_model,
+                "temperature": temperature,
+                "quality": quality,
+                "path": row["path"],
+                "sha256": row["sha256"],
+                "bytes": row["bytes"],
+            })
+            task_types.add(task_type)
+            data_sources.add(data_source)
+            generator_models.add(generator_model)
+            qualities.add(quality)
+
+        _atomic_write(index_path, "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in enriched))
+        manifest.update({
+            "dataset": "RAGTruth",
+            "split": resolved_split,
+            "index_sha256": sha256(index_path),
+            "index_fields": list(RESEARCH_INDEX_FIELDS),
+            "task_types": sorted(task_types),
+            "data_sources": sorted(data_sources),
+            "generator_models": sorted(generator_models),
+            "qualities": sorted(qualities),
+        })
+        _atomic_write(manifest_path, json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+        summary["splits"][str(resolved_split or split_root.name)] = len(enriched)
+
+    summary["count"] = sum(summary["splits"].values())
+    if graph_root is not None:
+        summary["graphs"] = refresh_graph_provenance(canonical_root, graph_root)
+    return summary

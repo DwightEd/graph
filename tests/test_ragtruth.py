@@ -23,16 +23,20 @@ class RagTruthTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "source_info.jsonl").write_text(json.dumps({
-                "source_id": "s1", "prompt": "question", "task_type": "qa",
+                "source_id": "s1", "prompt": "question", "task_type": "qa", "source": "MARCO",
             }) + "\n")
             (root / "response.jsonl").write_text("\n".join(json.dumps(row) for row in [
-                {"id": "r1", "source_id": "s1", "response": "answer", "split": "test", "model": "llama-2-7b-chat", "quality": "good", "labels": ["do not read"]},
-                {"id": "r2", "source_id": "s1", "response": "skip", "split": "test", "model": "other", "quality": "good"},
+                {"id": "r1", "source_id": "s1", "response": "answer", "split": "test", "model": "llama-2-7b-chat", "temperature": 0.7, "quality": "good", "labels": ["do not read"]},
+                {"id": "r2", "source_id": "s1", "response": "skip", "split": "test", "model": "other", "temperature": 0.7, "quality": "good"},
             ]) + "\n")
             samples = load_ragtruth_samples(root, split="test", generator_model="llama-2-7b-chat", task_type="qa")
 
         self.assertEqual(len(samples), 1)
         self.assertEqual(samples[0].response_id, "r1")
+        self.assertEqual(samples[0].task_type, "qa")
+        self.assertEqual(samples[0].data_source, "MARCO")
+        self.assertEqual(samples[0].generator_model, "llama-2-7b-chat")
+        self.assertEqual(samples[0].temperature, 0.7)
         self.assertFalse(hasattr(samples[0], "labels"))
 
     def test_tokenizer_uses_one_full_text_call_and_exact_response_boundary(self) -> None:
@@ -57,3 +61,7 @@ class RagTruthTests(unittest.TestCase):
             tokenize_ragtruth_sample(
                 MismatchedTokenizer(), prompt="question", response="answer"
             )
+
+
+if __name__ == "__main__":
+    unittest.main()

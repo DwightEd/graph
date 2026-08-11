@@ -162,13 +162,23 @@ class AttentionExtractor:
                     hidden_layers,
                     torch.stack([hidden[layer] for layer in hidden_layers]),
                 )
-            rows.append(index_row(output, sample, attention_path))
+            rows.append(index_row(output, sample, attention_path, metadata={
+                "split": item.split,
+                "task_type": item.task_type,
+                "data_source": item.data_source,
+                "generator_model": item.generator_model,
+                "temperature": item.temperature,
+                "quality": item.quality,
+            }))
             del result, token_log_prob, entropy
 
         return write_split_index(
             output, rows, attention_floor=self.config.floor, num_layers=L, num_heads=H,
             alignment="post_token_query_at_same_position", extra={
-                "hidden_layers": list(hidden_layers), "observer_model": Path(self.config.model_path).name,
+                "dataset": "RAGTruth",
+                "split": self.config.split,
+                "hidden_layers": list(hidden_layers),
+                "observer_model": Path(self.config.model_path).name,
                 "generator_model": self.config.generator_model,
             },
         )
