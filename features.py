@@ -39,6 +39,9 @@ def load_hidden_features(path, device="cpu"):
         token_ids = torch.from_numpy(arrays["token_ids"].astype(np.int64, copy=False))
         layer_ids = torch.from_numpy(arrays["hidden_layer_ids"].astype(np.int64, copy=False))
         hidden = torch.from_numpy(arrays["hidden_states"])
+    if (token_ids.ndim != 1 or layer_ids.ndim != 1 or hidden.ndim != 3
+            or hidden.shape[:2] != (len(layer_ids), len(token_ids))):
+        raise ValueError("hidden shapes must be token_ids [N], hidden_layer_ids [K], hidden_states [K,N,D]")
     return token_ids.to(device), layer_ids.to(device), hidden.to(device)
 
 
@@ -61,6 +64,9 @@ def load_token_stats(path, device="cpu"):
         token_ids = torch.from_numpy(arrays["token_ids"].astype(np.int64, copy=False))
         log_prob = torch.from_numpy(arrays["token_log_prob"])
         entropy = torch.from_numpy(arrays["entropy"])
+    if (token_ids.ndim != 1 or log_prob.ndim != 1 or entropy.ndim != 1
+            or len(log_prob) != len(token_ids) or len(entropy) != len(token_ids)):
+        raise ValueError("token-stat shapes must be token_ids, token_log_prob, entropy all [N]")
     return token_ids.to(device), log_prob.to(device), entropy.to(device)
 
 

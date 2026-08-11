@@ -18,7 +18,9 @@ from cache import AttentionDataset, AttentionSample, NPZ_FIELDS, index_row, save
 from features import (
     HIDDEN_FIELDS,
     STAT_FIELDS,
+    load_hidden_features,
     load_node_features,
+    load_token_stats,
     save_hidden_features,
     save_token_stats,
     teacher_forced_stats,
@@ -83,6 +85,29 @@ class CoreTests(unittest.TestCase):
             restored = next(iter(AttentionDataset(root)))
             x = load_node_features(root, restored, "all")
             self.assertEqual(x.shape, (4, 1 + 6 + 2))
+
+    def test_sidecar_loaders_reject_inconsistent_shapes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            hidden = root / "hidden.npz"
+            np.savez_compressed(
+                hidden,
+                token_ids=np.zeros(3, dtype=np.int32),
+                hidden_layer_ids=np.zeros(2, dtype=np.int16),
+                hidden_states=np.zeros((1, 3, 2), dtype=np.float16),
+            )
+            with self.assertRaisesRegex(ValueError, "hidden shapes"):
+                load_hidden_features(hidden)
+
+            stats = root / "stats.npz"
+            np.savez_compressed(
+                stats,
+                token_ids=np.zeros(3, dtype=np.int32),
+                token_log_prob=np.zeros((3, 1), dtype=np.float32),
+                entropy=np.zeros(3, dtype=np.float32),
+            )
+            with self.assertRaisesRegex(ValueError, "token-stat shapes"):
+                load_token_stats(stats)
 
     def test_teacher_forced_stats_match_direct_distribution(self):
         logits = torch.tensor([

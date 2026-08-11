@@ -151,13 +151,17 @@ class ResearchSample:
             raise ValueError("attention sample byte count does not match index")
         if self.dataset.verify_hashes and sha256(path) != self.row["sha256"]:
             raise ValueError("attention sample SHA256 does not match index")
-        self._attention = load_attention_sample(
+        sample = load_attention_sample(
             path,
             sample_id=self.sample_id,
             source_id=self.source_id,
             attention_floor=self.dataset.attention_dataset.attention_floor,
             device=self.dataset.device,
         )
+        if (sample.num_layers != self.dataset.manifest["num_layers"]
+                or sample.num_heads != self.dataset.manifest["num_heads"]):
+            raise ValueError("attention geometry does not match manifest")
+        self._attention = sample
         return self._attention
 
     def hidden(self):
@@ -193,8 +197,11 @@ class ResearchSample:
         if self.dataset.verify_hashes and "sha256" in row and sha256(path) != row["sha256"]:
             raise ValueError("graph SHA256 does not match index")
         graph = torch.load(path, map_location=self.dataset.device, weights_only=True)
-        if int(graph["num_nodes"]) != self.attention().num_tokens:
+        attention = self.attention()
+        if int(graph["num_nodes"]) != attention.num_tokens:
             raise ValueError("graph and attention token counts do not match")
+        if int(graph["response_idx"]) != attention.response_idx:
+            raise ValueError("graph and attention response boundaries do not match")
         return graph
 
     def original_graph(self, tau=None):

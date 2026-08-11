@@ -190,7 +190,7 @@ jupyter lab notebooks/graph_tsne.ipynb
 有两种明确的图来源：
 
 - `graph_root=None`：对每个 `ResearchSample` 调用 `original_graph(tau)`，直接由 `<split_root>/attention/*.npz` 的 canonical CSR 现场构图；不需要预构建图缓存。
-- `graph_root=/.../original_tau0p01/<split>`：对每个样本调用 `sample.graph("graph")`，使用已验证 provenance 的 `original` 缓存图。`relation_topk`、`relation_topk_channels` 和 hypergraph 都不适用于 topology t-SNE。
+- `graph_root=/.../original_tau0p01/<split>`：对每个样本调用 `sample.graph("graph")`，使用已验证 provenance 的 `original` 缓存图，且缓存 manifest 的 `parameters.tau` 必须等于传入的 `tau`。`relation_topk`、`relation_topk_channels` 和 hypergraph 都不适用于 topology t-SNE。
 
 所有样本先完成特征、标准化、PCA 和 t-SNE，再调用 `dataset.labels()` 仅为颜色读取标签。输出目录固定保存 `graph_tsne.png`、`graph_tsne_response_length.png`（同一坐标按回答长度着色，用于排查长度混杂）和 `graph_tsne_coordinates.npz`（`sample_id`、`response_tokens`、`topology`、`node`、`combined`）。
 

@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import torch
 
@@ -127,6 +128,30 @@ class MetadataTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "attention sample byte count"):
                 ResearchDataset(split)["r1"].attention()
 
+    def test_dataset_rejects_attention_geometry_that_disagrees_with_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            split, _ = make_archive(root)
+            manifest_path = split / "manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["num_heads"] = 2
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "attention geometry"):
+                ResearchDataset(split)["r1"].attention()
+
+    def test_dataset_rejects_graph_response_boundary_that_disagrees_with_attention(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            split, _ = make_archive(root)
+            graph_split = make_graph(split, root)
+            item = ResearchDataset(split, {"original": graph_split})["r1"]
+            bad_graph = {"num_nodes": 4, "response_idx": 1}
+
+            with patch("research_dataset.torch.load", return_value=bad_graph):
+                with self.assertRaisesRegex(ValueError, "response boundaries"):
+                    item.graph("original")
+
     def test_labels_reject_sample_from_another_dataset(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -151,6 +176,36 @@ class MetadataTests(unittest.TestCase):
             }
             with self.assertRaisesRegex(ValueError, "provenance"):
                 enrich_ragtruth_indices(root / "canonical", make_ragtruth_dataset(root), root / "graphs")
+            self.assertEqual({path: path.read_bytes() for path in before}, before)
+
+    def test_metadata_canonical_preflight_leaves_indices_unchanged_without_graphs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            split, _ = make_archive(root)
+            attention = split / "attention" / "r1.npz"
+            altered = bytearray(attention.read_bytes())
+            altered[-1] ^= 1
+            attention.write_bytes(altered)
+            before = {path: path.read_bytes() for path in (split / "index.jsonl", split / "manifest.json")}
+
+            with self.assertRaisesRegex(ValueError, "SHA256"):
+                enrich_ragtruth_indices(root / "canonical", make_ragtruth_dataset(root))
+
+            self.assertEqual({path: path.read_bytes() for path in before}, before)
+
+    def test_metadata_rejects_generator_mismatch_without_writing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            split, _ = make_archive(root)
+            manifest_path = split / "manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["generator_model"] = "expected-model"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            before = {path: path.read_bytes() for path in (split / "index.jsonl", manifest_path)}
+
+            with self.assertRaisesRegex(ValueError, "generator_model"):
+                enrich_ragtruth_indices(root / "canonical", make_ragtruth_dataset(root))
+
             self.assertEqual({path: path.read_bytes() for path in before}, before)
 
     def test_enrich_existing_json_and_access_research_metadata(self):

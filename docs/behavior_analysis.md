@@ -12,8 +12,10 @@ retained-edge cardinality by construction, so it is rejected rather than being
 silently interpreted as topology. Omit `--graph-root` to construct that
 original graph directly from each canonical attention sample; pass `--tau` to
 choose the threshold, otherwise the canonical attention floor is used. If a
-graph root is supplied, its manifest must declare `kind: original` and must
-already match the canonical split.
+graph root is supplied, its manifest must declare `kind: original`, already
+match the canonical split, and provide the threshold used by the analysis. An
+explicit `--tau` must equal manifest `parameters.tau`; omitting it uses that
+cached threshold.
 
 ## Single response and token t-SNE
 

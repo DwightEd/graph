@@ -7,7 +7,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
-from cache import sha256
+from cache import sha256, verify_split
 
 
 RESEARCH_INDEX_FIELDS = (
@@ -99,11 +99,14 @@ def enrich_ragtruth_indices(
 ) -> dict[str, Any]:
     """Rewrite canonical index/manifest JSON only; NPZ/PT artifacts are never touched."""
     canonical_root, dataset_path = Path(canonical_root), Path(dataset_path)
+    split_roots = _split_roots(canonical_root)
+    for split_root in split_roots:
+        verify_split(split_root)
     sources = {str(row["source_id"]): row for row in _read_jsonl(dataset_path / "source_info.jsonl")}
     responses = {str(row["id"]): row for row in _read_jsonl(dataset_path / "response.jsonl")}
 
     plans = []
-    for split_root in _split_roots(canonical_root):
+    for split_root in split_roots:
         index_path = split_root / "index.jsonl"
         manifest_path = split_root / "manifest.json"
         rows = _read_jsonl(index_path)
@@ -135,6 +138,10 @@ def enrich_ragtruth_indices(
             generator_model = str(response["model"])
             quality = str(response["quality"])
             temperature = response.get("temperature")
+            if manifest.get("generator_model") is not None and generator_model != manifest["generator_model"]:
+                raise ValueError(f"generator_model mismatch for sample {sample_id}")
+            if quality != "good":
+                raise ValueError(f"quality must be good for sample {sample_id}")
 
             enriched.append({
                 "sample_id": sample_id,

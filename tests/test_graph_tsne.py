@@ -130,6 +130,16 @@ class GraphTSNETests(unittest.TestCase):
 
             self.assertEqual(calls, [(f"r{index}", "graph") for index in range(6)])
 
+    def test_cached_original_graph_requires_requested_tau_before_graph_load(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = write_canonical_split(Path(directory) / "split")
+            graph_root = Path(directory) / "graphs"
+            GraphDatasetBuilder(BuildConfig(root, graph_root, kind="original", tau=0.05, device="cpu")).run()
+
+            with patch.object(ResearchSample, "graph", side_effect=AssertionError("graph should not load")):
+                with self.assertRaisesRegex(ValueError, "tau"):
+                    GraphTSNEAnalysis(root, Path(directory) / "output", graph_root=graph_root, tau=0.01).run()
+
     def test_non_original_graph_cache_is_rejected_before_graph_load(self):
         with tempfile.TemporaryDirectory() as directory:
             root = write_canonical_split(Path(directory) / "split")

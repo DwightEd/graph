@@ -38,8 +38,12 @@ class GraphTSNEAnalysis:
             raise ValueError("node_feature_mode cannot be 'none' for graph t-SNE")
         graph_roots = None if self.graph_root is None else {"graph": self.graph_root}
         dataset = ResearchDataset(self.split_root, graph_roots=graph_roots, verify_hashes=True)
-        if self.graph_root is not None and dataset.graph_manifests["graph"].get("kind") != "original":
-            raise ValueError("graph t-SNE topology descriptors require an original graph cache")
+        if self.graph_root is not None:
+            graph_manifest = dataset.graph_manifests["graph"]
+            if graph_manifest.get("kind") != "original":
+                raise ValueError("graph t-SNE topology descriptors require an original graph cache")
+            if graph_manifest.get("parameters", {}).get("tau") != self.tau:
+                raise ValueError("cached original graph tau does not match requested tau")
         sample_ids, response_tokens, topology_rows, node_rows = [], [], [], []
 
         for sample in tqdm(dataset, desc="t-SNE descriptors", unit="sample"):

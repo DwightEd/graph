@@ -12,6 +12,7 @@ import torch
 from behavior_analysis import BehaviorAnalysis, token_tsne_coordinates, token_tsne_perplexity
 from build import BuildConfig, GraphDatasetBuilder
 from cache import AttentionSample, index_row, save_attention_sample, sha256, write_split_index
+from research_dataset import ResearchSample
 
 
 def make_split(root: Path, *, with_control: bool = False) -> Path:
@@ -109,6 +110,47 @@ class BehaviorAnalysisTests(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "kind == original"):
                 BehaviorAnalysis(split, root / "output", graph_root=graph_root)
+
+    def test_cached_original_graph_requires_explicit_tau_match(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            split = make_split(root)
+            graph_root = root / "original"
+            GraphDatasetBuilder(BuildConfig(split, graph_root, kind="original", tau=0.05, device="cpu")).run()
+
+            with patch.object(ResearchSample, "graph", side_effect=AssertionError("graph should not load")):
+                with self.assertRaisesRegex(ValueError, "tau"):
+                    BehaviorAnalysis(split, root / "output", graph_root=graph_root, tau=0.01)
+
+            analysis = BehaviorAnalysis(split, root / "output", graph_root=graph_root)
+            self.assertEqual(analysis.tau, 0.05)
+
+    def test_alignment_loads_each_selected_control_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            split = make_split(root, with_control=True)
+            labels = split / "labels.jsonl"
+            labels.write_text(
+                json.dumps({"sample_id": "r1", "positive_runs": [[0, 1], [2, 3]]}) + "\n"
+                + json.dumps({"sample_id": "r2", "positive_runs": []}) + "\n",
+                encoding="utf-8",
+            )
+            manifest_path = split / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["labels_sha256"] = sha256(labels)
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            analysis = BehaviorAnalysis(split, root / "output")
+            original_features = analysis._features
+            calls = []
+
+            def features(sample):
+                calls.append(sample.sample_id)
+                return original_features(sample)
+
+            with patch.object(analysis, "_features", side_effect=features):
+                analysis.align(run_policy="all")
+
+            self.assertEqual(calls.count("r2"), 1)
 
     def test_alignment_writes_control_columns_only_when_controls_are_enabled(self):
         with tempfile.TemporaryDirectory() as directory:

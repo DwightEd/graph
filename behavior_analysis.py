@@ -203,8 +203,14 @@ class BehaviorAnalysis:
     def __init__(self, split_root, output_dir, graph_root=None, tau=None) -> None:
         graph_roots = {} if graph_root is None else {"original": Path(graph_root)}
         self.dataset = ResearchDataset(split_root, graph_roots)
-        if graph_root is not None and self.dataset.graph_manifests["original"].get("kind") != "original":
-            raise ValueError("token behavior topology features require graph manifest kind == original")
+        if graph_root is not None:
+            graph_manifest = self.dataset.graph_manifests["original"]
+            if graph_manifest.get("kind") != "original":
+                raise ValueError("token behavior topology features require graph manifest kind == original")
+            cached_tau = graph_manifest.get("parameters", {}).get("tau")
+            if tau is not None and cached_tau != tau:
+                raise ValueError("cached original graph tau does not match requested tau")
+            tau = cached_tau
         self._labels = None
         self.output_dir = Path(output_dir)
         self.tau = tau
@@ -286,7 +292,10 @@ class BehaviorAnalysis:
                 if controls:
                     candidates = by_source.get(sample.source_id, global_lengths)
                     control_id = self._nearest(candidates, len(features))
-                    control_features = cache.setdefault(control_id, self._features(self.dataset[control_id]))
+                    control_features = cache.get(control_id)
+                    if control_features is None:
+                        control_features = self._features(self.dataset[control_id])
+                        cache[control_id] = control_features
                     center = round(run[0] * max(len(control_features) - 1, 0) / max(len(features) - 1, 1))
                     control_windows.append(centered_window(control_features, center, radius)[0].cpu().numpy())
                     row += [control_id, "same_source_length" if sample.source_id in by_source else "global_length", len(control_features), center]

@@ -30,7 +30,7 @@ The attention NPZ format is unchanged.
 
 This command only rewrites canonical `index.jsonl` / `manifest.json`. It does not touch any attention NPZ, graph PT, hidden-state NPZ, or token-stat NPZ.
 
-If a graph cache was already built, pass `--graph-root`. Before writing either archive, enrichment verifies the graph index hash, count, sample IDs, and that its input hashes match the current canonical archive. It then updates only the graph manifest's input hashes; graph `.pt` files are not rebuilt.
+If a graph cache was already built, pass `--graph-root`. Before planning any rewrite, enrichment verifies every canonical split, including every indexed attention NPZ and any declared label sidecar. Before writing either archive, it also verifies the graph index hash, count, sample IDs, and that its input hashes match the current canonical archive. It then updates only the graph manifest's input hashes; graph `.pt` files are not rebuilt.
 
 ```bash
 python main.py enrich-index \
@@ -102,6 +102,6 @@ y_full = labels.token_labels(sample)
 
 ## Graph t-SNE
 
-`GraphTSNEAnalysis` uses `ResearchDataset` and `ResearchSample` only. It summarizes the 11 original-threshold token behavior features with mean, standard deviation, and slope, producing a 33-dimensional `topology` descriptor per response. With `graph_root=None`, it builds `sample.original_graph(tau)` from canonical CSR; a supplied cache must have manifest kind `original`. Labels are read only after t-SNE has been fitted, for plot colors.
+`GraphTSNEAnalysis` uses `ResearchDataset` and `ResearchSample` only. It summarizes the 11 original-threshold token behavior features with mean, standard deviation, and slope, producing a 33-dimensional `topology` descriptor per response. With `graph_root=None`, it builds `sample.original_graph(tau)` from canonical CSR; a supplied cache must have manifest kind `original` and matching `parameters.tau`. Labels are read only after t-SNE has been fitted, for plot colors.
 
 `positive_runs` preserves the binary token-level label used for evaluation. It does not preserve all original RAGTruth character-span annotation fields such as `label_type`, `meta`, or span text; those remain in the original RAGTruth `response.jsonl`.
