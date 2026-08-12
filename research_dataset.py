@@ -1,4 +1,8 @@
-"""Unified sample-level access for research experiments."""
+"""Canonical research data access and sparse attention relation decoding.
+
+Feature engineering belongs in graph_features.py.  This module only loads
+canonical artifacts, validates provenance/alignment, and exposes token relations.
+"""
 
 from __future__ import annotations
 
@@ -11,30 +15,16 @@ from cache import AttentionDataset, load_attention_sample, sha256
 from features import load_hidden_features, load_node_features, load_token_stats
 from graphs import build_original_graph
 
-
-STRUCTURAL_FEATURE_NAMES = (
-    "incoming_mass",
-    "prompt_mass_share",
-    "normalized_entropy",
-    "history_lag",
-    "in_degree",
-    "prompt_degree",
-    "history_degree",
-    "in_density",
-    "prompt_density",
-    "history_density",
-    "history_edge_share",
-    "channel_edge_density",
+# Temporary public aliases for dataset-level experiments that predate the module
+# split. The implementation itself lives only in graph_features.py.
+from graph_features import (
+    BASIC_FEATURE_NAMES as STRUCTURAL_FEATURE_NAMES,
+    basic_structural_features as structural_features_from_relations,
 )
 
 
 def aggregate_attention_relations(attention, edges):
-    """Merge channel-level CSR entries into unique source->target relations.
-
-    The returned ``weight`` is the sum of retained layer/head weights divided by
-    the total number of attention channels. Missing channels therefore contribute
-    zero, matching the reconstructed sparse-attention semantics.
-    """
+    """Merge channel-level CSR entries into unique source->target relations."""
     device = edges["weight"].device
     empty_long = torch.empty(0, dtype=torch.long, device=device)
     empty_float = torch.empty(0, dtype=torch.float32, device=device)
@@ -55,141 +45,23 @@ def aggregate_attention_relations(attention, edges):
 
     pair_key = target * attention.num_tokens + source
     unique_key, inverse = torch.unique(pair_key, sorted=True, return_inverse=True)
-
     relation_weight = torch.zeros(
         unique_key.numel(), dtype=torch.float32, device=device
     )
     relation_weight.index_add_(0, inverse, weight)
     relation_weight /= float(attention.num_channels)
-
-    channel_count = torch.bincount(
-        inverse, minlength=unique_key.numel()
-    ).to(torch.long)
+    channel_count = torch.bincount(inverse, minlength=unique_key.numel()).to(torch.long)
     relation_target = torch.div(
         unique_key, attention.num_tokens, rounding_mode="floor"
     ).long()
     relation_source = unique_key.remainder(attention.num_tokens).long()
-    edge_type = (relation_source >= attention.response_idx).long()
-
     return {
         "source": relation_source,
         "target": relation_target,
         "weight": relation_weight,
         "channel_count": channel_count,
-        "edge_type": edge_type,
+        "edge_type": (relation_source >= attention.response_idx).long(),
     }
-
-
-def structural_features_from_relations(attention, relations):
-    """Return [response_tokens, 12] structural graph features."""
-    response_idx = attention.response_idx
-    response_count = attention.num_response_tokens
-    device = relations["weight"].device
-    features = torch.zeros(
-        (response_count, len(STRUCTURAL_FEATURE_NAMES)),
-        dtype=torch.float32,
-        device=device,
-    )
-    if relations["weight"].numel() == 0:
-        return features
-
-    source = relations["source"].long()
-    target = relations["target"].long()
-    weight = relations["weight"].float()
-    channel_count = relations["channel_count"].float()
-    rows = target - response_idx
-
-    if bool(((rows < 0) | (rows >= response_count)).any()):
-        raise ValueError("relation targets must be response tokens")
-
-    prompt = source < response_idx
-    history = ~prompt
-
-    total_mass = torch.zeros(response_count, dtype=torch.float32, device=device)
-    total_mass.index_add_(0, rows, weight)
-
-    prompt_mass = torch.zeros_like(total_mass)
-    prompt_mass.index_add_(0, rows[prompt], weight[prompt])
-    prompt_share = torch.zeros_like(total_mass)
-    nonempty = total_mass > 0
-    prompt_share[nonempty] = prompt_mass[nonempty] / total_mass[nonempty]
-
-    in_degree = torch.bincount(rows, minlength=response_count).float()
-    prompt_degree = torch.bincount(rows[prompt], minlength=response_count).float()
-    history_degree = torch.bincount(rows[history], minlength=response_count).float()
-
-    probabilities = weight / total_mass[rows]
-    entropy = torch.zeros_like(total_mass)
-    entropy.index_add_(0, rows, -probabilities * probabilities.log())
-    normalized_entropy = torch.zeros_like(total_mass)
-    multiple = in_degree > 1
-    normalized_entropy[multiple] = entropy[multiple] / in_degree[multiple].log()
-
-    history_mass = torch.zeros_like(total_mass)
-    history_mass.index_add_(0, rows[history], weight[history])
-    history_lag_mass = torch.zeros_like(total_mass)
-    if bool(history.any()):
-        lag = (target[history] - source[history]).float()
-        history_lag_mass.index_add_(
-            0,
-            rows[history],
-            weight[history] * lag / max(response_count - 1, 1),
-        )
-    history_lag = torch.zeros_like(total_mass)
-    has_history_mass = history_mass > 0
-    history_lag[has_history_mass] = (
-        history_lag_mass[has_history_mass] / history_mass[has_history_mass]
-    )
-
-    response_position = torch.arange(
-        response_count, dtype=torch.float32, device=device
-    )
-    absolute_target = response_idx + response_position
-    in_density = in_degree / absolute_target.clamp_min(1.0)
-    prompt_density = prompt_degree / float(max(response_idx, 1))
-
-    history_density = torch.zeros_like(total_mass)
-    has_history = response_position > 0
-    history_density[has_history] = (
-        history_degree[has_history] / response_position[has_history]
-    )
-
-    history_edge_share = torch.zeros_like(total_mass)
-    has_edges = in_degree > 0
-    history_edge_share[has_edges] = history_degree[has_edges] / in_degree[has_edges]
-
-    channel_degree = torch.zeros_like(total_mass)
-    channel_degree.index_add_(0, rows, channel_count)
-    channel_edge_density = channel_degree / (
-        float(attention.num_channels) * absolute_target.clamp_min(1.0)
-    )
-
-    features = torch.stack(
-        (
-            total_mass,
-            prompt_share,
-            normalized_entropy,
-            history_lag,
-            in_degree,
-            prompt_degree,
-            history_degree,
-            in_density,
-            prompt_density,
-            history_density,
-            history_edge_share,
-            channel_edge_density,
-        ),
-        dim=1,
-    )
-    if not bool(torch.isfinite(features).all()):
-        raise ValueError("structural graph features must be finite")
-    return features
-
-
-def structural_features_from_edges(attention, edges):
-    """Decode channel edges into unique relations and structural node features."""
-    relations = aggregate_attention_relations(attention, edges)
-    return structural_features_from_relations(attention, relations)
 
 
 def relations_from_graph(attention, graph):
@@ -214,21 +86,37 @@ def relations_from_graph(attention, graph):
     }
 
 
+def structural_features_from_edges(attention, edges):
+    """Compatibility wrapper; feature implementation lives in graph_features.py."""
+    return structural_features_from_relations(
+        attention, aggregate_attention_relations(attention, edges)
+    )
+
+
 class ResearchDataset:
-    """Join canonical features and one or more graph caches by sample_id."""
+    """Join canonical modalities and optional graph caches by sample_id."""
 
     def __init__(self, split_root, graph_roots=None, device="cpu", verify_hashes=False):
         self.root = Path(split_root)
         self.device = device
         self.verify_hashes = verify_hashes
-        self.attention_dataset = AttentionDataset(self.root, device=device, verify_hashes=verify_hashes)
+        self.attention_dataset = AttentionDataset(
+            self.root, device=device, verify_hashes=verify_hashes
+        )
         self.manifest = self.attention_dataset.manifest
-        self.rows = {str(row["sample_id"]): row for row in self.attention_dataset.rows}
-        self.graph_roots = {name: Path(path) for name, path in (graph_roots or {}).items()}
-        graph_data = {name: self._graph_index(root) for name, root in self.graph_roots.items()}
+        self.rows = {
+            str(row["sample_id"]): row for row in self.attention_dataset.rows
+        }
+        self.graph_roots = {
+            name: Path(path) for name, path in (graph_roots or {}).items()
+        }
+        graph_data = {
+            name: self._graph_index(root) for name, root in self.graph_roots.items()
+        }
         self.graph_rows = {name: rows for name, (rows, _) in graph_data.items()}
-        self.graph_manifests = {name: manifest for name, (_, manifest) in graph_data.items()}
-
+        self.graph_manifests = {
+            name: manifest for name, (_, manifest) in graph_data.items()
+        }
         self.source_to_ids = {}
         for sample_id, row in self.rows.items():
             self.source_to_ids.setdefault(str(row["source_id"]), []).append(sample_id)
@@ -277,10 +165,12 @@ class ResearchDataset:
         return list(self.source_to_ids)
 
     def samples_from_source(self, source_id):
-        return [self[sample_id] for sample_id in self.source_to_ids.get(str(source_id), [])]
+        return [
+            self[sample_id]
+            for sample_id in self.source_to_ids.get(str(source_id), [])
+        ]
 
     def filter(self, **metadata):
-        """Return samples whose index metadata exactly matches all requested values."""
         return [
             self[sample_id]
             for sample_id, row in self.rows.items()
@@ -292,6 +182,8 @@ class ResearchDataset:
 
 
 class ResearchSample:
+    """Lazy, validated access to one canonical sample."""
+
     def __init__(self, dataset: ResearchDataset, sample_id: str):
         self.dataset = dataset
         self.sample_id = sample_id
@@ -316,8 +208,9 @@ class ResearchSample:
 
     @property
     def generator_model(self):
-        """Model that generated the RAGTruth response."""
-        return self.row.get("generator_model", self.dataset.manifest.get("generator_model"))
+        return self.row.get(
+            "generator_model", self.dataset.manifest.get("generator_model")
+        )
 
     @property
     def observer_model(self):
@@ -360,11 +253,13 @@ class ResearchSample:
             attention_floor=self.dataset.attention_dataset.attention_floor,
             device=self.dataset.device,
         )
-        if (sample.num_layers != self.dataset.manifest["num_layers"]
-                or sample.num_heads != self.dataset.manifest["num_heads"]):
+        if (
+            sample.num_layers != self.dataset.manifest["num_layers"]
+            or sample.num_heads != self.dataset.manifest["num_heads"]
+        ):
             raise ValueError("attention geometry does not match manifest")
         self._attention = sample
-        return self._attention
+        return sample
 
     def hidden(self):
         hidden = load_hidden_features(
@@ -396,7 +291,11 @@ class ResearchSample:
         path = root / row["path"]
         if not path.is_file() or path.stat().st_size != row["bytes"]:
             raise ValueError("graph byte count does not match index")
-        if self.dataset.verify_hashes and "sha256" in row and sha256(path) != row["sha256"]:
+        if (
+            self.dataset.verify_hashes
+            and "sha256" in row
+            and sha256(path) != row["sha256"]
+        ):
             raise ValueError("graph SHA256 does not match index")
         graph = torch.load(path, map_location=self.dataset.device, weights_only=True)
         attention = self.attention()
@@ -407,8 +306,10 @@ class ResearchSample:
         return graph
 
     def original_graph(self, tau=None):
-        sample = self.attention()
-        return build_original_graph(sample, sample.attention_floor if tau is None else tau)
+        attention = self.attention()
+        return build_original_graph(
+            attention, attention.attention_floor if tau is None else tau
+        )
 
     def attention_edges(self):
         """Decode canonical CSR to layer/head/source/target/weight vectors."""
@@ -428,28 +329,25 @@ class ResearchSample:
         }
 
     def relation_edges(self, graph=None):
-        """Return unique source->target relations aggregated across layer/head channels."""
+        """Return unique source->target relations aggregated across channels."""
         attention = self.attention()
         if graph is not None:
             return relations_from_graph(attention, graph)
-        edges = self.attention_edges()
-        return aggregate_attention_relations(attention, edges)
+        return aggregate_attention_relations(attention, self.attention_edges())
 
     def structural_features(self, graph=None):
-        """Return the 12-D structural state of every response token."""
-        attention = self.attention()
-        return structural_features_from_relations(attention, self.relation_edges(graph))
+        """Compatibility convenience; implementation lives in graph_features.py."""
+        return structural_features_from_relations(
+            self.attention(), self.relation_edges(graph)
+        )
 
     def graph_view(self, labels=None):
-        """Load one self-contained token-graph view for analysis/visualization."""
+        """Return a self-contained relation view; no feature engineering occurs here."""
         attention = self.attention()
         raw_edges = self.attention_edges()
         relations = aggregate_attention_relations(attention, raw_edges)
-        features = structural_features_from_relations(attention, relations)
         positive_runs = []
-        response_labels = torch.zeros(
-            attention.num_response_tokens, dtype=torch.long
-        )
+        response_labels = torch.zeros(attention.num_response_tokens, dtype=torch.long)
         if labels is not None:
             response_labels = labels.response_labels(self).cpu()
             positive_runs = labels.positive_runs(self.sample_id)
@@ -464,8 +362,6 @@ class ResearchSample:
             "num_channels": attention.num_channels,
             "raw_edges": {key: value.detach().cpu() for key, value in raw_edges.items()},
             "relations": {key: value.detach().cpu() for key, value in relations.items()},
-            "structural_feature_names": STRUCTURAL_FEATURE_NAMES,
-            "response_features": features.detach().cpu(),
             "positive_runs": positive_runs,
             "response_labels": response_labels,
         }
@@ -477,7 +373,7 @@ class ResearchSample:
 
 
 class LabelStore:
-    """Optional evaluation-only access to token labels."""
+    """Evaluation-only access to response/token labels."""
 
     def __init__(self, dataset: ResearchDataset):
         self.dataset = dataset
