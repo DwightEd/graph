@@ -1,5 +1,37 @@
 # Method: self-supervised attention-graph representation learning
 
+## Training-free provenance pattern discovery
+
+在训练图模型之前，仓库提供一个只检验拓扑机制的探索协议。对每个 response
+token，从最后一层开始沿 attention source 逐层反向传播单位质量。Prompt 节点
+和 cache 未观测质量是吸收状态，response 节点通过其精确 source endpoint 继续
+向前层传播。主曲线在每行已观测 attention 内条件归一化，避免把 cache 缺失量
+偷偷当作聚类特征；原始未观测质量使用独立传播副本计算控制曲线。第 $d$ 个反向
+深度的两个候选视图为
+
+\[
+A_t(d)=\text{cumulative mass absorbed by prompt},
+\]
+
+\[
+C_t(d)=\sum_j\left(\frac{\pi_{t,j}^{(d)}}
+{\sum_k\pi_{t,k}^{(d)}}\right)^2.
+\]
+
+$A_t$ 表示 prompt grounding 的传播深度，$C_t$ 表示仍存活的 response
+ancestry 是单链集中还是多源分散。默认主实验的节点表示只有
+
+\[
+z_t=[A_t(d_1),\ldots,A_t(d_m)].
+\]
+
+若单独研究 $C_t$，必须作为另一次实验运行，不允许与 $A_t$ 拼接。未观测质量
+曲线单独用于检查 cache censoring，不拼入 $z_t$。Train token 上
+使用 robust scaling 和 BIC-selected diagonal GMM 发现结构模式，不使用标签和
+反向传播。模式、t-SNE 坐标及代表性 ego graph 冻结后，才读取 test token
+labels 计算各模式的 hallucination enrichment，并比较正确/幻觉响应图的模式占比
+与相邻 token 模式转移。
+
 ## MART non-GNN baseline
 
 MART is the mechanism-aligned non-GNN baseline. It computes per-token features

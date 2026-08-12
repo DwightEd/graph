@@ -16,6 +16,7 @@ attention_graph/model.py   节点初始化 h0、RP/RR message passing hK、重�
 attention_graph/train.py   不读取标签的 GNN 训练
 attention_graph/score.py   冻结模型的 token 异常分数
 attention_graph/visualize.py  h0/hK 的论文式联合 t-SNE 投影
+attention_graph/patterns.py  无训练的多层 prompt 溯源模式发现
 main.py                    唯一命令行入口
 ```
 
@@ -33,6 +34,25 @@ response_values
 ```
 
 `labels.jsonl` 与 attention 分离；`positive_runs` 为 response-relative `[start, end)`，只可在评估或可视化着色阶段读取。
+
+## 无训练的溯源模式发现
+
+`discover-patterns` 不训练 GNN，也不拼接 degree、entropy、lag 等异质统计量。
+它只研究一个图机制：从每个 response-token 节点沿 layer-ordered attention 图
+向后追溯时，质量多快到达 prompt，以及尚未到达 prompt 的 response ancestry
+是否集中在一条窄链中。默认主节点表示**只含 prompt-absorption curve**；
+live-response concentration 只能用 `SIGNATURE_VIEW=response_concentration`
+作为独立实验运行，两者不会拼接。cache 未观察质量作为独立控制曲线，不进入
+聚类或 t-SNE。模式、坐标和代表节点冻结后才读取 test token labels。
+
+```bash
+bash run_provenance_patterns.sh
+```
+
+输出包括全部 test token 的 landmark t-SNE、模式中心曲线，以及每个模式中
+最接近中心的真实 token ego graph。非 landmark 节点使用原结构空间近邻插值，
+因此每个 test token 都有二维坐标；模式发现仍在原始结构曲线上完成。另外输出
+正确/幻觉响应图的节点模式占比与相邻模式转移图，标签只参与这一步事后解释。
 
 ## 训练、评分、评估
 

@@ -9,6 +9,10 @@ from archive import AttentionArchiveConverter, AttentionArchiveVerifier, Archive
 from attention_graph.evaluate import evaluate_scores
 from attention_graph.graph import GraphBuildConfig
 from attention_graph.mart import fit_mart, score_mart
+from attention_graph.patterns import (
+    PatternDiscoveryConfig,
+    discover_provenance_patterns,
+)
 from attention_graph.score import load_checkpoint, save_score_records, score_dataset
 from attention_graph.statistics import collect_statistics, evaluate_statistics
 from attention_graph.train import TrainingConfig, train_unsupervised
@@ -119,6 +123,31 @@ def parse_args(argv=None):
     p.add_argument("--statistics", required=True)
     p.add_argument("--output", required=True)
 
+    p = sub.add_parser(
+        "discover-patterns",
+        help="training-free discovery of multi-layer prompt-provenance node patterns",
+    )
+    p.add_argument("--train-split", required=True)
+    p.add_argument("--test-split", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.add_argument("--device", default="cuda")
+    p.add_argument(
+        "--signature-view",
+        choices=("prompt_absorption", "response_concentration"),
+        default="prompt_absorption",
+        help="fit one structural curve at a time; views are never concatenated",
+    )
+    p.add_argument("--checkpoints", type=int, default=8)
+    p.add_argument("--min-patterns", type=int, default=2)
+    p.add_argument("--max-patterns", type=int, default=6)
+    p.add_argument("--fit-reference-size", type=int, default=30000)
+    p.add_argument("--tsne-landmarks", type=int, default=10000)
+    p.add_argument("--perplexity", type=float, default=40.0)
+    p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--prototype-hops", type=int, default=3)
+    p.add_argument("--prototype-max-incoming", type=int, default=6)
+    _graph_args(p)
+
     p = sub.add_parser("visualize", help="paired before/after t-SNE of frozen GNN node states")
     p.add_argument("--canonical-split", required=True)
     p.add_argument("--checkpoint", required=True)
@@ -204,7 +233,37 @@ def main(argv=None):
         result = evaluate_statistics(
             dataset, statistics_path=args.statistics, output_path=args.output
         )
-    else:
+    elif args.command == "discover-patterns":
+        train_dataset = ResearchDataset(
+            args.train_split, device=args.device, verify_hashes=True
+        )
+        test_dataset = ResearchDataset(
+            args.test_split, device=args.device, verify_hashes=True
+        )
+        label_dataset = ResearchDataset(
+            args.test_split, device="cpu", verify_hashes=True
+        )
+        pattern_config = PatternDiscoveryConfig(
+            signature_view=args.signature_view,
+            checkpoints=args.checkpoints,
+            min_patterns=args.min_patterns,
+            max_patterns=args.max_patterns,
+            fit_reference_size=args.fit_reference_size,
+            tsne_landmarks=args.tsne_landmarks,
+            perplexity=args.perplexity,
+            seed=args.seed,
+            prototype_hops=args.prototype_hops,
+            prototype_max_incoming=args.prototype_max_incoming,
+        )
+        result = discover_provenance_patterns(
+            train_dataset,
+            test_dataset,
+            label_dataset,
+            output_dir=args.output_dir,
+            graph_config=_graph_config(args),
+            config=pattern_config,
+        )
+    elif args.command == "visualize":
         dataset = ResearchDataset(args.canonical_split, device=args.device, verify_hashes=True)
         result = EmbeddingShiftVisualizer(
             dataset,
@@ -218,6 +277,8 @@ def main(argv=None):
             perplexity=args.perplexity,
             seed=args.seed,
         ).run()
+    else:
+        raise ValueError(f"unsupported command: {args.command}")
     print(json.dumps(result, indent=2, sort_keys=True))
     return result
 
