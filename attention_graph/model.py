@@ -224,14 +224,19 @@ class AttentionGraphEncoder(nn.Module):
         relation = self.relation_embedding(graph.edge_type[visible_ids])
         return graph.edge_index[:, visible_ids], edge_all[visible_ids] + relation
 
-    def forward(self, graph: AttentionGraph, view: MaskedGraphView):
+    def encode_stages(self, graph: AttentionGraph, view: MaskedGraphView):
+        """Return node states before and after the same message-passing stack."""
         hidden = self._nodes(graph, view)
+        before = hidden
         if not self.layers:
-            return hidden
+            return before, before
         edge_index, edge_embedding = self._edges(graph, view)
         for layer in self.layers:
             hidden = layer(hidden, edge_index, edge_embedding)
-        return hidden
+        return before, hidden
+
+    def forward(self, graph: AttentionGraph, view: MaskedGraphView):
+        return self.encode_stages(graph, view)[1]
 
 
 class MaskedAttentionAutoencoder(nn.Module):
@@ -263,6 +268,9 @@ class MaskedAttentionAutoencoder(nn.Module):
 
     def encode(self, graph, view=None):
         return self.encoder(graph, full_view(graph) if view is None else view)
+
+    def encode_stages(self, graph, view=None):
+        return self.encoder.encode_stages(graph, full_view(graph) if view is None else view)
 
     def _pair_features(self, hidden, edge_index, edge_type):
         source, target = edge_index
