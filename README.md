@@ -48,6 +48,31 @@ main.py                  唯一命令行入口
 
 完整方法见 [`docs/method.md`](docs/method.md)。
 
+## MART: non-GNN mechanism baseline
+
+MART reads canonical CSR rows directly, without a second graph-support selection.
+For every response token it retains the fraction of **retained** causal mass
+coming from prompt, the entropy of retained source entries plus diagonal and one
+censored-OTHER bucket, their anchor `q * (1 - H)`, retained/diagonal/OTHER mass,
+channel mean/std, signed late-minus-early layer drift, and causal EMA innovation. A detector
+fits robust position-bin normalization, PCA whitening, and kNN novelty only on
+the canonical train split; relative position conditions calibration but is not a
+kNN feature. Test data are transformed by the frozen detector. The deterministic
+reference set is capped by `--reference-size` (default 100000) to bound kNN memory.
+
+```bash
+python main.py fit-mart --train-split /data/RAGTruth/model_traces/llama31_8b/train \
+  --output outputs/mart/model.npz --device cuda
+python main.py score-mart --canonical-split /data/RAGTruth/model_traces/llama31_8b/test \
+  --checkpoint outputs/mart/model.npz --output outputs/mart/test_scores.npz --device cuda
+python main.py evaluate --canonical-split /data/RAGTruth/model_traces/llama31_8b/test \
+  --scores outputs/mart/test_scores.npz --output outputs/mart/evaluation.json
+```
+
+MART is the primary non-GNN baseline.  Prior statistics select a representation,
+not an anomaly direction.  A GNN is necessary only if it beats MART and a
+no-message baseline, while source-shuffling its graph support reduces results.
+
 ## Canonical attention
 
 每个样本只需要六个 attention 字段：

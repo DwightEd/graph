@@ -8,6 +8,7 @@ import json
 from archive import AttentionArchiveConverter, AttentionArchiveVerifier, ArchiveConfig
 from attention_graph.evaluate import evaluate_scores
 from attention_graph.graph import GraphBuildConfig
+from attention_graph.mart import fit_mart, score_mart
 from attention_graph.score import load_checkpoint, save_score_records, score_dataset
 from attention_graph.statistics import collect_statistics, evaluate_statistics
 from attention_graph.train import TrainingConfig, train_unsupervised
@@ -88,6 +89,20 @@ def parse_args(argv=None):
     p.add_argument("--target-block-size", type=int, default=1)
     p.add_argument("--seed", type=int, default=0)
 
+    p = sub.add_parser("fit-mart", help="train-only non-GNN mechanism baseline")
+    p.add_argument("--train-split", required=True)
+    p.add_argument("--output", required=True)
+    p.add_argument("--device", default="cuda")
+    p.add_argument("--neighbors", type=int, default=16)
+    p.add_argument("--position-bins", type=int, default=8)
+    p.add_argument("--reference-size", type=int, default=100000)
+
+    p = sub.add_parser("score-mart", help="frozen MART detector -> label-free token scores")
+    p.add_argument("--canonical-split", required=True)
+    p.add_argument("--checkpoint", required=True)
+    p.add_argument("--output", required=True)
+    p.add_argument("--device", default="cuda")
+
     p = sub.add_parser("evaluate", help="open labels only after scores are frozen")
     p.add_argument("--canonical-split", required=True)
     p.add_argument("--scores", required=True)
@@ -163,6 +178,15 @@ def main(argv=None):
             "labels_read": False,
             "checkpoint_best_epoch": checkpoint.get("best_epoch"),
         }
+    elif args.command == "fit-mart":
+        dataset = ResearchDataset(args.train_split, device=args.device, verify_hashes=True)
+        result = fit_mart(
+            dataset, output_path=args.output, neighbors=args.neighbors,
+            position_bins=args.position_bins, reference_size=args.reference_size,
+        )
+    elif args.command == "score-mart":
+        dataset = ResearchDataset(args.canonical_split, device=args.device, verify_hashes=True)
+        result = score_mart(dataset, checkpoint=args.checkpoint, output_path=args.output)
     elif args.command == "evaluate":
         dataset = ResearchDataset(args.canonical_split, device="cpu", verify_hashes=True)
         result = evaluate_scores(dataset, score_path=args.scores, output_path=args.output)

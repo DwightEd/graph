@@ -1,5 +1,21 @@
 # Method: self-supervised attention-graph representation learning
 
+## MART non-GNN baseline
+
+MART is the mechanism-aligned non-GNN baseline. It computes per-token features
+directly from canonical CSR attention: channel summaries of retained mass,
+retained prompt fraction, entropy over retained sources plus diagonal and one
+censored OTHER bucket, anchor `q(1-H)`, diagonal mass and censored OTHER mass;
+signed late-minus-early layer drift; and a strictly causal EMA innovation.
+It then uses train-only robust calibration within relative-position bins, PCA
+whitening, and kNN distance; position selects the calibration bin but is excluded
+from the scored vector. This tests whether the useful routing findings
+already suffice without learned message passing. Statistics motivate the
+representation but do not prescribe an error direction.
+
+A graph encoder is scientifically necessary only when it improves on MART and
+the same encoder with no messages, and when source-shuffling edges degrades it.
+
 ## 1. 研究对象
 
 对一条 prompt + response 序列建立有向图

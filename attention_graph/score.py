@@ -157,6 +157,7 @@ def save_score_records(records, path):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     arrays = {
+        "representation": np.asarray("learned_attention_gnn_node_embedding"),
         "embedding": np.asarray([row["embedding"] for row in records], dtype=np.float32),
         "score": np.asarray([row["score"] for row in records], dtype=np.float32),
         "sample_id": np.asarray([row["sample_id"] for row in records], dtype=str),
@@ -184,6 +185,11 @@ def load_score_records(path):
         if missing:
             raise ValueError(f"score artifact is missing {sorted(missing)}")
         count = len(arrays["score"])
+        representation = (
+            str(arrays["representation"].item())
+            if "representation" in arrays.files
+            else "unspecified_embedding"
+        )
         records = []
         for row in range(count):
             record = {
@@ -192,6 +198,7 @@ def load_score_records(path):
                 "sample_id": str(arrays["sample_id"][row]),
                 "source_id": str(arrays["source_id"][row]),
                 "token_index": int(arrays["token_index"][row]),
+                "representation": representation,
             }
             for field in ("task_type", "data_source", "generator_model"):
                 if field in arrays.files:

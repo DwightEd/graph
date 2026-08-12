@@ -1,4 +1,4 @@
-"""Visualization of learned GNN node embeddings.
+"""Visualization of frozen unsupervised token embeddings.
 
 Sampling, scaling, PCA, and t-SNE are label-blind. Evaluation labels are opened
 only after coordinates are fixed, solely for coloring the same points.
@@ -62,6 +62,11 @@ def visualize_embeddings(
         y.append(label_cache[sample_id][int(record["token_index"])])
     y = np.asarray(y, dtype=np.int64)
     scores = np.asarray([row["score"] for row in records], dtype=np.float32)
+    representation = str(records[0]["representation"])
+    display_name = {
+        "learned_attention_gnn_node_embedding": "Learned attention-GNN node embedding",
+        "mart_mechanism_pca_embedding": "MART mechanism embedding",
+    }.get(representation, "Unsupervised token embedding")
 
     import matplotlib.pyplot as plt
 
@@ -72,7 +77,7 @@ def visualize_embeddings(
         coordinates[:, 0], coordinates[:, 1], c=scores, s=12, alpha=0.7, rasterized=True
     )
     figure.colorbar(plot, ax=axes[0], label="Unsupervised anomaly score")
-    axes[0].set_title("Learned node embeddings — anomaly score")
+    axes[0].set_title(f"{display_name} — anomaly score")
     for label, name, marker in ((0, "Non-hallucination", "o"), (1, "Hallucination", "x")):
         mask = y == label
         if mask.any():
@@ -105,5 +110,5 @@ def visualize_embeddings(
         "coordinates": str(output / "node_embedding_tsne.npz"),
         "selected_nodes": len(records),
         "perplexity": actual_perplexity,
-        "representation": "learned_attention_gnn_node_embedding",
+        "representation": representation,
     }
