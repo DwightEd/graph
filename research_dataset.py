@@ -1,7 +1,8 @@
-"""Canonical research data access and sparse attention relation decoding.
+"""Canonical dataset access for attention-graph experiments.
 
-Feature engineering belongs in graph_features.py.  This module only loads
-canonical artifacts, validates provenance/alignment, and exposes token relations.
+This module only owns validated data access and evaluation labels. Graph
+construction, feature learning, anomaly scoring, and visualization live in the
+``attention_graph`` package.
 """
 
 from __future__ import annotations
@@ -12,94 +13,15 @@ from pathlib import Path
 import torch
 
 from cache import AttentionDataset, load_attention_sample, sha256
-from features import load_hidden_features, load_node_features, load_token_stats
-from graphs import build_original_graph
-
-# Temporary public aliases for dataset-level experiments that predate the module
-# split. The implementation itself lives only in graph_features.py.
-from graph_features import (
-    BASIC_FEATURE_NAMES as STRUCTURAL_FEATURE_NAMES,
-    basic_structural_features as structural_features_from_relations,
-)
-
-
-def aggregate_attention_relations(attention, edges):
-    """Merge channel-level CSR entries into unique source->target relations."""
-    device = edges["weight"].device
-    empty_long = torch.empty(0, dtype=torch.long, device=device)
-    empty_float = torch.empty(0, dtype=torch.float32, device=device)
-    if edges["weight"].numel() == 0:
-        return {
-            "source": empty_long,
-            "target": empty_long,
-            "weight": empty_float,
-            "channel_count": empty_long,
-            "edge_type": empty_long,
-        }
-
-    source = edges["source"].long()
-    target = edges["target"].long()
-    weight = edges["weight"].float()
-    if bool(((source < 0) | (source >= target) | (target >= attention.num_tokens)).any()):
-        raise ValueError("attention relations must point from earlier valid tokens")
-
-    pair_key = target * attention.num_tokens + source
-    unique_key, inverse = torch.unique(pair_key, sorted=True, return_inverse=True)
-    relation_weight = torch.zeros(
-        unique_key.numel(), dtype=torch.float32, device=device
-    )
-    relation_weight.index_add_(0, inverse, weight)
-    relation_weight /= float(attention.num_channels)
-    channel_count = torch.bincount(inverse, minlength=unique_key.numel()).to(torch.long)
-    relation_target = torch.div(
-        unique_key, attention.num_tokens, rounding_mode="floor"
-    ).long()
-    relation_source = unique_key.remainder(attention.num_tokens).long()
-    return {
-        "source": relation_source,
-        "target": relation_target,
-        "weight": relation_weight,
-        "channel_count": channel_count,
-        "edge_type": (relation_source >= attention.response_idx).long(),
-    }
-
-
-def relations_from_graph(attention, graph):
-    """Decode one original threshold graph into weighted token relations."""
-    field = graph.__getitem__ if isinstance(graph, dict) else lambda name: getattr(graph, name)
-    source, target = torch.as_tensor(field("edge_index")).long()
-    edge_ptr = torch.as_tensor(field("edge_ptr"))
-    edge_value = torch.as_tensor(field("edge_value"), dtype=torch.float32)
-    counts = edge_ptr[1:] - edge_ptr[:-1]
-    edge_ids = torch.repeat_interleave(
-        torch.arange(len(counts), device=edge_value.device), counts
-    )
-    weight = torch.zeros(len(counts), dtype=torch.float32, device=edge_value.device)
-    weight.index_add_(0, edge_ids, edge_value)
-    weight /= float(attention.num_channels)
-    return {
-        "source": source,
-        "target": target,
-        "weight": weight,
-        "channel_count": counts.long(),
-        "edge_type": (source >= attention.response_idx).long(),
-    }
-
-
-def structural_features_from_edges(attention, edges):
-    """Compatibility wrapper; feature implementation lives in graph_features.py."""
-    return structural_features_from_relations(
-        attention, aggregate_attention_relations(attention, edges)
-    )
 
 
 class ResearchDataset:
-    """Join canonical modalities and optional graph caches by sample_id."""
+    """Lazy access to one canonical attention split."""
 
-    def __init__(self, split_root, graph_roots=None, device="cpu", verify_hashes=False):
+    def __init__(self, split_root, *, device="cpu", verify_hashes=False):
         self.root = Path(split_root)
         self.device = device
-        self.verify_hashes = verify_hashes
+        self.verify_hashes = bool(verify_hashes)
         self.attention_dataset = AttentionDataset(
             self.root, device=device, verify_hashes=verify_hashes
         )
@@ -107,41 +29,16 @@ class ResearchDataset:
         self.rows = {
             str(row["sample_id"]): row for row in self.attention_dataset.rows
         }
-        self.graph_roots = {
-            name: Path(path) for name, path in (graph_roots or {}).items()
-        }
-        graph_data = {
-            name: self._graph_index(root) for name, root in self.graph_roots.items()
-        }
-        self.graph_rows = {name: rows for name, (rows, _) in graph_data.items()}
-        self.graph_manifests = {
-            name: manifest for name, (_, manifest) in graph_data.items()
-        }
-        self.source_to_ids = {}
+        self.source_to_ids: dict[str, list[str]] = {}
         for sample_id, row in self.rows.items():
             self.source_to_ids.setdefault(str(row["source_id"]), []).append(sample_id)
 
-    def _graph_index(self, root):
-        manifest_path = root / "manifest.json"
-        index_path = root / "index.jsonl"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if sha256(index_path) != manifest.get("index_sha256"):
-            raise ValueError("graph index_sha256 does not match index.jsonl")
-        if manifest.get("input_manifest_sha256") != sha256(self.root / "manifest.json"):
-            raise ValueError("graph provenance does not match canonical manifest")
-        if manifest.get("input_index_sha256") != sha256(self.root / "index.jsonl"):
-            raise ValueError("graph provenance does not match canonical index")
-        with index_path.open(encoding="utf-8") as handle:
-            rows = [json.loads(line) for line in handle if line.strip()]
-        graph_ids = {str(row["sample_id"]) for row in rows}
-        if manifest.get("count") != len(rows) or len(graph_ids) != len(rows):
-            raise ValueError("graph manifest count or sample IDs are invalid")
-        if graph_ids != set(self.rows):
-            raise ValueError("graph/canonical sample ID sets do not match")
-        return {str(row["sample_id"]): row for row in rows}, manifest
-
     def __len__(self):
         return len(self.rows)
+
+    def __iter__(self):
+        for sample_id in self.rows:
+            yield self[sample_id]
 
     def __contains__(self, sample_id):
         return str(sample_id) in self.rows
@@ -152,10 +49,6 @@ class ResearchDataset:
             raise KeyError(sample_id)
         return ResearchSample(self, sample_id)
 
-    def __iter__(self):
-        for sample_id in self.rows:
-            yield self[sample_id]
-
     @property
     def sample_ids(self):
         return list(self.rows)
@@ -165,10 +58,7 @@ class ResearchDataset:
         return list(self.source_to_ids)
 
     def samples_from_source(self, source_id):
-        return [
-            self[sample_id]
-            for sample_id in self.source_to_ids.get(str(source_id), [])
-        ]
+        return [self[sample_id] for sample_id in self.source_to_ids.get(str(source_id), [])]
 
     def filter(self, **metadata):
         return [
@@ -182,7 +72,7 @@ class ResearchDataset:
 
 
 class ResearchSample:
-    """Lazy, validated access to one canonical sample."""
+    """One canonical attention sample plus lightweight metadata."""
 
     def __init__(self, dataset: ResearchDataset, sample_id: str):
         self.dataset = dataset
@@ -242,7 +132,7 @@ class ResearchSample:
         if self._attention is not None:
             return self._attention
         path = self.dataset.root / self.row["path"]
-        if not path.is_file() or path.stat().st_size != self.row["bytes"]:
+        if not path.is_file() or path.stat().st_size != int(self.row["bytes"]):
             raise ValueError("attention sample byte count does not match index")
         if self.dataset.verify_hashes and sha256(path) != self.row["sha256"]:
             raise ValueError("attention sample SHA256 does not match index")
@@ -254,130 +144,19 @@ class ResearchSample:
             device=self.dataset.device,
         )
         if (
-            sample.num_layers != self.dataset.manifest["num_layers"]
-            or sample.num_heads != self.dataset.manifest["num_heads"]
+            sample.num_layers != int(self.dataset.manifest["num_layers"])
+            or sample.num_heads != int(self.dataset.manifest["num_heads"])
         ):
-            raise ValueError("attention geometry does not match manifest")
+            raise ValueError("attention geometry does not match split manifest")
         self._attention = sample
         return sample
 
     def release_attention(self):
-        """Release the cached trace after a streaming GPU consumer finishes."""
         self._attention = None
-
-    def hidden(self):
-        hidden = load_hidden_features(
-            self.dataset.root / "hidden" / f"{self.sample_id}.npz",
-            device=self.dataset.device,
-        )
-        self._check_sidecar_alignment(hidden[0], "hidden")
-        return hidden
-
-    def stats(self):
-        stats = load_token_stats(
-            self.dataset.root / "token_stats" / f"{self.sample_id}.npz",
-            device=self.dataset.device,
-        )
-        self._check_sidecar_alignment(stats[0], "token_stats")
-        return stats
-
-    def _check_sidecar_alignment(self, token_ids, name):
-        reference = self.attention().token_ids
-        if not torch.equal(token_ids.to(reference.device), reference):
-            raise ValueError(f"{name} token_ids do not match attention token_ids")
-
-    def node_features(self, mode="attention"):
-        return load_node_features(self.dataset.root, self.attention(), mode=mode)
-
-    def graph(self, name):
-        root = self.dataset.graph_roots[name]
-        row = self.dataset.graph_rows[name][self.sample_id]
-        path = root / row["path"]
-        if not path.is_file() or path.stat().st_size != row["bytes"]:
-            raise ValueError("graph byte count does not match index")
-        if (
-            self.dataset.verify_hashes
-            and "sha256" in row
-            and sha256(path) != row["sha256"]
-        ):
-            raise ValueError("graph SHA256 does not match index")
-        graph = torch.load(path, map_location=self.dataset.device, weights_only=True)
-        attention = self.attention()
-        if int(graph["num_nodes"]) != attention.num_tokens:
-            raise ValueError("graph and attention token counts do not match")
-        if int(graph["response_idx"]) != attention.response_idx:
-            raise ValueError("graph and attention response boundaries do not match")
-        return graph
-
-    def original_graph(self, tau=None):
-        attention = self.attention()
-        return build_original_graph(
-            attention, attention.attention_floor if tau is None else tau
-        )
-
-    def attention_edges(self):
-        """Decode canonical CSR to layer/head/source/target/weight vectors."""
-        sample = self.attention()
-        response_count = sample.num_response_tokens
-        counts = sample.response_row_ptr[1:] - sample.response_row_ptr[:-1]
-        row = torch.repeat_interleave(
-            torch.arange(counts.numel(), device=counts.device), counts
-        )
-        channel = row // response_count
-        return {
-            "layer": channel // sample.num_heads,
-            "head": channel % sample.num_heads,
-            "source": sample.response_column_indices.long(),
-            "target": sample.response_idx + row % response_count,
-            "weight": sample.response_values,
-        }
-
-    def relation_edges(self, graph=None):
-        """Return unique source->target relations aggregated across channels."""
-        attention = self.attention()
-        if graph is not None:
-            return relations_from_graph(attention, graph)
-        return aggregate_attention_relations(attention, self.attention_edges())
-
-    def structural_features(self, graph=None):
-        """Compatibility convenience; implementation lives in graph_features.py."""
-        return structural_features_from_relations(
-            self.attention(), self.relation_edges(graph)
-        )
-
-    def graph_view(self, labels=None):
-        """Return a self-contained relation view; no feature engineering occurs here."""
-        attention = self.attention()
-        raw_edges = self.attention_edges()
-        relations = aggregate_attention_relations(attention, raw_edges)
-        positive_runs = []
-        response_labels = torch.zeros(attention.num_response_tokens, dtype=torch.long)
-        if labels is not None:
-            response_labels = labels.response_labels(self).cpu()
-            positive_runs = labels.positive_runs(self.sample_id)
-        return {
-            "sample_id": self.sample_id,
-            "source_id": self.source_id,
-            "metadata": self.metadata,
-            "token_ids": attention.token_ids.detach().cpu(),
-            "response_idx": attention.response_idx,
-            "num_tokens": attention.num_tokens,
-            "num_response_tokens": attention.num_response_tokens,
-            "num_channels": attention.num_channels,
-            "raw_edges": {key: value.detach().cpu() for key, value in raw_edges.items()},
-            "relations": {key: value.detach().cpu() for key, value in relations.items()},
-            "positive_runs": positive_runs,
-            "response_labels": response_labels,
-        }
-
-    @property
-    def response_slice(self):
-        sample = self.attention()
-        return slice(sample.response_idx, sample.num_tokens)
 
 
 class LabelStore:
-    """Evaluation-only access to response/token labels."""
+    """Evaluation-only token labels from ``labels.jsonl``."""
 
     def __init__(self, dataset: ResearchDataset):
         self.dataset = dataset
@@ -394,7 +173,19 @@ class LabelStore:
             raise ValueError("label/canonical sample ID sets do not match")
 
     def positive_runs(self, sample_id):
-        return self.rows[str(sample_id)]["positive_runs"]
+        runs = self.rows[str(sample_id)].get("positive_runs", [])
+        previous_end = 0
+        normalized = []
+        response_count = self.dataset[str(sample_id)].attention().num_response_tokens
+        for run in runs:
+            if len(run) != 2:
+                raise ValueError("each positive run must contain [start, end)")
+            start, end = map(int, run)
+            if not 0 <= start < end <= response_count or start < previous_end:
+                raise ValueError("positive runs must be sorted valid response-relative spans")
+            normalized.append([start, end])
+            previous_end = end
+        return normalized
 
     def response_labels(self, sample: ResearchSample):
         self._check_dataset(sample)
@@ -406,17 +197,6 @@ class LabelStore:
         )
         for start, end in self.positive_runs(sample.sample_id):
             labels[start:end] = 1
-        return labels
-
-    def token_labels(self, sample: ResearchSample):
-        self._check_dataset(sample)
-        attention = sample.attention()
-        labels = torch.zeros(
-            attention.num_tokens,
-            dtype=torch.long,
-            device=attention.token_ids.device,
-        )
-        labels[attention.response_idx:] = self.response_labels(sample)
         return labels
 
     def _check_dataset(self, sample: ResearchSample):

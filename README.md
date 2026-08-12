@@ -1,278 +1,206 @@
-# Attention Graph Lab
+# Attention Graph Hallucination Detection
 
-## Primary unsupervised path
-
-The main experiment now consumes the canonical sparse attention CSR directly:
+这个仓库只保留一条研究主线：**从 LLM attention 构图，学习 token 节点表示，再做无监督异常检测。**
 
 ```text
-canonical CSR
--> relation/channel-aware directed GNN
--> masked support, channel-weight, and row-distribution reconstruction
--> learned response-token embeddings
--> contamination-aware causal Student-t mixture
--> source-grouped out-of-fold scores
--> labels loaded only for final metrics and coloring
+RAGTruth + observer LLM
+        ↓
+canonical sparse attention
+        ↓
+RP/RR attributed token graph
+        ↓
+relation/channel-aware GNN
+        ↓
+self-supervised masked reconstruction
+        ↓
+learned response-token embeddings
+        ↓
+train-only robust residual calibration
+        ↓
+held-out token anomaly scores
+        ↓
+labels.jsonl only for final evaluation / coloring
 ```
 
-Core modules:
-
-- `attention_gnn.py`: sparse layer/head traces, masking, message passing, and reconstruction.
-- `anomaly.py`: causal multi-mode density and empirical-tail calibration.
-- `unsupervised_experiment.py`: label-blind training, source-group OOF records, and fold-local PCA.
-- `unsupervised_main.py`: foreground command for a complete run.
-
-Install the extraction and analysis dependencies in the active environment:
-
-```bash
-pip install -r requirements.txt -r requirements-analysis.txt
-```
-
-Run the development experiment on the canonical RAGTruth train split; no prebuilt
-graph cache is required:
-
-```bash
-python unsupervised_main.py \
-  --canonical-split /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b/train \
-  --output-dir outputs/unsupervised_gnn/ragtruth_train_oof \
-  --device cuda \
-  --folds 5 \
-  --embedding-dim 32 \
-  --message-steps 2 \
-  --epochs 20 \
-  --density-steps 75
-```
-
-`node_tsne.py`, `graph_tsne.py`, and the paired onset analysis remain scalar-feature
-baselines/diagnostics. They do not train or visualize the learned GNN representation.
-The main command writes separate `full/`, `no_message/`, `rewired/`, and
-`channel_mean/` result directories plus `summary.json`; the fold-local PCA PNG and
-its exact coordinates are saved together in each variant directory.
-
-本仓库把 LLM attention 保存成可校验的 canonical archive，并在同一份数据上进行图构建、结构特征分析和幻觉 onset 验证。
+手工统计量不再作为 GNN 输入，也不再用于主 t-SNE。它们只由 `attention_graph/statistics.py` 在**全部样本**上生成，作用是验证假设、做 baseline 和解释模型。
 
 ## 模块职责
 
-当前代码按职责分层，不再使用 `rich_*` / `transition_*` 叠加式补丁模块：
-
 ```text
-extract.py / archive.py
-        │  模型或旧缓存 -> canonical archive
-        ▼
-research_dataset.py
-        │  只负责 canonical 数据访问、CSR 解码、token relation
-        ▼
-graph_features.py
-        │  只负责 graph -> token feature vector
-        ▼
-sample_analysis.py
-           单条样本、正确对照、run-centric 统计与可视化
+cache.py                 canonical attention 格式与校验
+ragtruth.py              RAGTruth 读取、tokenization、标签 sidecar 对齐
+extract.py               observer LLM -> canonical attention
+archive.py               旧 formal cache -> canonical attention
+metadata.py              canonical index 的 RAGTruth metadata
+research_dataset.py      canonical split 的 lazy data access + evaluation labels
+
+attention_graph/
+  graph.py               canonical attention -> RP/RR sparse attributed graph
+  model.py               learned channel fusion + CHARM-style GNN + reconstruction losses
+  train.py               label-blind train/validation/calibration
+  score.py               frozen embedding + leave-one-token-out anomaly residual
+  statistics.py          all-data scalar diagnostics; never used as GNN input
+  evaluate.py            frozen scores后才读取 labels
+  visualize.py           learned node embedding t-SNE; coordinates固定后才读取 labels
+
+main.py                  唯一命令行入口
 ```
 
-其他实验各自独立：
-
-- `graph_tsne.py`：dataset-level graph t-SNE，一个点是一条 response。
-- `node_tsne.py`：dataset-level node t-SNE，一个点是一个 response token。
-- `onset_experiment.py`：跨样本配对 onset 统计验证。
-- `onset_validation.py`：onset experiment 使用的图随机化原语。
-
-单样本实验唯一 notebook：
-
-```text
-notebooks/sample_analysis.ipynb
-```
+完整方法见 [`docs/method.md`](docs/method.md)。
 
 ## Canonical attention
 
-每个 split：
+每个样本只需要六个 attention 字段：
 
 ```text
-<split>/
-├── manifest.json
-├── index.jsonl
-├── labels.jsonl
-├── attention/<sample_id>.npz
-├── hidden/<sample_id>.npz       # optional
-└── token_stats/<sample_id>.npz  # optional
+token_ids
+response_idx
+attention_diagonal        [L,H,N]
+response_row_ptr          [L*H*R+1]
+response_column_indices
+response_values
 ```
 
-每个 attention NPZ 固定六个字段：
+`response_values` 是 `attention > attention_floor` 且 `source < target` 的 response-query sparse trace。弱于 floor 的 channel 是 **censored / 未观察到**，不能当成精确 0。
 
-| field | shape | meaning |
-| --- | --- | --- |
-| `token_ids` | `[N]` | prompt + response token IDs |
-| `response_idx` | `[]` | first response-token index |
-| `attention_diagonal` | `[L,H,N]` | attention diagonal |
-| `response_row_ptr` | `[L*H*R+1]` | sparse response-query CSR pointer |
-| `response_column_indices` | `[M]` | earlier source positions |
-| `response_values` | `[M]` | retained attention weights |
+`labels.jsonl` 与 attention 文件分离：
 
-CSR 只保存 `attention > attention_floor` 的 response-query 非对角值，并且 source 必须严格早于 target。未保存的边只能解释为 `<= attention_floor`，不能解释为精确 0。
+```json
+{"sample_id":"10071","positive_runs":[[81,84],[85,87]]}
+```
 
-## 数据抽取
+`positive_runs` 是 response-relative `[start,end)`；只在 `evaluate`、`evaluate-statistics` 和 `visualize` 的最后着色阶段读取。
 
-RAGTruth 入口：
+## 1. 数据准备
+
+从原 RAGTruth + observer 模型抽取：
 
 ```bash
 python main.py extract \
   --model-path /models/Meta-Llama-3.1-8B-Instruct \
   --dataset-path /data/RAGTruth/dataset \
-  --output-dir /data/model_traces/run/test \
-  --split test \
+  --output-dir /data/RAGTruth/model_traces/llama31_8b/train \
+  --split train \
   --generator-model llama-2-7b-chat \
   --floor 0.01 \
   --device cuda
 ```
 
-`observer_model` 是执行 teacher-forcing、提供内部 attention 的模型；`generator_model` 是原始 response 的生成模型。二者会分别写入 metadata，不应混为一谈。
-
-已有正式 attention cache 可转换为同一 canonical 格式：
+已有 formal cache：
 
 ```bash
 python main.py archive-attention \
   --formal-root /path/to/formal_cache \
   --output-root /data/RAGTruth/model_traces/llama31_8b
+```
 
+校验：
+
+```bash
 python main.py verify-attention \
   --archive-root /data/RAGTruth/model_traces/llama31_8b
 ```
 
-补 research metadata：
+## 2. 全数据统计诊断
+
+这一步不训练模型，也不筛选错误样本。默认处理传入 split 的**所有 response token / 所有 response**：
 
 ```bash
-python main.py enrich-index \
-  --canonical-root /data/RAGTruth/model_traces/llama31_8b \
-  --dataset-path /data/RAGTruth/dataset
-```
-
-## 图构建
-
-图缓存始终是 topology-only；标签、hidden state 和任何学习 embedding 不写入图 PT。
-
-```bash
-python main.py build \
-  --cache-dir /data/RAGTruth/model_traces/llama31_8b/train \
-  --output-dir /data/RAGTruth/graphs/llama31_8b/relation_topk_channels/train \
-  --kind relation_topk_channels \
-  --k-prompt 8 \
-  --k-history 8 \
+python main.py statistics \
+  --canonical-split /data/RAGTruth/model_traces/llama31_8b/test \
+  --output outputs/statistics.json \
   --device cuda
 ```
 
-支持 `original`、`relation_topk`、`relation_topk_channels` 和 `hypergraph`。
-
-## Graph feature pipeline
-
-`research_dataset.py` 将 canonical CSR 解码为：
-
-```text
-(layer, head, source, target, weight)
-        ↓ aggregate same source->target
-(source, target, relation_weight, channel_count, edge_type)
-```
-
-所有手工 feature 的正式实现统一在 `graph_features.py`。
-
-`response_graph_features(sample)` 为每个 response token 提取 32D causal incoming-graph descriptor，包括：
-
-- prompt grounding；
-- response-history dependence；
-- sparsity/density；
-- edge-weight concentration；
-- history locality；
-- early/middle/late layer routing。
-
-`static_feature_blocks()` 将累计 locality 改为互斥的 `1 / 2-4 / 5-8 / 9-16 / >16` 距离区间，最终形成六个语义 block，共 33 维。
-
-`dynamic_state()` 再生成 19 个 token-to-token transition features，包括 block-wise delta、rolling deviation、source JS divergence、prompt/history source JS、neighbor turnover 和 layer-routing shift。
-
-## 单条样本可视化
-
-拉取代码后直接打开：
+冻结统计结果后才打开标签计算单特征 AUROC：
 
 ```bash
-jupyter lab notebooks/sample_analysis.ipynb
-```
-
-修改 notebook 顶部：
-
-```python
-ERROR_SAMPLE_ID = "10071"
-GENERATOR_MODEL = None
-```
-
-然后 **Restart Kernel -> Run All**。
-
-核心调用只有一个：
-
-```python
-from sample_analysis import SampleAnalysis
-
-analysis = SampleAnalysis(DATA_ROOT, output_root=OUTPUT_ROOT)
-result = analysis.visualize(sample_id)
-```
-
-输出到：
-
-```text
-outputs/sample_analysis/<sample_id>/
-```
-
-包含每个 hallucination run 的局部 PCA/t-SNE、transition curve、block deviation、same-generator correct-control null，以及 selected response 与正确 controls 的 joint projection。
-
-单样本代码职责：
-
-- `graph_features.py`：只算向量，不读 label，不选 control，不画图。
-- `sample_analysis.py`：只组织单样本实验、正确 control、统计和图。
-- notebook：只配置参数并调用 API，不实现算法。
-
-## Dataset-level visualization
-
-Graph-level：
-
-```bash
-jupyter lab notebooks/graph_tsne.ipynb
-```
-
-Node-level：
-
-```bash
-jupyter lab notebooks/node_tsne.ipynb
-```
-
-它们是不同实验，不与单样本 notebook 混用。
-
-## Paired onset validation
-
-跨样本 confirmatory analysis：
-
-```bash
-python scripts/validate_onsets.py \
+python main.py evaluate-statistics \
   --canonical-split /data/RAGTruth/model_traces/llama31_8b/test \
-  --output-dir outputs/onset_validation/test \
+  --statistics outputs/statistics.json \
+  --output outputs/statistics_evaluation.json
+```
+
+这里回答的是“哪些可解释 attention 图统计与错误有关”，不是主检测器。
+
+## 3. 无监督 GNN 训练
+
+只在 canonical **train** split 上训练。source_id 被拆为 mutually exclusive train / validation / calibration 三组；三组都不读取 hallucination label。
+
+```bash
+python main.py train \
+  --train-split /data/RAGTruth/model_traces/llama31_8b/train \
+  --output-dir outputs/model \
   --device cuda \
-  --effect-width 3 \
-  --bootstraps 10000 \
-  --permutations 10000 \
-  --rewires 100 \
-  --seed 0
+  --embedding-dim 64 \
+  --message-steps 2 \
+  --epochs 50
 ```
 
-设计与限制见 [`docs/onset_validation.md`](docs/onset_validation.md)。
+默认图是 threshold-union：只要某 layer/head retained trace 存在，该 causal token pair 就形成边。每条边仍保存所有 retained `(layer, head, value)` trace；不会先平均成一个 edge feature。也支持 `typed_mass_cover`：分别在 RP/RR 内选择覆盖指定 retained relation mass 的最小 source support，用作构图方式消融。
 
-## Tests
+训练时随机选 response targets，**同时遮蔽该 token 的 attention diagonal 与全部 incoming RP/RR edges**，再要求 GNN 重建：
 
-核心分析测试：
+1. incoming edge support；
+2. retained layer/head attention weight；
+3. attention-row distribution + censored OTHER mass；
+4. masked node attention diagonal。
+
+因此训练信号来自图自身，不来自 `positive_runs`。
+
+## 4. 冻结模型打分
+
+正式打分默认 `target-block-size=1`，即逐 token leave-one-out：
 
 ```bash
-python -m unittest \
-  tests.test_graph_features \
-  tests.test_sample_analysis \
-  tests.test_node_tsne \
-  tests.test_graph_tsne
+python main.py score \
+  --canonical-split /data/RAGTruth/model_traces/llama31_8b/test \
+  --checkpoint outputs/model/model.pt \
+  --output outputs/test_scores.npz \
+  --device cuda
 ```
 
-完整测试：
+输出包含每个 response token 的：
+
+- learned GNN embedding；
+- RP/RR support reconstruction residual；
+- RP/RR attention-weight residual；
+- row-distribution residual；
+- node-diagonal residual；
+- train-calibration median/MAD 标准化后的 anomaly score。
+
+该文件不含 label。
+
+## 5. 最终评估
 
 ```bash
-python -m unittest discover -s tests -v
+python main.py evaluate \
+  --canonical-split /data/RAGTruth/model_traces/llama31_8b/test \
+  --scores outputs/test_scores.npz \
+  --output outputs/evaluation.json
 ```
+
+只有这一步打开 `labels.jsonl`。token-level 是主指标；response-level 仅作为 secondary aggregation。
+
+## 6. Learned embedding 可视化
+
+```bash
+python main.py visualize \
+  --canonical-split /data/RAGTruth/model_traces/llama31_8b/test \
+  --scores outputs/test_scores.npz \
+  --output-dir outputs/visualization
+```
+
+t-SNE 输入是 **GNN learned node embedding**，不是 degree/entropy 等手工统计。节点采样、标准化和 t-SNE 都先完成，之后才读取 label 给同一坐标着色。
+
+## 后续核心消融
+
+主实验应围绕真正的问题逐项加入消融；当前核心代码已经支持 `message_steps=0` 和四种 support selection，其余作为下一步实现：
+
+- `message_steps=0`：没有消息传递；
+- layer/head channel mean：验证逐 channel 信息是否必要；
+- source shuffle：保持边数量/target/relation，破坏 source 对齐；
+- collapse RP/RR：验证 prompt grounding 与 response-history 路由的关系类型是否必要；
+- threshold / top-k / typed mass-cover support selection：验证构图方式。
+
+这些消融应比较同一 train/test protocol 下的 token AUROC/AUPRC，而不是通过“t-SNE 是否好看”判断方法有效。
