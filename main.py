@@ -34,7 +34,9 @@ def main(argv=None):
     p.add_argument("--generator-model", default="llama-2-7b-chat")
     p.add_argument("--task-type", default="all")
     p.add_argument("--floor", type=float, default=0.01)
-    p.add_argument("--hidden-layers", default="", help="0-based decoder layers, e.g. 7,15,23,31")
+    p.add_argument(
+        "--hidden-layers", default="", help="0-based decoder layers, e.g. 7,15,23,31"
+    )
     p.add_argument("--device", default="cuda")
     p.add_argument("--limit", type=int)
 
@@ -48,8 +50,15 @@ def main(argv=None):
 
     p = command.add_parser("enrich-index")
     p.add_argument("--canonical-root", required=True)
-    p.add_argument("--dataset-path", required=True, help="RAGTruth dataset directory containing response.jsonl and source_info.jsonl")
-    p.add_argument("--graph-root", help="optional existing graph root; refreshes graph input hashes after JSON enrichment")
+    p.add_argument(
+        "--dataset-path",
+        required=True,
+        help="RAGTruth dataset directory containing response.jsonl and source_info.jsonl",
+    )
+    p.add_argument(
+        "--graph-root",
+        help="optional existing graph root; refreshes graph input hashes after JSON enrichment",
+    )
 
     p = command.add_parser("inspect")
     p.add_argument("--artifact-dir", required=True)
@@ -64,44 +73,68 @@ def main(argv=None):
     p.add_argument("--tau", type=float, default=0.05)
     p.add_argument("--k-prompt", type=int, default=8)
     p.add_argument("--k-history", type=int, default=8)
+    p.add_argument(
+        "--mass-cover",
+        type=float,
+        default=0.80,
+        help="minimum cumulative mass retained independently for RP and RR",
+    )
+    p.add_argument(
+        "--relay-discount",
+        type=float,
+        default=0.85,
+        help="discount for multi-hop prompt ancestry through response history",
+    )
     p.add_argument("--device", default="cuda")
     p.add_argument("--limit", type=int)
 
     args = parser.parse_args(argv)
     if args.command == "extract":
-        result = AttentionExtractor(ExtractionConfig(
-            args.model_path,
-            args.dataset_path,
-            args.output_dir,
-            args.split,
-            args.generator_model,
-            args.task_type,
-            args.floor,
-            _layers(args.hidden_layers),
-            args.device,
-            args.limit,
-        )).run()
+        result = AttentionExtractor(
+            ExtractionConfig(
+                args.model_path,
+                args.dataset_path,
+                args.output_dir,
+                args.split,
+                args.generator_model,
+                args.task_type,
+                args.floor,
+                _layers(args.hidden_layers),
+                args.device,
+                args.limit,
+            )
+        ).run()
     elif args.command == "archive-attention":
-        result = AttentionArchiveConverter(ArchiveConfig(args.formal_root, args.output_root)).run()
+        result = AttentionArchiveConverter(
+            ArchiveConfig(args.formal_root, args.output_root)
+        ).run()
     elif args.command == "archive-features":
-        result = TraceArchiveConverter(TraceArchiveConfig(args.trace_dir, args.output_dir)).run()
+        result = TraceArchiveConverter(
+            TraceArchiveConfig(args.trace_dir, args.output_dir)
+        ).run()
     elif args.command == "enrich-index":
-        result = enrich_ragtruth_indices(args.canonical_root, args.dataset_path, args.graph_root)
+        result = enrich_ragtruth_indices(
+            args.canonical_root, args.dataset_path, args.graph_root
+        )
     elif args.command == "inspect":
         result = ArtifactInspector(args.artifact_dir).run()
     elif args.command == "verify-attention":
         result = AttentionArchiveVerifier(args.archive_root).run()
     else:
-        result = GraphDatasetBuilder(BuildConfig(
-            args.cache_dir,
-            args.output_dir,
-            args.kind,
-            args.tau,
-            args.k_prompt,
-            args.k_history,
-            args.device,
-            args.limit,
-        )).run()
+        result = GraphDatasetBuilder(
+            BuildConfig(
+                args.cache_dir,
+                args.output_dir,
+                args.kind,
+                args.tau,
+                args.k_prompt,
+                args.k_history,
+                args.device,
+                args.limit,
+                args.mass_cover,
+                args.relay_discount,
+            )
+        ).run()
     print(json.dumps(result, indent=2))
 
 
