@@ -30,8 +30,10 @@ z_t=[A_t(d_1),\ldots,A_t(d_m)].
 
 若单独研究 $C_t$，必须作为另一次实验运行，不允许与 $A_t$ 拼接。未观测质量
 曲线单独用于检查 cache censoring，不拼入 $z_t$。Train token 上
-使用 robust scaling 和 BIC-selected diagonal GMM 发现结构模式，不使用标签和
-反向传播。模式、t-SNE 坐标及代表性 ego graph 冻结后，才读取 test token
+使用 robust scaling 和 K-Means 发现曲线原型，候选模式数通过
+Davies--Bouldin 指标选择，不使用标签和反向传播。K-Means 不估计协方差，因而
+适用于包含大量相同或近似相同曲线的节点集合。模式、t-SNE 坐标及代表性 ego
+graph 冻结后，才读取 test token
 labels 计算各模式的 hallucination enrichment，并比较正确/幻觉响应图的模式占比
 与相邻 token 模式转移。
 

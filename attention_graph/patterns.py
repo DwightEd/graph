@@ -21,7 +21,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from sklearn.mixture import GaussianMixture
+from sklearn.cluster import KMeans
+from sklearn.metrics import davies_bouldin_score
 from sklearn.neighbors import NearestNeighbors
 from tqdm.auto import tqdm
 
@@ -289,34 +290,42 @@ def _reference_indices(count, maximum, seed):
 
 
 def _fit_patterns(train, config):
-    reference = train[
+    reference = np.asarray(train[
         _reference_indices(len(train), config.fit_reference_size, config.seed)
-    ]
-    upper = min(config.max_patterns, len(reference) - 1)
+    ], dtype=np.float64)
+    unique_count = len(np.unique(reference, axis=0))
+    upper = min(config.max_patterns, unique_count)
     if upper < config.min_patterns:
-        raise ValueError("not enough training nodes for pattern discovery")
-    candidates, bic = {}, {}
+        raise ValueError(
+            "the selected provenance curve has fewer than two distinct train "
+            "patterns; use the other signature view or inspect the graph threshold"
+        )
+    candidates, scores = {}, {}
     print(
-        f"[3/4] BIC pattern selection on {len(reference)} train nodes",
+        f"[3/4] curve-prototype selection on {len(reference)} train nodes "
+        f"({unique_count} distinct curves)",
         flush=True,
     )
-    for components in tqdm(
+    for clusters in tqdm(
         range(config.min_patterns, upper + 1),
-        desc="[3/4] diagonal GMM candidates",
+        desc="[3/4] K-Means candidates",
         unit="model",
         dynamic_ncols=True,
     ):
-        model = GaussianMixture(
-            n_components=components,
-            covariance_type="diag",
-            reg_covar=1e-5,
-            n_init=3,
+        model = KMeans(
+            n_clusters=clusters,
+            n_init=20,
+            max_iter=500,
             random_state=config.seed,
         ).fit(reference)
-        candidates[components] = model
-        bic[components] = float(model.bic(reference))
-    selected = min(bic, key=bic.get)
-    return candidates[selected], bic
+        if len(np.unique(model.labels_)) != clusters:
+            continue
+        candidates[clusters] = model
+        scores[clusters] = float(davies_bouldin_score(reference, model.labels_))
+    if not candidates:
+        raise ValueError("K-Means could not recover two distinct curve prototypes")
+    selected = min(scores, key=scores.get)
+    return candidates[selected], scores
 
 
 def _remap_patterns(labels, raw_centroids):
@@ -800,18 +809,19 @@ def discover_provenance_patterns(
     center, scale = _robust_fit(train_signature)
     train_scaled = (train_signature - center) / scale
     test_scaled = (test_signature - center) / scale
-    model, bic = _fit_patterns(train_scaled, config)
-    raw_pattern = model.predict(test_scaled)
-    raw_centroids = model.means_ * scale + center
+    model, selection_scores = _fit_patterns(train_scaled, config)
+    test_distances = model.transform(np.asarray(test_scaled, dtype=np.float64))
+    raw_pattern = np.argmin(test_distances, axis=1)
+    raw_centroids = model.cluster_centers_ * scale + center
     patterns, centroids, order = _remap_patterns(raw_pattern, raw_centroids)
-    anomaly_score = -model.score_samples(test_scaled)
+    anomaly_score = test_distances.min(axis=1)
     coordinates, projection = _landmark_tsne(test_scaled, config)
 
     # Everything up to this point is label-blind.  Persist it before opening
     # the evaluation sidecar so the experimental boundary is auditable.
     np.savez_compressed(
         output / "node_signatures_label_free.npz",
-        schema=np.asarray("layer-provenance-pattern-v2"),
+        schema=np.asarray("layer-provenance-pattern"),
         signature=test_signature,
         unresolved_control=unresolved,
         pattern=patterns.astype(np.int16),
@@ -829,13 +839,16 @@ def discover_provenance_patterns(
         generator_model=metadata["generator_model"].astype(str),
     )
     label_free_report = {
-        "schema": "layer-provenance-pattern-v2",
+        "schema": "layer-provenance-pattern",
         "labels_read": False,
         "signature_view": config.signature_view,
         "train_nodes": int(len(train_signature)),
         "test_nodes": int(len(test_signature)),
-        "patterns": int(model.n_components),
-        "bic_by_pattern_count": {str(key): value for key, value in bic.items()},
+        "patterns": int(model.n_clusters),
+        "pattern_selection_metric": "davies_bouldin_lower_is_better",
+        "selection_score_by_pattern_count": {
+            str(key): value for key, value in selection_scores.items()
+        },
         "projection": projection,
         "centroids": [
             {
@@ -851,7 +864,7 @@ def discover_provenance_patterns(
     )
 
     # Prototype selection is also label-blind.
-    ordered_centroids_scaled = model.means_[order]
+    ordered_centroids_scaled = model.cluster_centers_[order]
     prototype_ids = _prototype_indices(test_scaled, patterns, ordered_centroids_scaled)
     prototype_root = output / "prototype_graphs"
     prototype_root.mkdir(exist_ok=True)
@@ -961,5 +974,5 @@ def discover_provenance_patterns(
         "prototype_graphs": str(prototype_root),
         "response_graph_modes": str(output / "response_graph_pattern_modes.png"),
         "test_nodes": int(len(test_signature)),
-        "patterns": int(model.n_components),
+        "patterns": int(model.n_clusters),
     }

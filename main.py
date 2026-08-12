@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 
-from archive import AttentionArchiveConverter, AttentionArchiveVerifier, ArchiveConfig
 from attention_graph.evaluate import evaluate_scores
 from attention_graph.graph import GraphBuildConfig
 from attention_graph.mart import fit_mart, score_mart
@@ -56,13 +55,6 @@ def parse_args(argv=None):
     p.add_argument("--floor", type=float, default=0.01)
     p.add_argument("--device", default="cuda")
     p.add_argument("--limit", type=int)
-
-    p = sub.add_parser("archive-attention", help="formal RAGTruth cache -> canonical train/test")
-    p.add_argument("--formal-root", required=True)
-    p.add_argument("--output-root", required=True)
-
-    p = sub.add_parser("verify-attention")
-    p.add_argument("--archive-root", required=True)
 
     p = sub.add_parser("enrich-index")
     p.add_argument("--canonical-root", required=True)
@@ -169,10 +161,6 @@ def main(argv=None):
             args.model_path, args.dataset_path, args.output_dir, args.split,
             args.generator_model, args.task_type, args.floor, args.device, args.limit,
         )).run()
-    elif args.command == "archive-attention":
-        result = AttentionArchiveConverter(ArchiveConfig(args.formal_root, args.output_root)).run()
-    elif args.command == "verify-attention":
-        result = AttentionArchiveVerifier(args.archive_root).run()
     elif args.command == "enrich-index":
         result = enrich_ragtruth_indices(args.canonical_root, args.dataset_path)
     elif args.command == "train":

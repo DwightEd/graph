@@ -187,7 +187,7 @@ def save_mart(detector, path, *, provenance=None):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(path,
-        schema=np.asarray("mart-detector-v2"),
+        schema=np.asarray("mart-detector"),
         feature_names=np.asarray(MART_FEATURES),
         ema_alpha=np.asarray(MART_EMA_ALPHA),
         neighbors=np.asarray(detector.neighbors),
@@ -216,7 +216,7 @@ def save_mart(detector, path, *, provenance=None):
 
 def load_mart(path):
     with np.load(Path(path), allow_pickle=False) as values:
-        if values["schema"].item() != "mart-detector-v2":
+        if values["schema"].item() != "mart-detector":
             raise ValueError("unsupported MART checkpoint")
         if tuple(values["feature_names"].tolist()) != MART_FEATURES:
             raise ValueError("MART checkpoint feature semantics differ from this code")

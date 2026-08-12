@@ -239,14 +239,10 @@ class FormalResearchDataset:
     """
 
     def __init__(self, split_root, *, device="cpu", retain_labels=False):
-        from archive import _formal_manifest
+        from formal_cache import read_formal_manifest
 
         self.root = Path(split_root)
-        raw_manifest = json.loads(
-            (self.root / "manifest.json").read_text(encoding="utf-8")
-        )
-        split = str(raw_manifest["attention_cache_spec"]["split"]).casefold()
-        formal_manifest, spec, files = _formal_manifest(self.root, split)
+        formal_manifest, spec, files, split = read_formal_manifest(self.root)
         self.device = device
         self.split_name = split
         self.spec = spec
@@ -318,14 +314,13 @@ class FormalResearchSample:
     def _load(self):
         if self._attention is not None:
             return
-        from archive import _load_formal
+        from formal_cache import load_formal_sample
 
-        sample, labels, payload = _load_formal(
+        sample, labels, payload = load_formal_sample(
             self.row["path"],
             self.row["sha256"],
             split=self.dataset.split_name,
             spec=self.dataset.spec,
-            return_payload=True,
         )
         if sample.sample_id != self.sample_id:
             raise ValueError(

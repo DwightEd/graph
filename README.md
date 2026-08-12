@@ -44,6 +44,8 @@ response_values
 live-response concentration 只能用 `SIGNATURE_VIEW=response_concentration`
 作为独立实验运行，两者不会拼接。cache 未观察质量作为独立控制曲线，不进入
 聚类或 t-SNE。模式、坐标和代表节点冻结后才读取 test token labels。
+Train 节点使用 K-Means 形成曲线原型，模式数在 2--6 中按
+Davies--Bouldin 指标选择；不估计协方差，因此重复曲线不会导致分量崩溃。
 
 ```bash
 bash run_provenance_patterns.sh

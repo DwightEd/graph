@@ -6,6 +6,7 @@ import torch
 from attention_graph.graph import AttentionGraph, GraphBuildConfig, RP, RR
 from attention_graph.patterns import (
     PatternDiscoveryConfig,
+    _fit_patterns,
     _landmark_tsne,
     _response_graph_report,
     provenance_curves,
@@ -74,6 +75,33 @@ class ProvenanceCurveTests(unittest.TestCase):
 
 
 class PatternProjectionTests(unittest.TestCase):
+    def test_repeated_curves_do_not_collapse_pattern_fitting(self):
+        values = np.repeat(
+            np.asarray(
+                [
+                    [0.0, 0.0, 0.0],
+                    [0.0, 0.5, 1.0],
+                    [1.0, 1.0, 1.0],
+                ],
+                dtype=np.float32,
+            ),
+            repeats=[40, 30, 30],
+            axis=0,
+        )
+        model, scores = _fit_patterns(
+            values,
+            PatternDiscoveryConfig(
+                checkpoints=3,
+                min_patterns=2,
+                max_patterns=6,
+                fit_reference_size=100,
+                tsne_landmarks=20,
+            ),
+        )
+        self.assertGreaterEqual(model.n_clusters, 2)
+        self.assertLessEqual(model.n_clusters, 3)
+        self.assertTrue(all(np.isfinite(list(scores.values()))))
+
     def test_cli_exposes_training_free_pattern_discovery(self):
         args = parse_args([
             "discover-patterns",

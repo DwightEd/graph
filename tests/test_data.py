@@ -5,8 +5,8 @@ from pathlib import Path
 
 import torch
 
-from archive import FORMAL_SCHEMA, _fingerprint
 from cache import AttentionSample, index_row, save_attention_sample, sha256, verify_split, write_split_index
+from formal_cache import FORMAL_CACHE_SCHEMA, formal_fingerprint
 from research_dataset import ResearchDataset, open_research_dataset
 
 
@@ -48,7 +48,7 @@ class DataTests(unittest.TestCase):
             root = Path(directory)
             name = "attention_r1.pt"
             spec = {
-                "attention_cache_schema": FORMAL_SCHEMA,
+                "attention_cache_schema": FORMAL_CACHE_SCHEMA,
                 "split": "test",
                 "cache_dtype": "torch.float16",
                 "attention_floor": 0.01,
@@ -56,9 +56,9 @@ class DataTests(unittest.TestCase):
                 "num_attention_heads": 1,
                 "model_path": "/models/observer",
             }
-            fingerprint = _fingerprint(spec)
+            fingerprint = formal_fingerprint(spec)
             payload = {
-                "attention_cache_schema": FORMAL_SCHEMA,
+                "attention_cache_schema": FORMAL_CACHE_SCHEMA,
                 "attention_cache_fingerprint": fingerprint,
                 "response_id": "r1",
                 "source_id": "s1",
