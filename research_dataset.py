@@ -172,11 +172,12 @@ class LabelStore:
         if len(self.rows) != len(rows) or set(self.rows) != set(dataset.rows):
             raise ValueError("label/canonical sample ID sets do not match")
 
-    def positive_runs(self, sample_id):
+    def positive_runs(self, sample_id, *, response_count=None):
         runs = self.rows[str(sample_id)].get("positive_runs", [])
         previous_end = 0
         normalized = []
-        response_count = self.dataset[str(sample_id)].attention().num_response_tokens
+        if response_count is None:
+            response_count = self.dataset[str(sample_id)].attention().num_response_tokens
         for run in runs:
             if len(run) != 2:
                 raise ValueError("each positive run must contain [start, end)")
@@ -195,7 +196,9 @@ class LabelStore:
             dtype=torch.long,
             device=attention.token_ids.device,
         )
-        for start, end in self.positive_runs(sample.sample_id):
+        for start, end in self.positive_runs(
+            sample.sample_id, response_count=attention.num_response_tokens
+        ):
             labels[start:end] = 1
         return labels
 

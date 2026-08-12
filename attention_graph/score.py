@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from tqdm import tqdm
 
 from .graph import GraphBuildConfig, build_attention_graph
 from .model import MaskedAttentionAutoencoder, full_view, reconstruction_energy_by_node, target_masked_view
@@ -184,29 +185,30 @@ def load_score_records(path):
         missing = required.difference(arrays.files)
         if missing:
             raise ValueError(f"score artifact is missing {sorted(missing)}")
-        count = len(arrays["score"])
+        values = {name: arrays[name] for name in arrays.files}
+        count = len(values["score"])
         representation = (
-            str(arrays["representation"].item())
-            if "representation" in arrays.files
+            str(values["representation"].item())
+            if "representation" in values
             else "unspecified_embedding"
         )
         records = []
-        for row in range(count):
+        for row in tqdm(range(count), desc="load frozen scores", unit="token"):
             record = {
-                "embedding": arrays["embedding"][row].astype(np.float32, copy=False),
-                "score": float(arrays["score"][row]),
-                "sample_id": str(arrays["sample_id"][row]),
-                "source_id": str(arrays["source_id"][row]),
-                "token_index": int(arrays["token_index"][row]),
+                "embedding": values["embedding"][row].astype(np.float32, copy=False),
+                "score": float(values["score"][row]),
+                "sample_id": str(values["sample_id"][row]),
+                "source_id": str(values["source_id"][row]),
+                "token_index": int(values["token_index"][row]),
                 "representation": representation,
             }
             for field in ("task_type", "data_source", "generator_model"):
-                if field in arrays.files:
-                    record[field] = str(arrays[field][row])
+                if field in values:
+                    record[field] = str(values[field][row])
             for name in SCORE_COMPONENTS:
                 for prefix in ("residual", "z"):
                     field = f"{prefix}_{name}"
-                    if field in arrays.files:
-                        record[field] = float(arrays[field][row])
+                    if field in values:
+                        record[field] = float(values[field][row])
             records.append(record)
     return records

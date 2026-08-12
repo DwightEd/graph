@@ -1,16 +1,21 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import torch
 
-from cache import AttentionSample, index_row, save_attention_sample, sha256, write_split_index
+from cache import (
+    AttentionSample, index_row, load_attention_sample, save_attention_sample, sha256,
+    write_split_index,
+)
 from attention_graph.evaluate import evaluate_scores
 from attention_graph.mart import (
     MART_FEATURES, MartDetector, fit_mart, mart_features, load_mart, score_mart,
     save_mart,
 )
+from attention_graph.score import load_score_records
 from main import parse_args
 from research_dataset import ResearchDataset
 
@@ -198,10 +203,47 @@ class MartPipelineTests(unittest.TestCase):
             checkpoint, scores, report = root / "mart.npz", root / "scores.npz", root / "report.json"
             fit_mart(ResearchDataset(train_root), output_path=checkpoint, neighbors=1, position_bins=1)
             score_mart(ResearchDataset(test_root), checkpoint=checkpoint, output_path=scores)
-            result = evaluate_scores(ResearchDataset(test_root), score_path=scores, output_path=report)
+            with mock.patch(
+                "research_dataset.load_attention_sample", wraps=load_attention_sample
+            ) as loader:
+                result = evaluate_scores(
+                    ResearchDataset(test_root), score_path=scores, output_path=report
+                )
             self.assertEqual(result["token"]["overall"]["n"], 2)
+            self.assertEqual(loader.call_count, 1)
             with np.load(scores, allow_pickle=False) as artifact:
                 self.assertEqual(artifact["representation"].item(), "mart_mechanism_pca_embedding")
+
+    def test_score_loader_decompresses_each_npz_array_once(self):
+        class CountingArchive:
+            def __init__(self):
+                self.values = {
+                    "representation": np.asarray("mart_mechanism_pca_embedding"),
+                    "embedding": np.zeros((2, 3), dtype=np.float32),
+                    "score": np.zeros(2, dtype=np.float32),
+                    "sample_id": np.asarray(["a", "a"]),
+                    "source_id": np.asarray(["s", "s"]),
+                    "token_index": np.asarray([0, 1], dtype=np.int32),
+                }
+                self.files = list(self.values)
+                self.reads = {name: 0 for name in self.files}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return None
+
+            def __getitem__(self, name):
+                self.reads[name] += 1
+                if self.reads[name] > 1:
+                    raise AssertionError(f"{name} was decompressed more than once")
+                return self.values[name]
+
+        archive = CountingArchive()
+        with mock.patch("attention_graph.score.np.load", return_value=archive):
+            records = load_score_records("unused.npz")
+        self.assertEqual(len(records), 2)
 
 
 if __name__ == "__main__":

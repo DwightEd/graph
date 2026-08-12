@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 from sklearn.metrics import average_precision_score, roc_auc_score
+from tqdm import tqdm
 
 from .score import SCORE_COMPONENTS, load_score_records
 
@@ -34,26 +35,28 @@ def _ranking(labels, scores):
 
 def _attach_labels(dataset, records):
     store = dataset.labels()
-    cache = {}
-    output = []
-    for record in records:
+    by_sample = defaultdict(dict)
+    for record in tqdm(records, desc="index frozen scores", unit="token"):
         sample_id = str(record["sample_id"])
-        if sample_id not in cache:
-            sample = dataset[sample_id]
-            cache[sample_id] = store.response_labels(sample).cpu().numpy()
-            sample.release_attention()
-        index = int(record["token_index"])
-        if not 0 <= index < len(cache[sample_id]):
-            raise ValueError("score token index is outside the response")
-        output.append({**record, "label": int(cache[sample_id][index])})
-    expected = {
-        (sample_id, index)
-        for sample_id in dataset.sample_ids
-        for index in range(dataset[sample_id].attention().num_response_tokens)
-    }
-    observed = {(str(row["sample_id"]), int(row["token_index"])) for row in output}
-    if observed != expected:
-        raise ValueError("frozen score artifact does not cover the canonical split exactly")
+        token_index = int(record["token_index"])
+        if token_index in by_sample[sample_id]:
+            raise ValueError("frozen score artifact contains duplicate token rows")
+        by_sample[sample_id][token_index] = record
+    if set(by_sample) != set(dataset.sample_ids):
+        raise ValueError("frozen score artifact sample IDs do not match canonical split")
+
+    output = []
+    for sample_id in tqdm(dataset.sample_ids, desc="attach evaluation labels", unit="sample"):
+        sample = dataset[sample_id]
+        response_labels = store.response_labels(sample).cpu().numpy()
+        sample_records = by_sample[sample_id]
+        if set(sample_records) != set(range(len(response_labels))):
+            raise ValueError("frozen score artifact does not cover the response exactly")
+        output.extend(
+            {**sample_records[index], "label": int(response_labels[index])}
+            for index in range(len(response_labels))
+        )
+        sample.release_attention()
     return output
 
 
@@ -76,6 +79,7 @@ def _response_records(records):
 def evaluate_scores(dataset, *, score_path, output_path):
     """Load labels only after embeddings and anomaly scores are frozen."""
     records = _attach_labels(dataset, load_score_records(score_path))
+    print("compute evaluation metrics", flush=True)
     labels = np.asarray([row["label"] for row in records])
     report = {
         "schema": "attention-graph-evaluation-v1",
