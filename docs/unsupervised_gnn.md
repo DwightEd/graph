@@ -1,0 +1,73 @@
+# Unsupervised attention-GNN experiment
+
+## What is being tested
+
+The experiment asks whether the concrete attention adjacency, edge weights, RP/RR
+relation, and layer/head channel identity contain hallucination signal after learned
+message passing. It does not treat a list of hand-crafted scalars as a graph model.
+
+The encoder reads every retained canonical CSR trace as
+`(source, target, layer, head, weight)`. It masks part of the support and channel
+payload, aggregates the visible graph, and reconstructs only the hidden content.
+The distribution objective predicts masked traces plus the censored `OTHER` mass,
+conditioned on the support that remains visible.
+The resulting response-token vector is therefore trained to retain information about
+the graph rather than the labels.
+
+The anomaly head is fitted after the encoder is frozen. A shifted one-way GRU gives
+each token only its preceding embeddings. A multi-component diagonal Student-t
+density represents multiple common generation modes; a fixed wide-tailed component
+limits contamination during fitting. The reported score is the calibrated tail of
+the inlier negative log-likelihood.
+Within each outer fold, source groups used for empirical-tail calibration are held
+out from density fitting; the outer held-out fold is never used for either fit.
+
+## Data and label boundary
+
+Training uses every sample in a source-grouped fold split. Correct and hallucinated
+responses are both present, but `labels.jsonl` is not opened by graph construction,
+self-supervised training, density fitting, calibration, or OOF scoring. Labels are
+opened once, after all held-out embeddings and scores exist, for metrics and plot
+colors.
+
+The evaluator reports every OOF response token, not only onset events or erroneous
+answers. Alongside AUROC/AUPRC it reports correct and hallucination score medians and
+a source-bootstrap confidence interval for their mean score difference, overall and
+by task, data source, and generator.
+
+The current canonical attention archive is sufficient. Do not build a duplicate dense
+adjacency matrix or a second learned-feature graph cache.
+
+Passing the canonical `test` split runs a transductive, label-blind OOF analysis on
+that population; it is not an inductive train-to-test generalization result. Develop
+and lock choices on `train`, and reserve a later train-fit/test-score run for the
+final generalization claim.
+
+## Outputs
+
+The foreground entry point writes:
+
+- `<variant>/results.npz`: one row per response token with learned embedding, OOF score, fold,
+  sample/source IDs, token position, and evaluation label;
+- `summary.json`: overall metrics and paired full-minus-ablation confidence intervals;
+- `<variant>/embedding_fold_k.png` and `.npz`: one fold-local learned-embedding
+  projection and its exact coordinates.
+
+The required graph controls run through the same OOF evaluator: `no_message` removes
+neighbor aggregation, `rewired` changes legal source routing while retaining each
+edge payload/target, and `channel_mean` removes layer/head identity. The full model
+can be attributed to graph routing only if it beats these controls under paired
+source bootstrap.
+
+PCA coordinates from different OOF models must not be concatenated: independently
+trained latent spaces can rotate. Each fold visualization fits PCA on that fold's
+training embeddings and only transforms its held-out embeddings.
+
+## Interpretation of the previous onset statistics
+
+The paired result (`prompt_mass_share` up and normalized entropy down) is evidence for
+which attention information should not be discarded. It is not evidence that a GNN
+works, and it is not an all-token detector. `history_lag`, density, and coarse topology
+were not supported by that scalar test. The new experiment therefore preserves
+prompt/history relation and channel weights but requires learned aggregation to beat
+scalar, no-message, and source-rewired baselines before making a graph-mechanism claim.

@@ -261,6 +261,10 @@ class ResearchSample:
         self._attention = sample
         return sample
 
+    def release_attention(self):
+        """Release the cached trace after a streaming GPU consumer finishes."""
+        self._attention = None
+
     def hidden(self):
         hidden = load_hidden_features(
             self.dataset.root / "hidden" / f"{self.sample_id}.npz",

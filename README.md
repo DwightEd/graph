@@ -1,5 +1,53 @@
 # Attention Graph Lab
 
+## Primary unsupervised path
+
+The main experiment now consumes the canonical sparse attention CSR directly:
+
+```text
+canonical CSR
+-> relation/channel-aware directed GNN
+-> masked support, channel-weight, and row-distribution reconstruction
+-> learned response-token embeddings
+-> contamination-aware causal Student-t mixture
+-> source-grouped out-of-fold scores
+-> labels loaded only for final metrics and coloring
+```
+
+Core modules:
+
+- `attention_gnn.py`: sparse layer/head traces, masking, message passing, and reconstruction.
+- `anomaly.py`: causal multi-mode density and empirical-tail calibration.
+- `unsupervised_experiment.py`: label-blind training, source-group OOF records, and fold-local PCA.
+- `unsupervised_main.py`: foreground command for a complete run.
+
+Install the extraction and analysis dependencies in the active environment:
+
+```bash
+pip install -r requirements.txt -r requirements-analysis.txt
+```
+
+Run the development experiment on the canonical RAGTruth train split; no prebuilt
+graph cache is required:
+
+```bash
+python unsupervised_main.py \
+  --canonical-split /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b/train \
+  --output-dir outputs/unsupervised_gnn/ragtruth_train_oof \
+  --device cuda \
+  --folds 5 \
+  --embedding-dim 32 \
+  --message-steps 2 \
+  --epochs 20 \
+  --density-steps 75
+```
+
+`node_tsne.py`, `graph_tsne.py`, and the paired onset analysis remain scalar-feature
+baselines/diagnostics. They do not train or visualize the learned GNN representation.
+The main command writes separate `full/`, `no_message/`, `rewired/`, and
+`channel_mean/` result directories plus `summary.json`; the fold-local PCA PNG and
+its exact coordinates are saved together in each variant directory.
+
 本仓库把 LLM attention 保存成可校验的 canonical archive，并在同一份数据上进行图构建、结构特征分析和幻觉 onset 验证。
 
 ## 模块职责
