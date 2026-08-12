@@ -10,6 +10,7 @@ from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
 from descriptors import temporal_summary
+from graph_features import basic_structural_features
 from research_dataset import ResearchDataset
 
 
@@ -48,7 +49,7 @@ class GraphTSNEAnalysis:
         for sample in tqdm(dataset, desc="t-SNE descriptors", unit="sample"):
             attention = sample.attention()
             graph = sample.original_graph(self.tau) if self.graph_root is None else sample.graph("graph")
-            topology = sample.structural_features(graph)
+            topology = basic_structural_features(attention, sample.relation_edges(graph))
             node_features = sample.node_features(self.node_feature_mode)
             sample_ids.append(sample.sample_id)
             response_tokens.append(attention.num_response_tokens)
@@ -102,7 +103,8 @@ class GraphTSNEAnalysis:
         values = matrix if pre_scaled else self._scale(matrix)
         if values.shape[1] > 50:
             values = PCA(
-                n_components=min(50, values.shape[0], values.shape[1]), random_state=self.seed
+                n_components=min(50, values.shape[0], values.shape[1]),
+                random_state=self.seed,
             ).fit_transform(values)
         return TSNE(
             n_components=2,
