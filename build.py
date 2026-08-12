@@ -11,13 +11,21 @@ import torch
 from tqdm import tqdm
 
 from cache import AttentionDataset, sha256
+from evidence_graph import EvidenceGraphConfig, build_evidence_graph
 from graphs import build_original_graph, build_relation_topk_graph
 from hypergraph import build_attention_hypergraph
 
 
-GRAPH_KINDS = ("original", "relation_topk", "relation_topk_channels", "hypergraph")
+GRAPH_KINDS = (
+    "original",
+    "relation_topk",
+    "relation_topk_channels",
+    "hypergraph",
+    "evidence_mass_cover",
+)
 TOKEN_GRAPH_SCHEMA = "ragtruth-token-graph-v1"
 HYPERGRAPH_SCHEMA = "ragtruth-attention-hypergraph-v1"
+EVIDENCE_GRAPH_SCHEMA = "ragtruth-evidence-flow-graph-v1"
 
 
 @dataclass(frozen=True)
@@ -30,6 +38,8 @@ class BuildConfig:
     k_history: int = 8
     device: str = "cuda"
     limit: int | None = None
+    mass_cover: float = 0.80
+    relay_discount: float = 0.85
 
 
 class GraphDatasetBuilder:
@@ -58,7 +68,10 @@ class GraphDatasetBuilder:
             graph = self._build(sample)
             path = graphs_dir / f"{sample.sample_id}.pt"
             torch.save(
-                {k: v.detach().cpu() if torch.is_tensor(v) else v for k, v in graph.to_dict().items()},
+                {
+                    key: value.detach().cpu() if torch.is_tensor(value) else value
+                    for key, value in graph.to_dict().items()
+                },
                 path,
             )
             row = {
@@ -81,12 +94,14 @@ class GraphDatasetBuilder:
             "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8"
         )
         index_sha256 = sha256(index)
-        if (input_manifest_sha256 != sha256(cache / "manifest.json")
-                or input_index_sha256 != sha256(cache / "index.jsonl")):
+        if (
+            input_manifest_sha256 != sha256(cache / "manifest.json")
+            or input_index_sha256 != sha256(cache / "index.jsonl")
+        ):
             raise ValueError("input manifest or index changed during graph build")
         manifest = {
-            "schema": HYPERGRAPH_SCHEMA if self.config.kind == "hypergraph" else TOKEN_GRAPH_SCHEMA,
-            "representation": "sparse_attention_hypergraph" if self.config.kind == "hypergraph" else "sparse_causal_token_graph",
+            "schema": self._schema(),
+            "representation": self._representation(),
             "kind": self.config.kind,
             "count": len(rows),
             "attention_floor": dataset.attention_floor,
@@ -107,25 +122,72 @@ class GraphDatasetBuilder:
         if self.config.kind == "original":
             return build_original_graph(sample, self.config.tau)
         if self.config.kind == "relation_topk":
-            return build_relation_topk_graph(sample, self.config.k_prompt, self.config.k_history, False)
+            return build_relation_topk_graph(
+                sample, self.config.k_prompt, self.config.k_history, False
+            )
         if self.config.kind == "relation_topk_channels":
-            return build_relation_topk_graph(sample, self.config.k_prompt, self.config.k_history, True)
+            return build_relation_topk_graph(
+                sample, self.config.k_prompt, self.config.k_history, True
+            )
         if self.config.kind == "hypergraph":
             return build_attention_hypergraph(sample, self.config.tau)
+        if self.config.kind == "evidence_mass_cover":
+            return build_evidence_graph(
+                sample,
+                EvidenceGraphConfig(
+                    mass_cover=self.config.mass_cover,
+                    relay_discount=self.config.relay_discount,
+                ),
+            )
         raise ValueError(f"unknown graph kind: {self.config.kind}")
 
     def _validate_config(self) -> None:
         if self.config.kind not in GRAPH_KINDS:
             raise ValueError(f"unknown graph kind: {self.config.kind}")
-        if not isinstance(self.config.tau, Real) or isinstance(self.config.tau, bool) or not math.isfinite(self.config.tau) or not 0 < self.config.tau <= 1:
+        if (
+            not isinstance(self.config.tau, Real)
+            or isinstance(self.config.tau, bool)
+            or not math.isfinite(self.config.tau)
+            or not 0 < self.config.tau <= 1
+        ):
             raise ValueError("tau must be finite and in (0, 1]")
-        for name, value in (("k_prompt", self.config.k_prompt), ("k_history", self.config.k_history)):
+        for name, value in (
+            ("k_prompt", self.config.k_prompt),
+            ("k_history", self.config.k_history),
+        ):
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 raise ValueError(f"{name} must be a non-negative integer")
-        if self.config.limit is not None and (not isinstance(self.config.limit, int) or isinstance(self.config.limit, bool) or self.config.limit < 1):
+        if self.config.limit is not None and (
+            not isinstance(self.config.limit, int)
+            or isinstance(self.config.limit, bool)
+            or self.config.limit < 1
+        ):
             raise ValueError("limit must be a positive integer")
+        EvidenceGraphConfig(
+            self.config.mass_cover, self.config.relay_discount
+        ).validate()
 
     def _parameters(self) -> dict[str, float | int]:
         if self.config.kind in ("original", "hypergraph"):
             return {"tau": self.config.tau}
+        if self.config.kind == "evidence_mass_cover":
+            return {
+                "mass_cover": self.config.mass_cover,
+                "relay_discount": self.config.relay_discount,
+                "support_policy": "minimum typed support covering relation mass",
+            }
         return {"k_prompt": self.config.k_prompt, "k_history": self.config.k_history}
+
+    def _schema(self) -> str:
+        if self.config.kind == "hypergraph":
+            return HYPERGRAPH_SCHEMA
+        if self.config.kind == "evidence_mass_cover":
+            return EVIDENCE_GRAPH_SCHEMA
+        return TOKEN_GRAPH_SCHEMA
+
+    def _representation(self) -> str:
+        if self.config.kind == "hypergraph":
+            return "sparse_attention_hypergraph"
+        if self.config.kind == "evidence_mass_cover":
+            return "typed_mass_cover_graph_with_prompt_provenance"
+        return "sparse_causal_token_graph"
