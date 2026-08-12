@@ -68,7 +68,7 @@
 
 ## Compute and Data Budget
 
-- MART：16 维 token 表征；特征可在 GPU 计算，密度拟合在 CPU/scikit-learn。
+- MART：26 个原始 token 量；relative position 只用于分箱，其余 25 维进入 PCA/kNN。特征可在 GPU 计算，密度拟合在 CPU/scikit-learn。
 - GNN：RTX 4090，3 seeds 只用于通过 M1 后的决定性比较。
 - 最大瓶颈：kNN 训练参考向量与精确逐 token leave-one-out GNN 打分。
 
