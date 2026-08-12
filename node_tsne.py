@@ -7,16 +7,12 @@ from pathlib import Path
 
 import numpy as np
 
-from research_dataset import STRUCTURAL_FEATURE_NAMES, ResearchDataset
+from graph_features import BASIC_FEATURE_NAMES, basic_structural_features
+from research_dataset import ResearchDataset
 
 
 class NodeTSNEVisualizer:
-    """Project response-token structural states from many sample graphs together.
-
-    One point in the final embedding is one response token. The input vector of
-    each point is the 12-D structural state returned by
-    ``ResearchSample.structural_features()``; no learned encoder or GNN is used.
-    """
+    """Project response-token 12-D graph states from many sample graphs together."""
 
     def __init__(
         self,
@@ -33,13 +29,7 @@ class NodeTSNEVisualizer:
         self.last_result = None
 
     def collect(self, *, max_samples=None, max_nodes=None):
-        """Collect one 12-D vector per response token across the split.
-
-        ``max_samples`` truncates dataset order before loading. ``max_nodes``
-        applies deterministic uniform sampling *after* all node states are
-        collected and does not inspect labels, so sampling cannot manufacture
-        class separation. Set both to ``None`` to use every response token.
-        """
+        """Collect one 12-D graph-derived vector per response token."""
         sample_ids = self.dataset.sample_ids
         if max_samples is not None:
             max_samples = int(max_samples)
@@ -56,12 +46,14 @@ class NodeTSNEVisualizer:
         for sample_id in sample_ids:
             sample = self.dataset[sample_id]
             node_features = (
-                sample.structural_features().cpu().numpy().astype(np.float32, copy=False)
+                basic_structural_features(sample.attention(), sample.relation_edges())
+                .cpu()
+                .numpy()
+                .astype(np.float32, copy=False)
             )
             count = len(node_features)
             if count == 0:
                 continue
-
             features.append(node_features)
             node_sample_ids.append(np.full(count, str(sample_id), dtype=object))
             response_positions.append(np.arange(count, dtype=np.int32))
@@ -77,10 +69,9 @@ class NodeTSNEVisualizer:
             "response_position": np.concatenate(response_positions, axis=0),
             "task_type": np.concatenate(task_types, axis=0),
             "data_source": np.concatenate(data_sources, axis=0),
-            "feature_names": np.asarray(STRUCTURAL_FEATURE_NAMES),
+            "feature_names": np.asarray(BASIC_FEATURE_NAMES),
             "sample_count": len(sample_ids),
         }
-
         total_nodes = len(output["features"])
         output["total_nodes_before_sampling"] = total_nodes
         if max_nodes is not None:
@@ -89,9 +80,7 @@ class NodeTSNEVisualizer:
                 raise ValueError("max_nodes must be at least 3 or None")
             if total_nodes > max_nodes:
                 rng = np.random.default_rng(self.random_state)
-                indices = np.sort(
-                    rng.choice(total_nodes, size=max_nodes, replace=False)
-                )
+                indices = np.sort(rng.choice(total_nodes, size=max_nodes, replace=False))
                 for key in (
                     "features",
                     "sample_id",
@@ -100,12 +89,11 @@ class NodeTSNEVisualizer:
                     "data_source",
                 ):
                     output[key] = output[key][indices]
-
         output["selected_nodes"] = len(output["features"])
         return output
 
     def fit(self, *, max_samples=None, max_nodes=None, perplexity=30.0):
-        """Fit one common t-SNE, then load labels only for its presentation."""
+        """Fit one common t-SNE, then load labels only for presentation."""
         from sklearn.manifold import TSNE
         from sklearn.preprocessing import StandardScaler
 
@@ -113,12 +101,10 @@ class NodeTSNEVisualizer:
         matrix = result["features"]
         if len(matrix) < 3:
             raise ValueError("t-SNE needs at least three node vectors")
-
         scaled = StandardScaler().fit_transform(matrix)
         actual_perplexity = min(float(perplexity), len(scaled) - 1.0)
         if actual_perplexity <= 0:
             raise ValueError("perplexity must be positive")
-
         result["coordinates"] = TSNE(
             n_components=2,
             perplexity=actual_perplexity,
@@ -128,11 +114,10 @@ class NodeTSNEVisualizer:
             random_state=self.random_state,
         ).fit_transform(scaled)
         result["perplexity"] = actual_perplexity
+
         label_store = self.dataset.labels()
         labels_by_sample = {
-            sample_id: label_store.response_labels(self.dataset[sample_id])
-            .cpu()
-            .numpy()
+            sample_id: label_store.response_labels(self.dataset[sample_id]).cpu().numpy()
             for sample_id in np.unique(result["sample_id"])
         }
         result["labels"] = np.asarray(
@@ -148,40 +133,28 @@ class NodeTSNEVisualizer:
         return result
 
     def plot(self, result=None, *, save_path=None, title=None):
-        """Plot the pooled node embedding; one marker is one response token."""
         import matplotlib.pyplot as plt
 
         result = self.last_result if result is None else result
         if result is None or "coordinates" not in result:
             raise ValueError("call fit() first or pass a fitted result")
-
         coordinates = result["coordinates"]
         labels = result["labels"]
         figure, axis = plt.subplots(figsize=(8, 7), constrained_layout=True)
-
         normal = labels == 0
         anomaly = labels == 1
         if normal.any():
             axis.scatter(
-                coordinates[normal, 0],
-                coordinates[normal, 1],
-                s=10,
-                alpha=0.35,
-                marker="o",
-                label=f"Correct token (n={int(normal.sum())})",
-                rasterized=True,
+                coordinates[normal, 0], coordinates[normal, 1],
+                s=10, alpha=0.35, marker="o",
+                label=f"Correct token (n={int(normal.sum())})", rasterized=True,
             )
         if anomaly.any():
             axis.scatter(
-                coordinates[anomaly, 0],
-                coordinates[anomaly, 1],
-                s=22,
-                alpha=0.85,
-                marker="x",
-                label=f"Hallucination token (n={int(anomaly.sum())})",
-                rasterized=True,
+                coordinates[anomaly, 0], coordinates[anomaly, 1],
+                s=22, alpha=0.85, marker="x",
+                label=f"Hallucination token (n={int(anomaly.sum())})", rasterized=True,
             )
-
         axis.set(
             title=title or "Node-level t-SNE from graph-structural states",
             xlabel="t-SNE 1",
@@ -195,11 +168,9 @@ class NodeTSNEVisualizer:
         return figure
 
     def save(self, result=None, *, output_dir):
-        """Save coordinates, original 12-D node states, labels, and provenance."""
         result = self.last_result if result is None else result
         if result is None or "coordinates" not in result:
             raise ValueError("call fit() first or pass a fitted result")
-
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(
@@ -222,7 +193,7 @@ class NodeTSNEVisualizer:
             "hallucination_nodes": int((result["labels"] == 1).sum()),
             "perplexity": float(result["perplexity"]),
             "random_state": self.random_state,
-            "feature_names": list(STRUCTURAL_FEATURE_NAMES),
+            "feature_names": list(BASIC_FEATURE_NAMES),
             "node_representation": "12-D deterministic graph-structural statistics",
         }
         (output_dir / "metadata.json").write_text(
@@ -239,17 +210,10 @@ class NodeTSNEVisualizer:
         perplexity=30.0,
         title=None,
     ):
-        """Collect, fit, plot, and save the dataset-level node t-SNE in one call."""
         output_dir = Path(output_dir)
         result = self.fit(
-            max_samples=max_samples,
-            max_nodes=max_nodes,
-            perplexity=perplexity,
+            max_samples=max_samples, max_nodes=max_nodes, perplexity=perplexity
         )
-        self.plot(
-            result,
-            save_path=output_dir / "node_tsne.png",
-            title=title,
-        )
+        self.plot(result, save_path=output_dir / "node_tsne.png", title=title)
         metadata = self.save(result, output_dir=output_dir)
         return result, metadata
