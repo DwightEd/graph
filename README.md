@@ -1,11 +1,46 @@
 # Attention Graph Hallucination Detection
 
-从观察模型的因果 attention 构建 RP（prompt-to-response）和 RR（response-history-to-response）token 图，用无标签掩码重构训练图编码器，并在冻结模型上计算异常分数。
+从观察模型的因果 attention 构建 RP（prompt-to-response）和 RR（response-history-to-response）token 图。当前主实验先验证**怎样构图保留可用的无标签结构信息**；遮蔽重构 GNN 只是在构图证据充分后的后续基线。
 
 ```text
-canonical sparse attention -> RP/RR attributed token graph -> masked attention GNN
--> frozen response-token representation / anomaly score -> labels only for evaluation
+canonical sparse attention -> candidate RP/RR graphs -> fixed provenance signature
+-> train-only kNN novelty score -> labels only for evaluation
 ```
+
+## 首先运行：构图验证
+
+`validate-graphs` 固定“逐层 prompt-provenance 曲线”表示，只改变图中可见的结构。
+它在 train split 拟合 robust scaling + 有上限 reference 的 kNN，在 test split 产出 token 和连续 span
+（默认 8 个 response token；短回答不纳入 span）分数；整个阶段不读取或使用标签。`evaluate-graphs` 才读取
+`labels.jsonl`，输出 token/span AUROC、AUPRC、data source/task 分组，以及相对 full 图的差异。
+
+```bash
+python main.py validate-graphs \
+  --train-split /data/RAGTruth/model_traces/llama31_8b/train \
+  --test-split /data/RAGTruth/model_traces/llama31_8b/test \
+  --output-dir outputs/graph_validation/v1 --device cuda \
+  --variants full no_edges marginals source_rewire binary shuffle_layers
+
+python main.py evaluate-graphs \
+  --canonical-split /data/RAGTruth/model_traces/llama31_8b/test \
+  --artifact-dir outputs/graph_validation/v1 \
+  --output outputs/graph_validation/v1/evaluation.json
+```
+
+每个 `<variant>.npz` 是冻结的无标签 artifact，包含标准化后的 token/span 结构签名、分数、
+token/span 元数据和拟合尺度；`label_free_manifest.json` 固化构图和运行配置。候选含义：
+
+- `full`：原始稀疏 RP/RR 图；`no_edges`：移除 RP/RR 边，在该条件 provenance 下给出全零 null 曲线（仍保留但不使用 diagonal 节点属性）；
+- `marginals`：保留 target×RP/RR×channel 质量，抹去确切 source；`source_rewire`：保持 target/relation/channel 的质量多重集但改写 source；
+- `binary`：将边权和 diagonal 都二值化，只保留支撑集；`shuffle_layers`：同步打乱边 trace 和 diagonal 的 layer 顺序。
+
+默认候选不含仅作预期不变性检查的 `collapse_relations`/`mean_heads`。`collapse_relations` 是关系 metadata 消融：当前 provenance 按 source 的 prompt/response 边界计算，
+  所以它应与 full 完全相同；这明确表明该固定表征不能检验 learned relation-type embedding 的价值。
+
+当前 provenance 表征会把所有 prompt endpoint 吸收到同一个 prompt 状态，并且每层先对 head
+求平均。因此 `source_rewire` 检验的是 response-history（RR）具体连接对象是否重要，不能检验
+哪个 prompt token 是证据；`mean_heads` 是预期不变性控制，也不能被解释为 head 无用。若这些
+控制出现差异，首先应检查实现和缓存，而不是作机制结论。
 
 ## 核心模块
 

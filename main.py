@@ -12,6 +12,13 @@ from attention_graph.patterns import (
     PatternDiscoveryConfig,
     discover_provenance_patterns,
 )
+from attention_graph.graph_validation import (
+    DEFAULT_VARIANTS,
+    GraphValidationConfig,
+    GraphValidator,
+    evaluate_graph_artifacts,
+)
+from attention_graph.graph_variants import VARIANTS as GRAPH_VALIDATION_VARIANTS
 from attention_graph.score import load_checkpoint, save_score_records, score_dataset
 from attention_graph.statistics import collect_statistics, evaluate_statistics
 from attention_graph.train import TrainingConfig, train_unsupervised
@@ -114,6 +121,33 @@ def parse_args(argv=None):
     p.add_argument("--canonical-split", required=True)
     p.add_argument("--statistics", required=True)
     p.add_argument("--output", required=True)
+
+    p = sub.add_parser(
+        "validate-graphs",
+        help="label-blind construction ablations with fixed provenance signatures",
+    )
+    p.add_argument("--train-split", required=True)
+    p.add_argument("--test-split", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.add_argument("--device", default="cuda")
+    p.add_argument("--variants", nargs="+", choices=GRAPH_VALIDATION_VARIANTS,
+                   default=DEFAULT_VARIANTS)
+    p.add_argument("--checkpoints", type=int, default=8)
+    p.add_argument("--neighbors", type=int, default=16)
+    p.add_argument("--reference-size", type=int, default=100000)
+    p.add_argument("--span-width", type=int, default=8)
+    p.add_argument("--seed", type=int, default=42)
+    _graph_args(p)
+
+    p = sub.add_parser(
+        "evaluate-graphs",
+        help="read labels only after graph-construction artifacts are frozen",
+    )
+    p.add_argument("--canonical-split", required=True)
+    p.add_argument("--artifact-dir", required=True)
+    p.add_argument("--output", required=True)
+    p.add_argument("--bootstraps", type=int, default=400)
+    p.add_argument("--seed", type=int, default=42)
 
     p = sub.add_parser(
         "discover-patterns",
@@ -220,6 +254,32 @@ def main(argv=None):
         dataset = ResearchDataset(args.canonical_split, device="cpu", verify_hashes=True)
         result = evaluate_statistics(
             dataset, statistics_path=args.statistics, output_path=args.output
+        )
+    elif args.command == "validate-graphs":
+        train_dataset = open_research_dataset(
+            args.train_split, device=args.device, verify_hashes=True,
+            retain_embedded_labels=False,
+        )
+        test_dataset = open_research_dataset(
+            args.test_split, device=args.device, verify_hashes=True,
+            retain_embedded_labels=False,
+        )
+        config = GraphValidationConfig(
+            variants=tuple(args.variants), checkpoints=args.checkpoints,
+            neighbors=args.neighbors, reference_size=args.reference_size,
+            span_width=args.span_width, seed=args.seed,
+        )
+        result = GraphValidator(config).run(
+            train_dataset, test_dataset, args.output_dir, graph_config=_graph_config(args)
+        )
+    elif args.command == "evaluate-graphs":
+        dataset = open_research_dataset(
+            args.canonical_split, device="cpu", verify_hashes=True,
+            retain_embedded_labels=True,
+        )
+        result = evaluate_graph_artifacts(
+            dataset, args.artifact_dir, args.output,
+            bootstraps=args.bootstraps, seed=args.seed,
         )
     elif args.command == "discover-patterns":
         train_dataset = open_research_dataset(

@@ -2,6 +2,25 @@
 
 ## Training-free provenance pattern discovery
 
+### Construction validation before learning
+
+`validate-graphs` freezes the prompt-provenance curve and changes one graph
+assumption at a time. It fits robust scaling and bounded-reference kNN only on train signatures,
+writes label-free token/span artifacts on test, and `evaluate-graphs` opens
+labels afterwards for AUROC/AUPRC and paired source-cluster bootstrap intervals.
+The saved `token_embedding` and `span_embedding` arrays are robust-scaled
+structural signatures, not learned neural embeddings.
+The span is a fixed-width response window represented by `[window mean;
+last-first]`; short responses are excluded and the count is stored in the
+label-free manifest.
+
+The curve itself collapses all prompt endpoints into an absorbing prompt state
+and averages heads inside each layer. Therefore source rewiring is an RR
+incidence test, while relation-label collapse and mean-head transforms are
+expected-invariance controls for this representation. They do not test whether
+a learned relation embedding or individual attention head would help a later
+GNN.
+
 正式实验直接惰性读取已有稀疏 PT attention cache，并在内存中适配为统一 CSR
 图接口；不会为了适应实现而重新序列化或复制 attention 数据。
 

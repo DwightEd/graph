@@ -94,8 +94,11 @@ def _layer_transition(graph: AttentionGraph, layer: int):
     if graph.num_edges:
         source, target = graph.edge_index
         row = target - graph.response_idx
-        rp = (graph.edge_type == RP) & (edge_mass > 0)
-        rr = (graph.edge_type != RP) & (edge_mass > 0)
+        # RP/RR is a property of the causal endpoint boundary.  ``edge_type``
+        # is metadata for learned relation encoders, so graph controls may
+        # deliberately collapse it without changing provenance semantics.
+        rp = (source < graph.response_idx) & (edge_mass > 0)
+        rr = (source >= graph.response_idx) & (edge_mass > 0)
         if bool(rp.any()):
             prompt.index_add_(0, row[rp], edge_mass[rp])
         if bool(rr.any()):
