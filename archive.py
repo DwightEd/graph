@@ -91,7 +91,14 @@ def _formal_manifest(split_root: Path, split: str):
     return manifest, spec, files
 
 
-def _load_formal(path: Path, expected_hash: str, *, split: str, spec: dict):
+def _load_formal(
+    path: Path,
+    expected_hash: str,
+    *,
+    split: str,
+    spec: dict,
+    return_payload: bool = False,
+):
     if sha256(path) != expected_hash:
         raise ValueError(f"formal cache SHA256 mismatch: {path.name}")
     payload = torch.load(path, map_location="cpu", weights_only=True)
@@ -156,6 +163,8 @@ def _load_formal(path: Path, expected_hash: str, *, split: str, spec: dict):
         or bool(labels[: sample.response_idx].any())
     ):
         raise ValueError("formal y_token must be binary and response-aligned")
+    if return_payload:
+        return sample, labels, payload
     return sample, labels
 
 

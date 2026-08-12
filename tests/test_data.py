@@ -5,8 +5,9 @@ from pathlib import Path
 
 import torch
 
+from archive import FORMAL_SCHEMA, _fingerprint
 from cache import AttentionSample, index_row, save_attention_sample, sha256, verify_split, write_split_index
-from research_dataset import ResearchDataset
+from research_dataset import ResearchDataset, open_research_dataset
 
 
 class DataTests(unittest.TestCase):
@@ -41,6 +42,68 @@ class DataTests(unittest.TestCase):
             restored = dataset["r1"]
             self.assertEqual(restored.attention().num_response_tokens, 2)
             self.assertEqual(dataset.labels().response_labels(restored).tolist(), [0, 1])
+
+    def test_formal_sparse_pt_is_read_directly_without_npz_conversion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            name = "attention_r1.pt"
+            spec = {
+                "attention_cache_schema": FORMAL_SCHEMA,
+                "split": "test",
+                "cache_dtype": "torch.float16",
+                "attention_floor": 0.01,
+                "num_hidden_layers": 1,
+                "num_attention_heads": 1,
+                "model_path": "/models/observer",
+            }
+            fingerprint = _fingerprint(spec)
+            payload = {
+                "attention_cache_schema": FORMAL_SCHEMA,
+                "attention_cache_fingerprint": fingerprint,
+                "response_id": "r1",
+                "source_id": "s1",
+                "split": "test",
+                "cache_dtype": "torch.float16",
+                "num_attention_layers": 1,
+                "num_attention_heads": 1,
+                "quality": "good",
+                "was_truncated": False,
+                "response_idx": 2,
+                "token_ids": torch.tensor([1, 2, 3, 4]),
+                "attention_diagonal": torch.tensor(
+                    [[[0.8, 0.7, 0.6, 0.5]]], dtype=torch.float16
+                ),
+                "response_row_ptr": torch.tensor([0, 1, 2]),
+                "response_column_indices": torch.tensor([0, 2]),
+                "response_values": torch.tensor([0.2, 0.3], dtype=torch.float16),
+                "attention_floor": 0.01,
+                "y_token": torch.tensor([0, 0, 0, 1]),
+                "task_type": "QA",
+                "data_source": "MARCO",
+            }
+            path = root / name
+            torch.save(payload, path)
+            manifest = {
+                "state": "complete",
+                "cache_file_names": [name],
+                "matched_samples": 1,
+                "cache_files": 1,
+                "cache_files_sha256": {name: sha256(path)},
+                "attention_cache_spec": spec,
+                "attention_cache_fingerprint": fingerprint,
+            }
+            (root / "manifest.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+
+            dataset = open_research_dataset(
+                root, retain_embedded_labels=True
+            )
+            sample = dataset["r1"]
+            self.assertEqual(sample.attention().num_response_tokens, 2)
+            self.assertEqual(sample.task_type, "QA")
+            self.assertEqual(dataset.labels().response_labels(sample).tolist(), [0, 1])
+            self.assertEqual(list(root.glob("*.npz")), [])
 
 
 if __name__ == "__main__":

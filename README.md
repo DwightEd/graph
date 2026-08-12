@@ -49,6 +49,10 @@ live-response concentration 只能用 `SIGNATURE_VIEW=response_concentration`
 bash run_provenance_patterns.sh
 ```
 
+该脚本默认直接读取正式缓存中的稀疏 `attention_*.pt`；接口在内存中适配为统一
+图输入，不重新提取 attention，不复制为 `.npz`，也不创建重复 canonical 数据。
+每个阶段均输出编号，逐图处理有进度条，t-SNE 输出迭代日志。
+
 输出包括全部 test token 的 landmark t-SNE、模式中心曲线，以及每个模式中
 最接近中心的真实 token ego graph。非 landmark 节点使用原结构空间近邻插值，
 因此每个 test token 都有二维坐标；模式发现仍在原始结构曲线上完成。另外输出

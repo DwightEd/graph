@@ -23,6 +23,7 @@ import numpy as np
 import torch
 from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import NearestNeighbors
+from tqdm.auto import tqdm
 
 from .graph import AttentionGraph, GraphBuildConfig, RP, build_attention_graph
 
@@ -233,8 +234,15 @@ def _extract_split(dataset, graph_config, discovery_config, *, split_name):
         "data_source": [],
         "generator_model": [],
     }
-    total = len(dataset)
-    for sample_number, sample_id in enumerate(dataset.sample_ids, 1):
+    token_total = 0
+    progress = tqdm(
+        dataset.sample_ids,
+        total=len(dataset),
+        desc=f"[2/4] {split_name} provenance graphs",
+        unit="graph",
+        dynamic_ncols=True,
+    )
+    for sample_id in progress:
         sample = dataset[sample_id]
         graph = build_attention_graph(sample.attention(), graph_config)
         signature, unresolved = provenance_curves(
@@ -245,6 +253,7 @@ def _extract_split(dataset, graph_config, discovery_config, *, split_name):
         signatures.append(signature.detach().cpu().numpy())
         controls.append(unresolved.detach().cpu().numpy())
         count = len(signature)
+        token_total += count
         metadata["sample_id"].extend([sample.sample_id] * count)
         metadata["source_id"].extend([sample.source_id] * count)
         metadata["token_index"].extend(range(count))
@@ -255,12 +264,7 @@ def _extract_split(dataset, graph_config, discovery_config, *, split_name):
         metadata["data_source"].extend([str(sample.data_source)] * count)
         metadata["generator_model"].extend([str(sample.generator_model)] * count)
         sample.release_attention()
-        if sample_number == 1 or sample_number % 25 == 0 or sample_number == total:
-            print(
-                f"[{split_name} provenance] {sample_number}/{total} "
-                f"tokens={sum(map(len, signatures))}",
-                flush=True,
-            )
+        progress.set_postfix(tokens=token_total, refresh=False)
     if not signatures:
         raise ValueError(f"{split_name} split contains no samples")
     return (
@@ -292,7 +296,16 @@ def _fit_patterns(train, config):
     if upper < config.min_patterns:
         raise ValueError("not enough training nodes for pattern discovery")
     candidates, bic = {}, {}
-    for components in range(config.min_patterns, upper + 1):
+    print(
+        f"[3/4] BIC pattern selection on {len(reference)} train nodes",
+        flush=True,
+    )
+    for components in tqdm(
+        range(config.min_patterns, upper + 1),
+        desc="[3/4] diagonal GMM candidates",
+        unit="model",
+        dynamic_ncols=True,
+    ):
         model = GaussianMixture(
             n_components=components,
             covariance_type="diag",
@@ -323,6 +336,10 @@ def _landmark_tsne(values, config):
         len(values), config.tsne_landmarks, config.seed
     )
     landmarks = values[landmark_index]
+    print(
+        f"[4/4] t-SNE: {len(landmarks)} landmarks for {len(values)} test nodes",
+        flush=True,
+    )
     perplexity = min(config.perplexity, max(2.0, (len(landmarks) - 1) / 3.0))
     landmark_coordinates = TSNE(
         n_components=2,
@@ -331,6 +348,7 @@ def _landmark_tsne(values, config):
         learning_rate="auto",
         max_iter=1500,
         random_state=config.seed,
+        verbose=2,
     ).fit_transform(landmarks)
     coordinates = np.empty((len(values), 2), dtype=np.float32)
     coordinates[landmark_index] = landmark_coordinates
@@ -342,7 +360,12 @@ def _landmark_tsne(values, config):
         neighbors = min(8, len(landmarks))
         index = NearestNeighbors(n_neighbors=neighbors).fit(landmarks)
         # Chunking avoids allocating a large all-token distance matrix.
-        for start in range(0, len(remaining), 20_000):
+        for start in tqdm(
+            range(0, len(remaining), 20_000),
+            desc="[4/4] interpolate remaining nodes",
+            unit="chunk",
+            dynamic_ncols=True,
+        ):
             ids = remaining[start : start + 20_000]
             distance, nearest = index.kneighbors(values[ids])
             weights = 1.0 / np.maximum(distance, 1e-6)

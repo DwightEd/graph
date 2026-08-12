@@ -2,6 +2,9 @@
 
 ## Training-free provenance pattern discovery
 
+正式实验直接惰性读取已有稀疏 PT attention cache，并在内存中适配为统一 CSR
+图接口；不会为了适应实现而重新序列化或复制 attention 数据。
+
 在训练图模型之前，仓库提供一个只检验拓扑机制的探索协议。对每个 response
 token，从最后一层开始沿 attention source 逐层反向传播单位质量。Prompt 节点
 和 cache 未观测质量是吸收状态，response 节点通过其精确 source endpoint 继续

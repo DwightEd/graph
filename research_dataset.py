@@ -15,6 +15,29 @@ import torch
 from cache import AttentionDataset, load_attention_sample, sha256
 
 
+def open_research_dataset(
+    split_root,
+    *,
+    device="cpu",
+    verify_hashes=False,
+    retain_embedded_labels=False,
+):
+    """Open canonical NPZ or the formal sparse PT cache without repacking it."""
+
+    root = Path(split_root)
+    manifest_path = root / "manifest.json"
+    if not manifest_path.is_file():
+        raise ValueError(f"split has no manifest: {root}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("attention_cache_spec") is not None:
+        return FormalResearchDataset(
+            root,
+            device=device,
+            retain_labels=retain_embedded_labels,
+        )
+    return ResearchDataset(root, device=device, verify_hashes=verify_hashes)
+
+
 class ResearchDataset:
     """Lazy access to one canonical attention split."""
 
@@ -205,3 +228,172 @@ class LabelStore:
     def _check_dataset(self, sample: ResearchSample):
         if sample.dataset is not self.dataset:
             raise ValueError("labels belong to a different dataset")
+
+
+class FormalResearchDataset:
+    """Lazy adapter over the existing sparse ``attention_*.pt`` archive.
+
+    No attention tensor is copied or re-serialized.  The adapter normalizes the
+    in-memory object to ``AttentionSample`` and keeps embedded labels sealed
+    until ``labels()`` is explicitly requested after pattern discovery.
+    """
+
+    def __init__(self, split_root, *, device="cpu", retain_labels=False):
+        from archive import _formal_manifest
+
+        self.root = Path(split_root)
+        raw_manifest = json.loads(
+            (self.root / "manifest.json").read_text(encoding="utf-8")
+        )
+        split = str(raw_manifest["attention_cache_spec"]["split"]).casefold()
+        formal_manifest, spec, files = _formal_manifest(self.root, split)
+        self.device = device
+        self.split_name = split
+        self.spec = spec
+        self.retain_labels = bool(retain_labels)
+        self._label_cache = {}
+        self.manifest = {
+            "schema": formal_manifest["attention_cache_spec"][
+                "attention_cache_schema"
+            ],
+            "split": split,
+            "num_layers": int(spec["num_hidden_layers"]),
+            "num_heads": int(spec["num_attention_heads"]),
+            "attention_floor": float(spec["attention_floor"]),
+            "count": len(files),
+            "generator_model": spec.get("generator_model"),
+            "observer_model": Path(str(spec.get("model_path", ""))).name or None,
+        }
+        self.rows = {}
+        for path, digest in files:
+            stem = path.stem
+            sample_id = stem[len("attention_"):] if stem.startswith("attention_") else stem
+            if not sample_id or sample_id in self.rows:
+                raise ValueError("formal cache file names do not identify unique samples")
+            self.rows[sample_id] = {
+                "sample_id": sample_id,
+                "path": path,
+                "sha256": digest,
+            }
+
+    def __len__(self):
+        return len(self.rows)
+
+    def __iter__(self):
+        for sample_id in self.rows:
+            yield self[sample_id]
+
+    def __contains__(self, sample_id):
+        return str(sample_id) in self.rows
+
+    def __getitem__(self, sample_id):
+        sample_id = str(sample_id)
+        if sample_id not in self.rows:
+            raise KeyError(sample_id)
+        return FormalResearchSample(self, sample_id)
+
+    @property
+    def sample_ids(self):
+        return list(self.rows)
+
+    def labels(self):
+        if not self.retain_labels:
+            raise RuntimeError("embedded labels were not retained for this dataset")
+        if len(self._label_cache) != len(self.rows):
+            raise RuntimeError(
+                "formal labels become available only after every attention sample "
+                "has been processed"
+            )
+        return FormalLabelStore(self)
+
+
+class FormalResearchSample:
+    def __init__(self, dataset: FormalResearchDataset, sample_id: str):
+        self.dataset = dataset
+        self.sample_id = sample_id
+        self.row = dataset.rows[sample_id]
+        self._attention = None
+        self._metadata = None
+
+    def _load(self):
+        if self._attention is not None:
+            return
+        from archive import _load_formal
+
+        sample, labels, payload = _load_formal(
+            self.row["path"],
+            self.row["sha256"],
+            split=self.dataset.split_name,
+            spec=self.dataset.spec,
+            return_payload=True,
+        )
+        if sample.sample_id != self.sample_id:
+            raise ValueError(
+                "formal cache response_id does not match its attention file name"
+            )
+        for name in (
+            "token_ids",
+            "attention_diagonal",
+            "response_row_ptr",
+            "response_column_indices",
+            "response_values",
+        ):
+            setattr(sample, name, getattr(sample, name).to(self.dataset.device))
+        self._attention = sample
+        self._metadata = {
+            "source_id": sample.source_id,
+            "task_type": payload.get("task_type", self.dataset.spec.get("task_type")),
+            "data_source": payload.get(
+                "data_source", payload.get("source", self.dataset.spec.get("data_source"))
+            ),
+            "generator_model": payload.get(
+                "generator_model", self.dataset.spec.get("generator_model")
+            ),
+            "temperature": payload.get("temperature"),
+            "quality": payload.get("quality"),
+        }
+        if self.dataset.retain_labels:
+            self.dataset._label_cache[self.sample_id] = (
+                labels[sample.response_idx:].to(dtype=torch.long, device="cpu")
+            )
+
+    @property
+    def source_id(self):
+        self._load()
+        return str(self._metadata["source_id"])
+
+    @property
+    def split(self):
+        return self.dataset.split_name
+
+    @property
+    def task_type(self):
+        self._load()
+        return self._metadata["task_type"]
+
+    @property
+    def data_source(self):
+        self._load()
+        return self._metadata["data_source"]
+
+    @property
+    def generator_model(self):
+        self._load()
+        return self._metadata["generator_model"]
+
+    def attention(self):
+        self._load()
+        return self._attention
+
+    def release_attention(self):
+        self._attention = None
+
+
+class FormalLabelStore:
+    def __init__(self, dataset: FormalResearchDataset):
+        self.dataset = dataset
+
+    def response_labels(self, sample: FormalResearchSample):
+        if sample.dataset is not self.dataset:
+            raise ValueError("labels belong to a different dataset")
+        return self.dataset._label_cache[sample.sample_id]

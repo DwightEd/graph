@@ -8,30 +8,24 @@ BASE="${BASE:-/share/home/tm902089733300000/a903202310/lys}"
 PYTHON="${PYTHON:-$BASE/conda_envs/research/bin/python}"
 FORMAL_ROOT="${FORMAL_ROOT:-$BASE/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876}"
 OUTPUT_DIR="${OUTPUT_DIR:-$BASE/data/feature_extraction/provenance_patterns/$(date -u +%Y%m%dT%H%M%SZ)}"
-CANONICAL_ROOT="${CANONICAL_ROOT:-$BASE/data/feature_extraction/provenance_patterns/canonical}"
+TRAIN_SPLIT="${TRAIN_SPLIT:-$FORMAL_ROOT/train}"
+TEST_SPLIT="${TEST_SPLIT:-$FORMAL_ROOT/test}"
 DEVICE="${DEVICE:-cuda}"
 CHECKPOINTS="${CHECKPOINTS:-8}"
 TSNE_LANDMARKS="${TSNE_LANDMARKS:-10000}"
 SIGNATURE_VIEW="${SIGNATURE_VIEW:-prompt_absorption}"
 
 export MPLCONFIGDIR="${MPLCONFIGDIR:-$OUTPUT_DIR/.matplotlib}"
+export PYTHONUNBUFFERED=1
 mkdir -p "$OUTPUT_DIR"
 
-if [[ ! -f "$CANONICAL_ROOT/train/manifest.json" || ! -f "$CANONICAL_ROOT/test/manifest.json" ]]; then
-  if [[ -d "$CANONICAL_ROOT" ]] && find "$CANONICAL_ROOT" -mindepth 1 -print -quit | grep -q .; then
-    printf 'CANONICAL_ROOT is non-empty but incomplete: %s\n' "$CANONICAL_ROOT" >&2
-    exit 1
-  fi
-  "$PYTHON" main.py archive-attention \
-    --formal-root "$FORMAL_ROOT" \
-    --output-root "$CANONICAL_ROOT"
-fi
-
-"$PYTHON" main.py verify-attention --archive-root "$CANONICAL_ROOT"
+printf '[1/4] Direct sparse-cache input (no attention conversion)\n'
+printf 'train_split=%s\ntest_split=%s\n' "$TRAIN_SPLIT" "$TEST_SPLIT"
+printf '[2/4] Extracting one provenance curve per response-token node\n'
 
 "$PYTHON" main.py discover-patterns \
-  --train-split "$CANONICAL_ROOT/train" \
-  --test-split "$CANONICAL_ROOT/test" \
+  --train-split "$TRAIN_SPLIT" \
+  --test-split "$TEST_SPLIT" \
   --output-dir "$OUTPUT_DIR/patterns" \
   --device "$DEVICE" \
   --signature-view "$SIGNATURE_VIEW" \

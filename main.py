@@ -19,7 +19,7 @@ from attention_graph.train import TrainingConfig, train_unsupervised
 from attention_graph.visualize import EmbeddingShiftVisualizer
 from extract import AttentionExtractor, ExtractionConfig
 from metadata import enrich_ragtruth_indices
-from research_dataset import ResearchDataset
+from research_dataset import ResearchDataset, open_research_dataset
 
 
 def _graph_args(parser):
@@ -234,14 +234,17 @@ def main(argv=None):
             dataset, statistics_path=args.statistics, output_path=args.output
         )
     elif args.command == "discover-patterns":
-        train_dataset = ResearchDataset(
-            args.train_split, device=args.device, verify_hashes=True
+        train_dataset = open_research_dataset(
+            args.train_split,
+            device=args.device,
+            verify_hashes=True,
+            retain_embedded_labels=False,
         )
-        test_dataset = ResearchDataset(
-            args.test_split, device=args.device, verify_hashes=True
-        )
-        label_dataset = ResearchDataset(
-            args.test_split, device="cpu", verify_hashes=True
+        test_dataset = open_research_dataset(
+            args.test_split,
+            device=args.device,
+            verify_hashes=True,
+            retain_embedded_labels=True,
         )
         pattern_config = PatternDiscoveryConfig(
             signature_view=args.signature_view,
@@ -258,7 +261,7 @@ def main(argv=None):
         result = discover_provenance_patterns(
             train_dataset,
             test_dataset,
-            label_dataset,
+            test_dataset,
             output_dir=args.output_dir,
             graph_config=_graph_config(args),
             config=pattern_config,
