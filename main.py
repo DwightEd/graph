@@ -13,17 +13,19 @@ from attention_graph.score import load_checkpoint, save_score_records, score_dat
 from attention_graph.statistics import collect_statistics, evaluate_statistics
 from attention_graph.train import TrainingConfig, train_unsupervised
 from attention_graph.visualize import visualize_embeddings
+from attention_graph.graph_view import visualize_graph
 from extract import AttentionExtractor, ExtractionConfig
 from metadata import enrich_ragtruth_indices
 from research_dataset import ResearchDataset
 
 
-def _graph_args(parser):
+def _graph_args(parser, *, include_target_cap=True):
     parser.add_argument("--selection", choices=("threshold", "global_topk", "typed_topk", "typed_mass_cover"), default="threshold")
     parser.add_argument("--threshold", type=float)
     parser.add_argument("--top-k", type=int, default=8)
     parser.add_argument("--mass-cover", type=float, default=0.80)
-    parser.add_argument("--max-edges-per-target", type=int)
+    if include_target_cap:
+        parser.add_argument("--max-edges-per-target", type=int)
     parser.add_argument("--query-block", type=int, default=64)
 
 
@@ -33,7 +35,7 @@ def _graph_config(args):
         threshold=args.threshold,
         top_k=args.top_k,
         mass_cover=args.mass_cover,
-        max_edges_per_target=args.max_edges_per_target,
+        max_edges_per_target=getattr(args, "max_edges_per_target", None),
         query_block=args.query_block,
     )
 
@@ -126,6 +128,17 @@ def parse_args(argv=None):
     p.add_argument("--max-nodes", type=int, default=10000)
     p.add_argument("--perplexity", type=float, default=30.0)
     p.add_argument("--seed", type=int, default=0)
+
+    p = sub.add_parser("visualize-graph", help="render one sparse RP/RR token graph")
+    p.add_argument("--canonical-split", required=True)
+    p.add_argument("--scores", required=True)
+    p.add_argument("--sample-id", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.add_argument("--center-token", type=int)
+    p.add_argument("--window", type=int, default=48)
+    p.add_argument("--display-top-k", type=int, default=4)
+    _graph_args(p, include_target_cap=False)
+    p.set_defaults(selection="typed_mass_cover")
     return parser.parse_args(argv)
 
 
@@ -199,6 +212,18 @@ def main(argv=None):
         dataset = ResearchDataset(args.canonical_split, device="cpu", verify_hashes=True)
         result = evaluate_statistics(
             dataset, statistics_path=args.statistics, output_path=args.output
+        )
+    elif args.command == "visualize-graph":
+        dataset = ResearchDataset(args.canonical_split, device="cpu", verify_hashes=True)
+        result = visualize_graph(
+            dataset,
+            score_path=args.scores,
+            sample_id=args.sample_id,
+            output_dir=args.output_dir,
+            graph_config=_graph_config(args),
+            center_token=args.center_token,
+            window=args.window,
+            display_top_k=args.display_top_k,
         )
     else:
         dataset = ResearchDataset(args.canonical_split, device="cpu", verify_hashes=True)

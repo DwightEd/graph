@@ -1,5 +1,28 @@
 # Attention Graph Hallucination Detection
 
+## 因果 token 图个例可视化
+
+`visualize-graph` 从 canonical attention 重建指定样本的 RP/RR 图，样本由
+`--sample-id` 显式指定，标签只在绘图末尾用于红色描边。`--window` 是中心
+response token 两侧的半径；`--display-top-k`（默认 4）限制每个 target 的每类
+RP/RR 显示边数。PNG 与 NPZ 保存同一个可读的显示子图；底层完整图仍先由
+`--selection` 和 `--mass-cover` 构建。
+
+```bash
+python main.py visualize-graph \
+  --canonical-split /data/RAGTruth/model_traces/llama31_8b/test \
+  --scores outputs/mart/ragtruth_v1/test_scores.npz \
+  --sample-id 10071 \
+  --output-dir outputs/graph_cases/10071 \
+  --window 48 \
+  --display-top-k 4
+```
+
+省略 `--center-token` 时，窗口以该样本冻结异常分数最高的 token 为中心；也可
+传入 response-relative token index。命令输出 `graph_view.png` 和
+`graph_view.npz`，其中保存可见 token、RP/RR 边、冻结分数、仅供事后描边的标签，
+以及稀疏 `(layer, head, value)` traces。
+
 这个仓库只保留一条研究主线：**从 LLM attention 构图，学习 token 节点表示，再做无监督异常检测。**
 
 ```text

@@ -16,7 +16,7 @@ from attention_graph.mart import (
     save_mart,
 )
 from attention_graph.score import load_score_records
-from main import parse_args
+from main import _graph_config, parse_args
 from research_dataset import ResearchDataset
 
 
@@ -166,6 +166,16 @@ class MartCliTests(unittest.TestCase):
         score = parse_args(["score-mart", "--canonical-split", "test", "--checkpoint", "model.json", "--output", "score.npz"])
         self.assertEqual(fit.command, "fit-mart")
         self.assertEqual(score.command, "score-mart")
+
+    def test_cli_graph_view_defaults_to_typed_mass_cover(self):
+        args = parse_args([
+            "visualize-graph", "--canonical-split", "test", "--scores", "score.npz",
+            "--sample-id", "case", "--output-dir", "view",
+        ])
+        self.assertEqual(args.selection, "typed_mass_cover")
+        self.assertEqual(args.mass_cover, 0.8)
+        self.assertEqual(args.display_top_k, 4)
+        self.assertIsNone(_graph_config(args).max_edges_per_target)
 
 
 class MartPipelineTests(unittest.TestCase):
