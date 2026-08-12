@@ -402,9 +402,10 @@ def _distribution_group_energy(model, hidden, graph, view, max_groups=None, gene
     maximum = hidden.new_full((len(active_ids),), -torch.inf)
     maximum.scatter_reduce_(0, local_group, logits, reduce="amax", include_self=True)
     maximum = torch.maximum(maximum, other_logits)
-    partition = torch.exp(other_logits - maximum).index_add_(
+    trace_partition = hidden.new_zeros(len(active_ids)).index_add(
         0, local_group, torch.exp(logits - maximum[local_group])
     )
+    partition = torch.exp(other_logits - maximum) + trace_partition
     log_partition = maximum + partition.log()
     ce = hidden.new_zeros(len(active_ids))
     ce.index_add_(0, local_group, -target_probability * (logits - log_partition[local_group]))

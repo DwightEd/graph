@@ -55,6 +55,24 @@ class AttentionGraphTests(unittest.TestCase):
         losses = reconstruction_losses(model, graph, view, generator=generator)
         self.assertTrue(torch.isfinite(losses.total))
 
+    def test_reconstruction_backward_produces_finite_gradients(self):
+        graph = build_attention_graph(Sample())
+        model = MaskedAttentionAutoencoder(
+            num_channels=2, embedding_dim=8, message_steps=2, dropout=0.0
+        )
+        generator = torch.Generator().manual_seed(3)
+        view = random_target_view(
+            graph, target_mask_rate=0.5, channel_drop_rate=0.0, generator=generator
+        )
+
+        losses = reconstruction_losses(model, graph, view, generator=generator)
+        losses.total.backward()
+
+        self.assertIsNotNone(model.encoder.node_channel_basis.weight.grad)
+        self.assertTrue(torch.isfinite(model.encoder.node_channel_basis.weight.grad).all())
+        self.assertIsNotNone(model.distribution_decoder.net[0].weight.grad)
+        self.assertTrue(torch.isfinite(model.distribution_decoder.net[0].weight.grad).all())
+
     def test_leave_one_out_scoring_returns_learned_embeddings(self):
         graph = build_attention_graph(Sample())
         model = MaskedAttentionAutoencoder(
