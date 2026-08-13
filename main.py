@@ -69,7 +69,7 @@ def parse_args(argv=None):
 
     p = sub.add_parser(
         "represent-tokens",
-        help="full layer-head Lookback nodes plus compact layer graph propagation",
+        help="full Lookback nodes plus multiscale causal evidence-flow detection",
     )
     p.add_argument("--train-split", required=True)
     p.add_argument("--test-split", required=True)
@@ -78,7 +78,9 @@ def parse_args(argv=None):
     p.add_argument("--position-bins", type=int, default=10)
     p.add_argument("--lookback-window", type=int, default=8)
     p.add_argument("--provenance-hops", type=int, default=2)
-    p.add_argument("--route-top-heads", type=int, default=4)
+    p.add_argument("--prompt-bins", type=int, default=16)
+    p.add_argument("--graph-head-components", type=int, default=8)
+    p.add_argument("--bootstrap-replicates", type=int, default=200)
     p.add_argument("--csr-row-block", type=int, default=4096)
     p.add_argument(
         "--sample-id", action="append", default=[],
@@ -94,6 +96,7 @@ def parse_args(argv=None):
     p.add_argument("--reference-size", type=int, default=12_000)
     p.add_argument("--subspace-components", type=int, default=32)
     p.add_argument("--tail-fraction", type=float, default=0.05)
+    p.add_argument("--anomaly-quantile", type=float, default=0.95)
     p.add_argument("--seed", type=int, default=42)
 
     p = sub.add_parser(
@@ -151,7 +154,9 @@ def main(argv=None):
             position_bins=args.position_bins,
             lookback_window=args.lookback_window,
             provenance_hops=args.provenance_hops,
-            route_top_heads=args.route_top_heads,
+            prompt_bins=args.prompt_bins,
+            graph_head_components=args.graph_head_components,
+            bootstrap_replicates=args.bootstrap_replicates,
             csr_row_block=args.csr_row_block,
             sample_ids=tuple(args.sample_id),
             display_mass_cover=args.display_mass_cover,
@@ -161,6 +166,7 @@ def main(argv=None):
             reference_size=args.reference_size,
             subspace_components=args.subspace_components,
             tail_fraction=args.tail_fraction,
+            anomaly_quantile=args.anomaly_quantile,
             seed=args.seed,
         )
         result = discover_token_representations(

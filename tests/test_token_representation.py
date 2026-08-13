@@ -17,6 +17,7 @@ from attention_graph.token_representation import (
     representation_feature_names,
     structure_names,
     _read_dataset_labels,
+    _cluster_bootstrap_difference,
     _route_matrices,
 )
 from cache import AttentionSample, index_row, save_attention_sample, sha256, write_split_index
@@ -147,7 +148,7 @@ class TokenGraphRepresentationTests(unittest.TestCase):
     def test_top_head_route_is_compact_per_layer_not_all_head_average(self):
         names = structure_names(1)
         matrix = compact_layer_structure(
-            _multi_channel_sample(), provenance_hops=1, route_top_heads=1
+            _multi_channel_sample(), provenance_hops=1
         )
         prompt_mass = matrix[:, names.index("retained_prompt_mass")]
         torch.testing.assert_close(
@@ -156,7 +157,7 @@ class TokenGraphRepresentationTests(unittest.TestCase):
             atol=2e-3, rtol=2e-3,
         )
 
-    def test_missing_heads_are_zero_in_fixed_topk_divisor(self):
+    def test_strong_minority_head_is_not_diluted(self):
         diagonal = torch.zeros((1, 4, 2), dtype=torch.float16)
         sample = AttentionSample(
             "sparse-head", "source", 1, torch.arange(2, dtype=torch.int32),
@@ -166,12 +167,12 @@ class TokenGraphRepresentationTests(unittest.TestCase):
         )
         names = structure_names(1)
         matrix, route = compact_layer_structure(
-            sample, provenance_hops=1, route_top_heads=4, return_route=True
+            sample, provenance_hops=1, return_route=True
         )
         self.assertAlmostEqual(
-            float(matrix[0, names.index("retained_prompt_mass"), 0]), .2, places=3
+            float(matrix[0, names.index("retained_prompt_mass"), 0]), .8, places=3
         )
-        self.assertAlmostEqual(float(route["weight"][0]), .2, places=3)
+        self.assertAlmostEqual(float(route["weight"][0]), .8, places=3)
 
     def test_node_vector_is_exact_flattened_lookback(self):
         sample = _multi_channel_sample()
@@ -202,6 +203,17 @@ class TokenGraphRepresentationTests(unittest.TestCase):
 
 
 class PipelineContractTests(unittest.TestCase):
+    def test_paired_bootstrap_keeps_response_clusters_and_detects_gain(self):
+        labels = np.asarray([0, 1, 0, 1, 0, 1], dtype=np.int8)
+        sample_ids = np.asarray(["a", "a", "b", "b", "c", "c"])
+        better = np.asarray([.1, .9, .2, .8, .3, .7])
+        worse = np.asarray([.9, .1, .8, .2, .7, .3])
+        result = _cluster_bootstrap_difference(
+            labels, better, worse, sample_ids, seed=4, replicates=20,
+        )
+        self.assertGreater(result["auroc_difference"]["ci95"][0], 0)
+        self.assertGreater(result["auprc_difference"]["ci95"][0], 0)
+
     def test_saved_render_unlocks_a_formal_style_label_seal(self):
         class Sample:
             def __init__(self, dataset, sample_id):
@@ -246,7 +258,11 @@ class PipelineContractTests(unittest.TestCase):
         ])
         self.assertEqual(args.lookback_window, 8)
         self.assertEqual(args.provenance_hops, 2)
-        self.assertEqual(args.route_top_heads, 4)
+        self.assertFalse(hasattr(args, "route_top_heads"))
+        self.assertEqual(args.prompt_bins, 16)
+        self.assertEqual(args.graph_head_components, 8)
+        self.assertEqual(args.bootstrap_replicates, 200)
+        self.assertEqual(args.anomaly_quantile, .95)
         self.assertFalse(hasattr(args, "layer_bins"))
         self.assertFalse(hasattr(args, "diffusion_hops"))
         self.assertFalse(hasattr(args, "visual_reference_size"))
@@ -264,6 +280,7 @@ class PipelineContractTests(unittest.TestCase):
                 config=TokenRepresentationConfig(
                     position_bins=2, lookback_window=2, provenance_hops=2,
                     reference_size=8, subspace_components=2,
+                    bootstrap_replicates=10,
                     sample_ids=("test-1",), seed=7,
                 ),
             )
@@ -272,21 +289,36 @@ class PipelineContractTests(unittest.TestCase):
             nodes = np.load(output / "token_node_representations.float16.npy", mmap_mode="r")
             self.assertEqual(structure.shape, (len(structure_names(2)), 12, 1))
             self.assertEqual(nodes.shape[0], 12)
+            graph_nodes = np.load(
+                output / "evidence_flow_node_embeddings.float16.npy", mmap_mode="r"
+            )
+            self.assertEqual(graph_nodes.shape[0], 12)
             with np.load(output / "token_representations_label_free.npz", allow_pickle=False) as artifact:
                 self.assertFalse(bool(artifact["labels_included"]))
                 self.assertNotIn("label", artifact.files)
                 self.assertEqual(artifact["exact_token_features"].shape, (12, len(EXACT_FEATURES)))
+                self.assertIn("evidence_flow_score", artifact.files)
+                self.assertIn("randomized_topology_control_score", artifact.files)
+                self.assertIn("prompt_scale_innovation_score", artifact.files)
             with np.load(output / "train_reference_model.npz", allow_pickle=False) as model:
                 self.assertFalse(bool(model["labels_included"]))
-                self.assertIn("pca_components", model.files)
+                self.assertIn("token_only_pca_components", model.files)
+                self.assertIn("true_propagation_pca_components", model.files)
             with np.load(output / "sample_graphs" / "sample_test-1.npz", allow_pickle=False) as graph:
                 self.assertFalse(bool(graph["labels_included"]))
                 self.assertIn("global_row_start", graph.files)
                 self.assertIn("compact_route_layer", graph.files)
+                self.assertIn("evidence_flow_score", graph.files)
+                self.assertIn("anomaly_component", graph.files)
             report = json.loads((output / "token_representation_report.json").read_text())
             self.assertFalse(report["primary_node_state"]["layer_head_averaged"])
-            self.assertFalse(report["prompt_provenance"]["all_head_mean_used"])
-            self.assertFalse(report["prompt_provenance"]["row_normalized"])
+            self.assertFalse(report["evidence_flow_graph"]["all_head_mean_used"])
+            self.assertFalse(report["evidence_flow_graph"]["trainable"])
+            self.assertIn("structural_validation", report)
+            self.assertIn("graph_pattern_score_evaluation", report)
+            self.assertIn(
+                "anomaly_component_localization", report["structural_validation"]
+            )
             self.assertEqual(report["labels_read_during"], "evaluation_and_plot_coloring_only")
             self.assertTrue((output / "evaluation_token_labels.npy").exists())
             rendered = render_saved_sample(
