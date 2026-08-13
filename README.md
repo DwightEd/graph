@@ -3,13 +3,13 @@
 从观察模型的因果 attention 构建 RP（prompt-to-response）和 RR（response-history-to-response）token 图。当前主实验先验证**怎样构图保留可用的无标签结构信息**；遮蔽重构 GNN 只是在构图证据充分后的后续基线。
 
 ```text
-canonical sparse attention -> candidate RP/RR graphs -> fixed provenance signature
+canonical sparse attention -> RP/RR causal graph -> one Lookback-ratio trajectory per response token
 -> train-only kNN novelty score -> labels only for evaluation
 ```
 
 ## 首先运行：构图验证
 
-`validate-graphs` 固定“逐层 prompt-provenance 曲线”表示，只改变图中可见的结构。
+`validate-graphs` 固定下文定义的 Lookback ratio 逐层表示，只改变图中可见的结构。
 它在 train split 拟合 robust scaling + 有上限 reference 的 kNN，在 test split 产出 token 和连续 span
 （默认 8 个 response token；短回答不纳入 span）分数；整个阶段不读取或使用标签。`evaluate-graphs` 才读取
 `labels.jsonl`，输出 token/span AUROC、AUPRC、data source/task 分组，以及相对 full 图的差异。
@@ -18,29 +18,31 @@ canonical sparse attention -> candidate RP/RR graphs -> fixed provenance signatu
 python main.py validate-graphs \
   --train-split /data/RAGTruth/model_traces/llama31_8b/train \
   --test-split /data/RAGTruth/model_traces/llama31_8b/test \
-  --output-dir outputs/graph_validation/v1 --device cuda \
+  --output-dir outputs/graph_validation --device cuda \
   --variants full no_edges marginals source_rewire binary shuffle_layers
 
 python main.py evaluate-graphs \
   --canonical-split /data/RAGTruth/model_traces/llama31_8b/test \
-  --artifact-dir outputs/graph_validation/v1 \
-  --output outputs/graph_validation/v1/evaluation.json
+  --artifact-dir outputs/graph_validation \
+  --output outputs/graph_validation/evaluation.json
 ```
 
 每个 `<variant>.npz` 是冻结的无标签 artifact，包含标准化后的 token/span 结构签名、分数、
 token/span 元数据和拟合尺度；`label_free_manifest.json` 固化构图和运行配置。候选含义：
 
-- `full`：原始稀疏 RP/RR 图；`no_edges`：移除 RP/RR 边，在该条件 provenance 下给出全零 null 曲线（仍保留但不使用 diagonal 节点属性）；
+- `full`：原始稀疏 RP/RR 图；`no_edges`：移除 RP/RR 边，仅保留 self diagonal，Lookback 为零；
 - `marginals`：保留 target×RP/RR×channel 质量，抹去确切 source；`source_rewire`：保持 target/relation/channel 的质量多重集但改写 source；
 - `binary`：将边权和 diagonal 都二值化，只保留支撑集；`shuffle_layers`：同步打乱边 trace 和 diagonal 的 layer 顺序。
 
-默认候选不含仅作预期不变性检查的 `collapse_relations`/`mean_heads`。`collapse_relations` 是关系 metadata 消融：当前 provenance 按 source 的 prompt/response 边界计算，
-  所以它应与 full 完全相同；这明确表明该固定表征不能检验 learned relation-type embedding 的价值。
+默认候选不含可选的 `collapse_relations`/`mean_heads`。`collapse_relations` 只抹去关系 metadata；
+Lookback 按 source 的 prompt/response 边界计算，因此它应与 full 相同，不能检验 learned relation
+embedding。`mean_heads` 则在计算非线性比值之前合并 head，是有效的 head-aggregation 消融，
+不再被错误写成预期不变性。
 
-当前 provenance 表征会把所有 prompt endpoint 吸收到同一个 prompt 状态，并且每层先对 head
-求平均。因此 `source_rewire` 检验的是 response-history（RR）具体连接对象是否重要，不能检验
-哪个 prompt token 是证据；`mean_heads` 是预期不变性控制，也不能被解释为 head 无用。若这些
-控制出现差异，首先应检查实现和缓存，而不是作机制结论。
+Lookback 只汇总 RP 和 RR 两侧质量，因此 `marginals`、`source_rewire` 和
+`collapse_relations` 对该表示都是预期不变性控制：它们能证明当前结果来自两侧质量比，而不能
+证明“哪个 prompt token 是证据”。具体 source 连接仍保存在单样本图中，但不伪装成 Lookback
+检测分数的一部分。
 
 ## 核心模块
 
@@ -51,7 +53,7 @@ attention_graph/model.py   节点初始化 h0、RP/RR message passing hK、重�
 attention_graph/train.py   不读取标签的 GNN 训练
 attention_graph/score.py   冻结模型的 token 异常分数
 attention_graph/visualize.py  h0/hK 的论文式联合 t-SNE 投影
-attention_graph/patterns.py  无训练的多层 prompt 溯源模式发现
+attention_graph/patterns.py  无训练的结构机制、投影与逐样本图
 main.py                    唯一命令行入口
 ```
 
@@ -70,30 +72,52 @@ response_values
 
 `labels.jsonl` 与 attention 分离；`positive_runs` 为 response-relative `[start, end)`，只可在评估或可视化着色阶段读取。
 
-## 无训练的溯源模式发现
+## 无监督 Lookback 构图与可视化
 
-`discover-patterns` 不训练 GNN，也不拼接 degree、entropy、lag 等异质统计量。
-它只研究一个图机制：从每个 response-token 节点沿 layer-ordered attention 图
-向后追溯时，质量多快到达 prompt，以及尚未到达 prompt 的 response ancestry
-是否集中在一条窄链中。默认主节点表示**只含 prompt-absorption curve**；
-live-response concentration 只能用 `SIGNATURE_VIEW=response_concentration`
-作为独立实验运行，两者不会拼接。cache 未观察质量作为独立控制曲线，不进入
-聚类或 t-SNE。模式、坐标和代表节点冻结后才读取 test token labels。
-Train 节点使用 K-Means 形成曲线原型，模式数在 2--6 中按
-Davies--Bouldin 指标选择；不估计协方差，因此重复曲线不会导致分量崩溃。
+`discover-patterns` 不训练 GNN，也不把 degree、entropy、强边、lag 等特征再堆起来。
+每个 response token 只有一个机制：Lookback ratio。对 layer (l)、head (h)、第 (t)
+个生成 token，令 (P) 为保留的 prompt attention 总量、(R) 为先前生成 token 的
+attention 总量、(D) 为缓存中保存的当前 token diagonal，则
+
+\[
+r_{lht}=\frac{P_{lht}/N_{prompt}}
+{P_{lht}/N_{prompt}+(R_{lht}+D_{lht})/(t+1)}.
+\]
+
+这不是 prompt mass fraction：prompt 和 generated 两侧先分别除以各自 token 数，避免回答
+越长时 RR 端仅因 token 更多而自动占优。比值先逐 head 计算，再平均 head，并将 layer 分成
+连续 bins，得到节点向量 `[layer_bins]`。未保留的 cache 质量按零处理，其 unresolved mass 单独
+保存为控制量，不进入节点表示。
+
+主要无监督分数直接复现手工 Lookback baseline：`1 - mean(r)`，不拟合标签、不挑 layer/head。
+train-only 相对位置 median/MAD 校准只用于 K-Means、t-SNE 和一个单独报告的控制分数，不会
+覆盖这个原始基线。K-Means 数目只按 train Davies--Bouldin 选择；t-SNE 坐标冻结后才读取
+test labels 着色。
 
 ```bash
-bash run_provenance_patterns.sh
+bash run_lookback_graph.sh
 ```
 
-该脚本默认直接读取正式缓存中的稀疏 `attention_*.pt`；接口在内存中适配为统一
-图输入，不重新提取 attention，不复制为 `.npz`，也不创建重复 canonical 数据。
+该脚本默认直接读取正式缓存中的稀疏 `attention_*.pt`；读取层原生接受其中的
+CSR 字段，不要求数据迁就另一套格式，不重新提取 attention，也不复制为 `.npz`。
 每个阶段均输出编号，逐图处理有进度条，t-SNE 输出迭代日志。
 
-输出包括全部 test token 的 landmark t-SNE、模式中心曲线，以及每个模式中
-最接近中心的真实 token ego graph。非 landmark 节点使用原结构空间近邻插值，
-因此每个 test token 都有二维坐标；模式发现仍在原始结构曲线上完成。另外输出
-正确/幻觉响应图的节点模式占比与相邻模式转移图，标签只参与这一步事后解释。
+输出包括全部 test token 的 landmark t-SNE、Lookback 逐层对比、原始/位置校准分数分布、
+响应级模式占比，以及一条真实样本的完整 response-token 图和逐节点 Lookback 热图。未指定
+样本时会在所有坐标和总体指标冻结后，事后选择一个同时含正确/幻觉 token 且样本内 AUROC
+最高的可读示例；这个选择仅用于说明图，并在 report 中明确记录。指定真实样本可运行：
+
+```bash
+SAMPLE_IDS=123,456 bash run_lookback_graph.sh
+```
+
+完整图显示每个 response token；为了让边可读，只画每类覆盖 80% attention mass
+后的最强若干 RP/RR 边。节点纵坐标是 `1 - mean Lookback`，下方面板是每个节点的
+layer-bin Lookback 热图；红/绿标签只负责着色。显示剪枝不参与节点表征或模式发现。
+
+公式与 [Lookback Lens 论文](https://aclanthology.org/2024.emnlp-main.84/) 及其
+[官方 attention 提取实现](https://github.com/voidism/Lookback-Lens/blob/main/step01_extract_attns.py)
+一致；不同点是原方法还报告监督 Logistic Regression，而本项目保留其无监督的直接均值基线。
 
 ## 训练、评分、评估
 

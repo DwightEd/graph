@@ -10,7 +10,7 @@ from attention_graph.graph import GraphBuildConfig
 from attention_graph.mart import fit_mart, score_mart
 from attention_graph.patterns import (
     PatternDiscoveryConfig,
-    discover_provenance_patterns,
+    discover_lookback_patterns,
 )
 from attention_graph.graph_validation import (
     DEFAULT_VARIANTS,
@@ -124,7 +124,7 @@ def parse_args(argv=None):
 
     p = sub.add_parser(
         "validate-graphs",
-        help="label-blind construction ablations with fixed provenance signatures",
+        help="label-blind construction ablations with fixed Lookback trajectories",
     )
     p.add_argument("--train-split", required=True)
     p.add_argument("--test-split", required=True)
@@ -132,9 +132,9 @@ def parse_args(argv=None):
     p.add_argument("--device", default="cuda")
     p.add_argument("--variants", nargs="+", choices=GRAPH_VALIDATION_VARIANTS,
                    default=DEFAULT_VARIANTS)
-    p.add_argument("--checkpoints", type=int, default=8)
+    p.add_argument("--layer-bins", type=int, default=8)
     p.add_argument("--neighbors", type=int, default=16)
-    p.add_argument("--reference-size", type=int, default=100000)
+    p.add_argument("--reference-size", type=int, default=30000)
     p.add_argument("--span-width", type=int, default=8)
     p.add_argument("--seed", type=int, default=42)
     _graph_args(p)
@@ -151,28 +151,27 @@ def parse_args(argv=None):
 
     p = sub.add_parser(
         "discover-patterns",
-        help="training-free discovery of multi-layer prompt-provenance node patterns",
+        help="training-free discovery of Lookback-ratio graph patterns",
     )
     p.add_argument("--train-split", required=True)
     p.add_argument("--test-split", required=True)
     p.add_argument("--output-dir", required=True)
     p.add_argument("--device", default="cuda")
-    p.add_argument(
-        "--signature-view",
-        choices=("prompt_absorption", "response_concentration"),
-        default="prompt_absorption",
-        help="fit one structural curve at a time; views are never concatenated",
-    )
-    p.add_argument("--checkpoints", type=int, default=8)
+    p.add_argument("--layer-bins", type=int, default=8)
     p.add_argument("--min-patterns", type=int, default=2)
     p.add_argument("--max-patterns", type=int, default=6)
     p.add_argument("--fit-reference-size", type=int, default=30000)
     p.add_argument("--tsne-landmarks", type=int, default=10000)
     p.add_argument("--perplexity", type=float, default=40.0)
+    p.add_argument("--position-bins", type=int, default=10)
+    p.add_argument("--csr-row-block", type=int, default=4096)
+    p.add_argument(
+        "--sample-id", action="append", default=[],
+        help="render this test sample in full; repeat for multiple samples",
+    )
+    p.add_argument("--display-mass-cover", type=float, default=0.80)
+    p.add_argument("--display-edges-per-type", type=int, default=2)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--prototype-hops", type=int, default=3)
-    p.add_argument("--prototype-max-incoming", type=int, default=6)
-    _graph_args(p)
 
     p = sub.add_parser("visualize", help="paired before/after t-SNE of frozen GNN node states")
     p.add_argument("--canonical-split", required=True)
@@ -265,7 +264,7 @@ def main(argv=None):
             retain_embedded_labels=False,
         )
         config = GraphValidationConfig(
-            variants=tuple(args.variants), checkpoints=args.checkpoints,
+            variants=tuple(args.variants), layer_bins=args.layer_bins,
             neighbors=args.neighbors, reference_size=args.reference_size,
             span_width=args.span_width, seed=args.seed,
         )
@@ -292,26 +291,33 @@ def main(argv=None):
             args.test_split,
             device=args.device,
             verify_hashes=True,
+            retain_embedded_labels=False,
+        )
+        evaluation_dataset = open_research_dataset(
+            args.test_split,
+            device="cpu",
+            verify_hashes=True,
             retain_embedded_labels=True,
         )
         pattern_config = PatternDiscoveryConfig(
-            signature_view=args.signature_view,
-            checkpoints=args.checkpoints,
+            layer_bins=args.layer_bins,
             min_patterns=args.min_patterns,
             max_patterns=args.max_patterns,
             fit_reference_size=args.fit_reference_size,
             tsne_landmarks=args.tsne_landmarks,
             perplexity=args.perplexity,
+            position_bins=args.position_bins,
+            csr_row_block=args.csr_row_block,
+            sample_ids=tuple(args.sample_id),
+            display_mass_cover=args.display_mass_cover,
+            display_edges_per_type=args.display_edges_per_type,
             seed=args.seed,
-            prototype_hops=args.prototype_hops,
-            prototype_max_incoming=args.prototype_max_incoming,
         )
-        result = discover_provenance_patterns(
+        result = discover_lookback_patterns(
             train_dataset,
             test_dataset,
-            test_dataset,
+            evaluation_dataset,
             output_dir=args.output_dir,
-            graph_config=_graph_config(args),
             config=pattern_config,
         )
     elif args.command == "visualize":

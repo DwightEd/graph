@@ -15,7 +15,7 @@ from attention_graph.graph_validation import (
     evaluate_graph_artifacts,
 )
 from attention_graph.graph_variants import transform_graph
-from attention_graph.patterns import provenance_curves
+from attention_graph.patterns import graph_lookback_trajectories
 from cache import AttentionSample, index_row, save_attention_sample, sha256, write_split_index
 from main import parse_args
 from research_dataset import ResearchDataset
@@ -115,11 +115,11 @@ class GraphTransformTests(unittest.TestCase):
         self.assertTrue(torch.equal(left.edge_index, right.edge_index))
         self.assertTrue(torch.equal(left.trace_value, right.trace_value))
 
-    def test_relation_collapse_is_an_explicit_noop_for_provenance(self):
+    def test_relation_collapse_is_an_explicit_noop_for_lookback_endpoint_boundary(self):
         collapsed = transform_graph(self.graph, "collapse_relations", seed=0)
         self.assertTrue(torch.equal(collapsed.edge_type, torch.zeros_like(self.graph.edge_type)))
-        original, _ = provenance_curves(self.graph, checkpoints=2)
-        transformed, _ = provenance_curves(collapsed, checkpoints=2)
+        original, _ = graph_lookback_trajectories(self.graph, layer_bins=2)
+        transformed, _ = graph_lookback_trajectories(collapsed, layer_bins=2)
         torch.testing.assert_close(original, transformed)
 
     def test_layer_shuffle_moves_node_attributes_with_trace_layers(self):
@@ -137,13 +137,13 @@ class GraphTransformTests(unittest.TestCase):
         self.assertTrue(torch.equal(binary.trace_value, torch.ones_like(self.graph.trace_value)))
         self.assertTrue(torch.equal(binary.node_attr, (self.graph.node_attr != 0).float()))
 
-    def test_config_requires_full_unique_variants_and_two_checkpoints(self):
+    def test_config_requires_full_unique_variants_and_two_layer_bins(self):
         with self.assertRaises(ValueError):
             GraphValidationConfig(variants=("no_edges",)).validate()
         with self.assertRaises(ValueError):
             GraphValidationConfig(variants=("full", "full")).validate()
         with self.assertRaises(ValueError):
-            GraphValidationConfig(checkpoints=1).validate()
+            GraphValidationConfig(layer_bins=1).validate()
 
     def test_short_responses_are_excluded_from_fixed_width_spans(self):
         metadata = {

@@ -14,30 +14,32 @@ from tqdm.auto import tqdm
 from cache import sha256
 from .graph import GraphBuildConfig, build_attention_graph
 from .graph_variants import VARIANTS, rewire_moved_fractions, transform_graph
-from .patterns import provenance_curves
+from .patterns import REPRESENTATION, graph_lookback_trajectories
 
 DEFAULT_VARIANTS = ("full", "no_edges", "marginals", "source_rewire", "binary", "shuffle_layers")
 VARIANT_ROLES = {
-    "full": "reference", "no_edges": "diagonal_only_control", "marginals": "source_identity_control",
-    "source_rewire": "rr_incidence_control", "binary": "support_only_control", "shuffle_layers": "layer_order_control",
-    "collapse_relations": "expected_invariance_control", "mean_heads": "expected_invariance_control",
+    "full": "reference", "no_edges": "diagonal_only_control",
+    "marginals": "expected_source_identity_invariance_control",
+    "source_rewire": "expected_source_endpoint_invariance_control",
+    "binary": "support_only_control", "shuffle_layers": "layer_order_control",
+    "collapse_relations": "expected_invariance_control", "mean_heads": "head_aggregation_control",
 }
 
 
 @dataclass(frozen=True)
 class GraphValidationConfig:
     variants: tuple[str, ...] = DEFAULT_VARIANTS
-    checkpoints: int = 8
+    layer_bins: int = 8
     neighbors: int = 16
-    reference_size: int = 100_000
+    reference_size: int = 30_000
     span_width: int = 8
     seed: int = 42
 
     def validate(self):
         if "full" not in self.variants or len(set(self.variants)) != len(self.variants) or any(name not in VARIANTS for name in self.variants):
             raise ValueError("variants must be unique, include full, and be supported")
-        if self.checkpoints < 2 or min(self.neighbors, self.reference_size, self.span_width) < 1:
-            raise ValueError("checkpoints >= 2 and remaining limits must be positive")
+        if self.layer_bins < 2 or min(self.neighbors, self.reference_size, self.span_width) < 1:
+            raise ValueError("layer_bins >= 2 and remaining limits must be positive")
 
 
 def _fingerprint(dataset):
@@ -129,8 +131,10 @@ class GraphValidator:
             count = graph.num_nodes - graph.response_idx
             for variant in self.config.variants:
                 transformed = transform_graph(graph, variant, seed=_stable_seed(self.config.seed, sample.sample_id))
-                signature, _ = provenance_curves(transformed, checkpoints=self.config.checkpoints, signature_view="prompt_absorption")
-                matrices[variant].append(signature.detach().cpu().numpy())
+                trajectories, _ = graph_lookback_trajectories(
+                    transformed, layer_bins=self.config.layer_bins
+                )
+                matrices[variant].append(trajectories.detach().cpu().numpy())
                 if variant == "source_rewire":
                     moved.append(rewire_moved_fractions(graph, transformed))
             rows["sample_id"].extend([sample.sample_id] * count)
@@ -156,6 +160,7 @@ class GraphValidator:
             raise ValueError("train and test source groups overlap")
         artifacts = []
         for variant in self.config.variants:
+            print(f"scoring graph variant {variant} ({len(test[variant])} test tokens)", flush=True)
             token_embedding, token_score, center, scale = _score(train[variant], test[variant], self.config)
             train_span, _, train_skipped = _spans(train[variant], train_metadata, self.config.span_width)
             test_span, span_metadata, test_skipped = _spans(test[variant], metadata, self.config.span_width)
@@ -164,8 +169,8 @@ class GraphValidator:
             span_embedding, span_score, span_center, span_scale = _score(train_span, test_span, self.config)
             name = f"{variant}.npz"
             path = output / name
-            np.savez_compressed(path, schema=np.asarray("attention-graph-construction-v2"), variant=np.asarray(variant),
-                variant_role=np.asarray(VARIANT_ROLES[variant]), representation=np.asarray("layer_provenance_prompt_absorption"),
+            np.savez_compressed(path, schema=np.asarray("attention-graph-construction"), variant=np.asarray(variant),
+                variant_role=np.asarray(VARIANT_ROLES[variant]), representation=np.asarray(REPRESENTATION),
                 token_embedding=token_embedding, token_score=token_score, span_embedding=span_embedding, span_score=span_score,
                 center=center, scale=scale, span_center=span_center, span_scale=span_scale, **metadata,
                 span_sample_id=span_metadata["sample_id"].astype(str), span_source_id=span_metadata["source_id"].astype(str),
@@ -173,8 +178,8 @@ class GraphValidator:
                 span_task_type=span_metadata["task_type"].astype(str), span_data_source=span_metadata["data_source"].astype(str),
                 span_generator_model=span_metadata["generator_model"].astype(str))
             artifacts.append({"variant": variant, "variant_role": VARIANT_ROLES[variant], "path": name, "sha256": sha256(path), "train_spans_skipped": train_skipped, "test_spans_skipped": test_skipped})
-        manifest = {"schema": "attention-graph-construction-v2", "labels_consumed": False, "labels_retained": False,
-                    "formal_labels_may_be_embedded_but_unused": True, "representation": "layer_provenance_prompt_absorption",
+        manifest = {"schema": "attention-graph-construction", "labels_consumed": False, "labels_retained": False,
+                    "formal_labels_may_be_embedded_but_unused": True, "representation": REPRESENTATION,
                     "geometry": _geometry(train_dataset), "train_fingerprint": _fingerprint(train_dataset), "test_fingerprint": _fingerprint(test_dataset),
                     "graph": asdict(graph_config), "validation": asdict(self.config), "variants": artifacts,
                     "source_rewire": {
@@ -272,7 +277,7 @@ def evaluate_graph_artifacts(dataset, artifact_dir, output_path, *, bootstraps=4
         raise ValueError("bootstraps must be positive")
     directory = Path(artifact_dir)
     manifest = json.loads((directory / "label_free_manifest.json").read_text(encoding="utf-8"))
-    if manifest["schema"] != "attention-graph-construction-v2" or manifest["test_fingerprint"] != _fingerprint(dataset):
+    if manifest["schema"] != "attention-graph-construction" or manifest["test_fingerprint"] != _fingerprint(dataset):
         raise ValueError("artifacts do not belong to this exact test split")
     labels, reports, rows = _labels(dataset), {}, {}
     canonical = _expected_metadata(dataset, labels)
@@ -330,7 +335,7 @@ def evaluate_graph_artifacts(dataset, artifact_dir, output_path, *, bootstraps=4
                 }
             else:
                 report["full_minus_variant"][unit] = _bootstrap(full_label, full_score, label, score, source, seed=seed, bootstraps=bootstraps)
-    result = {"schema": "attention-graph-construction-evaluation-v2", "labels_consumed": True,
+    result = {"schema": "attention-graph-construction-evaluation", "labels_consumed": True,
               "labels_consumed_during": "evaluation_only", "source_rewire": manifest["source_rewire"], "variants": reports}
     Path(output_path).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return result

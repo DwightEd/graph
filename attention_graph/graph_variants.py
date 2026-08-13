@@ -129,8 +129,18 @@ def _mean_heads(graph: AttentionGraph) -> AttentionGraph:
     unique, inverse = torch.unique(key, sorted=True, return_inverse=True)
     values = torch.zeros(len(unique), dtype=torch.float32, device=graph.node_attr.device)
     values.index_add_(0, inverse, graph.trace_value.float())
+    values /= float(graph.num_heads)
+    # Materialise the same head-mean trace in every head slot. This represents
+    # "merge heads before computing the nonlinear Lookback ratio" without changing
+    # the graph geometry or treating unmaterialised heads as zeros afterwards.
     edge_id = torch.div(unique, graph.num_layers, rounding_mode="floor")
-    channel = unique.remainder(graph.num_layers) * graph.num_heads
+    layer = unique.remainder(graph.num_layers)
+    edge_id = edge_id.repeat_interleave(graph.num_heads)
+    channel = (
+        layer.repeat_interleave(graph.num_heads) * graph.num_heads
+        + torch.arange(graph.num_heads, device=graph.node_attr.device).repeat(len(unique))
+    )
+    values = values.repeat_interleave(graph.num_heads)
     edge_id, channel, values = _sort_traces(edge_id, channel, values, graph.num_channels)
     diagonal = graph.node_attr.reshape(graph.num_nodes, graph.num_layers, graph.num_heads).mean(2, keepdim=True)
     diagonal = diagonal.repeat(1, 1, graph.num_heads).reshape(graph.num_nodes, graph.num_channels)

@@ -1,60 +1,58 @@
 # Method: self-supervised attention-graph representation learning
 
-## Training-free provenance pattern discovery
+## Training-free Lookback graph discovery
 
 ### Construction validation before learning
 
-`validate-graphs` freezes the prompt-provenance curve and changes one graph
+`validate-graphs` freezes the same Lookback-ratio layer trajectory and changes one graph
 assumption at a time. It fits robust scaling and bounded-reference kNN only on train signatures,
 writes label-free token/span artifacts on test, and `evaluate-graphs` opens
 labels afterwards for AUROC/AUPRC and paired source-cluster bootstrap intervals.
 The saved `token_embedding` and `span_embedding` arrays are robust-scaled
-structural signatures, not learned neural embeddings.
+Lookback trajectories, not learned neural embeddings.
 The span is a fixed-width response window represented by `[window mean;
 last-first]`; short responses are excluded and the count is stored in the
 label-free manifest.
 
-The curve itself collapses all prompt endpoints into an absorbing prompt state
-and averages heads inside each layer. Therefore source rewiring is an RR
-incidence test, while relation-label collapse and mean-head transforms are
-expected-invariance controls for this representation. They do not test whether
-a learned relation embedding or individual attention head would help a later
-GNN.
+The representation aggregates endpoints into RP and RR mass. Therefore source
+rewiring, source marginals, and relation-label collapse are expected invariances:
+they test that the score really uses side mass rather than source identity.
+Mean-head is a real ablation: it merges heads before the nonlinear ratio,
+whereas the reference computes each head ratio first. None of these controls
+tests a learned relation embedding.
 
-正式实验直接惰性读取已有稀疏 PT attention cache，并在内存中适配为统一 CSR
-图接口；不会为了适应实现而重新序列化或复制 attention 数据。
+正式实验的读取层原生接受已有稀疏 PT attention cache 中的 CSR 字段；不会为了
+迁就实现而重新序列化、复制或转换 attention 数据。
 
-在训练图模型之前，仓库提供一个只检验拓扑机制的探索协议。对每个 response
-token，从最后一层开始沿 attention source 逐层反向传播单位质量。Prompt 节点
-和 cache 未观测质量是吸收状态，response 节点通过其精确 source endpoint 继续
-向前层传播。主曲线在每行已观测 attention 内条件归一化，避免把 cache 缺失量
-偷偷当作聚类特征；原始未观测质量使用独立传播副本计算控制曲线。第 $d$ 个反向
-深度的两个候选视图为
+在训练图模型之前，仓库直接使用已验证的 Lookback ratio，而不再对多个弱特征
+做拼接。对 response token $t$、layer $l$、head $h$，令 $P_{lht}$ 为 RP
+（prompt-to-response）保留 attention 总量，$R_{lht}$ 为 RR（response-history-to-response）
+保留 attention 总量，$D_{lht}$ 为当前 token 的已保存 diagonal，则
 
 \[
-A_t(d)=\text{cumulative mass absorbed by prompt},
+r_{lht}=\frac{P_{lht}/N_p}
+{P_{lht}/N_p+(R_{lht}+D_{lht})/(t+1)}.
 \]
 
-\[
-C_t(d)=\sum_j\left(\frac{\pi_{t,j}^{(d)}}
-{\sum_k\pi_{t,k}^{(d)}}\right)^2.
-\]
+两侧分别取每 token 平均后再求比值，因而该量不是 prompt mass fraction。这与
+[Lookback Lens 的公式代码](https://github.com/voidism/Lookback-Lens/blob/main/step01_extract_attns.py)
+一致。压缩 cache 中低于 floor 的 attention 按零处理，由此产生的 unresolved
+mass 只作 control，不进入表征。
 
-$A_t$ 表示 prompt grounding 的传播深度，$C_t$ 表示仍存活的 response
-ancestry 是单链集中还是多源分散。默认主实验的节点表示只有
+比值先在每个 head 内计算，再平均 heads，最后对连续 layer bins 取平均。因此每个
+response token 的节点表征只是一条 Lookback layer trajectory，没有 degree、entropy、
+lag 等其他特征干扰。
 
-\[
-z_t=[A_t(d_1),\ldots,A_t(d_m)].
-\]
+主检测分数为 $1-\operatorname{mean}_{lh}(r_{lht})$，即“越少回看 prompt，越异常”。
+该分数在任何标签打开前已冻结，不训练 Logistic Regression，不用标签选择 head。
+train-only 相对位置 median/MAD 校准仅用于 K-Means、t-SNE 和一个独立 control
+score，避免回答位置伪装成新模式。K-Means 数只按 train Davies--Bouldin 选择；
+t-SNE 只用于探索性投影，不承担检测结论。
 
-若单独研究 $C_t$，必须作为另一次实验运行，不允许与 $A_t$ 拼接。未观测质量
-曲线单独用于检查 cache censoring，不拼入 $z_t$。Train token 上
-使用 robust scaling 和 K-Means 发现曲线原型，候选模式数通过
-Davies--Bouldin 指标选择，不使用标签和反向传播。K-Means 不估计协方差，因而
-适用于包含大量相同或近似相同曲线的节点集合。模式、t-SNE 坐标及代表性 ego
-graph 冻结后，才读取 test token
-labels 计算各模式的 hallucination enrichment，并比较正确/幻觉响应图的模式占比
-与相邻 token 模式转移。
+逐样本图使用 RP/RR 作为有类型因果边：RP 形成 Lookback 分子，RR 与 diagonal
+形成生成侧分母。每个 response node 都显示，纵坐标是冻结的直接 Lookback 分数，
+下方热图是该节点的全部 layer-bin 轨迹。为了可读性，图上的边使用 relation-wise
+mass cover 和 top-edge 限制；计算表征时仍使用压缩 CSR 中的全部保留边。
 
 ## MART non-GNN baseline
 
