@@ -18,7 +18,7 @@ export MPLCONFIGDIR="${MPLCONFIGDIR:-${OUTPUT_DIR}.matplotlib}"
 export PYTHONUNBUFFERED=1
 mkdir -p "$(dirname -- "$OUTPUT_DIR")"
 
-printf '[start] compressed CSR -> layer-head mechanisms -> token embeddings -> sparse multi-hop graph ablations\n'
+printf '[start] compressed CSR -> exact graph scalars -> mass-preserving multi-hop token representations\n'
 printf 'train_split=%s\ntest_split=%s\noutput=%s\n' "$TRAIN_SPLIT" "$TEST_SPLIT" "$OUTPUT_DIR"
 
 if [[ "${RUN_TESTS:-1}" == "1" ]]; then
@@ -32,16 +32,13 @@ ARGS=(
   --test-split "$TEST_SPLIT"
   --output-dir "$OUTPUT_DIR"
   --device "$DEVICE"
-  --base-dim "${BASE_DIM:-32}"
-  --embedding-dim "${EMBEDDING_DIM:-32}"
-  --source-sketch-dim "${SOURCE_SKETCH_DIM:-16}"
-  --fit-reference-size "${FIT_REFERENCE_SIZE:-30000}"
-  --detector-reference-size "${DETECTOR_REFERENCE_SIZE:-100000}"
-  --prototypes "${PROTOTYPES:-256}"
-  --diffusion-hops "${DIFFUSION_HOPS:-3}"
+  --position-bins "${POSITION_BINS:-10}"
+  --diffusion-hops "${DIFFUSION_HOPS:-2}"
   --csr-row-block "${CSR_ROW_BLOCK:-4096}"
   --display-mass-cover "${DISPLAY_MASS_COVER:-0.80}"
   --display-edges-per-type "${DISPLAY_EDGES_PER_TYPE:-2}"
+  --display-max-edges "${DISPLAY_MAX_EDGES:-300}"
+  --visual-reference-size "${VISUAL_REFERENCE_SIZE:-30000}"
   --seed "${SEED:-42}"
 )
 

@@ -2,14 +2,15 @@
 
 from .graph import AttentionGraph, GraphBuildConfig, RP, RR, build_attention_graph
 from .token_representation import (
-    MECHANISMS,
+    EXACT_FEATURES,
     TokenRepresentationConfig,
     discover_token_representations,
-    mechanism_tensor,
+    exact_token_features,
+    structure_preserving_messages,
 )
 
 __all__ = [
     "AttentionGraph", "GraphBuildConfig", "RP", "RR", "build_attention_graph",
-    "MECHANISMS", "TokenRepresentationConfig", "discover_token_representations",
-    "mechanism_tensor",
+    "EXACT_FEATURES", "TokenRepresentationConfig", "discover_token_representations",
+    "exact_token_features", "structure_preserving_messages",
 ]

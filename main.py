@@ -74,13 +74,8 @@ def parse_args(argv=None):
     p.add_argument("--test-split", required=True)
     p.add_argument("--output-dir", required=True)
     p.add_argument("--device", default="cuda")
-    p.add_argument("--base-dim", type=int, default=32)
-    p.add_argument("--embedding-dim", type=int, default=32)
-    p.add_argument("--source-sketch-dim", type=int, default=16)
-    p.add_argument("--fit-reference-size", type=int, default=30000)
-    p.add_argument("--detector-reference-size", type=int, default=100000)
-    p.add_argument("--prototypes", type=int, default=256)
-    p.add_argument("--diffusion-hops", type=int, default=3)
+    p.add_argument("--position-bins", type=int, default=10)
+    p.add_argument("--diffusion-hops", type=int, default=2)
     p.add_argument("--csr-row-block", type=int, default=4096)
     p.add_argument(
         "--sample-id", action="append", default=[],
@@ -88,6 +83,8 @@ def parse_args(argv=None):
     )
     p.add_argument("--display-mass-cover", type=float, default=0.80)
     p.add_argument("--display-edges-per-type", type=int, default=2)
+    p.add_argument("--display-max-edges", type=int, default=300)
+    p.add_argument("--visual-reference-size", type=int, default=30_000)
     p.add_argument("--seed", type=int, default=42)
 
     return parser.parse_args(argv)
@@ -132,17 +129,14 @@ def main(argv=None):
             retain_embedded_labels=True,
         )
         representation_config = TokenRepresentationConfig(
-            base_dim=args.base_dim,
-            embedding_dim=args.embedding_dim,
-            source_sketch_dim=args.source_sketch_dim,
-            fit_reference_size=args.fit_reference_size,
-            detector_reference_size=args.detector_reference_size,
-            prototypes=args.prototypes,
+            position_bins=args.position_bins,
             diffusion_hops=args.diffusion_hops,
             csr_row_block=args.csr_row_block,
             sample_ids=tuple(args.sample_id),
             display_mass_cover=args.display_mass_cover,
             display_edges_per_type=args.display_edges_per_type,
+            display_max_edges=args.display_max_edges,
+            visual_reference_size=args.visual_reference_size,
             seed=args.seed,
         )
         result = discover_token_representations(

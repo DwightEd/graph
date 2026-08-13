@@ -1,10 +1,9 @@
-"""Label-blind token representations from sparse layer-head attention.
+"""Structure-preserving, label-blind token graph representations.
 
-The primary representation is not a scalar Lookback score.  Every response
-token first receives a ``[layer, head, mechanism]`` tensor.  A train-only
-robust PCA keeps informative layer/head directions without using hallucination
-labels.  Exact RP/RR endpoints are then added by fixed (non-neural) message
-passing and evaluated as an explicit ablation.
+Exact graph statistics remain directly recoverable. Sparse RP/RR propagation
+retains absolute edge/path mass and explicit self-versus-ancestor residuals.
+PCA is visualization-only; scoring is fixed and one-sided, with no learned
+graph weights, clustering detector, labels, or backpropagation.
 """
 
 from __future__ import annotations
@@ -15,821 +14,779 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from sklearn.cluster import MiniBatchKMeans
 from sklearn.decomposition import PCA
 from sklearn.metrics import average_precision_score, roc_auc_score
 from tqdm.auto import tqdm
 
 from .graph import GraphBuildConfig, RP, RR, build_attention_graph
+from .statistics import (
+    DIRECT_FEATURES,
+    TOKEN_FEATURES,
+    direct_lookback,
+    direct_lookback_from_graph,
+    token_statistics,
+)
 
 
-SCHEMA = "attention-mechanism-token-representation-v1"
-MECHANISMS = (
-    "routing_balance",
-    "effective_support_fraction",
-    "dominant_edge_strength",
-    "response_locality",
+SCHEMA = "structure-preserving-token-graph-v1"
+EXACT_FEATURES = TOKEN_FEATURES + DIRECT_FEATURES
+
+# Compact mechanism hypothesis fixed before evaluation labels are read.
+# Other exact features are preserved and evaluated separately, but not mixed
+# into the primary score because their anomaly direction is uncertain.
+FEATURE_DIRECTIONS = {
+    "prompt_mass_fraction": -1.0,
+    "edge_density": -1.0,
+    "retained_concentration": 1.0,
+    "mean_edge_strength": 1.0,
+    "history_lag": -1.0,
+}
+SCORE_FEATURES = tuple(FEATURE_DIRECTIONS)
+SCORE_INDEX = np.asarray([EXACT_FEATURES.index(name) for name in SCORE_FEATURES])
+SCORE_DIRECTION = np.asarray(
+    [FEATURE_DIRECTIONS[name] for name in SCORE_FEATURES], dtype=np.float32
 )
 VIEWS = ("token_only", "token_graph", "no_rp", "no_rr")
 
 
 @dataclass(frozen=True)
 class TokenRepresentationConfig:
-    base_dim: int = 32
-    embedding_dim: int = 32
-    source_sketch_dim: int = 16
-    fit_reference_size: int = 30_000
-    detector_reference_size: int = 100_000
-    prototypes: int = 256
-    diffusion_hops: int = 3
+    position_bins: int = 10
+    diffusion_hops: int = 2
     csr_row_block: int = 4096
     display_mass_cover: float = 0.80
     display_edges_per_type: int = 2
+    display_max_edges: int = 300
+    visual_reference_size: int = 30_000
     sample_ids: tuple[str, ...] = ()
     seed: int = 42
 
     def validate(self):
-        positive = (
-            self.base_dim,
-            self.embedding_dim,
-            self.source_sketch_dim,
-            self.fit_reference_size,
-            self.detector_reference_size,
-            self.prototypes,
-            self.diffusion_hops,
-            self.csr_row_block,
-            self.display_edges_per_type,
-        )
-        if any(int(value) < 1 for value in positive):
-            raise ValueError("representation dimensions and limits must be positive")
-        if self.source_sketch_dim % 2:
-            raise ValueError("source_sketch_dim must be even")
+        if min(
+            self.position_bins, self.diffusion_hops, self.csr_row_block,
+            self.display_edges_per_type, self.display_max_edges,
+            self.visual_reference_size,
+        ) < 1:
+            raise ValueError("representation limits must be positive")
         if self.diffusion_hops < 2:
-            raise ValueError("diffusion_hops must be at least two to model non-adjacent nodes")
+            raise ValueError("diffusion_hops must be at least two")
         if not 0.0 < float(self.display_mass_cover) <= 1.0:
             raise ValueError("display_mass_cover must be in (0,1]")
 
 
-class _ReferenceSampler:
-    """Bounded random reference with vectorized random-priority sampling."""
+class _PositionRobustScaler:
+    """Train-only position-conditioned median/MAD without label access."""
 
-    def __init__(self, capacity, seed):
-        self.capacity = int(capacity)
-        self.rng = np.random.default_rng(seed)
-        self.values = None
-        self.keys = np.empty(0, dtype=np.float64)
+    def __init__(self, bins):
+        self.bins = int(bins)
 
-    def add(self, values):
-        values = np.asarray(values, dtype=np.float32)
-        if values.ndim != 2 or not len(values):
-            return
-        keys = self.rng.random(len(values))
-        if len(values) > self.capacity:
-            keep = np.argpartition(keys, self.capacity - 1)[: self.capacity]
-            values, keys = values[keep], keys[keep]
-        self.values = values.copy() if self.values is None else np.concatenate((self.values, values))
-        self.keys = np.concatenate((self.keys, keys))
-        if len(self.keys) > 2 * self.capacity:
-            self._prune()
+    @staticmethod
+    def _fit_rows(values):
+        center = np.median(values, axis=0)
+        mad = 1.4826 * np.median(np.abs(values - center), axis=0)
+        std = values.std(axis=0)
+        scale = np.where(mad > 1e-8, mad, np.where(std > 1e-8, std, 1.0))
+        return center, scale
 
-    def _prune(self):
-        if len(self.keys) <= self.capacity:
-            return
-        keep = np.argpartition(self.keys, self.capacity - 1)[: self.capacity]
-        order = np.argsort(self.keys[keep])
-        keep = keep[order]
-        self.values = self.values[keep]
-        self.keys = self.keys[keep]
+    def _bin(self, position):
+        return np.minimum(
+            (np.asarray(position, dtype=np.float64) * self.bins).astype(int),
+            self.bins - 1,
+        )
 
-    def get(self):
-        self._prune()
-        if self.values is None or not len(self.values):
-            raise ValueError("cannot fit a representation on an empty reference")
-        return self.values
+    def fit(self, values, position, valid=None):
+        values = np.asarray(values, dtype=np.float64)
+        if values.ndim != 2 or not len(values) or not np.isfinite(values).all():
+            raise ValueError("scaler requires a non-empty finite matrix")
+        valid = (
+            np.ones_like(values, dtype=bool)
+            if valid is None else np.asarray(valid, dtype=bool)
+        )
+        if valid.shape != values.shape:
+            raise ValueError("scaler validity mask must match the value matrix")
+        global_center = np.zeros(values.shape[1], dtype=np.float64)
+        global_scale = np.ones(values.shape[1], dtype=np.float64)
+        for column in range(values.shape[1]):
+            selected = values[valid[:, column], column]
+            if len(selected):
+                center, scale = self._fit_rows(selected[:, None])
+                global_center[column], global_scale[column] = center[0], scale[0]
+        self.center = np.tile(global_center, (self.bins, 1))
+        self.scale = np.tile(global_scale, (self.bins, 1))
+        bins = self._bin(position)
+        self.bin_count = []
+        for bin_id in range(self.bins):
+            counts = []
+            for column in range(values.shape[1]):
+                selected = values[(bins == bin_id) & valid[:, column], column]
+                counts.append(int(len(selected)))
+                if len(selected) >= 3:
+                    center, scale = self._fit_rows(selected[:, None])
+                    self.center[bin_id, column] = center[0]
+                    self.scale[bin_id, column] = scale[0]
+            self.bin_count.append(counts)
+        return self
+
+    def transform(self, values, position):
+        values = np.asarray(values, dtype=np.float64)
+        bins = self._bin(position)
+        output = (values - self.center[bins]) / self.scale[bins]
+        return np.nan_to_num(output, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+
+    def report(self):
+        return {
+            "type": "train_only_position_conditioned_median_mad",
+            "position_bins": self.bins,
+            "tokens_per_bin": self.bin_count,
+            "fit_uses_labels": False,
+        }
 
 
-class _RobustProjector:
-    """Median/MAD scaling and PCA fitted on train tokens only."""
+class _RobustScaler:
+    """Train-only global median/MAD for graph mass or visualization."""
 
-    def __init__(self, output_dim, seed):
-        self.output_dim = int(output_dim)
-        self.seed = int(seed)
-        self.center = None
-        self.scale = None
-        self.active = None
-        self.pca = None
-        self.kept_components = None
-
-    def fit(self, reference):
-        reference = np.asarray(reference, dtype=np.float64)
-        if reference.ndim != 2 or not np.isfinite(reference).all():
-            raise ValueError("projector reference must be a finite matrix")
-        self.center = np.median(reference, axis=0)
-        mad = 1.4826 * np.median(np.abs(reference - self.center), axis=0)
-        std = reference.std(axis=0)
-        raw_scale = np.where(mad > 1e-8, mad, std)
-        self.active = raw_scale > 1e-8
-        if not bool(self.active.any()):
-            raise ValueError("all representation dimensions are constant on train")
-        self.scale = np.where(self.active, raw_scale, 1.0)
-        scaled = (reference[:, self.active] - self.center[self.active]) / self.scale[self.active]
-        count = min(self.output_dim, scaled.shape[1], max(1, scaled.shape[0] - 1))
-        self.pca = PCA(n_components=count, whiten=True, svd_solver="auto", random_state=self.seed)
-        self.pca.fit(scaled)
-        variance = np.asarray(self.pca.explained_variance_, dtype=np.float64)
-        self.kept_components = np.isfinite(variance) & (variance > 1e-10)
-        if not bool(self.kept_components.any()):
-            raise ValueError("train reference has no non-degenerate PCA component")
+    def fit(self, values):
+        values = np.asarray(values, dtype=np.float64)
+        self.center, self.scale = _PositionRobustScaler._fit_rows(values)
         return self
 
     def transform(self, values):
-        values = np.asarray(values, dtype=np.float64)
-        if self.pca is None or values.ndim != 2 or values.shape[1] != len(self.center):
-            raise ValueError("projector is unfitted or received the wrong input dimension")
-        scaled = (values[:, self.active] - self.center[self.active]) / self.scale[self.active]
-        output = self.pca.transform(scaled)[:, self.kept_components]
-        return np.nan_to_num(
-            output, copy=False, nan=0.0, posinf=0.0, neginf=0.0
-        ).astype(np.float32)
-
-    def report(self):
-        return {
-            "input_dimensions": int(len(self.center)),
-            "active_dimensions": int(self.active.sum()),
-            "output_dimensions": int(self.kept_components.sum()),
-            "explained_variance_ratio": self.pca.explained_variance_ratio_[
-                self.kept_components
-            ].tolist(),
-            "fit_uses_labels": False,
-        }
-
-    def structured_loading_report(self, num_layers, num_heads, mechanisms):
-        expected = int(num_layers) * int(num_heads) * int(mechanisms)
-        if self.pca is None or len(self.center) != expected:
-            raise ValueError("projector inputs do not match the requested layer-head shape")
-        full = np.zeros((int(self.kept_components.sum()), expected), dtype=np.float64)
-        full[:, self.active] = self.pca.components_[self.kept_components]
-        weight = self.pca.explained_variance_ratio_[self.kept_components, None]
-        importance = np.square(full) * weight
-        importance = importance.sum(0).reshape(num_layers, num_heads, mechanisms)
-        total = max(float(importance.sum()), 1e-12)
-        return {
-            "mechanism_fraction": (importance.sum((0, 1)) / total).tolist(),
-            "layer_fraction": (importance.sum((1, 2)) / total).tolist(),
-            "head_fraction": (importance.sum((0, 2)) / total).tolist(),
-            "computed_without_labels": True,
-        }
+        output = (np.asarray(values, dtype=np.float64) - self.center) / self.scale
+        return np.nan_to_num(output, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
 
-class _PrototypeDetector:
-    """Fast train-only local-scale prototype novelty detector."""
+class _PositivePathReliability:
+    """Train-only positive path reference with continuous zero reliability."""
 
-    def __init__(self, prototypes, reference_size, seed):
-        self.prototypes = int(prototypes)
-        self.reference_size = int(reference_size)
-        self.seed = int(seed)
-        self.model = None
-        self.scale = None
-        self.fit_count = 0
+    def __init__(self, bins):
+        self.bins = int(bins)
 
-    def fit(self, values):
-        values = np.asarray(values, dtype=np.float32)
-        if values.ndim != 2 or not len(values) or not np.isfinite(values).all():
-            raise ValueError("detector training values must be a non-empty finite matrix")
-        rng = np.random.default_rng(self.seed)
-        if len(values) > self.reference_size:
-            ids = np.sort(rng.choice(len(values), self.reference_size, replace=False))
-            reference = values[ids]
-        else:
-            reference = values
-        unique = len(np.unique(reference, axis=0))
-        clusters = min(self.prototypes, len(reference), unique)
-        if clusters < 1:
-            raise ValueError("detector reference has no usable rows")
-        self.model = MiniBatchKMeans(
-            n_clusters=clusters,
-            batch_size=min(4096, max(256, len(reference))),
-            n_init=5,
-            random_state=self.seed,
-        ).fit(reference)
-        assignment = self.model.predict(reference)
-        distance = np.linalg.norm(reference - self.model.cluster_centers_[assignment], axis=1)
-        global_scale = max(float(np.median(distance)), 1e-6)
-        scale = np.full(clusters, global_scale, dtype=np.float32)
-        for cluster in range(clusters):
-            selected = distance[assignment == cluster]
-            if len(selected) >= 4:
-                scale[cluster] = max(float(np.median(selected)), 1e-6)
-        self.scale = scale
-        self.fit_count = len(reference)
+    def _bin(self, position):
+        return np.minimum(
+            (np.asarray(position, dtype=np.float64) * self.bins).astype(int),
+            self.bins - 1,
+        )
+
+    def fit(self, mass, position, eligible):
+        mass = np.asarray(mass, dtype=np.float64)
+        eligible = np.asarray(eligible, dtype=bool)
+        if mass.ndim != 2 or mass.shape != eligible.shape:
+            raise ValueError("path reliability requires aligned matrices")
+        positive = eligible & (mass > 0)
+        global_reference = np.ones(mass.shape[1], dtype=np.float64)
+        for column in range(mass.shape[1]):
+            selected = mass[positive[:, column], column]
+            if len(selected):
+                global_reference[column] = max(float(np.median(selected)), 1e-12)
+        self.reference = np.tile(global_reference, (self.bins, 1))
+        bins = self._bin(position)
+        self.positive_count = []
+        for bin_id in range(self.bins):
+            counts = []
+            for column in range(mass.shape[1]):
+                selected = mass[(bins == bin_id) & positive[:, column], column]
+                counts.append(int(len(selected)))
+                if len(selected) >= 3:
+                    self.reference[bin_id, column] = max(
+                        float(np.median(selected)), 1e-12
+                    )
+            self.positive_count.append(counts)
         return self
 
-    def score(self, values):
-        values = np.asarray(values, dtype=np.float32)
-        assignment = self.model.predict(values)
-        distance = np.linalg.norm(values - self.model.cluster_centers_[assignment], axis=1)
-        return (distance / self.scale[assignment]).astype(np.float32)
+    def transform(self, mass, position, eligible):
+        mass = np.maximum(np.asarray(mass, dtype=np.float64), 0.0)
+        eligible = np.asarray(eligible, dtype=bool)
+        if mass.shape != eligible.shape:
+            raise ValueError("path reliability requires aligned matrices")
+        reference = self.reference[self._bin(position)]
+        reliability = mass / (mass + reference)
+        return np.where(eligible, reliability, 0.0).astype(np.float32)
 
     def report(self):
         return {
-            "type": "train_only_minibatch_prototype_distance",
-            "prototypes": int(self.model.n_clusters),
-            "fit_tokens": int(self.fit_count),
+            "type": "train_only_positive_path_median_q_over_q_plus_q0",
+            "position_bins": self.bins,
+            "positive_paths_per_bin_and_hop": self.positive_count,
+            "zero_path_reliability": 0.0,
             "fit_uses_labels": False,
         }
 
 
-def mechanism_tensor(attention, *, csr_row_block=4096):
-    """Return ``[response, layer, head, 4]`` without layer/head averaging.
-
-    The compressed cache contains strict causal entries plus a separately saved
-    diagonal.  Missing mass below the cache floor is not redistributed.
-    """
-    response_count = int(attention.num_response_tokens)
-    prompt_count = int(attention.response_idx)
-    if response_count < 1 or prompt_count < 1:
-        raise ValueError("mechanism tensor requires a non-empty prompt and response")
-    device = attention.response_values.device
-    rows_count = int(attention.num_channels) * response_count
-    row_ptr = attention.response_row_ptr.long()
-    prompt_mass = torch.zeros(rows_count, dtype=torch.float32, device=device)
-    history_mass = torch.zeros_like(prompt_mass)
-    squared_mass = torch.zeros_like(prompt_mass)
-    dominant = torch.zeros_like(prompt_mass)
-    local_mass = torch.zeros_like(prompt_mass)
-
-    for row_start in range(0, rows_count, int(csr_row_block)):
-        row_end = min(row_start + int(csr_row_block), rows_count)
-        starts = row_ptr[row_start:row_end]
-        lengths = row_ptr[row_start + 1 : row_end + 1] - starts
-        entry_count = int(lengths.sum())
-        if not entry_count:
-            continue
-        repeated_starts = torch.repeat_interleave(starts, lengths)
-        prefix = torch.repeat_interleave(torch.cumsum(lengths, 0) - lengths, lengths)
-        positions = repeated_starts + torch.arange(entry_count, device=device) - prefix
-        local_row = torch.repeat_interleave(
-            torch.arange(row_end - row_start, device=device), lengths
-        )
-        global_row = local_row + row_start
-        token_row = global_row.remainder(response_count)
-        source = attention.response_column_indices[positions].long()
-        value = attention.response_values[positions].float().clamp_min(0.0)
-        is_prompt = source < prompt_count
-
-        local_prompt = torch.zeros(row_end - row_start, dtype=torch.float32, device=device)
-        local_history = torch.zeros_like(local_prompt)
-        local_squared = torch.zeros_like(local_prompt)
-        local_dominant = torch.zeros_like(local_prompt)
-        local_locality = torch.zeros_like(local_prompt)
-        local_squared.index_add_(0, local_row, value.square())
-        local_dominant.scatter_reduce_(0, local_row, value, reduce="amax", include_self=True)
-        if bool(is_prompt.any()):
-            local_prompt.index_add_(0, local_row[is_prompt], value[is_prompt])
-        is_history = ~is_prompt
-        if bool(is_history.any()):
-            history_row = local_row[is_history]
-            history_value = value[is_history]
-            local_history.index_add_(0, history_row, history_value)
-            lag = token_row[is_history] - (source[is_history] - prompt_count)
-            locality = lag.float().clamp_min(1.0).reciprocal()
-            local_locality.index_add_(0, history_row, history_value * locality)
-        prompt_mass[row_start:row_end] = local_prompt
-        history_mass[row_start:row_end] = local_history
-        squared_mass[row_start:row_end] = local_squared
-        dominant[row_start:row_end] = local_dominant
-        local_mass[row_start:row_end] = local_locality
-
-    diagonal = (
-        attention.attention_diagonal.float()[:, :, prompt_count:]
-        .reshape(-1)
-        .clamp_min(0.0)
-    )
-    token_row = torch.arange(rows_count, device=device).remainder(response_count)
-    prompt_mean = prompt_mass / float(prompt_count)
-    response_mean = (history_mass + diagonal) / (token_row + 1).float()
-    routing_denominator = prompt_mean + response_mean
-    routing = torch.where(
-        routing_denominator > 0,
-        prompt_mean / routing_denominator,
-        torch.zeros_like(routing_denominator),
-    )
-
-    retained = prompt_mass + history_mass + diagonal
-    hhi = torch.where(
-        retained > 0,
-        (squared_mass + diagonal.square()) / retained.square().clamp_min(1e-12),
-        torch.zeros_like(retained),
-    )
-    possible_sources = (prompt_count + token_row + 1).float()
-    effective_support = torch.where(hhi > 0, hhi.reciprocal(), torch.zeros_like(hhi))
-    support_fraction = (effective_support / possible_sources).clamp(0.0, 1.0)
-    dominant = torch.maximum(dominant, diagonal)
-    response_total = history_mass + diagonal
-    locality = torch.where(
-        response_total > 0,
-        (local_mass + diagonal) / response_total,
-        torch.zeros_like(response_total),
-    )
-    tensor = torch.stack((routing, support_fraction, dominant, locality), dim=-1)
-    tensor = tensor.reshape(
-        attention.num_layers, attention.num_heads, response_count, len(MECHANISMS)
-    ).permute(2, 0, 1, 3)
-    unresolved = (1.0 - retained).clamp(0.0, 1.0).reshape(
-        attention.num_layers, attention.num_heads, response_count
-    ).permute(2, 0, 1)
-    return torch.nan_to_num(tensor), torch.nan_to_num(unresolved)
+def exact_token_features(attention, graph=None, *, csr_row_block=4096):
+    """Historical exact scalars plus the exact direct Lookback baseline."""
+    graph = build_attention_graph(attention) if graph is None else graph
+    scalar = token_statistics(graph)
+    lookback = direct_lookback(attention, csr_row_block=csr_row_block)[:, None]
+    output = torch.cat((scalar, lookback), dim=1)
+    if output.shape[1] != len(EXACT_FEATURES):
+        raise ValueError("exact feature schema and matrix width differ")
+    return torch.nan_to_num(output)
 
 
-def _source_codes(token_count, response_idx, dimension, device):
-    position = torch.arange(token_count, dtype=torch.float32, device=device)
-    prompt_denominator = max(response_idx - 1, 1)
-    response_denominator = max(token_count - response_idx - 1, 1)
-    relative = torch.where(
-        position < response_idx,
-        position / float(prompt_denominator),
-        (position - response_idx) / float(response_denominator),
-    )
-    frequencies = (2.0 ** torch.arange(dimension // 2, device=device)) * torch.pi
-    phase = relative[:, None] * frequencies[None, :]
-    code = torch.cat((torch.sin(phase), torch.cos(phase)), dim=1)
-    role = torch.where(position < response_idx, -1.0, 1.0)[:, None]
-    code[:, 0::2] *= role
-    return code
-
-
-def fixed_graph_messages(
-    graph, token_embedding, *, source_sketch_dim=16, diffusion_hops=3
-):
-    """Multi-scale causal diffusion over the exact retained RP/RR graph.
-
-    ``H[k] = P_RR @ H[k-1]`` transports token state through paths of exactly
-    ``k`` RR edges.  Prompt provenance is seeded by direct RP edges and follows
-    the same recurrence, so a later token can inherit prompt evidence through
-    response nodes even without a direct RP connection.
-    """
-    token_embedding = torch.as_tensor(
-        token_embedding, dtype=torch.float32, device=graph.node_attr.device
-    )
-    response_count, base_dim = token_embedding.shape
-    if response_count != graph.num_nodes - graph.response_idx:
-        raise ValueError("token embedding does not cover the graph response nodes")
-    sketch = _source_codes(
-        graph.num_nodes, graph.response_idx, int(source_sketch_dim), graph.node_attr.device
-    )
-    if int(diffusion_hops) < 1:
-        raise ValueError("diffusion_hops must be positive")
-    rp_direct = torch.zeros((response_count, source_sketch_dim), device=sketch.device)
-    rr_source = torch.empty(0, dtype=torch.long, device=sketch.device)
-    rr_target = torch.empty(0, dtype=torch.long, device=sketch.device)
-    rr_weight = torch.empty(0, dtype=torch.float32, device=sketch.device)
-
-    for relation in (RP, RR):
-        edge_ids = torch.nonzero(graph.edge_type == relation, as_tuple=False).flatten()
-        if not edge_ids.numel():
-            continue
-        source = graph.edge_index[0, edge_ids].long()
-        target = graph.edge_index[1, edge_ids].long() - graph.response_idx
-        weight = graph.edge_score[edge_ids].float().clamp_min(0.0)
-        denominator = torch.zeros(response_count, dtype=torch.float32, device=weight.device)
-        denominator.index_add_(0, target, weight)
-        normalized = weight / denominator[target].clamp_min(1e-12)
-        if relation == RP:
-            rp_direct.index_add_(0, target, normalized[:, None] * sketch[source])
+def _raw_relation_matrices(graph):
+    """Sparse RP/RR matrices using absolute pair mass, never row-normalized."""
+    response_count = graph.num_nodes - graph.response_idx
+    device = graph.node_attr.device
+    matrices = {}
+    for relation, width, source_offset in (
+        (RP, graph.response_idx, 0),
+        (RR, response_count, graph.response_idx),
+    ):
+        selected = torch.nonzero(graph.edge_type == relation, as_tuple=False).flatten()
+        if selected.numel():
+            source = graph.edge_index[0, selected].long() - source_offset
+            target = graph.edge_index[1, selected].long() - graph.response_idx
+            value = graph.edge_score[selected].float().clamp_min(0.0)
+            index = torch.stack((target, source))
         else:
-            rr_source = source - graph.response_idx
-            rr_target = target
-            rr_weight = normalized
-    rr_transition = torch.sparse_coo_tensor(
-        torch.stack((rr_target, rr_source)),
-        rr_weight,
-        size=(response_count, response_count),
-        dtype=torch.float32,
-        device=sketch.device,
-    ).coalesce()
-    blocks = [token_embedding, rp_direct]
-    slices = {
-        "token": (0, base_dim),
-        "rp_direct": (base_dim, base_dim + source_sketch_dim),
-    }
-    offset = base_dim + source_sketch_dim
-    token_state = token_embedding
-    position_state = sketch[graph.response_idx :]
-    prompt_state = rp_direct
-    reach = _exact_hop_reach_count(
-        rr_source.detach().cpu().tolist(),
-        rr_target.detach().cpu().tolist(),
-        response_count,
-        int(diffusion_hops),
-    )
-    influence_state = torch.ones(
-        (response_count, 1), dtype=torch.float32, device=sketch.device
-    )
-    influence = []
-    for hop in range(1, int(diffusion_hops) + 1):
-        token_state = torch.sparse.mm(rr_transition, token_state)
-        position_state = torch.sparse.mm(rr_transition, position_state)
-        prompt_state = torch.sparse.mm(rr_transition, prompt_state)
-        influence_state = torch.sparse.mm(rr_transition, influence_state)
-        for name, block in (
-            (f"rr_token_hop_{hop}", token_state),
-            (f"rr_position_hop_{hop}", position_state),
-            (f"rp_diffusion_hop_{hop}", prompt_state),
-        ):
-            width = int(block.shape[1])
-            slices[name] = (offset, offset + width)
-            offset += width
-            blocks.append(block)
-        influence.append(influence_state[:, 0])
-    fused = torch.cat(blocks, dim=1)
-    structure = {
-        "hop_reach_count": reach,
-        "hop_influence_mass": torch.stack(influence, dim=1),
-    }
-    return fused, slices, structure
+            index = torch.empty((2, 0), dtype=torch.long, device=device)
+            value = torch.empty(0, dtype=torch.float32, device=device)
+        matrices[relation] = torch.sparse_coo_tensor(
+            index, value, size=(response_count, width), device=device
+        ).coalesce()
+    return matrices[RP], matrices[RR]
 
 
-def _exact_hop_reach_count(sources, targets, node_count, hops):
-    parents = [set() for _ in range(int(node_count))]
+def _without_relation(graph, relation):
+    """Return the exact counterfactual graph after deleting one edge type."""
+    keep_edge = graph.edge_type != int(relation)
+    old_to_new = torch.full(
+        (graph.num_edges,), -1, dtype=torch.long, device=graph.edge_type.device
+    )
+    old_to_new[keep_edge] = torch.arange(
+        int(keep_edge.sum()), device=graph.edge_type.device
+    )
+    keep_trace = keep_edge[graph.trace_edge_id]
+    return graph.__class__(**{
+        **graph.__dict__,
+        "edge_index": graph.edge_index[:, keep_edge],
+        "edge_type": graph.edge_type[keep_edge],
+        "edge_score": graph.edge_score[keep_edge],
+        "trace_edge_id": old_to_new[graph.trace_edge_id[keep_trace]],
+        "trace_channel": graph.trace_channel[keep_trace],
+        "trace_value": graph.trace_value[keep_trace],
+    })
+
+
+def _exact_hop_reach_count(graph, hops):
+    response_count = graph.num_nodes - graph.response_idx
+    selected = graph.edge_type == RR
+    sources = (graph.edge_index[0, selected] - graph.response_idx).cpu().tolist()
+    targets = (graph.edge_index[1, selected] - graph.response_idx).cpu().tolist()
+    parents = [set() for _ in range(response_count)]
     for source, target in zip(sources, targets):
         parents[int(target)].add(int(source))
-    current = [set(value) for value in parents]
-    rows = []
+    current = [set(row) for row in parents]
+    output = []
     for _ in range(int(hops)):
-        rows.append([len(value) for value in current])
+        output.append([len(row) for row in current])
         current = [
-            set().union(*(parents[source] for source in ancestors))
-            if ancestors else set()
-            for ancestors in current
+            set().union(*(parents[source] for source in row)) if row else set()
+            for row in current
         ]
-    return torch.tensor(rows, dtype=torch.int32).T.contiguous()
+    return torch.tensor(output, dtype=torch.int32).T.contiguous()
 
 
-def _geometry(dataset):
+def structure_preserving_messages(graph, base_z, *, diffusion_hops=2):
+    """Retain raw path mass, conditional ancestors and local innovations.
+
+    ``M_k=A_RR M_(k-1)`` is saved before dividing by path mass. Therefore two
+    rows with equal normalized neighbor distributions but different absolute
+    mass remain distinguishable. Residuals preserve local changes rather than
+    replacing the token by a smoothed neighbor average.
+    """
+    base = torch.as_tensor(base_z, dtype=torch.float32, device=graph.node_attr.device)
+    response_count = graph.num_nodes - graph.response_idx
+    if tuple(base.shape) != (response_count, len(EXACT_FEATURES)):
+        raise ValueError("base_z does not align with response nodes")
+    rp, rr = _raw_relation_matrices(graph)
+    rp_direct = torch.sparse.mm(
+        rp, torch.ones((graph.response_idx, 1), device=base.device)
+    )[:, 0]
+    raw_state = base
+    rr_mass_state = torch.ones((response_count, 1), device=base.device)
+    rp_mass_state = rp_direct[:, None]
+    raw_messages, conditional, residuals = [], [], []
+    rr_mass, rp_mass = [], [rp_direct]
+    for _ in range(int(diffusion_hops)):
+        raw_state = torch.sparse.mm(rr, raw_state)
+        rr_mass_state = torch.sparse.mm(rr, rr_mass_state)
+        rp_mass_state = torch.sparse.mm(rr, rp_mass_state)
+        mass = rr_mass_state[:, 0]
+        mean = torch.where(
+            mass[:, None] > 1e-12,
+            raw_state / mass[:, None].clamp_min(1e-12),
+            torch.zeros_like(raw_state),
+        )
+        residual = torch.where(
+            mass[:, None] > 1e-12, base - mean, torch.zeros_like(base)
+        )
+        raw_messages.append(raw_state)
+        conditional.append(mean)
+        residuals.append(residual)
+        rr_mass.append(mass)
+        rp_mass.append(rp_mass_state[:, 0])
     return {
-        name: dataset.manifest.get(name)
-        for name in (
-            "schema",
-            "num_layers",
-            "num_heads",
-            "alignment",
-            "attention_floor",
-            "observer_model",
-        )
+        "raw_message": torch.stack(raw_messages, dim=1),
+        "conditional_neighbor": torch.stack(conditional, dim=1),
+        "self_neighbor_residual": torch.stack(residuals, dim=1),
+        "rr_path_mass": torch.stack(rr_mass, dim=1),
+        "rp_path_mass": torch.stack(rp_mass, dim=1),
+        "rr_hop_reach_count": _exact_hop_reach_count(graph, diffusion_hops),
     }
 
 
-def _fit_base_projector(dataset, config):
-    sampler = _ReferenceSampler(config.fit_reference_size, config.seed)
-    expected = (
-        int(dataset.manifest["num_layers"])
-        * int(dataset.manifest["num_heads"])
-        * len(MECHANISMS)
+def _metadata_template():
+    return {name: [] for name in (
+        "sample_id", "source_id", "token_index", "token_id",
+        "relative_position", "task_type", "data_source", "generator_model",
+    )}
+
+
+def _append_metadata(metadata, sample, attention, count):
+    metadata["sample_id"].extend([str(sample.sample_id)] * count)
+    metadata["source_id"].extend([str(sample.source_id)] * count)
+    metadata["token_index"].extend(range(count))
+    metadata["token_id"].extend(
+        attention.token_ids[attention.response_idx:].detach().cpu().tolist()
     )
-    for sample_id in tqdm(dataset.sample_ids, desc="[1/6] train mechanism reference", unit="sample"):
-        sample = dataset[sample_id]
-        tensor, _ = mechanism_tensor(
-            sample.attention(), csr_row_block=config.csr_row_block
-        )
-        flat = tensor.reshape(tensor.shape[0], -1).detach().cpu().numpy()
-        if flat.shape[1] != expected:
-            raise ValueError("train attention geometry changed across samples")
-        sampler.add(flat)
-        sample.release_attention()
-    reference = sampler.get()
-    return _RobustProjector(config.base_dim, config.seed).fit(reference), len(reference)
+    metadata["relative_position"].extend(
+        np.arange(count, dtype=np.float32) / max(count - 1, 1)
+    )
+    for field in ("task_type", "data_source", "generator_model"):
+        metadata[field].extend([str(getattr(sample, field))] * count)
 
 
-def _extract_split(dataset, base_projector, config, split_name, *, keep_graphs):
-    fused_rows, unresolved_rows = [], []
-    graphs = []
-    metadata = {
-        name: []
-        for name in (
-            "sample_id",
-            "source_id",
-            "token_index",
-            "token_id",
-            "task_type",
-            "data_source",
-            "generator_model",
-        )
-    }
-    slices = None
-    offset = 0
-    for sample_id in tqdm(
-        dataset.sample_ids,
-        desc=f"[2/6] {split_name} token and graph views",
-        unit="sample",
-    ):
-        sample = dataset[sample_id]
-        attention = sample.attention()
-        tensor, unresolved = mechanism_tensor(
-            attention, csr_row_block=config.csr_row_block
-        )
-        flat = tensor.reshape(tensor.shape[0], -1).detach().cpu().numpy()
-        token_embedding = base_projector.transform(flat)
-        graph = build_attention_graph(attention, GraphBuildConfig(selection="threshold"))
-        fused, current_slices, structure = fixed_graph_messages(
-            graph,
-            token_embedding,
-            source_sketch_dim=config.source_sketch_dim,
-            diffusion_hops=config.diffusion_hops,
-        )
-        if slices is None:
-            slices = current_slices
-        elif slices != current_slices:
-            raise ValueError("graph message block layout changed across samples")
-        fused_np = fused.detach().cpu().numpy().astype(np.float32)
-        unresolved_np = unresolved.detach().cpu().numpy().astype(np.float32)
-        count = int(attention.num_response_tokens)
-        if len(fused_np) != count or len(unresolved_np) != count:
-            raise ValueError("sample representation does not cover every response token")
-        fused_rows.append(fused_np)
-        unresolved_rows.append(unresolved_np)
-        metadata["sample_id"].extend([str(sample.sample_id)] * count)
-        metadata["source_id"].extend([str(sample.source_id)] * count)
-        metadata["token_index"].extend(range(count))
-        metadata["token_id"].extend(
-            attention.token_ids[attention.response_idx :].detach().cpu().tolist()
-        )
-        for field in ("task_type", "data_source", "generator_model"):
-            metadata[field].extend([str(getattr(sample, field))] * count)
-        if keep_graphs:
-            graphs.append(
-                {
-                    "sample_id": str(sample.sample_id),
-                    "start": offset,
-                    "end": offset + count,
-                    "token_ids": graph.token_ids.detach().cpu().numpy().astype(np.int32),
-                    "response_idx": int(graph.response_idx),
-                    "edge_index": graph.edge_index.detach().cpu().numpy().astype(np.int32),
-                    "edge_type": graph.edge_type.detach().cpu().numpy().astype(np.int8),
-                    "edge_score": graph.edge_score.detach().cpu().numpy().astype(np.float32),
-                    "hop_reach_count": structure["hop_reach_count"].detach().cpu().numpy().astype(np.int32),
-                    "hop_influence_mass": structure["hop_influence_mass"].detach().cpu().numpy().astype(np.float32),
-                }
-            )
-        offset += count
-        sample.release_attention()
-    if not fused_rows or slices is None:
-        raise ValueError(f"{split_name} split contains no response tokens")
-    arrays = {
+def _metadata_arrays(metadata):
+    return {
         name: np.asarray(values, dtype=dtype)
         for name, values, dtype in (
             ("sample_id", metadata["sample_id"], str),
             ("source_id", metadata["source_id"], str),
             ("token_index", metadata["token_index"], np.int32),
             ("token_id", metadata["token_id"], np.int32),
+            ("relative_position", metadata["relative_position"], np.float32),
             ("task_type", metadata["task_type"], str),
             ("data_source", metadata["data_source"], str),
             ("generator_model", metadata["generator_model"], str),
         )
     }
-    return (
-        np.concatenate(fused_rows).astype(np.float32),
-        np.concatenate(unresolved_rows).astype(np.float32),
-        arrays,
-        graphs,
-        slices,
+
+
+def _path_eligibility(token_index, hops):
+    """Causal eligibility, distinct from whether a retained path exists."""
+    token_index = np.asarray(token_index, dtype=np.int64)
+    rr = np.column_stack([
+        token_index >= hop for hop in range(1, int(hops) + 1)
+    ])
+    rp = np.column_stack((
+        np.ones(len(token_index), dtype=bool), rr,
+    ))
+    return rp, rr
+
+
+def _extract_exact_split(dataset, config, split_name):
+    rows, metadata = [], _metadata_template()
+    for sample_id in tqdm(
+        dataset.sample_ids, desc=f"[1/7] {split_name} exact graph scalars", unit="sample"
+    ):
+        sample = dataset[sample_id]
+        attention = sample.attention()
+        graph = build_attention_graph(attention, GraphBuildConfig(selection="threshold"))
+        values = exact_token_features(
+            attention, graph, csr_row_block=config.csr_row_block
+        ).detach().cpu().numpy().astype(np.float32)
+        rows.append(values)
+        _append_metadata(metadata, sample, attention, len(values))
+        sample.release_attention()
+    if not rows:
+        raise ValueError(f"{split_name} split contains no response tokens")
+    return np.concatenate(rows), _metadata_arrays(metadata)
+
+
+def _extract_graph_split(
+    dataset, base_z, base_scaler, relative_position, config, split_name, *, keep_graphs
+):
+    buffers = {name: [] for name in (
+        "raw_message", "conditional_neighbor", "self_neighbor_residual",
+        "rr_path_mass", "rp_path_mass", "rr_hop_reach_count",
+        "no_rp_exact", "no_rr_exact", "no_rp_self_neighbor_residual",
+    )}
+    graphs, offset = [], 0
+    for sample_id in tqdm(
+        dataset.sample_ids, desc=f"[2/7] {split_name} mass-preserving propagation", unit="sample"
+    ):
+        sample = dataset[sample_id]
+        attention = sample.attention()
+        graph = build_attention_graph(attention, GraphBuildConfig(selection="threshold"))
+        count = attention.num_response_tokens
+        messages = structure_preserving_messages(
+            graph, base_z[offset:offset + count], diffusion_hops=config.diffusion_hops
+        )
+        for name in (
+            "raw_message", "conditional_neighbor", "self_neighbor_residual",
+            "rr_path_mass", "rp_path_mass", "rr_hop_reach_count",
+        ):
+            buffers[name].append(messages[name].detach().cpu().numpy())
+        for name, relation in (("no_rp_exact", RP), ("no_rr_exact", RR)):
+            counterfactual_graph = _without_relation(graph, relation)
+            counterfactual = torch.cat((
+                token_statistics(counterfactual_graph),
+                direct_lookback_from_graph(counterfactual_graph)[:, None],
+            ), dim=1)
+            buffers[name].append(counterfactual.detach().cpu().numpy())
+            if relation == RP:
+                no_rp_z = base_scaler.transform(
+                    counterfactual.detach().cpu().numpy(),
+                    relative_position[offset:offset + count],
+                )
+                no_rp_messages = structure_preserving_messages(
+                    counterfactual_graph, no_rp_z,
+                    diffusion_hops=config.diffusion_hops,
+                )
+                buffers["no_rp_self_neighbor_residual"].append(
+                    no_rp_messages["self_neighbor_residual"].detach().cpu().numpy()
+                )
+        if keep_graphs:
+            graphs.append({
+                "sample_id": str(sample.sample_id), "start": offset, "end": offset + count,
+                "token_ids": graph.token_ids.cpu().numpy().astype(np.int32),
+                "response_idx": int(graph.response_idx),
+                "edge_index": graph.edge_index.cpu().numpy().astype(np.int32),
+                "edge_type": graph.edge_type.cpu().numpy().astype(np.int8),
+                "edge_score": graph.edge_score.cpu().numpy().astype(np.float32),
+            })
+        offset += count
+        sample.release_attention()
+    if offset != len(base_z):
+        raise ValueError("graph traversal and exact scalar rows do not align")
+    output = {
+        name: np.concatenate(rows).astype(
+            np.int32 if name == "rr_hop_reach_count" else np.float32
+        )
+        for name, rows in buffers.items()
+    }
+    return output, graphs
+
+
+def _directed_evidence(z, history_present=None):
+    selected = np.asarray(z, dtype=np.float32)[..., SCORE_INDEX]
+    evidence = np.maximum(selected * SCORE_DIRECTION, 0.0)
+    if history_present is not None:
+        lag_column = SCORE_FEATURES.index("history_lag")
+        evidence[..., lag_column] = np.where(history_present, evidence[..., lag_column], 0.0)
+    return evidence.astype(np.float32)
+
+
+def _directed_score(z, history_present=None, excluded=()):
+    evidence = _directed_evidence(z, history_present)
+    for name in excluded:
+        evidence[..., SCORE_FEATURES.index(name)] = 0.0
+    # Keep the denominator fixed so ablations are literal zeroed blocks under
+    # one scoring formula rather than newly reweighted detectors.
+    return evidence.mean(axis=-1).astype(np.float32)
+
+
+def _masked_mean(values, available):
+    """Mean only over eligible entries; empty rows stay zero."""
+    values = np.asarray(values, dtype=np.float32)
+    available = np.asarray(available, dtype=bool)
+    count = available.sum(axis=1)
+    total = np.where(available, values, 0.0).sum(axis=1)
+    return np.divide(
+        total, count, out=np.zeros_like(total, dtype=np.float32), where=count > 0
+    ).astype(np.float32)
+
+
+def _build_scores(
+    base_z, base_exact, no_rp_z, no_rp_exact, no_rr_z, no_rr_exact,
+    relative_position, rp_eligible, rr_eligible, graph, rp_scaler, rr_scaler,
+    rr_reliability
+):
+    history_present = (
+        np.asarray(base_exact)[:, EXACT_FEATURES.index("history_edge_fraction")] > 0
     )
+    token = _directed_score(base_z, history_present)
+    base_no_rp = _directed_score(
+        no_rp_z,
+        np.asarray(no_rp_exact)[:, EXACT_FEATURES.index("history_edge_fraction")] > 0,
+        excluded=("prompt_mass_fraction",),
+    )
+    base_no_rr = _directed_score(
+        no_rr_z,
+        np.asarray(no_rr_exact)[:, EXACT_FEATURES.index("history_edge_fraction")] > 0,
+        excluded=("history_lag",),
+    )
+    hop_present = history_present[:, None] & (graph["rr_path_mass"] > 1e-12)
+    innovation_by_hop = _directed_score(
+        graph["self_neighbor_residual"], hop_present
+    )
+    reachable = graph["rr_hop_reach_count"] > 0
+    no_rp_innovation_by_hop = _directed_score(
+        graph["no_rp_self_neighbor_residual"], reachable
+    )
+    rp_log = np.log1p(np.maximum(graph["rp_path_mass"], 0.0))
+    rp_z = rp_scaler.transform(rp_log, relative_position)
+    rp_z = np.where(rp_eligible, rp_z, 0.0).astype(np.float32)
+    rp_direct_weakness = np.maximum(-rp_z[:, 0], 0.0).astype(np.float32)
+    rr_log = np.log1p(np.maximum(graph["rr_path_mass"], 0.0))
+    rr_z = rr_scaler.transform(rr_log, relative_position)
+    rr_z = np.where(rr_eligible, rr_z, 0.0).astype(np.float32)
+    reliability = rr_reliability.transform(
+        graph["rr_path_mass"], relative_position, rr_eligible
+    )
+    innovation = _masked_mean(
+        innovation_by_hop * reliability, rr_eligible
+    )
+    no_rp_innovation = _masked_mean(
+        no_rp_innovation_by_hop * reliability, rr_eligible
+    )
+    rp_inherited_weakness = _masked_mean(
+        np.maximum(-rp_z[:, 1:], 0.0), rr_eligible
+    )
+    rp_weakness = _masked_mean(
+        np.maximum(-rp_z, 0.0), rp_eligible
+    )
+    rr_evidence = np.maximum(-rr_z, 0.0)
+    rr_path_deficit = _masked_mean(rr_evidence, rr_eligible)
+    graph_evidence = np.mean(
+        np.stack((innovation, rp_weakness), axis=1), axis=1
+    ).astype(np.float32)
+    return {
+        "token_only": token,
+        "token_graph": np.mean(
+            np.stack((token, innovation, rp_weakness), axis=1), axis=1
+        ).astype(np.float32),
+        "no_rp": np.mean(
+            np.stack((base_no_rp, no_rp_innovation, np.zeros_like(token)), axis=1), axis=1
+        ).astype(np.float32),
+        "no_rr": np.mean(
+            np.stack((base_no_rr, np.zeros_like(token), rp_direct_weakness), axis=1), axis=1
+        ).astype(np.float32),
+        "graph_innovation": innovation.astype(np.float32),
+        "graph_evidence": graph_evidence,
+        "rp_weakness": rp_weakness,
+        "rp_direct_weakness": rp_direct_weakness,
+        "rp_inherited_weakness": rp_inherited_weakness,
+        "rr_path_deficit": rr_path_deficit,
+        "innovation_by_hop": innovation_by_hop.astype(np.float32),
+        "innovation_reliability": reliability,
+        "rp_path_z": rp_z,
+        "rr_path_z": rr_z,
+    }
 
 
-def _view_matrix(values, slices, view):
-    if view == "token_only":
-        start, end = slices["token"]
-        return values[:, start:end]
-    if view == "token_graph":
-        return values
-    output = values.copy()
-    if view == "no_rp":
-        for name, (start, end) in slices.items():
-            if name == "rp_direct" or name.startswith("rp_diffusion_hop_"):
-                output[:, start:end] = 0.0
-    elif view == "no_rr":
-        for name, (start, end) in slices.items():
-            if name.startswith("rr_") or name.startswith("rp_diffusion_hop_"):
-                output[:, start:end] = 0.0
+def _representation(base_z, graph, rp_z, rr_z):
+    parts = [base_z]
+    names = [f"base:{name}" for name in EXACT_FEATURES]
+    for hop in range(graph["raw_message"].shape[1]):
+        parts.extend((
+            graph["raw_message"][:, hop],
+            graph["conditional_neighbor"][:, hop],
+            graph["self_neighbor_residual"][:, hop],
+        ))
+        names.extend(f"hop{hop + 1}:raw:{name}" for name in EXACT_FEATURES)
+        names.extend(f"hop{hop + 1}:neighbor:{name}" for name in EXACT_FEATURES)
+        names.extend(f"hop{hop + 1}:residual:{name}" for name in EXACT_FEATURES)
+    parts.extend((
+        rr_z,
+        rp_z,
+        np.log1p(graph["rr_hop_reach_count"].astype(np.float32)),
+    ))
+    names.extend(f"rr_path_mass_z:hop{hop + 1}" for hop in range(rr_z.shape[1]))
+    names.extend(f"rp_path_mass_z:hop{hop}" for hop in range(rp_z.shape[1]))
+    names.extend(f"rr_reach:hop{hop + 1}" for hop in range(graph["rr_hop_reach_count"].shape[1]))
+    return np.concatenate(parts, axis=1).astype(np.float32), tuple(names)
+
+
+def _visual_coordinates(
+    train_representation, test_representation, seed, reference_size
+):
+    rng = np.random.default_rng(seed)
+    if len(train_representation) > int(reference_size):
+        reference_ids = np.sort(
+            rng.choice(len(train_representation), int(reference_size), replace=False)
+        )
     else:
-        raise ValueError(f"unknown representation view: {view}")
-    return output
-
-
-def _fit_views(train, test, slices, config):
-    embeddings, scores, diagnostics = {}, {}, {}
-    rng = np.random.default_rng(config.seed + 10_000)
-    train_limit = min(
-        len(train), max(config.fit_reference_size, config.detector_reference_size)
-    )
-    train_ids = (
-        np.arange(len(train))
-        if train_limit == len(train)
-        else np.sort(rng.choice(len(train), train_limit, replace=False))
-    )
-    for view in VIEWS:
-        print(f"[3/6] fitting label-blind view {view}", flush=True)
-        train_view = _view_matrix(train[train_ids], slices, view)
-        test_view = _view_matrix(test, slices, view)
-        if view == "token_only":
-            train_embedding = train_view.astype(np.float32, copy=False)
-            test_embedding = test_view.astype(np.float32, copy=False)
-            projection = {
-                "type": "base_train_only_robust_pca",
-                "output_dimensions": int(train_embedding.shape[1]),
-                "fit_uses_labels": False,
-            }
-        else:
-            sampler = _ReferenceSampler(
-                config.fit_reference_size, config.seed + 100
-            )
-            sampler.add(train_view)
-            projector = _RobustProjector(
-                config.embedding_dim, config.seed + 100
-            ).fit(sampler.get())
-            train_embedding = projector.transform(train_view)
-            test_embedding = projector.transform(test_view)
-            projection = {"type": "train_only_robust_pca", **projector.report()}
-        detector = _PrototypeDetector(
-            config.prototypes,
-            config.detector_reference_size,
-            config.seed + 1000,
-        ).fit(train_embedding)
-        embeddings[view] = test_embedding
-        scores[view] = detector.score(test_embedding)
-        diagnostics[view] = {
-            "projection": projection,
-            "detector": detector.report(),
+        reference_ids = np.arange(len(train_representation))
+    reference = train_representation[reference_ids]
+    scaler = _RobustScaler().fit(reference)
+    train = scaler.transform(reference)
+    test = scaler.transform(test_representation)
+    active = train.std(0) > 1e-8
+    if not bool(active.any()):
+        return np.zeros((len(test), 2), dtype=np.float32), {
+            "type": "constant_zero_coordinates", "fit_uses_labels": False
         }
-    return embeddings, scores, diagnostics
+    count = min(2, int(active.sum()), max(1, len(train) - 1))
+    pca = PCA(n_components=count, random_state=seed).fit(train[:, active])
+    coordinates = np.zeros((len(test), 2), dtype=np.float32)
+    coordinates[:, :count] = pca.transform(test[:, active]).astype(np.float32)
+    return coordinates, {
+        "type": "visualization_only_train_robust_pca", "components": count,
+        "train_reference_nodes": int(len(reference_ids)),
+        "explained_variance_ratio": pca.explained_variance_ratio_.tolist(),
+        "changes_detector_score": False, "fit_uses_labels": False,
+    }
 
 
 def _ranking(labels, scores):
     labels = np.asarray(labels, dtype=np.int8)
     scores = np.asarray(scores, dtype=np.float64)
-    result = {
-        "n": int(len(labels)),
-        "positives": int(labels.sum()),
-        "prevalence": float(labels.mean()) if len(labels) else None,
-    }
+    result = {"n": int(len(labels)), "positives": int(labels.sum()),
+              "prevalence": float(labels.mean()) if len(labels) else None}
     if len(np.unique(labels)) < 2:
         return {**result, "auroc": None, "auprc": None}
     return {
-        **result,
-        "auroc": float(roc_auc_score(labels, scores)),
+        **result, "auroc": float(roc_auc_score(labels, scores)),
         "auprc": float(average_precision_score(labels, scores)),
         "correct_median": float(np.median(scores[labels == 0])),
         "hallucination_median": float(np.median(scores[labels == 1])),
     }
 
 
+def _feature_separation(labels, values, fixed_direction=None):
+    labels = np.asarray(labels, dtype=np.int8)
+    values = np.asarray(values, dtype=np.float64)
+    base = {
+        "n": int(len(labels)), "positives": int(labels.sum()),
+        "used_to_fit_representation": False,
+    }
+    if len(np.unique(labels)) < 2:
+        return {
+            **base,
+            "raw_auroc_higher_is_anomaly": None,
+            "separability": None,
+            "post_hoc_direction": None,
+            "post_hoc_oriented_auprc": None,
+            "correct_median": (
+                float(np.median(values[labels == 0])) if np.any(labels == 0) else None
+            ),
+            "hallucination_median": (
+                float(np.median(values[labels == 1])) if np.any(labels == 1) else None
+            ),
+        }
+    raw_auc = float(roc_auc_score(labels, values))
+    correct = float(np.median(values[labels == 0]))
+    hallucination = float(np.median(values[labels == 1]))
+    if raw_auc >= .5:
+        direction, oriented = "higher_for_hallucination", values
+    else:
+        direction, oriented = "lower_for_hallucination", -values
+    result = {
+        "raw_auroc_higher_is_anomaly": raw_auc,
+        "separability": max(raw_auc, 1.0 - raw_auc),
+        "post_hoc_direction": direction,
+        "post_hoc_oriented_auprc": float(average_precision_score(labels, oriented)),
+        "correct_median": correct, "hallucination_median": hallucination,
+        **base,
+    }
+    if fixed_direction is not None:
+        frozen = values * float(fixed_direction)
+        result["fixed_direction"] = (
+            "higher" if float(fixed_direction) > 0 else "lower"
+        )
+        result["fixed_direction_auroc"] = float(roc_auc_score(labels, frozen))
+        result["fixed_direction_auprc"] = float(
+            average_precision_score(labels, frozen)
+        )
+    return result
+
+
 def _grouped_ranking(labels, scores, metadata, field):
-    output = {}
-    for value in sorted(set(metadata[field].astype(str))):
-        selected = metadata[field].astype(str) == value
-        output[value] = _ranking(labels[selected], scores[selected])
-    return output
+    groups = metadata[field].astype(str)
+    return {
+        group: _ranking(labels[groups == group], scores[groups == group])
+        for group in sorted(set(groups))
+    }
 
 
 def _metric_delta(left, right, metric):
-    left_value, right_value = left.get(metric), right.get(metric)
-    return (
-        None if left_value is None or right_value is None
-        else float(left_value - right_value)
-    )
+    if left.get(metric) is None or right.get(metric) is None:
+        return None
+    return float(left[metric] - right[metric])
+
+
+def _response_feature_evaluation(labels, exact, metadata):
+    sample_ids = metadata["sample_id"].astype(str)
+    rows = {f"{summary}_{name}": [] for name in EXACT_FEATURES
+            for summary in ("mean", "std")}
+    response_labels = []
+    for sample_id in dict.fromkeys(sample_ids):
+        selected = sample_ids == sample_id
+        response_labels.append(int(labels[selected].max()))
+        for index, name in enumerate(EXACT_FEATURES):
+            rows[f"mean_{name}"].append(float(exact[selected, index].mean()))
+            rows[f"std_{name}"].append(float(exact[selected, index].std()))
+    response_labels = np.asarray(response_labels, dtype=np.int8)
+    return {
+        name: _feature_separation(response_labels, values)
+        for name, values in rows.items()
+    }
 
 
 def _read_labels(evaluation_dataset, metadata):
-    # Formal cache labels are deliberately sealed until every test attention
-    # sample has been visited.  This separate pass happens only after all
-    # projections, detector fits, scores, and example choices are frozen.
     for sample_id in tqdm(
-        evaluation_dataset.sample_ids,
-        desc="[5/6] load sealed evaluation labels",
-        unit="sample",
+        evaluation_dataset.sample_ids, desc="[6/7] load sealed labels", unit="sample"
     ):
         sample = evaluation_dataset[sample_id]
         sample.attention()
         sample.release_attention()
-    store = evaluation_dataset.labels()
-    rows = []
-    for sample_id in tqdm(
-        evaluation_dataset.sample_ids,
-        desc="[5/6] align evaluation labels",
-        unit="sample",
-    ):
-        sample = evaluation_dataset[sample_id]
-        labels = store.response_labels(sample).detach().cpu().numpy().astype(np.int8)
-        rows.extend(labels.tolist())
-        sample.release_attention()
-    output = np.asarray(rows, dtype=np.int8)
-    expected_sample = []
-    expected_index = []
+    store, rows = evaluation_dataset.labels(), []
     for sample_id in evaluation_dataset.sample_ids:
-        count = int((metadata["sample_id"].astype(str) == str(sample_id)).sum())
-        expected_sample.extend([str(sample_id)] * count)
-        expected_index.extend(range(count))
-    if not (
-        len(output) == len(metadata["sample_id"])
-        and np.array_equal(metadata["sample_id"].astype(str), np.asarray(expected_sample))
-        and np.array_equal(metadata["token_index"], np.asarray(expected_index, dtype=np.int32))
-    ):
+        sample = evaluation_dataset[sample_id]
+        rows.extend(store.response_labels(sample).cpu().tolist())
+        sample.release_attention()
+    labels = np.asarray(rows, dtype=np.int8)
+    if len(labels) != len(metadata["sample_id"]):
         raise ValueError("evaluation labels do not align with frozen token rows")
-    return output
+    return labels
 
 
-def _label_free_sample_selection(config, metadata, embedding):
+def _sample_selection(config, metadata, coordinates):
     available = set(metadata["sample_id"].astype(str))
     if config.sample_ids:
         requested = list(dict.fromkeys(map(str, config.sample_ids)))
-        missing = [sample_id for sample_id in requested if sample_id not in available]
+        missing = [value for value in requested if value not in available]
         if missing:
             raise ValueError(f"sample IDs are absent from test split: {missing}")
         return requested, "user_requested_before_labels"
     candidates = []
     for sample_id in dict.fromkeys(metadata["sample_id"].astype(str)):
         selected = metadata["sample_id"].astype(str) == sample_id
-        values = embedding[selected]
+        values = coordinates[selected]
         dispersion = float(np.linalg.norm(values - values.mean(0), axis=1).mean())
         candidates.append((dispersion, len(values), sample_id))
-    chosen = max(candidates, key=lambda row: (row[0], row[1], row[2]))
-    return [chosen[2]], "label_free_max_token_embedding_dispersion"
-
-
-def _save_sample_graphs(
-    output, graphs, metadata, embeddings, scores, graph_features, feature_slices
-):
-    directory = output / "sample_graphs"
-    directory.mkdir(parents=True, exist_ok=False)
-    paths = {}
-    for graph in tqdm(graphs, desc="[4/6] save per-sample graph artifacts", unit="sample"):
-        start, end = graph["start"], graph["end"]
-        path = directory / f"sample_{_safe_filename(graph['sample_id'])}.npz"
-        np.savez_compressed(
-            path,
-            schema=np.asarray(SCHEMA),
-            labels_included=np.asarray(False),
-            sample_id=np.asarray(graph["sample_id"]),
-            token_ids=graph["token_ids"],
-            response_idx=np.asarray(graph["response_idx"], dtype=np.int32),
-            edge_index=graph["edge_index"],
-            edge_type=graph["edge_type"],
-            edge_score=graph["edge_score"],
-            diffusion_hop=np.arange(
-                1, graph["hop_reach_count"].shape[1] + 1, dtype=np.int16
-            ),
-            rr_hop_reach_count=graph["hop_reach_count"],
-            rr_hop_influence_mass=graph["hop_influence_mass"],
-            multiscale_graph_features=graph_features[start:end],
-            feature_block_name=np.asarray(list(feature_slices)),
-            feature_block_start=np.asarray(
-                [bounds[0] for bounds in feature_slices.values()], dtype=np.int32
-            ),
-            feature_block_end=np.asarray(
-                [bounds[1] for bounds in feature_slices.values()], dtype=np.int32
-            ),
-            response_token_id=metadata["token_id"][start:end],
-            token_index=metadata["token_index"][start:end],
-            token_only_embedding=embeddings["token_only"][start:end],
-            token_graph_embedding=embeddings["token_graph"][start:end],
-            token_only_score=scores["token_only"][start:end],
-            token_graph_score=scores["token_graph"][start:end],
-        )
-        paths[graph["sample_id"]] = path
-    return paths
+    return [max(candidates)[2]], "label_free_max_representation_dispersion"
 
 
 def _safe_filename(value):
-    text = "".join(
-        character if character.isalnum() or character in "-_." else "_"
-        for character in str(value)
-    ).strip("._")
-    return (text or "sample")[:120]
+    value = "".join(c if c.isalnum() or c in "-_." else "_" for c in str(value))
+    return (value.strip("._") or "sample")[:120]
 
 
 def _display_edges(graph, config):
-    edge_index = graph["edge_index"]
-    edge_type = graph["edge_type"]
-    edge_score = graph["edge_score"]
-    selected = []
-    for target in range(graph["response_idx"], len(graph["token_ids"])):
-        incoming = np.flatnonzero(edge_index[1] == target)
+    target = graph["edge_index"][1]
+    chosen = []
+    for node in range(graph["response_idx"], len(graph["token_ids"])):
+        incoming = np.flatnonzero(target == node)
         for relation in (RP, RR):
-            ids = incoming[edge_type[incoming] == relation]
+            ids = incoming[graph["edge_type"][incoming] == relation]
             if not len(ids):
                 continue
-            ranked = ids[np.argsort(-edge_score[ids], kind="stable")]
-            mass = edge_score[ranked]
-            if float(mass.sum()) > 0:
-                reached = np.flatnonzero(
-                    np.cumsum(mass) >= config.display_mass_cover * mass.sum()
-                )
-                count = int(reached[0]) + 1 if len(reached) else len(ranked)
-                ranked = ranked[:count]
-            selected.extend(ranked[: config.display_edges_per_type].tolist())
-    return np.asarray(sorted(set(selected)), dtype=np.int64)
+            ranked = ids[np.argsort(-graph["edge_score"][ids], kind="stable")]
+            mass = graph["edge_score"][ranked]
+            reached = np.flatnonzero(np.cumsum(mass) >= config.display_mass_cover * mass.sum())
+            count = int(reached[0]) + 1 if len(reached) else len(ranked)
+            chosen.extend(ranked[:min(count, config.display_edges_per_type)].tolist())
+    chosen = np.asarray(sorted(set(chosen)), dtype=np.int64)
+    if len(chosen) > config.display_max_edges:
+        order = np.argsort(-graph["edge_score"][chosen], kind="stable")
+        chosen = np.sort(chosen[order[:config.display_max_edges]])
+    return chosen
 
 
-def _relation_matrices(graph):
+def _effective_relations(graph, hops, per_target=1):
     response_idx = int(graph["response_idx"])
     response_count = len(graph["token_ids"]) - response_idx
     rr = np.zeros((response_count, response_count), dtype=np.float64)
@@ -838,248 +795,202 @@ def _relation_matrices(graph):
     target = target - response_idx
     for relation, matrix, offset in ((RR, rr, response_idx), (RP, rp, 0)):
         selected = graph["edge_type"] == relation
-        if not selected.any():
-            continue
-        relation_target = target[selected]
-        relation_source = source[selected] - offset
-        weight = graph["edge_score"][selected].astype(np.float64)
-        denominator = np.zeros(response_count, dtype=np.float64)
-        np.add.at(denominator, relation_target, weight)
-        normalized = weight / np.maximum(denominator[relation_target], 1e-12)
-        np.add.at(matrix, (relation_target, relation_source), normalized)
-    return rr, rp
-
-
-def _effective_relations(graph, hops, per_target=2):
-    """Non-adjacent RR and inherited RP influences from matrix powers."""
-    rr, rp = _relation_matrices(graph)
-    rr_rows, rp_rows = [], []
-    power = rr.copy()
+        np.add.at(matrix, (target[selected], source[selected] - offset),
+                  graph["edge_score"][selected].astype(np.float64))
+    rr_rows, rp_rows, power = [], [], rr.copy()
     for hop in range(2, int(hops) + 1):
         power = rr @ power
-        for target in range(len(rr)):
-            candidates = np.flatnonzero((power[target] > 1e-8) & (rr[target] == 0))
-            ranked = candidates[np.argsort(-power[target, candidates], kind="stable")]
-            for source in ranked[:per_target]:
-                rr_rows.append((int(source), target, hop, float(power[target, source])))
+        for row in range(response_count):
+            ids = np.flatnonzero((power[row] > 1e-12) & (rr[row] == 0))
+            ids = ids[np.argsort(-power[row, ids], kind="stable")]
+            rr_rows.extend((int(i), row, hop, float(power[row, i])) for i in ids[:per_target])
     inherited = rr @ rp
     for rr_hops in range(1, int(hops) + 1):
-        for target in range(len(rr)):
-            candidates = np.flatnonzero((inherited[target] > 1e-8) & (rp[target] == 0))
-            ranked = candidates[np.argsort(-inherited[target, candidates], kind="stable")]
-            for source in ranked[:1]:
-                rp_rows.append(
-                    (int(source), target, rr_hops + 1, float(inherited[target, source]))
-                )
+        for row in range(response_count):
+            ids = np.flatnonzero((inherited[row] > 1e-12) & (rp[row] == 0))
+            ids = ids[np.argsort(-inherited[row, ids], kind="stable")]
+            rp_rows.extend((int(i), row, rr_hops + 1, float(inherited[row, i])) for i in ids[:per_target])
         inherited = rr @ inherited
     return rr_rows, rp_rows
 
 
-def _render_population(output, embeddings, scores, labels):
-    import matplotlib.pyplot as plt
+def _save_sample_graphs(output, graphs, exact, base_z, representation, coordinates, scores, messages):
+    directory = output / "sample_graphs"
+    directory.mkdir(parents=True, exist_ok=False)
+    paths = {}
+    for graph in tqdm(graphs, desc="[5/7] save every sample graph", unit="sample"):
+        start, end = graph["start"], graph["end"]
+        path = directory / f"sample_{_safe_filename(graph['sample_id'])}.npz"
+        np.savez_compressed(
+            path, schema=np.asarray(SCHEMA), labels_included=np.asarray(False),
+            sample_id=np.asarray(graph["sample_id"]), token_ids=graph["token_ids"],
+            response_idx=np.asarray(graph["response_idx"], dtype=np.int32),
+            edge_index=graph["edge_index"], edge_type=graph["edge_type"], edge_score=graph["edge_score"],
+            exact_feature_names=np.asarray(EXACT_FEATURES), exact_token_features=exact[start:end],
+            no_rp_exact_token_features=messages["no_rp_exact"][start:end],
+            no_rr_exact_token_features=messages["no_rr_exact"][start:end],
+            position_adjusted_features=base_z[start:end],
+            token_graph_representation=representation[start:end],
+            visualization_coordinates=coordinates[start:end],
+            mechanism_coordinates=np.column_stack((
+                scores["token_only"][start:end],
+                scores["graph_evidence"][start:end],
+            )).astype(np.float32),
+            rr_raw_message=messages["raw_message"][start:end],
+            rr_conditional_neighbor=messages["conditional_neighbor"][start:end],
+            self_neighbor_residual=messages["self_neighbor_residual"][start:end],
+            no_rp_self_neighbor_residual=messages[
+                "no_rp_self_neighbor_residual"
+            ][start:end],
+            rr_path_mass=messages["rr_path_mass"][start:end],
+            rp_path_mass=messages["rp_path_mass"][start:end],
+            rr_hop_reach_count=messages["rr_hop_reach_count"][start:end],
+            **{f"{name}_score": scores[name][start:end] for name in VIEWS},
+            graph_innovation_score=scores["graph_innovation"][start:end],
+            graph_evidence_score=scores["graph_evidence"][start:end],
+            rp_weakness_score=scores["rp_weakness"][start:end],
+            rp_direct_weakness_score=scores["rp_direct_weakness"][start:end],
+            rp_inherited_weakness_score=scores[
+                "rp_inherited_weakness"
+            ][start:end],
+            rr_path_deficit_diagnostic=scores["rr_path_deficit"][start:end],
+            innovation_reliability=scores["innovation_reliability"][start:end],
+        )
+        paths[graph["sample_id"]] = path
+    return paths
 
+
+def _render_population(output, coordinates, scores, labels):
+    import matplotlib.pyplot as plt
     figure, axes = plt.subplots(2, 2, figsize=(12, 10), constrained_layout=True)
-    for column, view in enumerate(("token_only", "token_graph")):
-        values = embeddings[view]
-        coordinates = np.zeros((len(values), 2), dtype=np.float32)
-        coordinates[:, : min(2, values.shape[1])] = values[:, : min(2, values.shape[1])]
-        for label, color, name, size, alpha in (
-            (0, "#2ca02c", "correct", 4, 0.16),
-            (1, "#d62728", "hallucination", 10, 0.72),
-        ):
-            selected = labels == label
-            axes[0, column].scatter(
-                coordinates[selected, 0],
-                coordinates[selected, 1],
-                c=color,
-                s=size,
-                alpha=alpha,
-                label=name,
-                rasterized=True,
-            )
-        axes[0, column].set(
-            title=f"{view}: frozen train-PCA coordinates",
-            xlabel="component 1",
-            ylabel="component 2",
+    for label, color, name, size, alpha in (
+        (0, "#2ca02c", "correct", 4, .12),
+        (1, "#d62728", "hallucination", 10, .65),
+    ):
+        selected = labels == label
+        axes[0, 0].scatter(
+            scores["token_only"][selected], scores["graph_evidence"][selected],
+            c=color, s=size, alpha=alpha, label=name, rasterized=True,
         )
-        axes[0, column].legend(frameon=False)
+        axes[0, 1].scatter(
+            coordinates[selected, 0], coordinates[selected, 1],
+            c=color, s=size, alpha=alpha, label=name, rasterized=True,
+        )
+    axes[0, 0].set(title="Interpretable mechanism map",
+                   xlabel="fixed directional token score",
+                   ylabel="RR/RP multi-hop graph evidence")
+    axes[0, 0].legend(frameon=False)
+    axes[0, 1].set(title="Visualization-only train PCA of graph vectors",
+                   xlabel="component 1", ylabel="component 2")
+    axes[0, 1].legend(frameon=False)
+    for axis, view in zip(axes[1], ("token_only", "token_graph")):
+        for label, color, name in ((0, "#2ca02c", "correct"), (1, "#d62728", "hallucination")):
+            axis.hist(scores[view][labels == label], bins=60, density=True,
+                      alpha=.55, color=color, label=name)
         metric = _ranking(labels, scores[view])
-        auc_text = "N/A" if metric["auroc"] is None else f"{metric['auroc']:.3f}"
-        for label, color, name in (
-            (0, "#2ca02c", "correct"),
-            (1, "#d62728", "hallucination"),
-        ):
-            selected = scores[view][labels == label]
-            if len(selected):
-                axes[1, column].hist(
-                    selected,
-                    bins=60,
-                    density=True,
-                    alpha=0.55,
-                    color=color,
-                    label=name,
-                )
-        axes[1, column].set(
-            title=f"prototype novelty: AUROC={auc_text}",
-            xlabel="train-only anomaly score",
-            ylabel="density",
-        )
-        axes[1, column].legend(frameon=False)
+        auc = "N/A" if metric["auroc"] is None else f"{metric['auroc']:.3f}"
+        axis.set(title=f"{view}: AUROC={auc}",
+                 xlabel="frozen score", ylabel="density")
+        axis.legend(frameon=False)
     path = output / "population_token_representations.png"
     figure.savefig(path, dpi=240)
     plt.close(figure)
     return path
 
 
-def _render_sample(output, graph, embedding, labels, config):
+def _render_sample(output, graph, mechanism_coordinates, exact_z, labels, config):
     import matplotlib.pyplot as plt
     from matplotlib.lines import Line2D
 
-    selected_edges = _display_edges(graph, config)
-    edge_index = graph["edge_index"][:, selected_edges]
-    edge_type = graph["edge_type"][selected_edges]
-    edge_score = graph["edge_score"][selected_edges]
+    selected = _display_edges(graph, config)
+    edge_index = graph["edge_index"][:, selected]
+    edge_type = graph["edge_type"][selected]
+    edge_score = graph["edge_score"][selected]
     response_idx = int(graph["response_idx"])
-    response_count = len(embedding)
-    response_nodes = np.arange(response_idx, response_idx + response_count)
+    count = len(mechanism_coordinates)
+    response_nodes = np.arange(response_idx, response_idx + count)
     prompt_nodes = np.unique(edge_index[0, edge_index[0] < response_idx])
     colors = np.where(labels == 1, "#d62728", "#2ca02c")
-
-    width = max(18, min(32, 15 + response_count * 0.15))
-    figure, axes = plt.subplots(1, 3, figsize=(width, 6), constrained_layout=True)
-    topology = axes[0]
+    width = max(22, min(36, 18 + count * .12))
+    figure, axes = plt.subplots(1, 4, figsize=(width, 6), constrained_layout=True)
     position = {
         **{int(node): (float(node), 1.0) for node in prompt_nodes},
         **{int(node): (float(node), 0.0) for node in response_nodes},
     }
-    maximum = max(float(edge_score.max()) if len(edge_score) else 0.0, 1e-8)
+    maximum = max(float(edge_score.max()) if len(edge_score) else 0.0, 1e-12)
     for edge, relation, weight in zip(edge_index.T, edge_type, edge_score):
         source, target = map(int, edge)
         if source not in position:
             continue
-        topology.annotate(
-            "",
-            xy=position[target],
-            xytext=position[source],
-            arrowprops={
-                "arrowstyle": "->",
-                "color": "#1f77b4" if relation == RP else "#7f7f7f",
-                "alpha": 0.20 + 0.55 * float(weight / maximum),
-                "lw": 0.4 + 1.8 * float(weight / maximum),
-                "connectionstyle": "arc3,rad=.08",
-            },
-        )
+        axes[0].annotate("", xy=position[target], xytext=position[source], arrowprops={
+            "arrowstyle": "->", "color": "#1f77b4" if relation == RP else "#777777",
+            "alpha": .15 + .55 * float(weight / maximum),
+            "lw": .3 + 1.5 * float(weight / maximum), "connectionstyle": "arc3,rad=.08",
+        })
     if len(prompt_nodes):
-        topology.scatter(prompt_nodes, np.ones(len(prompt_nodes)), marker="s", s=28, c="#4c78a8")
-    topology.scatter(response_nodes, np.zeros(response_count), c=colors, s=42, edgecolors="black", linewidths=.3, zorder=3)
-    topology.set(
-        title="Typed causal attention graph (display-pruned only)",
-        xlabel="absolute token position",
-        yticks=(0, 1),
-        yticklabels=("response", "prompt endpoints"),
-    )
-    topology.grid(alpha=.12)
-    topology.legend(handles=[
-        Line2D([], [], color="#1f77b4", label="direct RP"),
-        Line2D([], [], color="#7f7f7f", label="direct RR"),
-    ], frameon=False)
+        axes[0].scatter(prompt_nodes, np.ones(len(prompt_nodes)), marker="s", s=22, c="#4c78a8")
+    axes[0].scatter(response_nodes, np.zeros(count), c=colors, s=38,
+                    edgecolors="black", linewidths=.25)
+    axes[0].set(title="Direct typed attention graph", xlabel="absolute token position",
+                yticks=(0, 1), yticklabels=("response", "prompt"))
 
-    effective = axes[1]
-    rr_effective, rp_effective = _effective_relations(
-        graph, config.diffusion_hops
-    )
-    effective_prompt = np.unique([row[0] for row in rp_effective]).astype(int)
-    if len(effective_prompt):
-        effective.scatter(
-            effective_prompt, np.ones(len(effective_prompt)),
-            marker="s", s=26, c="#4c78a8", zorder=3,
-        )
-    effective.scatter(
-        response_nodes, np.zeros(response_count), c=colors,
-        s=40, edgecolors="black", linewidths=.3, zorder=3,
-    )
-    rr_max = max([row[3] for row in rr_effective], default=1.0)
-    rp_max = max([row[3] for row in rp_effective], default=1.0)
-    for source, target, hop, weight in rr_effective:
-        effective.annotate(
-            "",
-            xy=(float(target + response_idx), 0.0),
-            xytext=(float(source + response_idx), 0.0),
-            arrowprops={
-                "arrowstyle": "->", "linestyle": "--", "color": "#9467bd",
-                "alpha": .20 + .55 * weight / max(rr_max, 1e-12),
-                "lw": .5 + 1.5 * weight / max(rr_max, 1e-12),
-                "connectionstyle": f"arc3,rad={.08 + .025 * hop}",
-            },
-        )
-    for source, target, hop, weight in rp_effective:
-        effective.annotate(
-            "",
-            xy=(float(target + response_idx), 0.0),
-            xytext=(float(source), 1.0),
-            arrowprops={
-                "arrowstyle": "->", "linestyle": ":", "color": "#1f77b4",
-                "alpha": .20 + .55 * weight / max(rp_max, 1e-12),
-                "lw": .5 + 1.5 * weight / max(rp_max, 1e-12),
-                "connectionstyle": f"arc3,rad={.08 + .025 * hop}",
-            },
-        )
-    effective.set(
-        title=f"Non-adjacent effective relations from P²…P^{config.diffusion_hops}",
-        xlabel="absolute token position",
-        yticks=(0, 1),
-        yticklabels=("response", "inherited prompt"),
-    )
-    effective.grid(alpha=.12)
-    effective.legend(handles=[
-        Line2D([], [], color="#9467bd", linestyle="--", label="non-adjacent RR influence"),
-        Line2D([], [], color="#1f77b4", linestyle=":", label="inherited prompt provenance"),
-    ], frameon=False)
+    rr_rows, rp_rows = _effective_relations(graph, config.diffusion_hops)
+    axes[1].scatter(response_nodes, np.zeros(count), c=colors, s=38,
+                    edgecolors="black", linewidths=.25)
+    for source, target, hop, _ in rr_rows:
+        axes[1].annotate("", xy=(target + response_idx, 0),
+                         xytext=(source + response_idx, 0), arrowprops={
+            "arrowstyle": "->", "linestyle": "--", "color": "#9467bd",
+            "alpha": .4, "lw": .7, "connectionstyle": f"arc3,rad={.08 + .02 * hop}"})
+    for source, target, hop, _ in rp_rows:
+        axes[1].annotate("", xy=(target + response_idx, 0), xytext=(source, 1), arrowprops={
+            "arrowstyle": "->", "linestyle": ":", "color": "#1f77b4",
+            "alpha": .4, "lw": .7, "connectionstyle": f"arc3,rad={.08 + .02 * hop}"})
+    axes[1].set(title="Non-adjacent raw path influence", xlabel="absolute token position",
+                yticks=(0, 1), yticklabels=("response", "inherited prompt"))
 
-    coordinates = np.zeros((response_count, 2), dtype=np.float32)
-    coordinates[:, : min(2, embedding.shape[1])] = embedding[:, : min(2, embedding.shape[1])]
     for source, target in edge_index.T[edge_type == RR]:
         source_index, target_index = int(source) - response_idx, int(target) - response_idx
-        axes[2].plot(
-            coordinates[[source_index, target_index], 0],
-            coordinates[[source_index, target_index], 1],
-            color="#7f7f7f",
-            alpha=.18,
-            lw=.7,
-            zorder=1,
-        )
-    axes[2].scatter(
-        coordinates[:, 0], coordinates[:, 1], c=colors, s=52,
-        edgecolors="black", linewidths=.35, zorder=2,
-    )
-    for index, (x, y) in enumerate(coordinates):
-        axes[2].text(x, y, str(index), fontsize=6, ha="center", va="bottom")
-    axes[2].set(
-        title="Every response token in the frozen graph embedding",
-        xlabel="embedding component 1",
-        ylabel="embedding component 2",
-    )
+        axes[2].plot(mechanism_coordinates[[source_index, target_index], 0],
+                     mechanism_coordinates[[source_index, target_index], 1],
+                     color="#777777", alpha=.15, lw=.6)
+    axes[2].scatter(mechanism_coordinates[:, 0], mechanism_coordinates[:, 1], c=colors, s=46,
+                    edgecolors="black", linewidths=.3)
+    for index, point in enumerate(mechanism_coordinates):
+        axes[2].text(point[0], point[1], str(index), fontsize=5, ha="center", va="bottom")
+    axes[2].set(title="Frozen mechanism-space token graph",
+                xlabel="token mechanism evidence", ylabel="multi-hop graph evidence")
     axes[2].legend(handles=[
         Line2D([], [], marker="o", color="none", markerfacecolor="#2ca02c", label="correct"),
         Line2D([], [], marker="o", color="none", markerfacecolor="#d62728", label="hallucination"),
-        Line2D([], [], color="#7f7f7f", label="RR edge"),
+        Line2D([], [], color="#777777", label="RR edge"),
     ], frameon=False)
+
+    heat = exact_z[:, SCORE_INDEX].T * SCORE_DIRECTION[:, None]
+    limit = max(float(np.quantile(np.abs(heat), .98)), 1e-6)
+    image = axes[3].imshow(heat, aspect="auto", cmap="coolwarm", vmin=-limit,
+                           vmax=limit, interpolation="nearest")
+    axes[3].set(title="Signed exact mechanisms", xlabel="response token index",
+                yticks=np.arange(len(SCORE_FEATURES)), yticklabels=SCORE_FEATURES)
+    figure.colorbar(image, ax=axes[3], label="positive = hypothesis-consistent anomaly")
     path = output / f"sample_{_safe_filename(graph['sample_id'])}_token_graph.png"
-    figure.suptitle(f"Sample {graph['sample_id']}; labels used only as node colors")
+    figure.suptitle(f"Sample {graph['sample_id']}; labels only color frozen nodes")
     figure.savefig(path, dpi=240)
     plt.close(figure)
-    return path, int(len(selected_edges)), int(len(rr_effective)), int(len(rp_effective))
+    return path, len(selected), len(rr_rows), len(rp_rows)
+
+
+def _geometry(dataset):
+    return {name: dataset.manifest.get(name) for name in (
+        "schema", "num_layers", "num_heads", "alignment",
+        "attention_floor", "observer_model",
+    )}
 
 
 def discover_token_representations(
-    train_dataset,
-    test_dataset,
-    evaluation_dataset,
-    *,
-    output_dir,
-    config=None,
+    train_dataset, test_dataset, evaluation_dataset, *, output_dir, config=None
 ):
-    """Fit label-blind token representations, then evaluate frozen scores."""
+    """Freeze exact scalars, propagation and scores before opening labels."""
     config = TokenRepresentationConfig() if config is None else config
     config.validate()
     output = Path(output_dir)
@@ -1091,177 +1002,276 @@ def discover_token_representations(
     if list(map(str, test_dataset.sample_ids)) != list(map(str, evaluation_dataset.sample_ids)):
         raise ValueError("evaluation dataset does not match ordered test sample IDs")
 
-    base_projector, base_reference_count = _fit_base_projector(train_dataset, config)
-    train, _, train_metadata, _, train_slices = _extract_split(
-        train_dataset, base_projector, config, "train", keep_graphs=False
-    )
-    test, unresolved, metadata, graphs, test_slices = _extract_split(
-        test_dataset, base_projector, config, "test", keep_graphs=True
-    )
-    if train_slices != test_slices:
-        raise ValueError("train and test graph-message layouts differ")
-    if set(train_metadata["source_id"].astype(str)) & set(metadata["source_id"].astype(str)):
+    train_exact, train_meta = _extract_exact_split(train_dataset, config, "train")
+    test_exact, metadata = _extract_exact_split(test_dataset, config, "test")
+    if set(train_meta["source_id"].astype(str)) & set(metadata["source_id"].astype(str)):
         raise ValueError("train and test source groups overlap")
+    base_scaler = _PositionRobustScaler(config.position_bins).fit(
+        train_exact, train_meta["relative_position"]
+    )
+    train_z = base_scaler.transform(train_exact, train_meta["relative_position"])
+    test_z = base_scaler.transform(test_exact, metadata["relative_position"])
+    train_graph, _ = _extract_graph_split(
+        train_dataset, train_z, base_scaler, train_meta["relative_position"],
+        config, "train", keep_graphs=False
+    )
+    test_graph, graphs = _extract_graph_split(
+        test_dataset, test_z, base_scaler, metadata["relative_position"],
+        config, "test", keep_graphs=True
+    )
 
-    embeddings, scores, view_diagnostics = _fit_views(
-        train, test, test_slices, config
+    print("[3/7] fitting train-only position calibration and frozen scores", flush=True)
+    train_no_rp_z = base_scaler.transform(
+        train_graph["no_rp_exact"], train_meta["relative_position"]
     )
-    selected_samples, selection_rule = _label_free_sample_selection(
-        config, metadata, embeddings["token_graph"]
+    train_no_rr_z = base_scaler.transform(
+        train_graph["no_rr_exact"], train_meta["relative_position"]
     )
-    graph_paths = _save_sample_graphs(
-        output, graphs, metadata, embeddings, scores, test, test_slices
+    test_no_rp_z = base_scaler.transform(
+        test_graph["no_rp_exact"], metadata["relative_position"]
     )
+    test_no_rr_z = base_scaler.transform(
+        test_graph["no_rr_exact"], metadata["relative_position"]
+    )
+    train_rp_eligible, train_rr_eligible = _path_eligibility(
+        train_meta["token_index"], config.diffusion_hops
+    )
+    test_rp_eligible, test_rr_eligible = _path_eligibility(
+        metadata["token_index"], config.diffusion_hops
+    )
+    rp_scaler = _PositionRobustScaler(config.position_bins).fit(
+        np.log1p(np.maximum(train_graph["rp_path_mass"], 0.0)),
+        train_meta["relative_position"],
+        train_rp_eligible,
+    )
+    rr_scaler = _PositionRobustScaler(config.position_bins).fit(
+        np.log1p(np.maximum(train_graph["rr_path_mass"], 0.0)),
+        train_meta["relative_position"],
+        train_rr_eligible,
+    )
+    rr_reliability = _PositivePathReliability(config.position_bins).fit(
+        train_graph["rr_path_mass"], train_meta["relative_position"],
+        train_rr_eligible,
+    )
+    train_scores = _build_scores(
+        train_z, train_exact,
+        train_no_rp_z, train_graph["no_rp_exact"],
+        train_no_rr_z, train_graph["no_rr_exact"],
+        train_meta["relative_position"],
+        train_rp_eligible, train_rr_eligible,
+        train_graph, rp_scaler, rr_scaler, rr_reliability
+    )
+    scores = _build_scores(
+        test_z, test_exact,
+        test_no_rp_z, test_graph["no_rp_exact"],
+        test_no_rr_z, test_graph["no_rr_exact"],
+        metadata["relative_position"],
+        test_rp_eligible, test_rr_eligible,
+        test_graph, rp_scaler, rr_scaler, rr_reliability
+    )
+    train_representation, representation_names = _representation(
+        train_z, train_graph, train_scores["rp_path_z"], train_scores["rr_path_z"]
+    )
+    representation, test_names = _representation(
+        test_z, test_graph, scores["rp_path_z"], scores["rr_path_z"]
+    )
+    if representation_names != test_names:
+        raise ValueError("train and test representation schemas differ")
+    coordinates, projection = _visual_coordinates(
+        train_representation, representation, config.seed,
+        config.visual_reference_size,
+    )
+    mechanism_coordinates = np.column_stack((
+        scores["token_only"], scores["graph_evidence"]
+    )).astype(np.float32)
+    selected_samples, selection_rule = _sample_selection(
+        config, metadata, mechanism_coordinates
+    )
+
+    print("[4/7] freezing label-free representations and scores", flush=True)
     np.savez_compressed(
         output / "token_representations_label_free.npz",
-        schema=np.asarray(SCHEMA),
-        labels_included=np.asarray(False),
-        mechanisms=np.asarray(MECHANISMS),
-        sample_id=metadata["sample_id"],
-        source_id=metadata["source_id"],
-        token_index=metadata["token_index"],
-        token_id=metadata["token_id"],
-        task_type=metadata["task_type"],
-        data_source=metadata["data_source"],
+        schema=np.asarray(SCHEMA), labels_included=np.asarray(False),
+        exact_feature_names=np.asarray(EXACT_FEATURES),
+        score_feature_names=np.asarray(SCORE_FEATURES),
+        score_feature_direction=SCORE_DIRECTION,
+        representation_feature_names=np.asarray(representation_names),
+        exact_token_features=test_exact, position_adjusted_features=test_z,
+        no_rp_exact_token_features=test_graph["no_rp_exact"],
+        no_rr_exact_token_features=test_graph["no_rr_exact"],
+        rr_path_mass=test_graph["rr_path_mass"],
+        rp_path_mass=test_graph["rp_path_mass"],
+        rr_hop_reach_count=test_graph["rr_hop_reach_count"],
+        innovation_reliability=scores["innovation_reliability"],
+        token_graph_representation=representation,
+        visualization_coordinates=coordinates,
+        mechanism_coordinates=mechanism_coordinates,
+        sample_id=metadata["sample_id"], source_id=metadata["source_id"],
+        token_index=metadata["token_index"], token_id=metadata["token_id"],
+        relative_position=metadata["relative_position"],
+        task_type=metadata["task_type"], data_source=metadata["data_source"],
         generator_model=metadata["generator_model"],
-        unresolved_control=unresolved,
-        **{f"{view}_embedding": embeddings[view] for view in VIEWS},
-        **{f"{view}_score": scores[view] for view in VIEWS},
+        **{f"{name}_score": scores[name] for name in VIEWS},
+        graph_innovation_score=scores["graph_innovation"],
+        graph_evidence_score=scores["graph_evidence"],
+        rp_weakness_score=scores["rp_weakness"],
+        rp_direct_weakness_score=scores["rp_direct_weakness"],
+        rp_inherited_weakness_score=scores["rp_inherited_weakness"],
+        rr_path_deficit_diagnostic=scores["rr_path_deficit"],
+    )
+    graph_paths = _save_sample_graphs(
+        output, graphs, test_exact, test_z, representation,
+        coordinates, scores, test_graph
     )
     label_free_report = {
-        "schema": SCHEMA,
-        "labels_read": False,
-        "representation": {
-            "mechanisms": list(MECHANISMS),
-            "mechanism_tensor": "response_token_by_layer_by_head_by_mechanism",
-            "layer_head_aggregation_before_projection": False,
-            "base_projection": base_projector.report(),
-            "base_reference_tokens": int(base_reference_count),
-            "graph_propagation": {
-                "trainable": False,
-                "support": "all retained threshold-cache RP/RR pair edges",
-                "rp_message": "weighted source-specific positional sketch",
-                "rr_recurrence": "H_k = P_RR @ H_(k-1)",
-                "prompt_recurrence": "B_0 = direct_RP_provenance; B_k = P_RR @ B_(k-1)",
-                "diffusion_hops": int(config.diffusion_hops),
-                "saved_structure_diagnostics": [
-                    "rr_hop_reach_count", "rr_hop_influence_mass"
-                ],
-            },
-            "base_loading_summary": base_projector.structured_loading_report(
-                int(train_dataset.manifest["num_layers"]),
-                int(train_dataset.manifest["num_heads"]),
-                len(MECHANISMS),
-            ),
+        "schema": SCHEMA, "labels_read": False,
+        "exact_feature_names": list(EXACT_FEATURES),
+        "exact_scalar_block_recoverable_without_projection": True,
+        "fixed_score_hypothesis": FEATURE_DIRECTIONS,
+        "score_formula": "mean positive signed train-position-MAD deviation",
+        "base_scaler": base_scaler.report(),
+        "path_mass_scalers": {
+            "rp": rp_scaler.report(), "rr": rr_scaler.report(),
+            "rr_innovation_reliability": rr_reliability.report(),
         },
-        "views": view_diagnostics,
+        "graph_propagation": {
+            "trainable": False, "rr_matrix_row_normalized": False,
+            "raw_recurrence": "M_k = A_RR @ M_(k-1)",
+            "path_mass": "q_k = A_RR^k @ 1",
+            "neighbor_mean": "mu_k = M_k / q_k; raw M_k and q_k both retained",
+            "innovation": "delta_k = base_z - mu_k",
+            "innovation_reliability": "q_k/(q_k+q0), where q0 is the train-positive position/hop median",
+            "prompt_mass": "p_0 = A_RP @ 1; p_k = A_RR @ p_(k-1)",
+            "diffusion_hops": config.diffusion_hops,
+            "hop_eligibility": "response token index t is eligible for RR hop k iff t >= k",
+            "structurally_ineligible_hops_contribute_to_score": False,
+        },
+        "view_components": {
+            "token_only": ["fixed base mechanism"],
+            "token_graph": ["fixed base mechanism", "reliability-gated RR innovation", "RP path weakness"],
+            "no_rp": ["base recomputed after deleting RP edges", "recomputed reliability-gated RR innovation"],
+            "no_rr": ["base recomputed after deleting RR edges", "direct RP weakness only"],
+        },
+        "ablation_semantics": "delete relation edges, recompute exact base features, keep the same train-fitted calibrators and scoring formula",
+        "protocol_status": (
+            "exploratory_same_benchmark_hypotheses; confirm on an independent "
+            "held-out test after freezing directions and hop count"
+        ),
+        "visual_projection": projection,
         "labels_read_during_fit": False,
-        "train_tokens": int(len(train)),
-        "test_tokens": int(len(test)),
+        "train_tokens": int(len(train_exact)), "test_tokens": int(len(test_exact)),
         "sample_selection": {
-            "sample_ids": selected_samples,
-            "rule": selection_rule,
-            "labels_used": False,
+            "sample_ids": selected_samples, "rule": selection_rule, "labels_used": False
         },
         "config": asdict(config),
     }
     (output / "label_free_report.json").write_text(
-        json.dumps(label_free_report, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+        json.dumps(label_free_report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
-    print("[5/6] opening labels after embeddings and scores are frozen", flush=True)
+    print("[6/7] opening labels only after artifacts and scores are frozen", flush=True)
     labels = _read_labels(evaluation_dataset, metadata)
-    view_results = {}
-    for view in VIEWS:
-        view_results[view] = {
-            "overall": _ranking(labels, scores[view]),
-            "by_task_type": _grouped_ranking(
-                labels, scores[view], metadata, "task_type"
-            ),
-            "by_data_source": _grouped_ranking(
-                labels, scores[view], metadata, "data_source"
-            ),
-        }
-    full_metrics = view_results["token_graph"]["overall"]
-    token_metrics = view_results["token_only"]["overall"]
+    view_metrics = {view: _ranking(labels, scores[view]) for view in VIEWS}
+    exact_metrics = {
+        name: _feature_separation(
+            labels, test_exact[:, index], FEATURE_DIRECTIONS.get(name)
+        )
+        for index, name in enumerate(EXACT_FEATURES)
+    }
+    response_exact_metrics = _response_feature_evaluation(
+        labels, test_exact, metadata
+    )
     report = {
-        **label_free_report,
-        "labels_read": True,
+        **label_free_report, "labels_read": True,
         "labels_read_during": "evaluation_and_plot_coloring_only",
+        "exact_feature_evaluation": exact_metrics,
+        "response_exact_feature_evaluation": response_exact_metrics,
         "views": {
-            view: {**view_diagnostics[view], "evaluation": view_results[view]}
+            view: {
+                "evaluation": view_metrics[view],
+                "by_task_type": _grouped_ranking(
+                    labels, scores[view], metadata, "task_type"
+                ),
+                "by_data_source": _grouped_ranking(
+                    labels, scores[view], metadata, "data_source"
+                ),
+            }
             for view in VIEWS
         },
+        "score_components": {
+            "combined_graph_evidence": _ranking(labels, scores["graph_evidence"]),
+            "rr_innovation": _ranking(labels, scores["graph_innovation"]),
+            "rp_path_weakness": _ranking(labels, scores["rp_weakness"]),
+            "rp_direct_weakness": _ranking(labels, scores["rp_direct_weakness"]),
+            "rp_inherited_weakness": _ranking(labels, scores["rp_inherited_weakness"]),
+            "rr_path_deficit_diagnostic_only": _ranking(
+                labels, scores["rr_path_deficit"]
+            ),
+        },
         "graph_gain_over_token_only": {
-            "auroc": _metric_delta(full_metrics, token_metrics, "auroc"),
-            "auprc": _metric_delta(full_metrics, token_metrics, "auprc"),
-            "interpretation": "positive means exact RP/RR graph propagation adds value",
+            metric: _metric_delta(
+                view_metrics["token_graph"], view_metrics["token_only"], metric
+            )
+            for metric in ("auroc", "auprc")
         },
         "relation_ablation": {
             "full_minus_no_rp": {
                 metric: _metric_delta(
-                    full_metrics, view_results["no_rp"]["overall"], metric
+                    view_metrics["token_graph"], view_metrics["no_rp"], metric
                 )
                 for metric in ("auroc", "auprc")
             },
             "full_minus_no_rr": {
                 metric: _metric_delta(
-                    full_metrics, view_results["no_rr"]["overall"], metric
+                    view_metrics["token_graph"], view_metrics["no_rr"], metric
                 )
                 for metric in ("auroc", "auprc")
             },
-            "direction": "positive means that relation's direct and propagated blocks add value",
         },
-        "unresolved_control": {
-            "mean": float(unresolved.mean()),
-            "included_in_representation": False,
-        },
+        "warning": "separability=max(raw_auc,1-raw_auc) is diagnostic, not raw AUROC",
     }
     report_path = output / "token_representation_report.json"
     report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
-    print("[6/6] rendering frozen population and requested sample views", flush=True)
-    population_path = _render_population(output, embeddings, scores, labels)
+    print("[7/7] rendering label-colored diagnostics", flush=True)
+    population = _render_population(output, coordinates, scores, labels)
     graph_by_id = {graph["sample_id"]: graph for graph in graphs}
     sample_rows = []
     for sample_id in selected_samples:
         graph = graph_by_id[sample_id]
         start, end = graph["start"], graph["end"]
-        figure, display_edges, effective_rr, inherited_rp = _render_sample(
-            output,
-            graph,
-            embeddings["token_graph"][start:end],
-            labels[start:end],
-            config,
+        figure, edges, rr_effective, rp_effective = _render_sample(
+            output, graph, mechanism_coordinates[start:end], test_z[start:end],
+            labels[start:end], config,
         )
         sample_rows.append({
-            "sample_id": sample_id,
-            "selection_rule": selection_rule,
+            "sample_id": sample_id, "selection_rule": selection_rule,
             "response_nodes": int(end - start),
             "hallucination_tokens": int(labels[start:end].sum()),
-            "display_edges": display_edges,
-            "display_nonadjacent_rr_relations": effective_rr,
-            "display_inherited_rp_relations": inherited_rp,
-            "figure": str(figure),
-            "label_free_data": str(graph_paths[sample_id]),
+            "display_edges": int(edges),
+            "display_nonadjacent_rr_relations": int(rr_effective),
+            "display_inherited_rp_relations": int(rp_effective),
+            "figure": str(figure), "label_free_data": str(graph_paths[sample_id]),
         })
-    report["population_figure"] = str(population_path)
+    report["population_figure"] = str(population)
     report["sample_visualizations"] = sample_rows
     report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    ranked_exact = {
+        name: row["separability"]
+        for name, row in exact_metrics.items()
+        if row["separability"] is not None
+    }
     return {
-        "output_dir": str(output),
-        "report": str(report_path),
+        "output_dir": str(output), "report": str(report_path),
         "label_free_embeddings": str(output / "token_representations_label_free.npz"),
         "sample_graph_directory": str(output / "sample_graphs"),
-        "population_figure": str(population_path),
-        "sample_visualizations": sample_rows,
-        "test_nodes": int(len(test)),
-        "view_metrics": {
-            view: view_results[view]["overall"] for view in VIEWS
-        },
+        "population_figure": str(population), "sample_visualizations": sample_rows,
+        "test_nodes": int(len(test_exact)), "view_metrics": view_metrics,
+        "best_exact_feature_by_separability": (
+            max(ranked_exact, key=ranked_exact.get) if ranked_exact else None
+        ),
     }

@@ -1,48 +1,57 @@
-# Method: mechanism-guided token representation with graph ablations
+# Structure-preserving token graph representation
 
-## 1. Layer-head mechanism tensor
+## Scientific contract
 
-For response token (t), layer (l), and head (h), let (P) be retained prompt attention, (R) retained response-history attention, and (D) the saved diagonal. The method computes four non-redundant channels without averaging layers or heads.
+The deterministic statistics in `attention_graph.statistics` are the canonical base state and remain directly recoverable in every saved token artifact. No PCA or learned encoder defines the detector. Evaluation labels remain sealed until representations, scores, sample selection and per-sample graph artifacts have been written.
 
-Routing balance:
+## Base state and score
 
-\[
-b_{lht}=\frac{P/N_p}{P/N_p+(R+D)/(t+1)}.
-\]
-
-Effective support fraction uses the Herfindahl concentration of all retained strict edges and the diagonal:
+The full base state contains the historical pair-graph statistics, absolute mean edge strength and exact direct Lookback. Train-only position-conditioned median/MAD produces standardized values. The primary score uses five pre-registered directions: low prompt mass fraction, low edge density, high concentration, high retained mean edge strength and low RR lag. `top1_share` remains recoverable but is not counted again because it overlaps the concentration mechanism. Missing RR support masks lag. Exact Lookback remains an independently evaluated baseline rather than being diluted by the composite.
 
 \[
-q_{lht}=\frac{1}{(N_p+t+1)\sum_j (a_j/(P+R+D))^2}.
+z_{td}=\frac{x_{td}-\operatorname{median}_{train,d}}
+{\operatorname{MAD}_{train,d}},\qquad
+e_{td}=\max(\sigma_dz_{td},0).
 \]
 
-Dominant strength is \(\max_j a_j\). Response locality is the RR/diagonal-weighted normalized inverse lag, with the diagonal assigned locality one. The resulting raw node tensor is
+The token score is the mean of these one-sided evidence values. This preserves direction, unlike nearest-cluster distance.
+
+This run is exploratory if these directions were chosen after inspecting the
+same benchmark test labels. Runtime label sealing prevents implementation
+leakage, not researcher-level test-set selection. Confirmatory evaluation must
+freeze features, directions and hop depth on an independent validation split.
+
+## Raw typed propagation
+
+The RP/RR pair weight is the sum of retained layer/head traces divided by channel count. Neither relation matrix is row-normalized and censored mass is not redistributed.
+
+With `W=A_RR`, both raw and conditional quantities are stored:
 
 \[
-X_t\in\mathbb R^{L\times H\times 4}.
+M^{(k)}=W^kZ,\qquad q^{(k)}=W^k\mathbf1,
 \]
 
-Unretained mass caused by the cache floor is saved as a control and is not redistributed or included in (X_t).
+\[
+\bar Z^{(k)}=M^{(k)}/q^{(k)},\qquad
+\Delta^{(k)}=Z-\bar Z^{(k)}.
+\]
 
-## 2. Train-only token embedding
+Prompt provenance is
 
-The tensor is flattened only after preserving its layer/head coordinates. A bounded random sample of train tokens fits coordinate-wise median/MAD scaling followed by PCA whitening. No hallucination label, test token, layer ranking, or supervised probe is used. This produces the direct token representation (z_t).
+\[
+p^{(0)}=A_{RP}\mathbf1,\qquad p^{(k)}=W^kp^{(0)}.
+\]
 
-## 3. Fixed typed graph propagation
+The saved vector concatenates standardized exact features, each hop's raw message, conditional ancestor mean, self/ancestor residual, RR/RP path mass and reachable ancestor count. Default depth is two.
 
-The canonical CSR support is converted into its full retained RP/RR pair graph. Exact source positions receive deterministic sinusoidal codes. For every response target:
+A hop is causally eligible for response position (t) only when (t\ge k). Structurally impossible early hops are excluded, while an eligible but missing RP path remains weak-path evidence. Conditional innovations require an actual retained path and are continuously gated by (q/(q+q_0)), where (q_0) is the frozen train-positive path-mass median for that position bin and hop. Thus reliability is zero at zero mass, tends continuously to zero for numerical traces, and approaches one only for strong paths. RR path deficit is reported diagnostically but is not part of the primary score because its anomaly direction has not been independently validated.
 
-- RP aggregates normalized prompt-source codes into direct provenance (B^{(0)});
-- (H^{(k)}=P_{RR}H^{(k-1)}) transports token state over exact (k)-edge RR paths;
-- (B^{(k)}=P_{RR}B^{(k-1)}) transports prompt provenance through response intermediates;
-- source-position states follow the same recurrence, and each node stores hop-wise reachable-ancestor count and influence mass.
+## Frozen ablations
 
-The concatenation is projected by a second train-only robust PCA. There are no trainable graph weights and no backpropagation. Three graph views use the same protocol: full `token_graph`, `no_rp`, and `no_rr`. `token_only` is the direct mechanism embedding.
+`token_only`, `token_graph`, `no_rp` and `no_rr` share the same train-only scalers and scoring formula. `no_rp` and `no_rr` really delete the corresponding edge type and recompute the exact node statistics before scoring; no view refits a projector or detector. Claims are evaluated through `token_graph-token_only`, `token_graph-no_rp` and `token_graph-no_rr` differences.
 
-## 4. Unsupervised score and evaluation
+The primary per-sample graph places every token at `(fixed token mechanism evidence, multi-hop graph evidence)` and overlays RR edges. PCA is fitted on a bounded train-only reference and is retained only as a population-level auxiliary diagnostic. Neither coordinate system affects scores.
 
-Each view fits MiniBatch K-Means prototypes on bounded train tokens. A test token score is its nearest-prototype distance divided by the train median distance within that prototype. The anomaly direction is fixed before labels are opened.
+## Metric interpretation
 
-All test embeddings, scores, sample selection, and per-sample graph artifacts are persisted label-free. Only then is the evaluation dataset opened to compute AUROC/AUPRC and color plots. The main scientific comparison is `token_graph - token_only`; `no_rp` and `no_rr` identify which relation supplies any gain.
-
-PCA coordinates are visual diagnostics, not the detector and not proof of separability. Every sample has a saved graph artifact. Requested sample figures have three panels: retained direct RP/RR edges; non-adjacent effective RR and inherited RP relations computed from (P_{RR}^2,P_{RR}^3); and every response token in the frozen graph-embedding coordinates.
+Every exact feature reports signed raw AUROC and `separability=max(AUC,1-AUC)` separately. Separability is retrospective either-direction association, not deployable signed AUROC. Token and response-aggregated results are both reported so different granularities are not conflated.
