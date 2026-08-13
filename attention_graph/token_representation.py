@@ -761,19 +761,35 @@ def _window_any_positive(labels, token_index, window):
     return output
 
 
-def _read_labels(evaluation_dataset, metadata):
+def _open_label_store(evaluation_dataset, description):
+    """Open labels, completing the formal-cache seal when it is still closed."""
+    try:
+        return evaluation_dataset.labels()
+    except RuntimeError as error:
+        if "only after every attention sample has been processed" not in str(error):
+            raise
     for sample_id in tqdm(
-        evaluation_dataset.sample_ids, desc="[5/8] open sealed labels", unit="sample"
+        evaluation_dataset.sample_ids, desc=description, unit="sample"
     ):
         sample = evaluation_dataset[sample_id]
         sample.attention()
         sample.release_attention()
-    store, rows = evaluation_dataset.labels(), []
+    return evaluation_dataset.labels()
+
+
+def _read_dataset_labels(evaluation_dataset, description):
+    store, rows = _open_label_store(evaluation_dataset, description), []
     for sample_id in evaluation_dataset.sample_ids:
         sample = evaluation_dataset[sample_id]
         rows.extend(store.response_labels(sample).cpu().tolist())
         sample.release_attention()
-    labels = np.asarray(rows, dtype=np.int8)
+    return np.asarray(rows, dtype=np.int8)
+
+
+def _read_labels(evaluation_dataset, metadata):
+    labels = _read_dataset_labels(
+        evaluation_dataset, "[5/8] open sealed labels"
+    )
     if len(labels) != len(metadata["sample_id"]):
         raise ValueError("evaluation labels do not align with frozen token rows")
     return labels
@@ -1136,6 +1152,7 @@ def render_saved_sample(dataset, *, output_dir, sample_id, layer=None):
         names = tuple(map(str, index["structure_names"].tolist()))
         structure_file = output / str(index["compact_layer_structure_file"])
         coordinates_all = np.asarray(index["visualization_coordinates"], dtype=np.float32)
+        saved_sample_ids = np.asarray(index["sample_id"]).astype(str)
     with np.load(graph_path, allow_pickle=False) as artifact:
         start = int(artifact["global_row_start"])
         end = int(artifact["global_row_end"])
@@ -1155,10 +1172,23 @@ def render_saved_sample(dataset, *, output_dir, sample_id, layer=None):
     structure = np.asarray(
         structure_array[:, start:end], dtype=np.float32
     ).transpose(1, 0, 2)
-    sample = dataset[str(sample_id)]
-    sample.attention()
-    labels = dataset.labels().response_labels(sample).detach().cpu().numpy().astype(np.int8)
-    sample.release_attention()
+    if not np.all(saved_sample_ids[start:end] == str(sample_id)):
+        raise ValueError("saved sample rows do not match the requested sample ID")
+    label_cache = output / "evaluation_token_labels.npy"
+    if label_cache.exists():
+        all_labels = np.load(label_cache, mmap_mode="r")
+        label_source = "saved_evaluation_cache"
+    else:
+        all_labels = _read_dataset_labels(
+            dataset, "[render] open sealed labels"
+        )
+        if len(all_labels) != len(coordinates_all):
+            raise ValueError("evaluation labels do not align with saved token rows")
+        np.save(label_cache, all_labels)
+        label_source = "dataset_after_formal_seal"
+    if len(all_labels) != len(coordinates_all):
+        raise ValueError("cached evaluation labels do not align with saved token rows")
+    labels = np.asarray(all_labels[start:end], dtype=np.int8)
     if len(labels) != end - start:
         raise ValueError("saved sample rows do not align with evaluation labels")
     config = TokenRepresentationConfig(
@@ -1179,7 +1209,7 @@ def render_saved_sample(dataset, *, output_dir, sample_id, layer=None):
         "sample_id": str(sample_id), "attention_structure_figure": str(figure),
         "hallucination_tokens": int(labels.sum()),
         "response_nodes": int(len(labels)), "visualization_stats": stats,
-        "features_recomputed": False,
+        "features_recomputed": False, "label_source": label_source,
     }
 
 
@@ -1428,6 +1458,8 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
     )
 
     labels = _read_labels(evaluation_dataset, metadata)
+    evaluation_labels_file = output / "evaluation_token_labels.npy"
+    np.save(evaluation_labels_file, labels)
     representation_read = np.load(representation_file, mmap_mode="r")
     lookback_signals = _evaluate_lookback(
         representation_file, labels, metadata["token_index"],
@@ -1443,6 +1475,7 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
         **label_free_report,
         "labels_read": True,
         "labels_read_during": "evaluation_and_plot_coloring_only",
+        "evaluation_label_cache": str(evaluation_labels_file),
         "unsupervised_score_evaluation": score_metrics,
         "lookback_layer_head_signal_evaluation": lookback_signals,
         "compact_layer_structure_signal_evaluation": structure_signals,

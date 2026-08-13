@@ -16,6 +16,7 @@ from attention_graph.token_representation import (
     render_saved_sample,
     representation_feature_names,
     structure_names,
+    _read_dataset_labels,
     _route_matrices,
 )
 from cache import AttentionSample, index_row, save_attention_sample, sha256, write_split_index
@@ -201,6 +202,43 @@ class TokenGraphRepresentationTests(unittest.TestCase):
 
 
 class PipelineContractTests(unittest.TestCase):
+    def test_saved_render_unlocks_a_formal_style_label_seal(self):
+        class Sample:
+            def __init__(self, dataset, sample_id):
+                self.dataset, self.sample_id = dataset, sample_id
+
+            def attention(self):
+                self.dataset.processed.add(self.sample_id)
+
+            def release_attention(self):
+                pass
+
+        class Store:
+            def response_labels(self, sample):
+                return torch.tensor([int(sample.sample_id == "b")])
+
+        class Dataset:
+            sample_ids = ["a", "b"]
+
+            def __init__(self):
+                self.processed = set()
+
+            def __getitem__(self, sample_id):
+                return Sample(self, sample_id)
+
+            def labels(self):
+                if len(self.processed) != len(self.sample_ids):
+                    raise RuntimeError(
+                        "formal labels become available only after every attention "
+                        "sample has been processed"
+                    )
+                return Store()
+
+        dataset = Dataset()
+        labels = _read_dataset_labels(dataset, "test label seal")
+        np.testing.assert_array_equal(labels, np.asarray([0, 1], dtype=np.int8))
+        self.assertEqual(dataset.processed, {"a", "b"})
+
     def test_cli_exposes_only_current_compact_graph_controls(self):
         args = parse_args([
             "represent-tokens", "--train-split", "train", "--test-split", "test",
@@ -250,11 +288,13 @@ class PipelineContractTests(unittest.TestCase):
             self.assertFalse(report["prompt_provenance"]["all_head_mean_used"])
             self.assertFalse(report["prompt_provenance"]["row_normalized"])
             self.assertEqual(report["labels_read_during"], "evaluation_and_plot_coloring_only")
+            self.assertTrue((output / "evaluation_token_labels.npy").exists())
             rendered = render_saved_sample(
                 ResearchDataset(test_root), output_dir=output,
                 sample_id="test-1", layer=0,
             )
             self.assertFalse(rendered["features_recomputed"])
+            self.assertEqual(rendered["label_source"], "saved_evaluation_cache")
             self.assertTrue(Path(rendered["attention_structure_figure"]).exists())
             self.assertIn("layer_0", rendered["attention_structure_figure"])
 
