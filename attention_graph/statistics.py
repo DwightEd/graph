@@ -1,8 +1,8 @@
 """Label-blind full-population diagnostics for attention graphs.
 
-These statistics are diagnostics and baselines only. They are never concatenated
-into the GNN input. Evaluation labels are joined only by ``evaluate_statistics``
-after feature records have been frozen.
+These statistics are retrospective diagnostics only. They are not concatenated
+into the token representation. Evaluation labels are joined only by
+``evaluate_statistics`` after feature records have been frozen.
 """
 
 from __future__ import annotations

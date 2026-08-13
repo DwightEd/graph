@@ -5,24 +5,12 @@ from __future__ import annotations
 import argparse
 import json
 
-from attention_graph.evaluate import evaluate_scores
 from attention_graph.graph import GraphBuildConfig
-from attention_graph.mart import fit_mart, score_mart
-from attention_graph.patterns import (
-    PatternDiscoveryConfig,
-    discover_lookback_patterns,
-)
-from attention_graph.graph_validation import (
-    DEFAULT_VARIANTS,
-    GraphValidationConfig,
-    GraphValidator,
-    evaluate_graph_artifacts,
-)
-from attention_graph.graph_variants import VARIANTS as GRAPH_VALIDATION_VARIANTS
-from attention_graph.score import load_checkpoint, save_score_records, score_dataset
 from attention_graph.statistics import collect_statistics, evaluate_statistics
-from attention_graph.train import TrainingConfig, train_unsupervised
-from attention_graph.visualize import EmbeddingShiftVisualizer
+from attention_graph.token_representation import (
+    TokenRepresentationConfig,
+    discover_token_representations,
+)
 from extract import AttentionExtractor, ExtractionConfig
 from metadata import enrich_ragtruth_indices
 from research_dataset import ResearchDataset, open_research_dataset
@@ -67,50 +55,6 @@ def parse_args(argv=None):
     p.add_argument("--canonical-root", required=True)
     p.add_argument("--dataset-path", required=True)
 
-    p = sub.add_parser("train", help="label-blind GNN training on canonical train split")
-    p.add_argument("--train-split", required=True)
-    p.add_argument("--output-dir", required=True)
-    p.add_argument("--device", default="cuda")
-    p.add_argument("--embedding-dim", type=int, default=64)
-    p.add_argument("--message-steps", type=int, default=2)
-    p.add_argument("--dropout", type=float, default=0.1)
-    p.add_argument("--epochs", type=int, default=50)
-    p.add_argument("--patience", type=int, default=8)
-    p.add_argument("--learning-rate", type=float, default=1e-3)
-    p.add_argument("--weight-decay", type=float, default=1e-5)
-    p.add_argument("--target-mask-rate", type=float, default=0.20)
-    p.add_argument("--channel-drop-rate", type=float, default=0.10)
-    p.add_argument("--target-block-size", type=int, default=1)
-    p.add_argument("--seed", type=int, default=0)
-    _graph_args(p)
-
-    p = sub.add_parser("score", help="frozen checkpoint -> label-free token embeddings and scores")
-    p.add_argument("--canonical-split", required=True)
-    p.add_argument("--checkpoint", required=True)
-    p.add_argument("--output", required=True)
-    p.add_argument("--device", default="cuda")
-    p.add_argument("--target-block-size", type=int, default=1)
-    p.add_argument("--seed", type=int, default=0)
-
-    p = sub.add_parser("fit-mart", help="train-only non-GNN mechanism baseline")
-    p.add_argument("--train-split", required=True)
-    p.add_argument("--output", required=True)
-    p.add_argument("--device", default="cuda")
-    p.add_argument("--neighbors", type=int, default=16)
-    p.add_argument("--position-bins", type=int, default=8)
-    p.add_argument("--reference-size", type=int, default=100000)
-
-    p = sub.add_parser("score-mart", help="frozen MART detector -> label-free token scores")
-    p.add_argument("--canonical-split", required=True)
-    p.add_argument("--checkpoint", required=True)
-    p.add_argument("--output", required=True)
-    p.add_argument("--device", default="cuda")
-
-    p = sub.add_parser("evaluate", help="open labels only after scores are frozen")
-    p.add_argument("--canonical-split", required=True)
-    p.add_argument("--scores", required=True)
-    p.add_argument("--output", required=True)
-
     p = sub.add_parser("statistics", help="all-sample label-blind scalar diagnostics")
     p.add_argument("--canonical-split", required=True)
     p.add_argument("--output", required=True)
@@ -123,47 +67,20 @@ def parse_args(argv=None):
     p.add_argument("--output", required=True)
 
     p = sub.add_parser(
-        "validate-graphs",
-        help="label-blind construction ablations with fixed Lookback trajectories",
+        "represent-tokens",
+        help="label-blind layer-head mechanism token representations with graph ablations",
     )
     p.add_argument("--train-split", required=True)
     p.add_argument("--test-split", required=True)
     p.add_argument("--output-dir", required=True)
     p.add_argument("--device", default="cuda")
-    p.add_argument("--variants", nargs="+", choices=GRAPH_VALIDATION_VARIANTS,
-                   default=DEFAULT_VARIANTS)
-    p.add_argument("--layer-bins", type=int, default=8)
-    p.add_argument("--neighbors", type=int, default=16)
-    p.add_argument("--reference-size", type=int, default=30000)
-    p.add_argument("--span-width", type=int, default=8)
-    p.add_argument("--seed", type=int, default=42)
-    _graph_args(p)
-
-    p = sub.add_parser(
-        "evaluate-graphs",
-        help="read labels only after graph-construction artifacts are frozen",
-    )
-    p.add_argument("--canonical-split", required=True)
-    p.add_argument("--artifact-dir", required=True)
-    p.add_argument("--output", required=True)
-    p.add_argument("--bootstraps", type=int, default=400)
-    p.add_argument("--seed", type=int, default=42)
-
-    p = sub.add_parser(
-        "discover-patterns",
-        help="training-free discovery of Lookback-ratio graph patterns",
-    )
-    p.add_argument("--train-split", required=True)
-    p.add_argument("--test-split", required=True)
-    p.add_argument("--output-dir", required=True)
-    p.add_argument("--device", default="cuda")
-    p.add_argument("--layer-bins", type=int, default=8)
-    p.add_argument("--min-patterns", type=int, default=2)
-    p.add_argument("--max-patterns", type=int, default=6)
+    p.add_argument("--base-dim", type=int, default=32)
+    p.add_argument("--embedding-dim", type=int, default=32)
+    p.add_argument("--source-sketch-dim", type=int, default=16)
     p.add_argument("--fit-reference-size", type=int, default=30000)
-    p.add_argument("--tsne-landmarks", type=int, default=10000)
-    p.add_argument("--perplexity", type=float, default=40.0)
-    p.add_argument("--position-bins", type=int, default=10)
+    p.add_argument("--detector-reference-size", type=int, default=100000)
+    p.add_argument("--prototypes", type=int, default=256)
+    p.add_argument("--diffusion-hops", type=int, default=3)
     p.add_argument("--csr-row-block", type=int, default=4096)
     p.add_argument(
         "--sample-id", action="append", default=[],
@@ -173,17 +90,6 @@ def parse_args(argv=None):
     p.add_argument("--display-edges-per-type", type=int, default=2)
     p.add_argument("--seed", type=int, default=42)
 
-    p = sub.add_parser("visualize", help="paired before/after t-SNE of frozen GNN node states")
-    p.add_argument("--canonical-split", required=True)
-    p.add_argument("--checkpoint", required=True)
-    p.add_argument("--domain-field", choices=("data_source", "task_type"), required=True)
-    p.add_argument("--source-domain", required=True)
-    p.add_argument("--target-domain", required=True)
-    p.add_argument("--output-dir", required=True)
-    p.add_argument("--device", default="cuda")
-    p.add_argument("--max-nodes-per-domain", type=int, default=5000)
-    p.add_argument("--perplexity", type=float, default=30.0)
-    p.add_argument("--seed", type=int, default=0)
     return parser.parse_args(argv)
 
 
@@ -196,54 +102,6 @@ def main(argv=None):
         )).run()
     elif args.command == "enrich-index":
         result = enrich_ragtruth_indices(args.canonical_root, args.dataset_path)
-    elif args.command == "train":
-        dataset = ResearchDataset(args.train_split, device=args.device, verify_hashes=True)
-        config = TrainingConfig(
-            embedding_dim=args.embedding_dim,
-            message_steps=args.message_steps,
-            dropout=args.dropout,
-            epochs=args.epochs,
-            patience=args.patience,
-            learning_rate=args.learning_rate,
-            weight_decay=args.weight_decay,
-            target_mask_rate=args.target_mask_rate,
-            channel_drop_rate=args.channel_drop_rate,
-            target_block_size=args.target_block_size,
-            seed=args.seed,
-        )
-        result = train_unsupervised(
-            dataset, output_dir=args.output_dir, graph_config=_graph_config(args), config=config
-        )
-    elif args.command == "score":
-        dataset = ResearchDataset(args.canonical_split, device=args.device, verify_hashes=True)
-        model, calibrator, graph_config, checkpoint = load_checkpoint(args.checkpoint, device=args.device)
-        expected_channels = int(dataset.manifest["num_layers"]) * int(dataset.manifest["num_heads"])
-        if model.num_channels != expected_channels:
-            raise ValueError("checkpoint and canonical split have different attention geometry")
-        records = score_dataset(
-            dataset, model, calibrator, graph_config=graph_config,
-            target_block_size=args.target_block_size, seed=args.seed,
-        )
-        path = save_score_records(records, args.output)
-        result = {
-            "output": path,
-            "tokens": len(records),
-            "samples": len(dataset),
-            "labels_read": False,
-            "checkpoint_best_epoch": checkpoint.get("best_epoch"),
-        }
-    elif args.command == "fit-mart":
-        dataset = ResearchDataset(args.train_split, device=args.device, verify_hashes=True)
-        result = fit_mart(
-            dataset, output_path=args.output, neighbors=args.neighbors,
-            position_bins=args.position_bins, reference_size=args.reference_size,
-        )
-    elif args.command == "score-mart":
-        dataset = ResearchDataset(args.canonical_split, device=args.device, verify_hashes=True)
-        result = score_mart(dataset, checkpoint=args.checkpoint, output_path=args.output)
-    elif args.command == "evaluate":
-        dataset = ResearchDataset(args.canonical_split, device="cpu", verify_hashes=True)
-        result = evaluate_scores(dataset, score_path=args.scores, output_path=args.output)
     elif args.command == "statistics":
         dataset = ResearchDataset(args.canonical_split, device=args.device, verify_hashes=True)
         result = collect_statistics(
@@ -254,33 +112,7 @@ def main(argv=None):
         result = evaluate_statistics(
             dataset, statistics_path=args.statistics, output_path=args.output
         )
-    elif args.command == "validate-graphs":
-        train_dataset = open_research_dataset(
-            args.train_split, device=args.device, verify_hashes=True,
-            retain_embedded_labels=False,
-        )
-        test_dataset = open_research_dataset(
-            args.test_split, device=args.device, verify_hashes=True,
-            retain_embedded_labels=False,
-        )
-        config = GraphValidationConfig(
-            variants=tuple(args.variants), layer_bins=args.layer_bins,
-            neighbors=args.neighbors, reference_size=args.reference_size,
-            span_width=args.span_width, seed=args.seed,
-        )
-        result = GraphValidator(config).run(
-            train_dataset, test_dataset, args.output_dir, graph_config=_graph_config(args)
-        )
-    elif args.command == "evaluate-graphs":
-        dataset = open_research_dataset(
-            args.canonical_split, device="cpu", verify_hashes=True,
-            retain_embedded_labels=True,
-        )
-        result = evaluate_graph_artifacts(
-            dataset, args.artifact_dir, args.output,
-            bootstraps=args.bootstraps, seed=args.seed,
-        )
-    elif args.command == "discover-patterns":
+    elif args.command == "represent-tokens":
         train_dataset = open_research_dataset(
             args.train_split,
             device=args.device,
@@ -299,41 +131,27 @@ def main(argv=None):
             verify_hashes=True,
             retain_embedded_labels=True,
         )
-        pattern_config = PatternDiscoveryConfig(
-            layer_bins=args.layer_bins,
-            min_patterns=args.min_patterns,
-            max_patterns=args.max_patterns,
+        representation_config = TokenRepresentationConfig(
+            base_dim=args.base_dim,
+            embedding_dim=args.embedding_dim,
+            source_sketch_dim=args.source_sketch_dim,
             fit_reference_size=args.fit_reference_size,
-            tsne_landmarks=args.tsne_landmarks,
-            perplexity=args.perplexity,
-            position_bins=args.position_bins,
+            detector_reference_size=args.detector_reference_size,
+            prototypes=args.prototypes,
+            diffusion_hops=args.diffusion_hops,
             csr_row_block=args.csr_row_block,
             sample_ids=tuple(args.sample_id),
             display_mass_cover=args.display_mass_cover,
             display_edges_per_type=args.display_edges_per_type,
             seed=args.seed,
         )
-        result = discover_lookback_patterns(
+        result = discover_token_representations(
             train_dataset,
             test_dataset,
             evaluation_dataset,
             output_dir=args.output_dir,
-            config=pattern_config,
+            config=representation_config,
         )
-    elif args.command == "visualize":
-        dataset = ResearchDataset(args.canonical_split, device=args.device, verify_hashes=True)
-        result = EmbeddingShiftVisualizer(
-            dataset,
-            checkpoint=args.checkpoint,
-            domain_field=args.domain_field,
-            source_domain=args.source_domain,
-            target_domain=args.target_domain,
-            output_dir=args.output_dir,
-            device=args.device,
-            max_nodes_per_domain=args.max_nodes_per_domain,
-            perplexity=args.perplexity,
-            seed=args.seed,
-        ).run()
     else:
         raise ValueError(f"unsupported command: {args.command}")
     print(json.dumps(result, indent=2, sort_keys=True))

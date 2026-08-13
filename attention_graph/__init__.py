@@ -1,11 +1,15 @@
-"""Learned attention-graph representation and unsupervised hallucination detection."""
+"""Label-blind attention token representations and causal graph structure."""
 
 from .graph import AttentionGraph, GraphBuildConfig, RP, RR, build_attention_graph
-from .model import AttentionGraphEncoder, MaskedAttentionAutoencoder
-from .train import TrainingConfig, train_unsupervised
+from .token_representation import (
+    MECHANISMS,
+    TokenRepresentationConfig,
+    discover_token_representations,
+    mechanism_tensor,
+)
 
 __all__ = [
     "AttentionGraph", "GraphBuildConfig", "RP", "RR", "build_attention_graph",
-    "AttentionGraphEncoder", "MaskedAttentionAutoencoder", "TrainingConfig",
-    "train_unsupervised",
+    "MECHANISMS", "TokenRepresentationConfig", "discover_token_representations",
+    "mechanism_tensor",
 ]
