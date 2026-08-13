@@ -107,11 +107,13 @@ def token_statistics(graph):
 
 
 def direct_lookback(attention, *, csr_row_block=4096):
-    """Exact length-normalized Lookback anomaly for every response token.
+    """Legacy retained-attention Lookback anomaly averaged over layer/head.
 
-    The ratio is computed for every layer/head before aggregation.  The saved
-    diagonal belongs to the generated side.  This is the historical direct
-    baseline, exposed as an exact scalar rather than hidden inside a PCA.
+    The per-channel ratio is computed before this explicit compatibility
+    average. Values below ``attention_floor`` cannot be recovered, so this is
+    exact only for the retained cache, not for the original dense attention.
+    Channel-preserving representations use ``direct_lookback_channels`` from
+    ``token_representation`` instead.
     """
     response_count = int(attention.num_response_tokens)
     prompt_count = int(attention.response_idx)
@@ -161,45 +163,6 @@ def direct_lookback(attention, *, csr_row_block=4096):
     )
     ratio = ratio.reshape(
         attention.num_layers, attention.num_heads, response_count
-    ).permute(2, 0, 1)
-    return torch.nan_to_num(1.0 - ratio.mean((1, 2)))
-
-
-def direct_lookback_from_graph(graph):
-    """Exact Lookback anomaly from a typed graph, including counterfactuals."""
-    response_count = int(graph.num_nodes - graph.response_idx)
-    prompt_count = int(graph.response_idx)
-    if response_count < 1 or prompt_count < 1:
-        raise ValueError("graph Lookback requires a non-empty prompt and response")
-    device = graph.node_attr.device
-    rows_count = int(graph.num_channels) * response_count
-    prompt_mass = torch.zeros(rows_count, dtype=torch.float32, device=device)
-    history_mass = torch.zeros_like(prompt_mass)
-    if graph.trace_edge_id.numel():
-        edge = graph.trace_edge_id.long()
-        target = graph.edge_index[1, edge].long() - prompt_count
-        source = graph.edge_index[0, edge].long()
-        row = graph.trace_channel.long() * response_count + target
-        value = graph.trace_value.float().clamp_min(0.0)
-        is_prompt = source < prompt_count
-        if bool(is_prompt.any()):
-            prompt_mass.index_add_(0, row[is_prompt], value[is_prompt])
-        if bool((~is_prompt).any()):
-            history_mass.index_add_(0, row[~is_prompt], value[~is_prompt])
-    diagonal = (
-        graph.node_attr[prompt_count:].float().T.reshape(-1).clamp_min(0.0)
-    )
-    token_row = torch.arange(rows_count, device=device).remainder(response_count)
-    prompt_mean = prompt_mass / float(prompt_count)
-    generated_mean = (history_mass + diagonal) / (token_row + 1).float()
-    denominator = prompt_mean + generated_mean
-    ratio = torch.where(
-        denominator > 0,
-        prompt_mean / denominator,
-        torch.zeros_like(denominator),
-    )
-    ratio = ratio.reshape(
-        graph.num_layers, graph.num_heads, response_count
     ).permute(2, 0, 1)
     return torch.nan_to_num(1.0 - ratio.mean((1, 2)))
 

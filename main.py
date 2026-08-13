@@ -68,14 +68,16 @@ def parse_args(argv=None):
 
     p = sub.add_parser(
         "represent-tokens",
-        help="label-blind layer-head mechanism token representations with graph ablations",
+        help="full layer-head Lookback nodes plus compact layer graph propagation",
     )
     p.add_argument("--train-split", required=True)
     p.add_argument("--test-split", required=True)
     p.add_argument("--output-dir", required=True)
     p.add_argument("--device", default="cuda")
     p.add_argument("--position-bins", type=int, default=10)
-    p.add_argument("--diffusion-hops", type=int, default=2)
+    p.add_argument("--lookback-window", type=int, default=8)
+    p.add_argument("--provenance-hops", type=int, default=2)
+    p.add_argument("--route-top-heads", type=int, default=4)
     p.add_argument("--csr-row-block", type=int, default=4096)
     p.add_argument(
         "--sample-id", action="append", default=[],
@@ -84,7 +86,9 @@ def parse_args(argv=None):
     p.add_argument("--display-mass-cover", type=float, default=0.80)
     p.add_argument("--display-edges-per-type", type=int, default=2)
     p.add_argument("--display-max-edges", type=int, default=300)
-    p.add_argument("--visual-reference-size", type=int, default=30_000)
+    p.add_argument("--reference-size", type=int, default=12_000)
+    p.add_argument("--subspace-components", type=int, default=32)
+    p.add_argument("--tail-fraction", type=float, default=0.05)
     p.add_argument("--seed", type=int, default=42)
 
     return parser.parse_args(argv)
@@ -130,13 +134,17 @@ def main(argv=None):
         )
         representation_config = TokenRepresentationConfig(
             position_bins=args.position_bins,
-            diffusion_hops=args.diffusion_hops,
+            lookback_window=args.lookback_window,
+            provenance_hops=args.provenance_hops,
+            route_top_heads=args.route_top_heads,
             csr_row_block=args.csr_row_block,
             sample_ids=tuple(args.sample_id),
             display_mass_cover=args.display_mass_cover,
             display_edges_per_type=args.display_edges_per_type,
             display_max_edges=args.display_max_edges,
-            visual_reference_size=args.visual_reference_size,
+            reference_size=args.reference_size,
+            subspace_components=args.subspace_components,
+            tail_fraction=args.tail_fraction,
             seed=args.seed,
         )
         result = discover_token_representations(

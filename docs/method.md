@@ -1,57 +1,51 @@
-# Structure-preserving token graph representation
+# Compact token graph representation
 
 ## Scientific contract
 
-The deterministic statistics in `attention_graph.statistics` are the canonical base state and remain directly recoverable in every saved token artifact. No PCA or learned encoder defines the detector. Evaluation labels remain sealed until representations, scores, sample selection and per-sample graph artifacts have been written.
+The primary node vector is the complete windowed layer-head Lookback tensor. For a 32-layer, 32-head observer it has 1024 coordinates. No layer/head average is used before saving, train-only calibration, PCA projection, or anomaly scoring.
 
-## Base state and score
+Test labels are loaded only after node vectors, compact graph state, anomaly scores, sample selection, and graph indices have been frozen. The sparse cache is censored at `attention_floor`; absent entries are never presented as recovered original attention.
 
-The full base state contains the historical pair-graph statistics, absolute mean edge strength and exact direct Lookback. Train-only position-conditioned median/MAD produces standardized values. The primary score uses five pre-registered directions: low prompt mass fraction, low edge density, high concentration, high retained mean edge strength and low RR lag. `top1_share` remains recoverable but is not counted again because it overlaps the concentration mechanism. Missing RR support masks lag. Exact Lookback remains an independently evaluated baseline rather than being diluted by the composite.
+## Direct node state
 
-\[
-z_{td}=\frac{x_{td}-\operatorname{median}_{train,d}}
-{\operatorname{MAD}_{train,d}},\qquad
-e_{td}=\max(\sigma_dz_{td},0).
-\]
-
-The token score is the mean of these one-sided evidence values. This preserves direction, unlike nearest-cluster distance.
-
-This run is exploratory if these directions were chosen after inspecting the
-same benchmark test labels. Runtime label sealing prevents implementation
-leakage, not researcher-level test-set selection. Confirmatory evaluation must
-freeze features, directions and hop depth on an independent validation split.
-
-## Raw typed propagation
-
-The RP/RR pair weight is the sum of retained layer/head traces divided by channel count. Neither relation matrix is row-normalized and censored mass is not redistributed.
-
-With `W=A_RR`, both raw and conditional quantities are stored:
+For response token $t$, layer $l$, head $h$, prompt length $P$, retained prompt mass $p$, retained history mass $r$, and saved diagonal $d$:
 
 \[
-M^{(k)}=W^kZ,\qquad q^{(k)}=W^k\mathbf1,
+L_{t,l,h}=\frac{p/P}{p/P+(r+d)/(t+1)}.
 \]
+
+A causal temporal window preserves every layer-head coordinate. The flattened tensor is the only primary node representation; auxiliary graph mechanisms are not concatenated before validation.
+
+## Sparse layer routes
+
+Propagating every auxiliary mechanism through all layer-head channels is redundant. Instead, identical `(query, source)` edges within one layer are aggregated using the mean of the strongest $K$ head values:
 
 \[
-\bar Z^{(k)}=M^{(k)}/q^{(k)},\qquad
-\Delta^{(k)}=Z-\bar Z^{(k)}.
+B_{l,t,s}=K^{-1}\sum_{h\in\operatorname{TopK}}a_{l,h,t,s}.
 \]
 
-Prompt provenance is
+Unobserved head values are zero, the divisor remains $K$, and routes below `attention_floor` are removed. This differs from an all-head mean: it preserves strong minority-head evidence while requiring either sufficient strength or cross-head support.
+
+The direct compact state records retained prompt mass, prompt coverage/span/centroid/centroid change, and history mass/coverage/edge fraction/lag/lag change/far-history fraction per layer. History edge fraction is retained explicitly because it was the strongest earlier scalar structural signal; it is no longer hidden inside an indiscriminate feature average.
+
+## Multi-hop prompt provenance
+
+Direct prompt evidence is represented by raw position moments
 
 \[
-p^{(0)}=A_{RP}\mathbf1,\qquad p^{(k)}=W^kp^{(0)}.
+S^{(0)}_{t,l}=\sum_{p<P}B_{l,t,p}[1,u_p,u_p^2],
 \]
 
-The saved vector concatenates standardized exact features, each hop's raw message, conditional ancestor mean, self/ancestor residual, RR/RP path mass and reachable ancestor count. Default depth is two.
+and propagated through the layer-level RR route:
 
-A hop is causally eligible for response position (t) only when (t\ge k). Structurally impossible early hops are excluded, while an eligible but missing RP path remains weak-path evidence. Conditional innovations require an actual retained path and are continuously gated by (q/(q+q_0)), where (q_0) is the frozen train-positive path-mass median for that position bin and hop. Thus reliability is zero at zero mass, tends continuously to zero for numerical traces, and approaches one only for strong paths. RR path deficit is reported diagnostically but is not part of the primary score because its anomaly direction has not been independently validated.
+\[
+S^{(k)}_{t,l}=\sum_{r<t}B_{l,t,r}S^{(k-1)}_{r,l}.
+\]
 
-## Frozen ablations
+No row normalization occurs. The three propagated moments recover path-weighted prompt mass, centroid, and spread, so a weak path cannot become equivalent to a strong path. Two hops explicitly represent non-adjacent prompt inheritance through an earlier response token.
 
-`token_only`, `token_graph`, `no_rp` and `no_rr` share the same train-only scalers and scoring formula. `no_rp` and `no_rr` really delete the corresponding edge type and recompute the exact node statistics before scoring; no view refits a projector or detector. Claims are evaluated through `token_graph-token_only`, `token_graph-no_rp` and `token_graph-no_rr` differences.
+## Unsupervised reference and evaluation boundary
 
-The primary per-sample graph places every token at `(fixed token mechanism evidence, multi-hop graph evidence)` and overlays RR edges. PCA is fitted on a bounded train-only reference and is retained only as a population-level auxiliary diagnostic. Neither coordinate system affects scores.
+An unlabeled train reservoir fits position-conditioned median/MAD calibration and a PCA subspace on the 1024-D Lookback vectors. The deployable label-free scores are robust tail deviation and PCA reconstruction error. PCA supplies population/sample coordinates but is not optimized with test labels.
 
-## Metric interpretation
-
-Every exact feature reports signed raw AUROC and `separability=max(AUC,1-AUC)` separately. Separability is retrospective either-direction association, not deployable signed AUROC. Token and response-aggregated results are both reported so different granularities are not conflated.
+After artifacts freeze, every Lookback layer-head and every compact mechanism layer is evaluated independently. Raw AUROC preserves direction; `max(AUC,1-AUC)` is post-hoc association only. Any selected layer, head, or mechanism must be frozen on validation before confirmatory held-out testing.
