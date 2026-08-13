@@ -10,6 +10,7 @@ from attention_graph.statistics import collect_statistics, evaluate_statistics
 from attention_graph.token_representation import (
     TokenRepresentationConfig,
     discover_token_representations,
+    render_saved_sample,
 )
 from extract import AttentionExtractor, ExtractionConfig
 from metadata import enrich_ragtruth_indices
@@ -86,10 +87,24 @@ def parse_args(argv=None):
     p.add_argument("--display-mass-cover", type=float, default=0.80)
     p.add_argument("--display-edges-per-type", type=int, default=2)
     p.add_argument("--display-max-edges", type=int, default=300)
+    p.add_argument(
+        "--display-layer", type=int,
+        help="render this layer; default collapses each edge by maximum layer weight",
+    )
     p.add_argument("--reference-size", type=int, default=12_000)
     p.add_argument("--subspace-components", type=int, default=32)
     p.add_argument("--tail-fraction", type=float, default=0.05)
     p.add_argument("--seed", type=int, default=42)
+
+    p = sub.add_parser(
+        "render-token-graph",
+        help="re-render weighted attention structure from an existing output directory",
+    )
+    p.add_argument("--test-split", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.add_argument("--sample-id", required=True)
+    p.add_argument("--display-layer", type=int)
+    p.add_argument("--device", default="cpu")
 
     return parser.parse_args(argv)
 
@@ -142,6 +157,7 @@ def main(argv=None):
             display_mass_cover=args.display_mass_cover,
             display_edges_per_type=args.display_edges_per_type,
             display_max_edges=args.display_max_edges,
+            display_layer=args.display_layer,
             reference_size=args.reference_size,
             subspace_components=args.subspace_components,
             tail_fraction=args.tail_fraction,
@@ -153,6 +169,17 @@ def main(argv=None):
             evaluation_dataset,
             output_dir=args.output_dir,
             config=representation_config,
+        )
+    elif args.command == "render-token-graph":
+        dataset = open_research_dataset(
+            args.test_split,
+            device=args.device,
+            verify_hashes=True,
+            retain_embedded_labels=True,
+        )
+        result = render_saved_sample(
+            dataset, output_dir=args.output_dir,
+            sample_id=args.sample_id, layer=args.display_layer,
         )
     else:
         raise ValueError(f"unsupported command: {args.command}")

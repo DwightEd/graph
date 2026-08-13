@@ -49,3 +49,7 @@ No row normalization occurs. The three propagated moments recover path-weighted 
 An unlabeled train reservoir fits position-conditioned median/MAD calibration and a PCA subspace on the 1024-D Lookback vectors. The deployable label-free scores are robust tail deviation and PCA reconstruction error. PCA supplies population/sample coordinates but is not optimized with test labels.
 
 After artifacts freeze, every Lookback layer-head and every compact mechanism layer is evaluated independently. Raw AUROC preserves direction; `max(AUC,1-AUC)` is post-hoc association only. Any selected layer, head, or mechanism must be frozen on validation before confirmatory held-out testing.
+
+## Sample visualization
+
+The static visualization never places prompt and response tokens on two horizontal lines. It uses four complementary coordinate systems: the frozen 1024-D Lookback PCA with weighted RR edges, a prompt-to-response weighted adjacency matrix, a causal response-to-response adjacency matrix, and an RR target-versus-lag plot. Matrix color and graph edge width/color encode salient route weight. Distance from the RR diagonal and the lag ordinate encode exact token distance. Hop-1 inherited prompt centroid and spread are overlaid on the RP matrix. Every response token is rendered in representation space; hallucination labels are used only for coloring and target-row annotation.

@@ -59,6 +59,7 @@ class TokenRepresentationConfig:
     display_mass_cover: float = 0.80
     display_edges_per_type: int = 2
     display_max_edges: int = 300
+    display_layer: int | None = None
     sample_ids: tuple[str, ...] = ()
     seed: int = 42
 
@@ -76,6 +77,8 @@ class TokenRepresentationConfig:
             raise ValueError("tail_fraction must be in (0,1]")
         if not 0.0 < float(self.display_mass_cover) <= 1.0:
             raise ValueError("display_mass_cover must be in (0,1]")
+        if self.display_layer is not None and int(self.display_layer) < 0:
+            raise ValueError("display_layer must be nonnegative")
 
 
 def structure_names(hops):
@@ -776,19 +779,37 @@ def _read_labels(evaluation_dataset, metadata):
     return labels
 
 
-def _display_route_edges(route, response_idx, token_count, config):
-    """Choose visible edges from the exact compact route used in propagation."""
+def _collapsed_route_indices(route, token_count, layer=None):
+    """Return one maximum-weight layer route for each source-target pair."""
+    source = route["source"]
+    target = route["target"]
+    weight = route["weight"]
+    candidates = np.arange(len(weight), dtype=np.int64)
+    if layer is not None:
+        candidates = candidates[np.asarray(route["layer"]) == int(layer)]
+    if not len(candidates):
+        return candidates
+    pair = (
+        source[candidates].astype(np.int64) * int(token_count)
+        + target[candidates].astype(np.int64)
+    )
+    # Sort by pair first and descending weight second; keep the first member.
+    order = np.lexsort((-weight[candidates], pair))
+    ranked = candidates[order]
+    ranked_pair = pair[order]
+    first = np.ones(len(ranked), dtype=bool)
+    first[1:] = ranked_pair[1:] != ranked_pair[:-1]
+    return ranked[first]
+
+
+def _display_route_edges(route, response_idx, token_count, config, layer=None):
+    """Choose readable edges from the same route used in propagation."""
     source = route["source"]
     target = route["target"]
     weight = route["weight"]
     if not len(weight):
         return np.empty(0, dtype=np.int64)
-    # A 2-D figure cannot show the layer axis. Keep the strongest layer for
-    # each source-target pair; the full multilayer COO remains in the NPZ.
-    pair = source.astype(np.int64) * int(token_count) + target.astype(np.int64)
-    ranked_all = np.argsort(-weight, kind="stable")
-    _, first = np.unique(pair[ranked_all], return_index=True)
-    candidates = ranked_all[np.sort(first)]
+    candidates = _collapsed_route_indices(route, token_count, layer=layer)
     chosen = []
     for node in range(int(response_idx), int(token_count)):
         incoming = candidates[target[candidates] == node]
@@ -812,6 +833,40 @@ def _display_route_edges(route, response_idx, token_count, config):
         order = np.argsort(-weight[chosen], kind="stable")
         chosen = np.sort(chosen[order[:config.display_max_edges]])
     return chosen
+
+
+def _route_matrices(route, response_idx, response_count, layer=None):
+    """Dense RP/RR matrices of maximum salient route weight for plotting."""
+    token_count = int(response_idx) + int(response_count)
+    selected = _collapsed_route_indices(route, token_count, layer=layer)
+    source = np.asarray(route["source"])[selected]
+    target = np.asarray(route["target"])[selected]
+    weight = np.asarray(route["weight"], dtype=np.float32)[selected]
+    target_relative = target - int(response_idx)
+    rp = np.zeros((response_count, response_idx), dtype=np.float32)
+    rr = np.zeros((response_count, response_count), dtype=np.float32)
+    prompt = source < int(response_idx)
+    if bool(prompt.any()):
+        rp[target_relative[prompt], source[prompt]] = weight[prompt]
+    history = ~prompt
+    if bool(history.any()):
+        rr[target_relative[history], source[history] - int(response_idx)] = weight[history]
+    return rp, rr, selected
+
+
+def _weight_norm(values):
+    """Log normalization which leaves absent edges visually blank."""
+    from matplotlib.colors import LogNorm
+
+    positive = np.asarray(values, dtype=np.float64)
+    positive = positive[positive > 0]
+    if not len(positive):
+        return None
+    lower = max(float(positive.min()), float(np.quantile(positive, .02)))
+    upper = float(positive.max())
+    if upper <= lower:
+        lower = max(upper * .5, np.finfo(np.float32).tiny)
+    return LogNorm(vmin=lower, vmax=upper)
 
 
 def _select_samples(config, graphs, coordinates):
@@ -869,130 +924,263 @@ def _render_population(output, coordinates, scores, labels):
     return path
 
 
-def _render_sample(output, graph, route, coordinates, lookback, structure, labels,
-                   names, config, num_layers, num_heads):
+def _render_sample(output, graph, route, coordinates, structure, labels,
+                   names, config, num_layers, *, layer=None):
+    """Render weighted structure without collapsing tokens onto two lines."""
     import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
     from matplotlib.lines import Line2D
 
     response_idx = graph["response_idx"]
-    selected = _display_route_edges(
-        route, response_idx, len(graph["token_ids"]), config
-    )
-    edge_index = np.stack((route["source"][selected], route["target"][selected]))
-    edge_type = np.where(edge_index[0] < response_idx, RP, RR)
-    edge_score = route["weight"][selected]
     response_count = graph["end"] - graph["start"]
-    response_nodes = np.arange(response_idx, response_idx + response_count)
-    prompt_nodes = np.unique(edge_index[0, edge_index[0] < response_idx])
+    token_count = len(graph["token_ids"])
+    if layer is not None and not 0 <= int(layer) < int(num_layers):
+        raise ValueError(f"display layer must be in [0,{int(num_layers) - 1}]")
+    rp_matrix, rr_matrix, collapsed = _route_matrices(
+        route, response_idx, response_count, layer=layer
+    )
+    selected = _display_route_edges(
+        route, response_idx, token_count, config, layer=layer
+    )
     colors = np.where(labels == 1, "#d62728", "#2ca02c")
-    width = max(22, min(38, 18 + response_count * .12))
-    figure, axes = plt.subplots(1, 4, figsize=(width, 6), constrained_layout=True)
-    position = {
-        **{int(node): (float(node), 1.0) for node in prompt_nodes},
-        **{int(node): (float(node), 0.0) for node in response_nodes},
-    }
-    maximum = max(float(edge_score.max()) if len(edge_score) else 0.0, 1e-12)
-    for edge, relation, weight in zip(edge_index.T, edge_type, edge_score):
-        source, target = map(int, edge)
-        if source not in position:
-            continue
-        axes[0].annotate("", xy=position[target], xytext=position[source], arrowprops={
-            "arrowstyle": "->", "color": "#1f77b4" if relation == RP else "#777777",
-            "alpha": .15 + .55 * float(weight / maximum),
-            "lw": .3 + 1.5 * float(weight / maximum), "connectionstyle": "arc3,rad=.08",
-        })
-    if len(prompt_nodes):
-        axes[0].scatter(prompt_nodes, np.ones(len(prompt_nodes)), marker="s", s=22, c="#4c78a8")
-    hop = int(config.provenance_hops)
+    figure, axes = plt.subplots(2, 2, figsize=(17, 14), constrained_layout=True)
+    axes = axes.ravel()
+    layer_text = "max over layers" if layer is None else f"layer {int(layer)}"
+
+    # Panel 1: all response nodes in their frozen representation coordinates.
+    rr_selected = selected[np.asarray(route["source"])[selected] >= response_idx]
+    rr_weight = np.asarray(route["weight"], dtype=np.float32)[rr_selected]
+    if len(rr_selected):
+        source = np.asarray(route["source"])[rr_selected] - response_idx
+        target = np.asarray(route["target"])[rr_selected] - response_idx
+        valid = (
+            (source >= 0) & (source < response_count)
+            & (target >= 0) & (target < response_count)
+        )
+        source, target, rr_weight = source[valid], target[valid], rr_weight[valid]
+        segments = np.stack((coordinates[source], coordinates[target]), axis=1)
+        maximum = max(float(rr_weight.max()) if len(rr_weight) else 0.0, 1e-12)
+        collection = LineCollection(
+            segments, cmap="magma", norm=_weight_norm(rr_weight),
+            linewidths=.25 + 2.5 * np.sqrt(rr_weight / maximum), alpha=.55,
+            zorder=1,
+        )
+        collection.set_array(rr_weight)
+        axes[0].add_collection(collection)
+        figure.colorbar(collection, ax=axes[0], label="salient RR route weight")
+    incoming = rr_matrix.sum(axis=1) + rp_matrix.sum(axis=1)
+    node_size = 16.0 + 60.0 * np.sqrt(incoming / max(float(incoming.max()), 1e-12))
+    axes[0].scatter(
+        coordinates[:, 0], coordinates[:, 1], c=colors, s=node_size,
+        edgecolors="black", linewidths=.25, zorder=2,
+    )
+    for index in np.flatnonzero(labels == 1):
+        axes[0].annotate(
+            str(index), coordinates[index], xytext=(2, 2), textcoords="offset points",
+            fontsize=6, color="#8b0000",
+        )
+    axes[0].set(
+        title=(f"All {response_count} response nodes in 1024-D Lookback PCA\n"
+               f"{len(rr_selected)} strongest visible RR routes; {layer_text}"),
+        xlabel="PCA component 1", ylabel="PCA component 2",
+    )
+    axes[0].legend(handles=[
+        Line2D([], [], marker="o", color="none", markerfacecolor="#2ca02c", label="correct"),
+        Line2D([], [], marker="o", color="none", markerfacecolor="#d62728", label="hallucination"),
+        Line2D([], [], color="#7f3c8d", label="RR route; width/color = weight"),
+    ], frameon=False)
+
+    # Panels 2/3: adjacency matrices expose source, target, weight and distance.
+    cmap = plt.get_cmap("magma").copy()
+    cmap.set_bad("white")
+    rp_norm = _weight_norm(rp_matrix)
+    image = axes[1].imshow(
+        np.ma.masked_less_equal(rp_matrix, 0), origin="lower", aspect="auto",
+        cmap=cmap, norm=rp_norm, interpolation="nearest",
+    )
+    for token in np.flatnonzero(labels == 1):
+        axes[1].axhline(token, color="#00ffff", lw=.35, alpha=.65)
+    # Overlay every reachable hop-1 prompt provenance as a centroid and spread,
+    # instead of drawing arbitrary long arrows between two horizontal rows.
+    hop = 1
     log_mass = structure[:, names.index(
         f"prompt_provenance_log_mass_hop{hop}"
     )]
-    centroid = structure[:, names.index(
+    provenance_centroid = structure[:, names.index(
         f"prompt_provenance_centroid_hop{hop}"
     )]
-    path_strength = np.quantile(log_mass, .90, axis=1)
-    path_centroid = np.zeros(response_count, dtype=np.float32)
-    has_path = np.zeros(response_count, dtype=bool)
-    for token_index in range(response_count):
-        valid_layer = log_mass[token_index] > -11.5
-        if valid_layer.any():
-            has_path[token_index] = True
-            path_centroid[token_index] = float(np.median(
-                centroid[token_index, valid_layer]
-            ))
-    candidates = np.flatnonzero(has_path)
-    if len(candidates) > 60:
-        candidates = candidates[
-            np.argsort(-path_strength[candidates], kind="stable")[:60]
-        ]
-    inherited_min = float(path_strength[candidates].min()) if len(candidates) else 0.0
-    inherited_max = float(path_strength[candidates].max()) if len(candidates) else 1.0
-    inherited_scale = max(inherited_max - inherited_min, 1e-6)
-    for token_index in candidates:
-        source_position = path_centroid[token_index] * max(response_idx - 1, 1)
-        axes[0].annotate(
-            "", xy=(response_idx + token_index, 0.0), xytext=(source_position, 1.0),
-            arrowprops={
-                "arrowstyle": "->", "linestyle": ":", "color": "#9467bd",
-                "alpha": .12 + .30 * (
-                    float(path_strength[token_index]) - inherited_min
-                ) / inherited_scale,
-                "lw": .6, "connectionstyle": "arc3,rad=.05",
-            },
+    provenance_spread = structure[:, names.index(
+        f"prompt_provenance_spread_hop{hop}"
+    )]
+    if layer is None:
+        strongest_layer = np.argmax(log_mass, axis=1)
+        row = np.arange(response_count)
+        displayed_log_mass = log_mass[row, strongest_layer]
+        displayed_centroid = provenance_centroid[row, strongest_layer]
+        displayed_spread = provenance_spread[row, strongest_layer]
+    else:
+        displayed_log_mass = log_mass[:, int(layer)]
+        displayed_centroid = provenance_centroid[:, int(layer)]
+        displayed_spread = provenance_spread[:, int(layer)]
+    reachable = displayed_log_mass > -11.5
+    provenance_rows = np.flatnonzero(reachable)
+    if len(provenance_rows):
+        prompt_scale = float(max(response_idx - 1, 1))
+        center = displayed_centroid[reachable] * prompt_scale
+        radius = displayed_spread[reachable] * prompt_scale
+        path_mass = np.power(10.0, displayed_log_mass[reachable])
+        relative_mass = path_mass / max(float(path_mass.max()), 1e-12)
+        axes[1].hlines(
+            provenance_rows, np.clip(center - radius, 0, response_idx - 1),
+            np.clip(center + radius, 0, response_idx - 1),
+            color="#2d6cdf", lw=.55, alpha=.55,
         )
-    axes[0].scatter(response_nodes, np.zeros(response_count), c=colors, s=38,
-                    edgecolors="black", linewidths=.25)
-    axes[0].set(title=f"Compact route edges + strongest hop-{hop} prompt provenance",
-                xlabel="absolute token position",
-                yticks=(0, 1), yticklabels=("response", "prompt"))
-
-    rr = edge_type == RR
-    for source, target in edge_index[:, rr].T:
-        source -= response_idx
-        target -= response_idx
-        axes[1].plot(
-            coordinates[[source, target], 0], coordinates[[source, target], 1],
-            color="#777777", alpha=.18, lw=.6,
+        axes[1].scatter(
+            center, provenance_rows, s=7.0 + 40.0 * np.sqrt(relative_mass),
+            facecolors="none", edgecolors="#2d6cdf", linewidths=.65,
+            label="hop-1 inherited prompt centroid ± spread",
         )
-    axes[1].scatter(coordinates[:, 0], coordinates[:, 1], c=colors, s=42,
-                    edgecolors="black", linewidths=.25)
-    for index, point in enumerate(coordinates):
-        axes[1].text(point[0], point[1], str(index), fontsize=5, ha="center", va="bottom")
-    axes[1].set(title="Every token in frozen node-representation space",
-                xlabel="PCA component 1", ylabel="PCA component 2")
-    axes[1].legend(handles=[
-        Line2D([], [], marker="o", color="none", markerfacecolor="#2ca02c", label="correct"),
-        Line2D([], [], marker="o", color="none", markerfacecolor="#d62728", label="hallucination"),
-        Line2D([], [], color="#777777", label="compact RR route"),
-    ], frameon=False)
+    axes[1].set(
+        title=f"Prompt→response weighted adjacency ({layer_text})",
+        xlabel="prompt source token index", ylabel="response target token index",
+    )
+    if rp_norm is not None:
+        figure.colorbar(image, ax=axes[1], label="salient RP route weight (log scale)")
+    if len(provenance_rows):
+        axes[1].legend(frameon=False, loc="upper right")
 
-    lookback = lookback.reshape(response_count, num_layers, num_heads)
-    layer_lookback = np.median(lookback, axis=2).T
+    rr_norm = _weight_norm(rr_matrix)
     image = axes[2].imshow(
-        layer_lookback, aspect="auto", cmap="viridis", vmin=0, vmax=1,
-        interpolation="nearest",
+        np.ma.masked_less_equal(rr_matrix, 0), origin="lower", aspect="equal",
+        cmap=cmap, norm=rr_norm, interpolation="nearest",
     )
-    axes[2].set(title="Windowed Lookback by layer (head median)",
-                xlabel="response token index", ylabel="layer")
-    figure.colorbar(image, ax=axes[2], label="Lookback ratio")
+    axes[2].plot(
+        np.arange(response_count), np.arange(response_count),
+        color="#00b5d8", lw=.8, linestyle="--", label="zero lag",
+    )
+    for token in np.flatnonzero(labels == 1):
+        axes[2].axhline(token, color="#00ffff", lw=.35, alpha=.65)
+    axes[2].set(
+        title=f"Response→response weighted adjacency ({layer_text})",
+        xlabel="history source token index", ylabel="response target token index",
+        xlim=(-.5, response_count - .5), ylim=(-.5, response_count - .5),
+    )
+    axes[2].legend(frameon=False)
+    if rr_norm is not None:
+        figure.colorbar(image, ax=axes[2], label="salient RR route weight (log scale)")
 
-    mechanism_median = np.median(structure, axis=2).T
-    lower = np.quantile(mechanism_median, .02, axis=1, keepdims=True)
-    upper = np.quantile(mechanism_median, .98, axis=1, keepdims=True)
-    normalized = (mechanism_median - lower) / np.maximum(upper - lower, 1e-6)
-    image = axes[3].imshow(
-        np.clip(normalized, 0, 1), aspect="auto", cmap="magma",
-        interpolation="nearest",
+    # Panel 4: vertical distance is the exact causal token lag, not layout artifice.
+    rr_all = collapsed[np.asarray(route["source"])[collapsed] >= response_idx]
+    source = np.asarray(route["source"])[rr_all] - response_idx
+    target = np.asarray(route["target"])[rr_all] - response_idx
+    weight = np.asarray(route["weight"], dtype=np.float32)[rr_all]
+    lag = target - source
+    if len(weight):
+        maximum = max(float(weight.max()), 1e-12)
+        points = axes[3].scatter(
+            target, lag, c=weight,
+            s=4.0 + 38.0 * np.sqrt(weight / maximum),
+            cmap="magma", norm=_weight_norm(weight), alpha=.62,
+            edgecolors="none", rasterized=True,
+        )
+        figure.colorbar(points, ax=axes[3], label="salient RR route weight")
+    hallucination = labels[target] == 1 if len(target) else np.zeros(0, dtype=bool)
+    if bool(hallucination.any()):
+        axes[3].scatter(
+            target[hallucination], lag[hallucination], facecolors="none",
+            edgecolors="#00b5d8", s=58, linewidths=.8,
+            label="edge targets hallucination token",
+        )
+    axes[3].set(
+        title=f"RR connection distance and strength ({layer_text})",
+        xlabel="response target token index",
+        ylabel="causal lag = target index − source index",
+        xlim=(-.5, response_count - .5), ylim=(0, max(response_count - 1, 1)),
     )
-    axes[3].set(title="Layer-median compact graph mechanisms",
-                xlabel="response token index", yticks=np.arange(len(names)),
-                yticklabels=names)
-    figure.colorbar(image, ax=axes[3], label="within-mechanism normalized value")
-    path = output / f"sample_{_safe_filename(graph['sample_id'])}_token_graph.png"
-    figure.suptitle(f"Sample {graph['sample_id']}; labels only color frozen nodes")
+    if bool(hallucination.any()):
+        axes[3].legend(frameon=False)
+
+    layer_suffix = "all_layers" if layer is None else f"layer_{int(layer)}"
+    path = output / (
+        f"sample_{_safe_filename(graph['sample_id'])}_attention_structure_"
+        f"{layer_suffix}.png"
+    )
+    figure.suptitle(
+        f"Sample {graph['sample_id']}: node geometry, weighted adjacency, and causal distance\n"
+        "cyan target lines/rings indicate hallucination labels used only for coloring",
+        fontsize=14,
+    )
     figure.savefig(path, dpi=240)
     plt.close(figure)
-    return path, int(len(selected)), int(len(candidates))
+    return path, {
+        "visible_rr_edges": int(len(rr_selected)),
+        "collapsed_route_edges": int(len(collapsed)),
+        "rp_route_edges": int(np.count_nonzero(rp_matrix)),
+        "rr_route_edges": int(np.count_nonzero(rr_matrix)),
+        "display_layer": None if layer is None else int(layer),
+    }
+
+
+def render_saved_sample(dataset, *, output_dir, sample_id, layer=None):
+    """Re-render one saved sample without recomputing train/test features."""
+    output = Path(output_dir)
+    index_path = output / "token_representations_label_free.npz"
+    report_path = output / "label_free_report.json"
+    graph_path = output / "sample_graphs" / f"sample_{_safe_filename(sample_id)}.npz"
+    for required in (index_path, report_path, graph_path):
+        if not required.exists():
+            raise FileNotFoundError(f"saved artifact is missing: {required}")
+    saved_report = json.loads(report_path.read_text(encoding="utf-8"))
+    saved_config = saved_report.get("config", {})
+    with np.load(index_path, allow_pickle=False) as index:
+        names = tuple(map(str, index["structure_names"].tolist()))
+        structure_file = output / str(index["compact_layer_structure_file"])
+        coordinates_all = np.asarray(index["visualization_coordinates"], dtype=np.float32)
+    with np.load(graph_path, allow_pickle=False) as artifact:
+        start = int(artifact["global_row_start"])
+        end = int(artifact["global_row_end"])
+        graph = {
+            "sample_id": str(artifact["sample_id"]),
+            "start": start, "end": end,
+            "token_ids": artifact["token_ids"],
+            "response_idx": int(artifact["response_idx"]),
+        }
+        route = {
+            "layer": artifact["compact_route_layer"],
+            "source": artifact["compact_route_source"],
+            "target": artifact["compact_route_target"],
+            "weight": artifact["compact_route_weight"],
+        }
+    structure_array = np.load(structure_file, mmap_mode="r")
+    structure = np.asarray(
+        structure_array[:, start:end], dtype=np.float32
+    ).transpose(1, 0, 2)
+    sample = dataset[str(sample_id)]
+    sample.attention()
+    labels = dataset.labels().response_labels(sample).detach().cpu().numpy().astype(np.int8)
+    sample.release_attention()
+    if len(labels) != end - start:
+        raise ValueError("saved sample rows do not align with evaluation labels")
+    config = TokenRepresentationConfig(
+        lookback_window=int(saved_config.get("lookback_window", 8)),
+        provenance_hops=int(saved_config.get("provenance_hops", 2)),
+        route_top_heads=int(saved_config.get("route_top_heads", 4)),
+        display_mass_cover=float(saved_config.get("display_mass_cover", .80)),
+        display_edges_per_type=int(saved_config.get("display_edges_per_type", 2)),
+        display_max_edges=int(saved_config.get("display_max_edges", 300)),
+        display_layer=layer,
+    )
+    config.validate()
+    figure, stats = _render_sample(
+        output, graph, route, coordinates_all[start:end], structure,
+        labels, names, config, int(dataset.manifest["num_layers"]), layer=layer,
+    )
+    return {
+        "sample_id": str(sample_id), "attention_structure_figure": str(figure),
+        "hallucination_tokens": int(labels.sum()),
+        "response_nodes": int(len(labels)), "visualization_stats": stats,
+        "features_recomputed": False,
+    }
 
 
 def _geometry(dataset):
@@ -1289,9 +1477,10 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
             structure_read[:, start:end], dtype=np.float32
         ).transpose(1, 0, 2)
         lookback = np.asarray(representation_read[start:end], dtype=np.float32)
-        figure, edge_count, inherited_count = _render_sample(
-            output, graph, route, coordinate_output[start:end], lookback, structure,
-            labels[start:end], names, config, num_layers, num_heads,
+        figure, visualization_stats = _render_sample(
+            output, graph, route, coordinate_output[start:end], structure,
+            labels[start:end], names, config, num_layers,
+            layer=config.display_layer,
         )
         detail_path = output / f"sample_{_safe_filename(sample_id)}_graph_state.npz"
         np.savez_compressed(
@@ -1305,8 +1494,8 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
             "sample_id": sample_id, "selection_rule": selection_rule,
             "response_nodes": int(end - start),
             "hallucination_tokens": int(labels[start:end].sum()),
-            "display_edges": edge_count, "figure": str(figure),
-            "display_multihop_prompt_provenance": inherited_count,
+            "attention_structure_figure": str(figure),
+            "visualization_stats": visualization_stats,
             "label_free_graph": str(graph_paths[sample_id]),
             "label_free_graph_state": str(detail_path),
         })

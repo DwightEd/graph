@@ -12,6 +12,7 @@ TRAIN_SPLIT="${TRAIN_SPLIT:-$FORMAL_ROOT/train}"
 TEST_SPLIT="${TEST_SPLIT:-$FORMAL_ROOT/test}"
 DEVICE="${DEVICE:-cuda}"
 SAMPLE_IDS="${SAMPLE_IDS:-}"
+DISPLAY_LAYER="${DISPLAY_LAYER:-}"
 LOG_FILE="${LOG_FILE:-${OUTPUT_DIR}.log}"
 
 export MPLCONFIGDIR="${MPLCONFIGDIR:-${OUTPUT_DIR}.matplotlib}"
@@ -53,6 +54,10 @@ if [[ -n "$SAMPLE_IDS" ]]; then
   done
 fi
 
+if [[ -n "$DISPLAY_LAYER" ]]; then
+  ARGS+=(--display-layer "$DISPLAY_LAYER")
+fi
+
 "$PYTHON" -u main.py "${ARGS[@]}" 2>&1 | tee "$LOG_FILE"
 
 printf 'complete_output=%s\n' "$OUTPUT_DIR"
@@ -64,4 +69,4 @@ printf 'compact_layer_structure=%s\n' "$OUTPUT_DIR/compact_layer_structure.float
 printf 'train_reference_model=%s\n' "$OUTPUT_DIR/train_reference_model.npz"
 printf 'all_sample_graphs=%s\n' "$OUTPUT_DIR/sample_graphs"
 printf 'population_figure=%s\n' "$OUTPUT_DIR/population_token_representations.png"
-printf 'selected_sample_figure=%s\n' "$OUTPUT_DIR/sample_*_token_graph.png"
+printf 'selected_sample_figure=%s\n' "$OUTPUT_DIR/sample_*_attention_structure_*.png"

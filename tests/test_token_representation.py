@@ -13,8 +13,10 @@ from attention_graph.token_representation import (
     compact_layer_structure,
     direct_lookback_channels,
     discover_token_representations,
+    render_saved_sample,
     representation_feature_names,
     structure_names,
+    _route_matrices,
 )
 from cache import AttentionSample, index_row, save_attention_sample, sha256, write_split_index
 from main import parse_args
@@ -184,6 +186,19 @@ class TokenGraphRepresentationTests(unittest.TestCase):
             node, lookback.reshape(2, 4)
         )
 
+    def test_weighted_route_matrices_preserve_source_target_distance(self):
+        route = {
+            "layer": np.asarray([0, 1, 0, 0]),
+            "source": np.asarray([0, 0, 2, 3]),
+            "target": np.asarray([3, 3, 4, 4]),
+            "weight": np.asarray([.2, .7, .5, .4], dtype=np.float32),
+        }
+        rp, rr, selected = _route_matrices(route, response_idx=2, response_count=3)
+        self.assertEqual(len(selected), 3)
+        self.assertAlmostEqual(float(rp[1, 0]), .7, places=6)
+        self.assertAlmostEqual(float(rr[2, 0]), .5, places=6)
+        self.assertAlmostEqual(float(rr[2, 1]), .4, places=6)
+
 
 class PipelineContractTests(unittest.TestCase):
     def test_cli_exposes_only_current_compact_graph_controls(self):
@@ -235,6 +250,13 @@ class PipelineContractTests(unittest.TestCase):
             self.assertFalse(report["prompt_provenance"]["all_head_mean_used"])
             self.assertFalse(report["prompt_provenance"]["row_normalized"])
             self.assertEqual(report["labels_read_during"], "evaluation_and_plot_coloring_only")
+            rendered = render_saved_sample(
+                ResearchDataset(test_root), output_dir=output,
+                sample_id="test-1", layer=0,
+            )
+            self.assertFalse(rendered["features_recomputed"])
+            self.assertTrue(Path(rendered["attention_structure_figure"]).exists())
+            self.assertIn("layer_0", rendered["attention_structure_figure"])
 
 
 if __name__ == "__main__":

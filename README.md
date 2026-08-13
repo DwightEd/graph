@@ -24,6 +24,16 @@ git pull --ff-only origin main && CUDA_VISIBLE_DEVICES=0 bash run_token_represen
 SAMPLE_IDS=11445,11289 CUDA_VISIBLE_DEVICES=0 bash run_token_representation.sh
 ```
 
+已有完整输出不需要重新计算特征，可以只重画某条样本。以下命令针对已发现信号最强的 layer 4；省略 `--display-layer` 时，每对 source-target 使用所有层中的最大路由权重：
+
+```bash
+python main.py render-token-graph \
+  --test-split /path/to/formal_cache/test \
+  --output-dir /path/to/existing/token_representation/output \
+  --sample-id 12471 \
+  --display-layer 4
+```
+
 程序分八个阶段显示进度，直接使用原始压缩缓存，不转换、不复制、不重新抽取 attention。可用 `ROUTE_TOP_HEADS=4`、`PROVENANCE_HOPS=2` 和 `LOOKBACK_WINDOW=8` 修改三个核心参数。
 
 ## 为什么只为 Lookback 保留 1024 维
@@ -93,4 +103,8 @@ S^{(k)}_{t,l}=\sum_{r<t}B_{l,t,r}S^{(k-1)}_{r,l}.
 - `sample_graphs/*.npz`：每条样本实际用于传播的多层稀疏 COO 路由及全局节点行区间；
 - `token_representation_report.json`：无监督分数、Lookback 通道信号和紧凑结构信号；
 - `population_token_representations.png`：train-only PCA 与无监督分数分布；
-- `sample_*_token_graph.png`：直接边、多跳 prompt provenance、所有 token 投影、Lookback 层轨迹和结构热图。
+- `sample_*_attention_structure_*.png`：四个相互对应的结构视图，不再把 token 压在两条水平线上：
+  1. 全部 response 节点的 1024-D Lookback PCA 坐标，RR 边宽和颜色均表示路由权重；
+  2. RP 加权邻接矩阵，横轴是 prompt source、纵轴是 response target，并叠加 hop-1 prompt provenance 的质心与范围；
+  3. RR 加权邻接矩阵，离对角线的距离直接表示历史跨度；
+  4. RR 的 target-lag 散点，纵坐标为精确 causal lag，点大小和颜色表示路由权重。

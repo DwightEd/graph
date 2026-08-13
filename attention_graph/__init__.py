@@ -8,6 +8,7 @@ from .token_representation import (
     compact_layer_structure,
     direct_lookback_channels,
     discover_token_representations,
+    render_saved_sample,
     structure_names,
 )
 
@@ -16,4 +17,5 @@ __all__ = [
     "EXACT_FEATURES", "TokenRepresentationConfig", "discover_token_representations",
     "build_node_representation", "compact_layer_structure",
     "direct_lookback_channels", "structure_names",
+    "render_saved_sample",
 ]
