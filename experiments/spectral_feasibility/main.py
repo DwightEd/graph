@@ -1,4 +1,4 @@
-"""CLI for label-blind spectral attention-graph feasibility experiments."""
+"""CLI for fully unsupervised causal spectral attention-graph experiments."""
 
 from __future__ import annotations
 
@@ -8,50 +8,47 @@ import json
 from research_dataset import open_research_dataset
 
 from .experiment import (
-    collect_representations,
     evaluate_score_artifact,
-    save_representation_artifact,
-    score_representation_artifacts,
+    fit_spectral_reference,
+    score_spectral_dataset,
 )
 from .representations import SpectralConfig
-
-
-def _scales(value: str) -> tuple[float, ...]:
-    values = tuple(float(item) for item in value.split(",") if item.strip())
-    if not values:
-        raise argparse.ArgumentTypeError("at least one heat scale is required")
-    return values
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
 
-    extract = commands.add_parser(
-        "extract",
-        help="build spectral token vectors without labels",
+    fit = commands.add_parser(
+        "fit",
+        help="fit a label-free causal spectral manifold on a train split",
     )
-    extract.add_argument("--split-root", required=True)
-    extract.add_argument("--output", required=True)
-    extract.add_argument("--device", default="cpu")
-    extract.add_argument("--sample-id", action="append")
-    extract.add_argument("--limit", type=int)
-    extract.add_argument("--heat-scales", type=_scales, default=(0.25, 0.5, 1.0, 2.0, 4.0))
-    extract.add_argument("--block-rows", type=int, default=4096)
+    fit.add_argument("--train-split", required=True)
+    fit.add_argument("--output", required=True)
+    fit.add_argument("--device", default="cuda")
+    fit.add_argument("--top-k", type=int, default=5)
+    fit.add_argument("--position-bins", type=int, default=4)
+    fit.add_argument("--pca-dim", type=int, default=32)
+    fit.add_argument("--reference-per-sample", type=int, default=4)
+    fit.add_argument("--neighbors", type=int, default=10)
+    fit.add_argument("--spectral-window", type=int, default=8)
+    fit.add_argument("--logdet-alpha", type=float, default=1e-3)
+    fit.add_argument("--block-rows", type=int, default=8192)
+    fit.add_argument("--limit", type=int)
 
     score = commands.add_parser(
         "score",
-        help="fit an unlabeled train reference and score frozen test vectors",
+        help="score one split from a frozen label-free spectral reference",
     )
-    score.add_argument("--train-features", required=True)
-    score.add_argument("--test-features", required=True)
+    score.add_argument("--split-root", required=True)
+    score.add_argument("--reference", required=True)
     score.add_argument("--output", required=True)
-    score.add_argument("--trim-fraction", type=float, default=0.90)
-    score.add_argument("--ridge", type=float, default=1e-3)
+    score.add_argument("--device", default="cuda")
+    score.add_argument("--limit", type=int)
 
     evaluate = commands.add_parser(
         "evaluate",
-        help="open labels only after spectral scores are frozen",
+        help="open token labels only after scores are frozen",
     )
     evaluate.add_argument("--split-root", required=True)
     evaluate.add_argument("--scores", required=True)
@@ -62,35 +59,32 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
-    if args.command == "extract":
-        dataset = open_research_dataset(args.split_root, device=args.device)
+    if args.command == "fit":
+        dataset = open_research_dataset(args.train_split, device=args.device)
         config = SpectralConfig(
-            heat_scales=tuple(args.heat_scales),
+            top_k=args.top_k,
+            position_bins=args.position_bins,
+            pca_dim=args.pca_dim,
+            reference_per_sample=args.reference_per_sample,
+            neighbors=args.neighbors,
+            spectral_window=args.spectral_window,
+            logdet_alpha=args.logdet_alpha,
             block_rows=args.block_rows,
         )
-        artifact = collect_representations(
+        result = fit_spectral_reference(
             dataset,
+            args.output,
             config=config,
-            sample_ids=args.sample_id,
             limit=args.limit,
         )
-        save_representation_artifact(artifact, args.output)
-        result = {
-            "output": args.output,
-            "samples": int(artifact["sample_count"]),
-            "tokens": int(len(artifact["features"])),
-            "feature_dim": int(artifact["features"].shape[1]),
-            "labels_read": False,
-        }
     elif args.command == "score":
-        result = score_representation_artifacts(
-            args.train_features,
-            args.test_features,
+        dataset = open_research_dataset(args.split_root, device=args.device)
+        result = score_spectral_dataset(
+            dataset,
+            args.reference,
             args.output,
-            trim_fraction=args.trim_fraction,
-            ridge=args.ridge,
+            limit=args.limit,
         )
-        result["labels_read"] = False
     else:
         dataset = open_research_dataset(
             args.split_root,
@@ -101,6 +95,7 @@ def main(argv=None):
         result = {
             "output": args.output,
             **report["metrics"],
+            "components": report["components"],
             "labels_read": True,
         }
     print(json.dumps(result, indent=2, sort_keys=True))
