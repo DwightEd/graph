@@ -1,24 +1,20 @@
 """Causal channel-preserving spectral states for sparse attention graphs.
 
-The representation uses two spectral objects that are exactly supportable by
-the response-query cache:
+The representation is built only from information that is exactly available in
+``ResearchSample`` response-query caches:
 
-1. Response-history (RR) topology: for every layer/head and response prefix,
-   construct the directed response-subgraph Laplacian diagonal following the
-   LapEigvals degree convention. Causality makes the Laplacian triangular, so
-   its diagonal is its spectrum. Keep top-k eigenvalues per channel.
+* RR (response-history) topology: for every layer/head and causal response
+  prefix, use the triangular directed Laplacian spectrum.  We keep the signed
+  eigenvalues with largest absolute magnitude so strong positive and negative
+  departures are both retained.
+* RP (response-to-prompt) transport: prompt query rows are unavailable, so a
+  prompt-node Laplacian would be fabricated.  Instead retained prompt attention
+  is accumulated into fixed relative prompt-position bins independently for
+  every layer/head.  The bin sum is the exact retained prompt mass.
 
-2. Prompt-routing (RP) transport: prompt query rows are not present in the
-   cache, so we do not fabricate a prompt-node Laplacian. Instead each
-   response-query prompt-routing row is mapped by a deterministic CountSketch
-   that preserves an exact DC coordinate (retained prompt mass) and signed
-   source geometry. Channel-wise sketches are kept, and their covariance
-   LogDet provides an EigenScore-inspired spectral-volume diagnostic.
-
-No hallucination labels are used and layer/head channels are never averaged
-before the raw spectral state is formed. Values below ``attention_floor`` remain
-censored; this is the spectrum of the retained cache, not a reconstruction of
-unknown full-precision attention.
+Layer/head channels are never averaged before the raw state is formed.  Missing
+CSR entries remain cache-censored (<= ``attention_floor``), not reconstructed
+zeros.
 """
 
 from __future__ import annotations
@@ -32,22 +28,25 @@ import torch
 @dataclass(frozen=True)
 class SpectralConfig:
     top_k: int = 5
-    prompt_sketch_dim: int = 4
-    prompt_sketch_seed: int = 20260814
+    prompt_bins: int = 8
     block_rows: int = 8192
     position_bins: int = 4
     pca_dim: int = 32
-    reference_per_sample: int = 4
+    reference_per_sample: int = 6
+    trim_fraction: float = 0.90
     neighbors: int = 10
     spectral_window: int = 8
+    dynamic_lags: int = 3
+    dynamic_ridge: float = 1e-2
     logdet_alpha: float = 1e-3
+    attribution_topk: int = 8
     epsilon: float = 1e-8
 
     def validate(self) -> None:
         if self.top_k < 1:
             raise ValueError("top_k must be positive")
-        if self.prompt_sketch_dim < 2:
-            raise ValueError("prompt_sketch_dim must be at least two")
+        if self.prompt_bins < 2:
+            raise ValueError("prompt_bins must be at least two")
         if self.block_rows < 1:
             raise ValueError("block_rows must be positive")
         if self.position_bins < 1:
@@ -56,12 +55,20 @@ class SpectralConfig:
             raise ValueError("pca_dim must be positive")
         if self.reference_per_sample < 1:
             raise ValueError("reference_per_sample must be positive")
+        if not 0.5 <= float(self.trim_fraction) <= 1.0:
+            raise ValueError("trim_fraction must be in [0.5, 1]")
         if self.neighbors < 1:
             raise ValueError("neighbors must be positive")
         if self.spectral_window < 2:
             raise ValueError("spectral_window must be at least two")
+        if self.dynamic_lags < 1:
+            raise ValueError("dynamic_lags must be positive")
+        if not np.isfinite(self.dynamic_ridge) or self.dynamic_ridge <= 0:
+            raise ValueError("dynamic_ridge must be positive and finite")
         if not np.isfinite(self.logdet_alpha) or self.logdet_alpha <= 0:
             raise ValueError("logdet_alpha must be positive and finite")
+        if self.attribution_topk < 1:
+            raise ValueError("attribution_topk must be positive")
         if not np.isfinite(self.epsilon) or self.epsilon <= 0:
             raise ValueError("epsilon must be positive and finite")
 
@@ -81,7 +88,7 @@ def response_position_bin(position: int, response_count: int, bins: int) -> int:
 
 
 def reference_positions(response_count: int, count: int) -> np.ndarray:
-    """Choose deterministic, approximately uniform train reference tokens."""
+    """Choose deterministic approximately-uniform train reference tokens."""
     if response_count < 1:
         return np.empty(0, dtype=np.int64)
     count = min(int(count), response_count)
@@ -95,7 +102,7 @@ def reference_positions(response_count: int, count: int) -> np.ndarray:
 
 
 def _retained_response_edges(sample, *, block_rows: int):
-    """Collect retained RR edges exclusively through the ResearchSample API."""
+    """Collect retained RR entries exclusively through ``ResearchSample``."""
     attention = sample.attention()
     channels: list[torch.Tensor] = []
     queries: list[torch.Tensor] = []
@@ -131,16 +138,17 @@ def prefix_laplacian_spectrum(
     positions=None,
     config: SpectralConfig | None = None,
 ) -> np.ndarray:
-    """Top-k causal RR-Laplacian eigenvalues for every layer/head.
+    """Signed strongest-magnitude causal RR-Laplacian eigenvalues per channel.
 
-    For prefix t and response source j<=t,
+    For channel ``c=(layer, head)``, response prefix ``t`` and response source
+    node ``j <= t``::
 
-        d[c,t,j] = sum_{u=j..t} A_c[u,j] / (t-j+1)
-        lambda[c,t,j] = d[c,t,j] - A_c[j,j].
+        d[c,t,j]      = sum_{u=j..t} A_c[u,j] / (t-j+1)
+        lambda[c,t,j] = d[c,t,j] - A_c[j,j]
 
-    This matches the no-vertical-edge degree convention used by LapEigvals,
-    restricted to the response subgraph that the cache can reconstruct without
-    inventing prompt-query rows.
+    The causal Laplacian is triangular, therefore its diagonal is its spectrum.
+    We keep the ``top_k`` entries with largest absolute magnitude and preserve
+    their signs.  This avoids discarding strong negative spectral departures.
     """
     config = SpectralConfig() if config is None else config
     config.validate()
@@ -200,10 +208,11 @@ def prefix_laplacian_spectrum(
             - diagonal[:, :active]
         )
         keep = min(config.top_k, active)
-        largest = torch.topk(
-            eigenvalues, k=keep, dim=1, largest=True, sorted=True
-        ).values
-        output[output_index, :, :keep] = largest
+        indices = torch.topk(
+            eigenvalues.abs(), k=keep, dim=1, largest=True, sorted=True
+        ).indices
+        strongest = torch.gather(eigenvalues, 1, indices)
+        output[output_index, :, :keep] = strongest
         previous_prefix = prefix
 
     return (
@@ -215,42 +224,30 @@ def prefix_laplacian_spectrum(
     )
 
 
-def _prompt_hash(source: torch.Tensor, config: SpectralConfig):
-    """Deterministic source hash for the signed CountSketch coordinates."""
-    modulus = 2_147_483_647
-    seed = int(config.prompt_sketch_seed) % modulus
-    hashed = torch.remainder(source.long() * 1_103_515_245 + seed, modulus)
-    bucket = 1 + torch.remainder(hashed, config.prompt_sketch_dim - 1)
-    sign_hash = torch.remainder(
-        source.long() * 214_013 + seed * 2_531_011, modulus
-    )
-    sign = torch.where(
-        torch.remainder(sign_hash, 2) == 0,
-        torch.ones_like(sign_hash, dtype=torch.float32),
-        -torch.ones_like(sign_hash, dtype=torch.float32),
-    )
-    return bucket.long(), sign
-
-
-def prompt_transport_sketch(
+def prompt_transport_profile(
     sample,
     *,
     positions=None,
     config: SpectralConfig | None = None,
 ) -> np.ndarray:
-    """Return channel-preserving prompt-routing sketches [tokens, C*m].
+    """Channel-preserving RP routing profiles in fixed relative prompt bins.
 
-    Coordinate zero is exact retained prompt mass. Remaining coordinates are a
-    signed CountSketch over prompt source positions, preserving source geometry
-    without materializing a dense [L,H,R,P] tensor.
+    Each retained prompt source ``p`` is assigned to a deterministic relative
+    prompt-position bin.  For every response token and layer/head channel,
+    weights are accumulated without normalization.  Therefore the sum across
+    bins is exactly the retained prompt mass while the bin pattern preserves
+    coarse source location without CountSketch collisions.
     """
     config = SpectralConfig() if config is None else config
     config.validate()
     attention = sample.attention()
     response_count = int(attention.num_response_tokens)
+    prompt_count = int(attention.response_idx)
+    if prompt_count < 1:
+        raise ValueError("response_idx must leave at least one prompt token")
     device = attention.response_values.device
-    sketch = torch.zeros(
-        (response_count, attention.num_channels, config.prompt_sketch_dim),
+    profile = torch.zeros(
+        (response_count, attention.num_channels, config.prompt_bins),
         dtype=torch.float32,
         device=device,
     )
@@ -265,35 +262,30 @@ def prompt_transport_sketch(
         ).long()
         source = block.source[prompt].long()
         weight = block.weight[prompt].float()
-        sketch.index_put_(
-            (query, channel, torch.zeros_like(query)),
-            weight,
-            accumulate=True,
-        )
-        bucket, sign = _prompt_hash(source, config)
-        sketch.index_put_(
-            (query, channel, bucket),
-            weight * sign.to(device=weight.device),
-            accumulate=True,
-        )
+        bucket = torch.div(
+            source * config.prompt_bins,
+            prompt_count,
+            rounding_mode="floor",
+        ).clamp_(0, config.prompt_bins - 1)
+        profile.index_put_((query, channel, bucket), weight, accumulate=True)
 
     if positions is None:
-        selected = sketch
+        selected = profile
     else:
         requested = np.asarray(list(positions), dtype=np.int64)
         if requested.ndim != 1:
             raise ValueError("positions must be one-dimensional")
         if requested.size == 0:
             return np.empty(
-                (0, attention.num_channels * config.prompt_sketch_dim),
-                dtype=np.float32,
+                (0, attention.num_channels * config.prompt_bins), dtype=np.float32
             )
         if np.any(requested < 0) or np.any(requested >= response_count):
             raise IndexError("requested response position is outside the response")
         requested = np.unique(requested)
-        selected = sketch[
+        selected = profile[
             torch.as_tensor(requested, dtype=torch.long, device=device)
         ]
+
     return (
         selected.reshape(selected.shape[0], -1)
         .detach()
@@ -304,31 +296,31 @@ def prompt_transport_sketch(
 
 
 def prompt_channel_volume(
-    prompt_sketch: np.ndarray,
+    prompt_profile: np.ndarray,
     *,
     num_channels: int,
-    sketch_dim: int,
+    prompt_bins: int,
     alpha: float,
     epsilon: float = 1e-8,
 ) -> np.ndarray:
-    """EigenScore-inspired LogDet of prompt-routing diversity across channels."""
-    values = np.asarray(prompt_sketch, dtype=np.float64)
-    if values.ndim != 2 or values.shape[1] != num_channels * sketch_dim:
-        raise ValueError("prompt sketch shape does not match channel geometry")
+    """EigenScore-inspired LogDet of RP routing diversity across channels."""
+    values = np.asarray(prompt_profile, dtype=np.float64)
+    if values.ndim != 2 or values.shape[1] != num_channels * prompt_bins:
+        raise ValueError("prompt profile shape does not match channel geometry")
     if alpha <= 0:
         raise ValueError("alpha must be positive")
-    reshaped = values.reshape(len(values), num_channels, sketch_dim)
+    reshaped = values.reshape(len(values), num_channels, prompt_bins)
     centered = reshaped - reshaped.mean(axis=1, keepdims=True)
     covariance = np.einsum(
         "tcm,tcn->tmn", centered, centered, optimize=True
     ) / max(num_channels, 1)
-    diagonal = np.arange(sketch_dim)
+    diagonal = np.arange(prompt_bins)
     covariance[:, diagonal, diagonal] += alpha
     sign, logdet = np.linalg.slogdet(covariance)
     if np.any(sign <= 0) or not np.all(np.isfinite(logdet)):
         eigenvalues = np.linalg.eigvalsh(covariance)
         logdet = np.log(np.maximum(eigenvalues, epsilon)).sum(axis=1)
-    return (logdet / float(sketch_dim)).astype(np.float32, copy=False)
+    return (logdet / float(prompt_bins)).astype(np.float32, copy=False)
 
 
 def causal_spectral_state(
@@ -337,11 +329,11 @@ def causal_spectral_state(
     positions=None,
     config: SpectralConfig | None = None,
 ):
-    """Return raw causal spectral state plus prompt channel-volume diagnostic."""
+    """Return raw causal RR-spectrum + RP-transport state and RP LogDet."""
     config = SpectralConfig() if config is None else config
     config.validate()
     rr = prefix_laplacian_spectrum(sample, positions=positions, config=config)
-    rp = prompt_transport_sketch(sample, positions=positions, config=config)
+    rp = prompt_transport_profile(sample, positions=positions, config=config)
     if len(rr) != len(rp):
         raise RuntimeError("RR spectrum and RP transport views are misaligned")
     state = np.concatenate((rr, rp), axis=1).astype(np.float32, copy=False)
@@ -349,7 +341,7 @@ def causal_spectral_state(
     volume = prompt_channel_volume(
         rp,
         num_channels=int(attention.num_channels),
-        sketch_dim=config.prompt_sketch_dim,
+        prompt_bins=config.prompt_bins,
         alpha=config.logdet_alpha,
         epsilon=config.epsilon,
     )
@@ -363,12 +355,7 @@ def spectral_volume(
     alpha: float = 1e-3,
     epsilon: float = 1e-8,
 ) -> np.ndarray:
-    """EigenScore-inspired causal LogDet of recent learned spectral states.
-
-    This is not the original EigenScore. EigenScore applies LogDet to the
-    covariance of sentence embeddings from multiple sampled responses. Here
-    consecutive graph-spectral embeddings form a causal trajectory window.
-    """
+    """Causal LogDet volume of the recent learned spectral trajectory."""
     values = np.asarray(embeddings, dtype=np.float64)
     if values.ndim != 2:
         raise ValueError("embeddings must have shape [tokens, dimensions]")
@@ -399,7 +386,7 @@ def spectral_state_dimension(
     num_layers: int,
     num_heads: int,
     top_k: int,
-    prompt_sketch_dim: int,
+    prompt_bins: int,
 ) -> int:
     channels = int(num_layers) * int(num_heads)
-    return channels * (int(top_k) + int(prompt_sketch_dim))
+    return channels * (int(top_k) + int(prompt_bins))
