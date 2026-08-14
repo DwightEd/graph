@@ -76,6 +76,11 @@ class SpectralFeasibilityTests(unittest.TestCase):
             self.assertEqual(artifact["features"].shape[0], 4)
             self.assertEqual(artifact["features"].shape[1], 22)
             self.assertTrue(np.isfinite(artifact["features"]).all())
+            self.assertEqual(set(artifact["sample_id"].tolist()), {"r1"})
+            self.assertEqual(set(artifact["source_id"].tolist()), {"s1"})
+            self.assertEqual(set(artifact["task_type"].tolist()), {"QA"})
+            self.assertEqual(set(artifact["data_source"].tolist()), {"synthetic"})
+            self.assertEqual(set(artifact["generator_model"].tolist()), {"generator"})
             self.assertNotIn("label", artifact)
 
             train_path = Path(directory) / "train.npz"
