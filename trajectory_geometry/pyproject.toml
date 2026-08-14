@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trajectory-geometry"
+version = "0.1.0"
+description = "Label-free attention-route and latent-trajectory geometry for token anomaly research"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "torch>=2.0",
+]
+
+[project.scripts]
+trajectory-geometry = "trajectory_geometry.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["trajectory_geometry*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
