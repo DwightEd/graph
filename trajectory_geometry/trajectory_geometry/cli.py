@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 from .data import discover_attention_files, load_attention_sample
 from .pipeline import extract_many
 from .routing import AnchorSpec
+from .evaluation import GateAEvaluator
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -28,6 +30,12 @@ def _parser() -> argparse.ArgumentParser:
     extract.add_argument("--csr-row-block", type=int, default=4096)
     extract.add_argument("--limit", type=int)
     extract.add_argument("--save-raw-route", action="store_true")
+
+    evaluate = commands.add_parser("evaluate", help="score extracted route features then evaluate labels")
+    evaluate.add_argument("--train-features", required=True)
+    evaluate.add_argument("--test-features", required=True)
+    evaluate.add_argument("--output-dir", required=True)
+    evaluate.add_argument("--device", default="cuda")
     return parser
 
 
@@ -59,6 +67,13 @@ def main() -> None:
                 indent=2,
             )
         )
+        return
+
+    if arguments.command == "evaluate":
+        report = GateAEvaluator(device=arguments.device).evaluate(
+            arguments.train_features, arguments.test_features, arguments.output_dir
+        )
+        print((Path(arguments.output_dir) / "summary.txt").read_text(encoding="utf-8"), end="")
         return
 
     files = discover_attention_files(arguments.attention_root, arguments.split)

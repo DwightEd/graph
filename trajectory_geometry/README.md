@@ -82,3 +82,20 @@ Each compressed NPZ contains:
 
 These are representations and diagnostics, not hallucination scores. Detection
 and labels belong to the later frozen evaluation stage.
+
+## Evaluate the extracted feature effect
+
+After both train and test extraction completes, one foreground command runs the
+entire frozen Gate-A evaluation; it does not extract attention again:
+
+```bash
+bash run_feature_effects.sh \
+  /share/home/tm902089733300000/a903202310/lys/data/feature_extraction/trajectory_geometry/route_v1/train \
+  /share/home/tm902089733300000/a903202310/lys/data/feature_extraction/trajectory_geometry/route_v1/test
+```
+
+It fits label-free conditional kNN detectors on train routes, writes
+`detector_state.pt` and `scores_label_free.npz`, then opens test labels only for
+evaluation. The output directory contains `results.json` and a compact
+`summary.txt`. The fixed comparison views are nuisance, low prompt mass, route
+mass, route dynamics, route embedding, their summary, and their full mean.

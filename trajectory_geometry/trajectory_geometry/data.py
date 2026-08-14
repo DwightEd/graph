@@ -212,7 +212,7 @@ def load_attention_sample(path: str | Path) -> SparseAttentionSample:
 
 def discover_attention_files(root: str | Path, split: str | None = None) -> list[Path]:
     root = Path(root).expanduser().resolve()
-    if str(root).startswith("/path/to/"):
+    if "/path/to/" in str(root).replace("\\", "/"):
         raise FileNotFoundError(
             f"{root} is a documentation placeholder, not an attention cache. "
             f"Use the existing cache root: {DEFAULT_FORMAL_ROOT}"
