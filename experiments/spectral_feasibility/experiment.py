@@ -1,4 +1,4 @@
-"""Fully label-free spectral manifold fitting, scoring, and post-hoc evaluation."""
+"""Fully label-free fitting, scoring, and evaluation for causal spectral states."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from tqdm.auto import tqdm
 
 from .representations import (
     SpectralConfig,
-    prefix_laplacian_spectrum,
+    causal_spectral_state,
     reference_positions,
     response_position_bin,
     spectral_state_dimension,
@@ -21,8 +21,8 @@ from .representations import (
 )
 
 
-REFERENCE_SCHEMA = "causal-channel-laplacian-reference-v1"
-SCORE_SCHEMA = "causal-channel-laplacian-score-v1"
+REFERENCE_SCHEMA = "causal-dual-spectrum-reference-v1"
+SCORE_SCHEMA = "causal-dual-spectrum-score-v1"
 
 
 def _robust_location_scale(values: np.ndarray, *, epsilon=1e-6):
@@ -114,7 +114,7 @@ def _knn_distances(reference_values, query_values, neighbors, *, self_query=Fals
     return distances.mean(axis=1).astype(np.float32, copy=False)
 
 
-def _spectra_for_targets(sample, targets, config, *, include_window=False):
+def _states_for_targets(sample, targets, config, *, include_window=False):
     needed = set()
     for target in map(int, targets):
         needed.add(target)
@@ -125,8 +125,10 @@ def _spectra_for_targets(sample, targets, config, *, include_window=False):
                 range(max(0, target - config.spectral_window + 1), target + 1)
             )
     positions = np.asarray(sorted(needed), dtype=np.int64)
-    states = prefix_laplacian_spectrum(sample, positions=positions, config=config)
-    return positions, states
+    states, prompt_volume = causal_spectral_state(
+        sample, positions=positions, config=config
+    )
+    return positions, states, prompt_volume
 
 
 def _metadata_text(value):
@@ -140,7 +142,7 @@ def fit_spectral_reference(
     config: SpectralConfig | None = None,
     limit=None,
 ):
-    """Fit a normal spectral manifold from train attention without labels."""
+    """Fit the normal causal dual-spectrum manifold without opening labels."""
     config = SpectralConfig() if config is None else config
     config.validate()
     sample_ids = _sample_ids(dataset, limit)
@@ -151,10 +153,8 @@ def fit_spectral_reference(
     audit_token = []
     geometry = None
 
-    # Pass 1 learns robust position normalization and the unsupervised
-    # layer/head mixtures.  Only a few deterministic tokens per response are
-    # retained, so the raw 5k-dimensional spectrum does not become a giant
-    # train artifact.
+    # Pass 1: sample deterministic causal prefixes and learn robust position
+    # normalization plus unsupervised layer/head combinations.
     for sample_id in tqdm(sample_ids, desc="spectral fit pass 1"):
         sample = dataset[sample_id]
         try:
@@ -167,7 +167,7 @@ def fit_spectral_reference(
             targets = reference_positions(
                 attention.num_response_tokens, config.reference_per_sample
             )
-            states = prefix_laplacian_spectrum(
+            states, _prompt_volume = causal_spectral_state(
                 sample, positions=targets, config=config
             )
             raw_states.append(states)
@@ -185,7 +185,9 @@ def fit_spectral_reference(
     bins = np.concatenate(raw_bins, axis=0)
     if len(states) < 3:
         raise ValueError("at least three train reference tokens are required")
-    expected_dim = spectral_state_dimension(geometry[0], geometry[1], config.top_k)
+    expected_dim = spectral_state_dimension(
+        geometry[0], geometry[1], config.top_k, config.prompt_sketch_dim
+    )
     if states.shape[1] != expected_dim:
         raise RuntimeError("unexpected channel-preserving spectral dimension")
 
@@ -208,14 +210,15 @@ def fit_spectral_reference(
     }
     del standardized, states
 
-    # Pass 2 freezes the learned spectral coordinates and measures two things:
-    # current spectral state and its causal innovation from t-1.  A short
-    # recent window also yields the EigenScore-inspired LogDet volume.
+    # Pass 2: freeze coordinates and measure current state, one-step spectral
+    # innovation, temporal spectral volume, and RP channel-volume.
     ref_embedding = []
     ref_delta = []
     ref_residual = []
-    ref_volume = []
+    ref_temporal_volume = []
+    ref_prompt_volume = []
     ref_bins = []
+    ref_tasks = []
     for sample_id in tqdm(sample_ids, desc="spectral fit pass 2"):
         sample = dataset[sample_id]
         try:
@@ -223,7 +226,7 @@ def fit_spectral_reference(
             targets = reference_positions(
                 attention.num_response_tokens, config.reference_per_sample
             )
-            positions, local_states = _spectra_for_targets(
+            positions, local_states, local_prompt_volume = _states_for_targets(
                 sample, targets, config, include_window=True
             )
             local_bins = _bins_for_positions(
@@ -235,6 +238,7 @@ def fit_spectral_reference(
             by_position = {
                 int(position): index for index, position in enumerate(positions)
             }
+            task = _metadata_text(sample.task_type)
             for target in targets.tolist():
                 index = by_position[int(target)]
                 current = local_embedding[index]
@@ -247,7 +251,7 @@ def fit_spectral_reference(
                 window_indices = [
                     by_position[position] for position in range(start, target + 1)
                 ]
-                volume = spectral_volume(
+                temporal_volume = spectral_volume(
                     local_embedding[window_indices],
                     window=config.spectral_window,
                     alpha=config.logdet_alpha,
@@ -256,20 +260,24 @@ def fit_spectral_reference(
                 ref_embedding.append(current)
                 ref_delta.append(delta)
                 ref_residual.append(local_residual[index])
-                ref_volume.append(volume)
+                ref_temporal_volume.append(temporal_volume)
+                ref_prompt_volume.append(local_prompt_volume[index])
                 ref_bins.append(
                     response_position_bin(
                         target, attention.num_response_tokens, config.position_bins
                     )
                 )
+                ref_tasks.append(task)
         finally:
             sample.release_attention()
 
     ref_embedding = np.asarray(ref_embedding, dtype=np.float32)
     ref_delta = np.asarray(ref_delta, dtype=np.float32)
     ref_residual = np.asarray(ref_residual, dtype=np.float32)
-    ref_volume = np.asarray(ref_volume, dtype=np.float32)
+    ref_temporal_volume = np.asarray(ref_temporal_volume, dtype=np.float32)
+    ref_prompt_volume = np.asarray(ref_prompt_volume, dtype=np.float32)
     ref_bins = np.asarray(ref_bins, dtype=np.int16)
+    ref_tasks = np.asarray(ref_tasks, dtype=str)
 
     delta_center, delta_scale = _position_stats(
         ref_delta, ref_bins, config.position_bins
@@ -281,26 +289,43 @@ def fit_spectral_reference(
         (ref_embedding, delta_standardized), axis=1
     ).astype(np.float32, copy=False)
 
-    knn_center = np.zeros(config.position_bins, dtype=np.float32)
-    knn_scale = np.ones(config.position_bins, dtype=np.float32)
+    train_knn = np.zeros(len(reference_manifold), dtype=np.float32)
+    for task in np.unique(ref_tasks):
+        for position_bin in range(config.position_bins):
+            selected = (ref_tasks == task) & (ref_bins == position_bin)
+            if selected.sum() < 2:
+                continue
+            train_knn[selected] = _knn_distances(
+                reference_manifold[selected],
+                reference_manifold[selected],
+                config.neighbors,
+                self_query=True,
+            )
+    # Rare empty task-position cells fall back to position-only neighbors.
+    missing = train_knn == 0
     for position_bin in range(config.position_bins):
-        selected = ref_bins == position_bin
-        distances = _knn_distances(
-            reference_manifold[selected],
+        selected = missing & (ref_bins == position_bin)
+        if not bool(selected.any()):
+            continue
+        source = ref_bins == position_bin
+        train_knn[selected] = _knn_distances(
+            reference_manifold[source],
             reference_manifold[selected],
             config.neighbors,
-            self_query=True,
+            self_query=False,
         )
-        if len(distances) >= 2:
-            center, scale = _robust_location_scale(distances.reshape(-1, 1))
-            knn_center[position_bin] = center[0]
-            knn_scale[position_bin] = scale[0]
 
+    knn_center, knn_scale = _scalar_position_stats(
+        train_knn, ref_bins, config.position_bins
+    )
     residual_center, residual_scale = _scalar_position_stats(
         ref_residual, ref_bins, config.position_bins
     )
-    volume_center, volume_scale = _scalar_position_stats(
-        ref_volume, ref_bins, config.position_bins
+    temporal_volume_center, temporal_volume_scale = _scalar_position_stats(
+        ref_temporal_volume, ref_bins, config.position_bins
+    )
+    prompt_volume_center, prompt_volume_scale = _scalar_position_stats(
+        ref_prompt_volume, ref_bins, config.position_bins
     )
 
     output_path = Path(output_path)
@@ -311,6 +336,8 @@ def fit_spectral_reference(
         num_layers=np.asarray(geometry[0], dtype=np.int16),
         num_heads=np.asarray(geometry[1], dtype=np.int16),
         top_k=np.asarray(config.top_k, dtype=np.int16),
+        prompt_sketch_dim=np.asarray(config.prompt_sketch_dim, dtype=np.int16),
+        prompt_sketch_seed=np.asarray(config.prompt_sketch_seed, dtype=np.int64),
         block_rows=np.asarray(config.block_rows, dtype=np.int32),
         position_bins=np.asarray(config.position_bins, dtype=np.int16),
         pca_dim=np.asarray(pca_dim, dtype=np.int16),
@@ -328,12 +355,15 @@ def fit_spectral_reference(
         delta_scale=delta_scale,
         reference_manifold=reference_manifold,
         reference_bin=ref_bins,
+        reference_task=ref_tasks,
         knn_center=knn_center,
         knn_scale=knn_scale,
         residual_center=residual_center,
         residual_scale=residual_scale,
-        volume_center=volume_center,
-        volume_scale=volume_scale,
+        temporal_volume_center=temporal_volume_center,
+        temporal_volume_scale=temporal_volume_scale,
+        prompt_volume_center=prompt_volume_center,
+        prompt_volume_scale=prompt_volume_scale,
         reference_sample_id=np.asarray(audit_sample, dtype=str),
         reference_token_index=np.asarray(audit_token, dtype=np.int32),
     )
@@ -358,6 +388,8 @@ def load_spectral_reference(path):
 def _config_from_reference(reference):
     return SpectralConfig(
         top_k=int(reference["top_k"]),
+        prompt_sketch_dim=int(reference["prompt_sketch_dim"]),
+        prompt_sketch_seed=int(reference["prompt_sketch_seed"]),
         block_rows=int(reference["block_rows"]),
         position_bins=int(reference["position_bins"]),
         pca_dim=int(reference["pca_dim"]),
@@ -369,19 +401,26 @@ def _config_from_reference(reference):
     )
 
 
-def _query_reference_knn(reference, manifold, bins):
+def _query_reference_knn(reference, manifold, bins, tasks):
     result = np.zeros(len(manifold), dtype=np.float32)
-    for position_bin in range(int(reference["position_bins"])):
-        query = bins == position_bin
-        if not bool(query.any()):
-            continue
-        source = reference["reference_bin"] == position_bin
-        result[query] = _knn_distances(
-            reference["reference_manifold"][source],
-            manifold[query],
-            int(reference["neighbors"]),
-            self_query=False,
-        )
+    tasks = np.asarray(tasks, dtype=str)
+    for task in np.unique(tasks):
+        for position_bin in range(int(reference["position_bins"])):
+            query = (tasks == task) & (bins == position_bin)
+            if not bool(query.any()):
+                continue
+            source = (
+                (reference["reference_task"] == task)
+                & (reference["reference_bin"] == position_bin)
+            )
+            if source.sum() < 2:
+                source = reference["reference_bin"] == position_bin
+            result[query] = _knn_distances(
+                reference["reference_manifold"][source],
+                manifold[query],
+                int(reference["neighbors"]),
+                self_query=False,
+            )
     return result
 
 
@@ -395,8 +434,9 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
         for name in (
             "sample_id", "source_id", "token_index", "task_type",
             "data_source", "generator_model", "embedding", "innovation",
-            "knn_distance", "pca_residual", "spectral_volume",
-            "spectral_volume_deviation", "score_knn", "score_residual", "score",
+            "knn_distance", "pca_residual", "temporal_spectral_volume",
+            "prompt_channel_volume", "score_knn", "score_residual",
+            "score_temporal_volume", "score_prompt_volume", "score",
         )
     }
 
@@ -408,10 +448,12 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
                 int(attention.num_layers) != int(reference["num_layers"])
                 or int(attention.num_heads) != int(reference["num_heads"])
             ):
-                raise ValueError("test attention geometry differs from spectral reference")
+                raise ValueError(
+                    "test attention geometry differs from spectral reference"
+                )
             response_count = int(attention.num_response_tokens)
             positions = np.arange(response_count, dtype=np.int64)
-            states = prefix_laplacian_spectrum(
+            states, prompt_volume = causal_spectral_state(
                 sample, positions=positions, config=config
             )
             bins = _bins_for_positions(
@@ -430,13 +472,16 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
                 (embedding, innovation_standardized), axis=1
             ).astype(np.float32, copy=False)
 
-            knn = _query_reference_knn(reference, manifold, bins)
-            volume = spectral_volume(
+            task = _metadata_text(sample.task_type)
+            tasks = np.asarray([task] * response_count, dtype=str)
+            knn = _query_reference_knn(reference, manifold, bins, tasks)
+            temporal_volume = spectral_volume(
                 embedding,
                 window=config.spectral_window,
                 alpha=config.logdet_alpha,
                 epsilon=config.epsilon,
             )
+
             knn_z = np.maximum(
                 (knn - reference["knn_center"][bins])
                 / reference["knn_scale"][bins],
@@ -447,17 +492,22 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
                 / reference["residual_scale"][bins],
                 0.0,
             )
-            volume_z = np.abs(
-                (volume - reference["volume_center"][bins])
-                / reference["volume_scale"][bins]
+            temporal_volume_z = np.abs(
+                (temporal_volume - reference["temporal_volume_center"][bins])
+                / reference["temporal_volume_scale"][bins]
+            )
+            prompt_volume_z = np.abs(
+                (prompt_volume - reference["prompt_volume_center"][bins])
+                / reference["prompt_volume_scale"][bins]
             )
             score = np.sqrt(
                 (
                     np.square(knn_z)
                     + np.square(residual_z)
-                    + np.square(volume_z)
+                    + np.square(temporal_volume_z)
+                    + np.square(prompt_volume_z)
                 )
-                / 3.0
+                / 4.0
             ).astype(np.float32)
 
             text = lambda value: np.asarray(
@@ -466,22 +516,32 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
             columns["sample_id"].append(text(sample.sample_id))
             columns["source_id"].append(text(sample.source_id))
             columns["token_index"].append(positions.astype(np.int32))
-            columns["task_type"].append(text(sample.task_type))
+            columns["task_type"].append(tasks)
             columns["data_source"].append(text(sample.data_source))
             columns["generator_model"].append(text(sample.generator_model))
             columns["embedding"].append(embedding)
-            columns["innovation"].append(innovation_standardized.astype(np.float32))
+            columns["innovation"].append(
+                innovation_standardized.astype(np.float32)
+            )
             columns["knn_distance"].append(knn)
             columns["pca_residual"].append(residual)
-            columns["spectral_volume"].append(volume)
-            columns["spectral_volume_deviation"].append(volume_z.astype(np.float32))
+            columns["temporal_spectral_volume"].append(temporal_volume)
+            columns["prompt_channel_volume"].append(prompt_volume)
             columns["score_knn"].append(knn_z.astype(np.float32))
             columns["score_residual"].append(residual_z.astype(np.float32))
+            columns["score_temporal_volume"].append(
+                temporal_volume_z.astype(np.float32)
+            )
+            columns["score_prompt_volume"].append(
+                prompt_volume_z.astype(np.float32)
+            )
             columns["score"].append(score)
         finally:
             sample.release_attention()
 
-    output = {name: np.concatenate(values, axis=0) for name, values in columns.items()}
+    output = {
+        name: np.concatenate(values, axis=0) for name, values in columns.items()
+    }
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
@@ -536,7 +596,7 @@ def _metrics(y, score):
 
 
 def evaluate_score_artifact(dataset, score_path, output_path):
-    """Open labels only after the spectral representation and score are frozen."""
+    """Open labels only after representation and anomaly scores are frozen."""
     artifact = load_score_artifact(score_path)
     labels = _label_store_for_evaluation(dataset)
     cache = {}
@@ -557,21 +617,26 @@ def evaluate_score_artifact(dataset, score_path, output_path):
     component_metrics = {
         "manifold_knn": _metrics(y, artifact["score_knn"]),
         "pca_residual": _metrics(y, artifact["score_residual"]),
-        "spectral_volume_deviation": _metrics(
-            y, artifact["spectral_volume_deviation"]
+        "temporal_spectral_volume": _metrics(
+            y, artifact["score_temporal_volume"]
+        ),
+        "prompt_channel_volume": _metrics(
+            y, artifact["score_prompt_volume"]
         ),
         "innovation_norm": _metrics(
             y, np.linalg.norm(artifact["innovation"], axis=1)
         ),
     }
     report = {
-        "schema": "causal-channel-laplacian-evaluation-v1",
+        "schema": "causal-dual-spectrum-evaluation-v1",
         "metrics": metrics,
         "components": component_metrics,
         "labels_used_during": "posthoc_evaluation_only",
         "representation": (
-            "channel-preserving causal prefix LapEigvals -> label-free "
-            "position-robust PCA/whitening -> spectral state+innovation manifold"
+            "RR causal per-layer/head prefix LapEigvals + RP channel-preserving "
+            "prompt transport sketch -> robust PCA/whitening -> current spectral "
+            "state + one-step innovation manifold; LogDet volumes are calibrated "
+            "as independent label-free anomaly components"
         ),
     }
     output_path = Path(output_path)
