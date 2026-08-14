@@ -1,5 +1,5 @@
-"""Spectral node-representation feasibility experiments."""
+"""Causal channel-preserving spectral attention experiments."""
 
-from .representations import SpectralConfig, spectral_token_representation
+from .representations import SpectralConfig, prefix_laplacian_spectrum, spectral_volume
 
-__all__ = ["SpectralConfig", "spectral_token_representation"]
+__all__ = ["SpectralConfig", "prefix_laplacian_spectrum", "spectral_volume"]
