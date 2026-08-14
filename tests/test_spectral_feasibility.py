@@ -6,14 +6,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from cache import (
-    AttentionSample,
-    index_row,
-    save_attention_sample,
-    sha256,
-    write_split_index,
-)
+from cache import AttentionSample, index_row, save_attention_sample, sha256, write_split_index
 from experiments.spectral_feasibility.experiment import (
+    _dynamic_residual,
+    _empirical_upper_tail,
+    _fit_dynamic_predictor,
     evaluate_score_artifact,
     fit_spectral_reference,
     score_spectral_dataset,
@@ -22,6 +19,7 @@ from experiments.spectral_feasibility.representations import (
     SpectralConfig,
     causal_spectral_state,
     prefix_laplacian_spectrum,
+    prompt_transport_profile,
     spectral_volume,
 )
 from research_dataset import ResearchDataset
@@ -32,9 +30,6 @@ def _sample(sample_id: str, source_id: str, multiplier: float = 1.0):
         [[[0.8, 0.7, 0.4, 0.3, 0.2], [0.6, 0.5, 0.2, 0.4, 0.1]]],
         dtype=torch.float16,
     )
-    # Canonical CSR requires source columns to be strictly increasing inside
-    # every row.  The six rows below are:
-    #   [0], [2], [1, 2, 3], [1], [2], [0, 2, 3].
     columns = torch.tensor(
         [0, 2, 1, 2, 3, 1, 2, 0, 2, 3],
         dtype=torch.int32,
@@ -59,12 +54,7 @@ def _sample(sample_id: str, source_id: str, multiplier: float = 1.0):
     )
 
 
-def _write_dataset(
-    root: Path,
-    multipliers,
-    *,
-    positive_sample: int | None = None,
-):
+def _write_dataset(root: Path, multipliers, *, positive_sample: int | None = None):
     (root / "attention").mkdir(parents=True)
     rows = []
     label_rows = []
@@ -110,43 +100,45 @@ def _write_dataset(
 
 
 class SpectralFeasibilityTests(unittest.TestCase):
-    def test_prefix_lapeigvals_match_direct_causal_degree(self):
+    def test_prefix_lapeigvals_keep_signed_strongest_magnitude(self):
         with tempfile.TemporaryDirectory() as directory:
             dataset = _write_dataset(Path(directory), [1.0])
             sample = dataset["r0"]
-            config = SpectralConfig(top_k=2, prompt_sketch_dim=3)
-            spectrum = prefix_laplacian_spectrum(
-                sample, positions=[1, 2], config=config
+            config = SpectralConfig(top_k=2, prompt_bins=2)
+            spectrum = prefix_laplacian_spectrum(sample, positions=[1, 2], config=config)
+            np.testing.assert_allclose(
+                spectrum[0], [-0.1, 0.0, -0.075, 0.0], atol=2e-4
             )
             np.testing.assert_allclose(
-                spectrum[0],
-                [0.0, -0.1, 0.0, -0.075],
-                atol=2e-4,
-            )
-            np.testing.assert_allclose(
-                spectrum[1],
-                [0.0, 0.0, 1.0 / 60.0, 0.0],
-                atol=3e-4,
+                spectrum[1], [-1.0 / 6.0, 0.0, -0.15, 1.0 / 60.0], atol=3e-4
             )
             sample.release_attention()
 
-    def test_dual_state_preserves_channel_prompt_mass(self):
+    def test_prompt_bins_preserve_channel_mass_and_source_location(self):
         with tempfile.TemporaryDirectory() as directory:
             dataset = _write_dataset(Path(directory), [1.0])
             sample = dataset["r0"]
-            config = SpectralConfig(top_k=2, prompt_sketch_dim=3)
+            config = SpectralConfig(top_k=2, prompt_bins=2)
+            profile = prompt_transport_profile(
+                sample, positions=[1, 2], config=config
+            ).reshape(2, 2, 2)
+            np.testing.assert_allclose(profile[0], 0.0, atol=1e-6)
+            np.testing.assert_allclose(profile[1, 0], [0.0, 0.15], atol=2e-4)
+            np.testing.assert_allclose(profile[1, 1], [0.05, 0.0], atol=2e-4)
+            np.testing.assert_allclose(profile[1].sum(axis=1), [0.15, 0.05], atol=2e-4)
+            sample.release_attention()
+
+    def test_dual_state_dimension_and_logdet_are_finite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dataset = _write_dataset(Path(directory), [1.0])
+            sample = dataset["r0"]
+            config = SpectralConfig(top_k=2, prompt_bins=2)
             state, prompt_volume = causal_spectral_state(
                 sample, positions=[1, 2], config=config
             )
-            self.assertEqual(state.shape, (2, 10))
+            self.assertEqual(state.shape, (2, 8))
             self.assertEqual(prompt_volume.shape, (2,))
             self.assertTrue(np.isfinite(prompt_volume).all())
-            # First four dimensions are RR LapEigvals. Prompt sketches then
-            # flatten as [head0:3, head1:3], with coordinate 0 exact mass.
-            self.assertAlmostEqual(float(state[0, 4]), 0.0, places=6)
-            self.assertAlmostEqual(float(state[0, 7]), 0.0, places=6)
-            self.assertAlmostEqual(float(state[1, 4]), 0.15, places=3)
-            self.assertAlmostEqual(float(state[1, 7]), 0.05, places=3)
             sample.release_attention()
 
     def test_spectral_logdet_volume_increases_for_nonconstant_trajectory(self):
@@ -155,68 +147,78 @@ class SpectralFeasibilityTests(unittest.TestCase):
             [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 1]],
             dtype=np.float32,
         )
-        constant_volume = spectral_volume(
-            constant, window=4, alpha=1e-3
-        )[-1]
-        varied_volume = spectral_volume(
-            varied, window=4, alpha=1e-3
-        )[-1]
+        constant_volume = spectral_volume(constant, window=4, alpha=1e-3)[-1]
+        varied_volume = spectral_volume(varied, window=4, alpha=1e-3)[-1]
         self.assertGreater(float(varied_volume), float(constant_volume))
+
+    def test_empirical_tail_and_dynamic_prediction_are_label_free_primitives(self):
+        reference = np.asarray([1.0, 2.0, 3.0, 4.0])
+        bins = np.zeros(4, dtype=np.int16)
+        score = _empirical_upper_tail(
+            reference,
+            bins,
+            np.asarray([1.5, 5.0]),
+            np.zeros(2, dtype=np.int16),
+        )
+        self.assertGreater(score[1], score[0])
+
+        embedding = np.arange(20, dtype=np.float32).reshape(10, 2)
+        features = embedding[:-1]
+        targets = embedding[1:]
+        coef, intercept = _fit_dynamic_predictor(features, targets, 1e-4)
+        residual = _dynamic_residual(embedding, coef, intercept, 1)
+        self.assertLess(float(np.nanmean(residual[1:])), 1e-3)
 
     def test_label_free_fit_score_then_posthoc_evaluation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            train = _write_dataset(
-                root / "train",
-                [0.8, 1.0, 1.2],
-            )
-            test = _write_dataset(
-                root / "test",
-                [1.0, 1.1],
-                positive_sample=1,
-            )
+            train = _write_dataset(root / "train", [0.8, 1.0, 1.2, 1.1])
+            test = _write_dataset(root / "test", [1.0, 1.1], positive_sample=1)
             reference_path = root / "reference.npz"
             score_path = root / "scores.npz"
             report_path = root / "report.json"
             config = SpectralConfig(
                 top_k=2,
-                prompt_sketch_dim=3,
+                prompt_bins=2,
                 position_bins=2,
                 pca_dim=2,
-                reference_per_sample=2,
+                reference_per_sample=3,
+                trim_fraction=0.9,
                 neighbors=1,
                 spectral_window=2,
+                dynamic_lags=1,
+                dynamic_ridge=0.1,
+                attribution_topk=2,
             )
 
-            fit = fit_spectral_reference(
-                train, reference_path, config=config
-            )
+            fit = fit_spectral_reference(train, reference_path, config=config)
             self.assertFalse(fit["labels_read"])
-            self.assertEqual(fit["raw_spectral_dim"], 10)
+            self.assertEqual(fit["raw_spectral_dim"], 8)
+            self.assertLessEqual(
+                fit["trimmed_reference_tokens"], fit["reference_tokens"]
+            )
             with np.load(reference_path, allow_pickle=False) as arrays:
                 self.assertNotIn("label", arrays.files)
                 self.assertNotIn("y_token", arrays.files)
-                self.assertIn("reference_manifold", arrays.files)
+                self.assertIn("dynamic_coef", arrays.files)
+                self.assertIn("calibration_static", arrays.files)
 
-            scored = score_spectral_dataset(
-                test, reference_path, score_path
-            )
+            scored = score_spectral_dataset(test, reference_path, score_path)
             self.assertFalse(scored["labels_read"])
             self.assertEqual(scored["tokens"], 6)
             with np.load(score_path, allow_pickle=False) as arrays:
                 self.assertNotIn("label", arrays.files)
                 self.assertNotIn("y_token", arrays.files)
-                self.assertEqual(arrays["embedding"].shape, (6, 2))
-                self.assertEqual(arrays["innovation"].shape, (6, 2))
-                self.assertIn("prompt_channel_volume", arrays.files)
+                self.assertIn("score_static", arrays.files)
+                self.assertIn("score_dynamic", arrays.files)
+                self.assertIn("top_channel_index", arrays.files)
+                self.assertEqual(arrays["top_channel_index"].shape, (6, 2))
 
-            report = evaluate_score_artifact(
-                test, score_path, report_path
-            )
+            report = evaluate_score_artifact(test, score_path, report_path)
             self.assertEqual(report["metrics"]["tokens"], 6)
             self.assertEqual(report["metrics"]["positive_tokens"], 1)
-            self.assertIn("manifold_knn", report["components"])
-            self.assertIn("prompt_channel_volume", report["components"])
+            self.assertIn("static_subspace_residual", report["components"])
+            self.assertIn("dynamic_prediction_residual", report["components"])
             self.assertTrue(report_path.is_file())
 
 
