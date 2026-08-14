@@ -97,6 +97,22 @@ def _transform_states(states, bins, reference):
     )
 
 
+def _project_raw_innovation(current, previous, position_bin, reference):
+    """Project one raw spectral change using one shared current-bin scale.
+
+    Using the current position-bin normalization for both states prevents
+    artificial jumps when t and t-1 fall on different position bins.
+    """
+    raw = (
+        np.asarray(current, dtype=np.float32)
+        - np.asarray(previous, dtype=np.float32)
+    ) / reference["state_scale"][int(position_bin)]
+    projected = raw @ reference["pca_components"].T
+    return (
+        projected / reference["pca_whiten_scale"]
+    ).astype(np.float32, copy=False)
+
+
 def _knn_distances(reference_values, query_values, neighbors, *, self_query=False):
     reference_values = np.asarray(reference_values, dtype=np.float32)
     query_values = np.asarray(query_values, dtype=np.float32)
@@ -242,9 +258,17 @@ def fit_spectral_reference(
             for target in targets.tolist():
                 index = by_position[int(target)]
                 current = local_embedding[index]
+                position_bin = response_position_bin(
+                    target, attention.num_response_tokens, config.position_bins
+                )
                 if target > 0:
-                    previous = local_embedding[by_position[int(target - 1)]]
-                    delta = current - previous
+                    previous_index = by_position[int(target - 1)]
+                    delta = _project_raw_innovation(
+                        local_states[index],
+                        local_states[previous_index],
+                        position_bin,
+                        proto,
+                    )
                 else:
                     delta = np.zeros_like(current)
                 start = max(0, target - config.spectral_window + 1)
@@ -262,11 +286,7 @@ def fit_spectral_reference(
                 ref_residual.append(local_residual[index])
                 ref_temporal_volume.append(temporal_volume)
                 ref_prompt_volume.append(local_prompt_volume[index])
-                ref_bins.append(
-                    response_position_bin(
-                        target, attention.num_response_tokens, config.position_bins
-                    )
-                )
+                ref_bins.append(position_bin)
                 ref_tasks.append(task)
         finally:
             sample.release_attention()
@@ -290,6 +310,7 @@ def fit_spectral_reference(
     ).astype(np.float32, copy=False)
 
     train_knn = np.zeros(len(reference_manifold), dtype=np.float32)
+    filled = np.zeros(len(reference_manifold), dtype=bool)
     for task in np.unique(ref_tasks):
         for position_bin in range(config.position_bins):
             selected = (ref_tasks == task) & (ref_bins == position_bin)
@@ -301,10 +322,10 @@ def fit_spectral_reference(
                 config.neighbors,
                 self_query=True,
             )
-    # Rare empty task-position cells fall back to position-only neighbors.
-    missing = train_knn == 0
+            filled[selected] = True
+    # Rare task-position cells fall back to position-only neighbors.
     for position_bin in range(config.position_bins):
-        selected = missing & (ref_bins == position_bin)
+        selected = (~filled) & (ref_bins == position_bin)
         if not bool(selected.any()):
             continue
         source = ref_bins == position_bin
@@ -314,6 +335,7 @@ def fit_spectral_reference(
             config.neighbors,
             self_query=False,
         )
+        filled[selected] = True
 
     knn_center, knn_scale = _scalar_position_stats(
         train_knn, ref_bins, config.position_bins
@@ -462,7 +484,11 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
             embedding, residual = _transform_states(states, bins, reference)
             innovation = np.zeros_like(embedding)
             if response_count > 1:
-                innovation[1:] = embedding[1:] - embedding[:-1]
+                raw_delta = states[1:] - states[:-1]
+                scaled_delta = raw_delta / reference["state_scale"][bins[1:]]
+                innovation[1:] = (
+                    scaled_delta @ reference["pca_components"].T
+                ) / reference["pca_whiten_scale"]
             innovation_standardized = (
                 innovation - reference["delta_center"][bins]
             ) / reference["delta_scale"][bins]
