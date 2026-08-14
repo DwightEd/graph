@@ -21,12 +21,14 @@ def parse_args(argv=None):
 
     fit = commands.add_parser(
         "fit",
-        help="fit a label-free causal spectral manifold on a train split",
+        help="fit a label-free causal dual-spectrum manifold on a train split",
     )
     fit.add_argument("--train-split", required=True)
     fit.add_argument("--output", required=True)
     fit.add_argument("--device", default="cuda")
     fit.add_argument("--top-k", type=int, default=5)
+    fit.add_argument("--prompt-sketch-dim", type=int, default=4)
+    fit.add_argument("--prompt-sketch-seed", type=int, default=20260814)
     fit.add_argument("--position-bins", type=int, default=4)
     fit.add_argument("--pca-dim", type=int, default=32)
     fit.add_argument("--reference-per-sample", type=int, default=4)
@@ -63,6 +65,8 @@ def main(argv=None):
         dataset = open_research_dataset(args.train_split, device=args.device)
         config = SpectralConfig(
             top_k=args.top_k,
+            prompt_sketch_dim=args.prompt_sketch_dim,
+            prompt_sketch_seed=args.prompt_sketch_seed,
             position_bins=args.position_bins,
             pca_dim=args.pca_dim,
             reference_per_sample=args.reference_per_sample,
