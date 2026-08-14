@@ -1,233 +1,252 @@
-"""Label-blind spectral token representations from research attention views.
+"""Channel-preserving causal Laplacian spectra for attention graphs.
 
-This module never opens raw attention files. It consumes only ResearchSample
-objects supplied by ``research_dataset.open_research_dataset``.
+For a response-prefix ending at response-relative position ``t`` and channel
+``c=(layer, head)``, let ``A_c[:t+1, :t+1]`` be the cache-censored
+response-to-response attention submatrix, including the stored diagonal.
+Following the directed-Laplacian construction in LapEigvals, define
+
+    d[c,t,j] = sum_{u=j..t} A_c[u,j] / (t-j+1)
+    lambda[c,t,j] = d[c,t,j] - A_c[j,j].
+
+Because causal attention and ``L=D-A`` are lower triangular, these diagonal
+values are the Laplacian eigenvalues.  We keep the largest k values separately
+for every layer/head at every causal response prefix.  There is deliberately no
+channel mean, ``AA^T`` symmetrization, label use, or supervised feature
+selection here.
+
+The formal cache censors off-diagonal attention <= ``attention_floor``.  The
+result is therefore the spectrum of the cache-censored response graph, not a
+claim that the unavailable full-precision attention matrix was recovered.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 
 import numpy as np
+import torch
 
 
 @dataclass(frozen=True)
 class SpectralConfig:
-    """Configuration for the first RP/RR spectral feasibility study."""
-
-    heat_scales: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0)
-    svd_bands: tuple[tuple[int, int], ...] = ((0, 1), (1, 4), (4, 8), (8, 16))
-    block_rows: int = 4096
+    top_k: int = 5
+    block_rows: int = 8192
+    position_bins: int = 4
+    pca_dim: int = 32
+    reference_per_sample: int = 4
+    neighbors: int = 10
+    spectral_window: int = 8
+    logdet_alpha: float = 1e-3
     epsilon: float = 1e-8
 
     def validate(self) -> None:
-        if not self.heat_scales or any(
-            (not math.isfinite(float(value)) or float(value) <= 0.0)
-            for value in self.heat_scales
-        ):
-            raise ValueError("heat_scales must contain positive finite values")
-        if not self.svd_bands:
-            raise ValueError("svd_bands must not be empty")
-        previous = 0
-        for start, end in self.svd_bands:
-            if start < 0 or end <= start or start < previous:
-                raise ValueError("svd_bands must be ordered non-overlapping half-open ranges")
-            previous = end
-        if int(self.block_rows) < 1:
+        if self.top_k < 1:
+            raise ValueError("top_k must be positive")
+        if self.block_rows < 1:
             raise ValueError("block_rows must be positive")
-        if not math.isfinite(float(self.epsilon)) or float(self.epsilon) <= 0.0:
+        if self.position_bins < 1:
+            raise ValueError("position_bins must be positive")
+        if self.pca_dim < 1:
+            raise ValueError("pca_dim must be positive")
+        if self.reference_per_sample < 1:
+            raise ValueError("reference_per_sample must be positive")
+        if self.neighbors < 1:
+            raise ValueError("neighbors must be positive")
+        if self.spectral_window < 2:
+            raise ValueError("spectral_window must be at least two")
+        if not np.isfinite(self.logdet_alpha) or self.logdet_alpha <= 0:
+            raise ValueError("logdet_alpha must be positive and finite")
+        if not np.isfinite(self.epsilon) or self.epsilon <= 0:
             raise ValueError("epsilon must be positive and finite")
 
 
-def _normalized_laplacian_from_transport(
-    transport: np.ndarray,
-    *,
-    epsilon: float,
-) -> np.ndarray:
-    """Build a response-response normalized Laplacian from co-attention geometry.
-
-    ``transport`` is ``[response_tokens, source_tokens]``. The Gram matrix
-    captures similarity between response tokens' source-attention patterns.
-    Its diagonal is removed so self similarity does not dominate the graph.
-    """
-
-    values = np.asarray(transport, dtype=np.float64)
-    if values.ndim != 2:
-        raise ValueError("transport must be a matrix")
-    response_count = values.shape[0]
-    if response_count == 0:
-        return np.empty((0, 0), dtype=np.float64)
-    if values.shape[1] == 0 or not np.any(values):
-        return np.zeros((response_count, response_count), dtype=np.float64)
-
-    gram = values @ values.T
-    gram = 0.5 * (gram + gram.T)
-    np.fill_diagonal(gram, 0.0)
-    gram = np.maximum(gram, 0.0)
-    degree = gram.sum(axis=1)
-    positive = degree > epsilon
-    inverse_sqrt = np.zeros_like(degree)
-    inverse_sqrt[positive] = 1.0 / np.sqrt(degree[positive])
-    normalized = gram * inverse_sqrt[:, None] * inverse_sqrt[None, :]
-    laplacian = -normalized
-    diagonal = np.arange(response_count)
-    laplacian[diagonal[positive], diagonal[positive]] = 1.0
-    return 0.5 * (laplacian + laplacian.T)
+def response_position_bin(position: int, response_count: int, bins: int) -> int:
+    """Map a response-relative token index to a relative-position bin."""
+    if response_count < 1:
+        raise ValueError("response_count must be positive")
+    if not 0 <= int(position) < response_count:
+        raise IndexError("response position is outside the response")
+    if bins < 1:
+        raise ValueError("bins must be positive")
+    if response_count == 1:
+        return 0
+    fraction = float(position) / float(response_count - 1)
+    return min(int(fraction * bins), bins - 1)
 
 
-def _relative_heat_kernel_signature(
-    transport: np.ndarray,
-    scales: tuple[float, ...],
-    *,
-    epsilon: float,
-) -> np.ndarray:
-    """Return sign-invariant node-local heat-kernel spectral signatures.
-
-    Each scale is normalized by its within-graph mean and log transformed. This
-    suppresses trivial response-length scale while retaining whether a token is
-    locally spectrally more or less concentrated than the sample average.
-    """
-
-    laplacian = _normalized_laplacian_from_transport(
-        transport,
-        epsilon=epsilon,
-    )
-    if laplacian.shape[0] == 0:
-        return np.empty((0, len(scales)), dtype=np.float32)
-    eigenvalues, eigenvectors = np.linalg.eigh(laplacian)
-    eigenvalues = np.clip(eigenvalues, 0.0, 2.0)
-    squared_modes = np.square(eigenvectors)
-    kernels = np.exp(
-        -2.0
-        * eigenvalues[:, None]
-        * np.asarray(scales, dtype=np.float64)[None, :]
-    )
-    signature = squared_modes @ kernels
-    mean = np.maximum(signature.mean(axis=0, keepdims=True), epsilon)
-    signature = np.log(np.maximum(signature / mean, epsilon))
-    return signature.astype(np.float32, copy=False)
+def reference_positions(response_count: int, count: int) -> np.ndarray:
+    """Choose deterministic, approximately uniform reference tokens."""
+    if response_count < 1:
+        return np.empty(0, dtype=np.int64)
+    count = min(int(count), response_count)
+    if count < 1:
+        raise ValueError("reference position count must be positive")
+    if count == response_count:
+        return np.arange(response_count, dtype=np.int64)
+    quantiles = (np.arange(count, dtype=np.float64) + 0.5) / float(count)
+    positions = np.rint(quantiles * (response_count - 1)).astype(np.int64)
+    return np.unique(np.clip(positions, 0, response_count - 1))
 
 
-def _svd_band_energy(
-    transport: np.ndarray,
-    bands: tuple[tuple[int, int], ...],
-    *,
-    epsilon: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Return receiver and sender local energy over singular-value bands.
-
-    Squared singular vectors make the representation invariant to individual
-    singular-vector sign flips. Multiplication by node count expresses each
-    token relative to the average leverage in that relation-specific operator.
-    """
-
-    values = np.asarray(transport, dtype=np.float64)
-    if values.ndim != 2:
-        raise ValueError("transport must be a matrix")
-    receiver_count, sender_count = values.shape
-    receiver = np.zeros((receiver_count, len(bands)), dtype=np.float64)
-    sender = np.zeros((sender_count, len(bands)), dtype=np.float64)
-    if receiver_count == 0 or sender_count == 0 or not np.any(values):
-        return receiver.astype(np.float32), sender.astype(np.float32)
-
-    left, singular_values, right_t = np.linalg.svd(values, full_matrices=False)
-    spectral_energy = np.square(singular_values)
-    total = max(float(spectral_energy.sum()), epsilon)
-    right = right_t.T
-    rank = len(singular_values)
-    for column, (start, end) in enumerate(bands):
-        start = min(int(start), rank)
-        end = min(int(end), rank)
-        if end <= start:
+def _retained_response_edges(sample, *, block_rows: int):
+    """Collect retained RR edges exclusively through the ResearchSample API."""
+    attention = sample.attention()
+    channels: list[torch.Tensor] = []
+    queries: list[torch.Tensor] = []
+    sources: list[torch.Tensor] = []
+    weights: list[torch.Tensor] = []
+    for block in sample.iter_sparse_attention_blocks(block_rows=block_rows):
+        response = block.source >= attention.response_idx
+        if not bool(response.any()):
             continue
-        weights = spectral_energy[start:end]
-        receiver[:, column] = (
-            np.square(left[:, start:end]) * weights[None, :]
-        ).sum(axis=1) / total
-        sender[:, column] = (
-            np.square(right[:, start:end]) * weights[None, :]
-        ).sum(axis=1) / total
-
-    receiver *= max(receiver_count, 1)
-    sender *= max(sender_count, 1)
-    return receiver.astype(np.float32), sender.astype(np.float32)
-
-
-def _scale_name(value: float) -> str:
-    text = f"{float(value):g}"
-    return text.replace("-", "m").replace(".", "p")
-
-
-def spectral_feature_names(config: SpectralConfig) -> tuple[str, ...]:
-    names: list[str] = []
-    for relation in ("rp", "rr"):
-        names.extend(
-            f"{relation}_log_hks_tau_{_scale_name(scale)}"
-            for scale in config.heat_scales
+        channels.append(
+            (block.layer[response] * attention.num_heads + block.head[response]).long()
         )
-    for relation in ("rp_receiver", "rr_receiver", "rr_sender"):
-        names.extend(
-            f"{relation}_svd_energy_{start}_{end}"
-            for start, end in config.svd_bands
-        )
-    return tuple(names)
+        queries.append(block.query[response].long())
+        sources.append((block.source[response] - attention.response_idx).long())
+        weights.append(block.weight[response].float())
+
+    device = attention.response_values.device
+    if not channels:
+        empty_i = torch.empty(0, dtype=torch.long, device=device)
+        empty_v = torch.empty(0, dtype=torch.float32, device=device)
+        return empty_i, empty_i, empty_i, empty_v
+    return (
+        torch.cat(channels),
+        torch.cat(queries),
+        torch.cat(sources),
+        torch.cat(weights),
+    )
 
 
-def spectral_token_representation(sample, config: SpectralConfig | None = None):
-    """Build one spectral vector per response token without labels.
+def prefix_laplacian_spectrum(
+    sample,
+    *,
+    positions=None,
+    config: SpectralConfig | None = None,
+) -> np.ndarray:
+    """Return top-k causal Laplacian eigenvalues for every layer/head.
 
-    The data view is the channel-mean, cache-censored response attention exposed
-    by ``ResearchSample.mean_response_attention``. Prompt and response-history
-    columns are kept separate so their spectral geometries cannot cancel.
+    Output shape is ``[len(positions), L*H*k]`` in layer-major, head-major,
+    descending-eigenvalue order.  A prefix shorter than k nodes is zero-padded.
 
-    Returns ``(features, feature_names)`` where features has shape ``[R,D]``.
+    We intentionally restrict the Laplacian to response nodes.  For a response
+    node all queries that can attend to it from itself onward are response
+    queries and are present in the cache.  Prompt-query rows are not present,
+    so pretending to reconstruct a full prompt+response Laplacian would be
+    unjustified.
     """
-
     config = SpectralConfig() if config is None else config
     config.validate()
     attention = sample.attention()
-    matrix = (
-        sample.mean_response_attention(
-            include_diagonal=False,
-            block_rows=config.block_rows,
-        )
-        .detach()
+    response_count = int(attention.num_response_tokens)
+    if response_count < 1:
+        return np.empty((0, attention.num_channels * config.top_k), dtype=np.float32)
+
+    if positions is None:
+        requested = np.arange(response_count, dtype=np.int64)
+    else:
+        requested = np.asarray(list(positions), dtype=np.int64)
+        if requested.ndim != 1:
+            raise ValueError("positions must be one-dimensional")
+        if requested.size == 0:
+            return np.empty((0, attention.num_channels * config.top_k), dtype=np.float32)
+        if np.any(requested < 0) or np.any(requested >= response_count):
+            raise IndexError("requested response position is outside the response")
+        requested = np.unique(requested)
+
+    device = attention.response_values.device
+    diagonal = (
+        attention.attention_diagonal[:, :, attention.response_idx :]
         .float()
+        .reshape(attention.num_channels, response_count)
+    )
+    # Each node starts with its exact stored self-attention.  As the response
+    # prefix grows, retained future RR attention to that source is accumulated.
+    received = diagonal.clone()
+    edge_channel, edge_query, edge_source, edge_weight = _retained_response_edges(
+        sample, block_rows=config.block_rows
+    )
+
+    output = torch.zeros(
+        (requested.size, attention.num_channels, config.top_k),
+        dtype=torch.float32,
+        device=device,
+    )
+    previous_prefix = -1
+    for output_index, prefix in enumerate(requested.tolist()):
+        if edge_query.numel():
+            new_edge = (edge_query > previous_prefix) & (edge_query <= prefix)
+            if bool(new_edge.any()):
+                received.index_put_(
+                    (edge_channel[new_edge], edge_source[new_edge]),
+                    edge_weight[new_edge],
+                    accumulate=True,
+                )
+
+        active = prefix + 1
+        source = torch.arange(active, dtype=torch.float32, device=device)
+        denominator = (float(prefix) - source + 1.0).clamp_min(1.0)
+        eigenvalues = (
+            received[:, :active] / denominator.unsqueeze(0)
+            - diagonal[:, :active]
+        )
+        keep = min(config.top_k, active)
+        largest = torch.topk(
+            eigenvalues, k=keep, dim=1, largest=True, sorted=True
+        ).values
+        output[output_index, :, :keep] = largest
+        previous_prefix = prefix
+
+    return (
+        output.reshape(requested.size, attention.num_channels * config.top_k)
+        .detach()
         .cpu()
         .numpy()
-        .astype(np.float64, copy=False)
+        .astype(np.float32, copy=False)
     )
-    prompt = matrix[:, : attention.response_idx]
-    history = matrix[:, attention.response_idx :]
 
-    rp_hks = _relative_heat_kernel_signature(
-        prompt,
-        config.heat_scales,
-        epsilon=config.epsilon,
-    )
-    rr_hks = _relative_heat_kernel_signature(
-        history,
-        config.heat_scales,
-        epsilon=config.epsilon,
-    )
-    rp_receiver, _rp_sender = _svd_band_energy(
-        prompt,
-        config.svd_bands,
-        epsilon=config.epsilon,
-    )
-    rr_receiver, rr_sender = _svd_band_energy(
-        history,
-        config.svd_bands,
-        epsilon=config.epsilon,
-    )
-    features = np.concatenate(
-        (rp_hks, rr_hks, rp_receiver, rr_receiver, rr_sender),
-        axis=1,
-    ).astype(np.float32, copy=False)
-    names = spectral_feature_names(config)
-    if features.shape != (attention.num_response_tokens, len(names)):
-        raise RuntimeError("spectral representation shape does not match feature names")
-    if not np.isfinite(features).all():
-        raise FloatingPointError("spectral representation contains non-finite values")
-    return features, names
+
+def spectral_volume(
+    embeddings: np.ndarray,
+    *,
+    window: int = 8,
+    alpha: float = 1e-3,
+    epsilon: float = 1e-8,
+) -> np.ndarray:
+    """EigenScore-inspired causal LogDet of recent graph spectral states.
+
+    This is not the original EigenScore: EigenScore uses covariance across
+    sentence embeddings from multiple sampled responses.  Here consecutive
+    label-free graph spectral embeddings form the columns.  LogDet therefore
+    measures the local volume occupied by the causal attention-graph trajectory.
+    """
+    values = np.asarray(embeddings, dtype=np.float64)
+    if values.ndim != 2:
+        raise ValueError("embeddings must have shape [tokens, dimensions]")
+    if window < 2:
+        raise ValueError("window must be at least two")
+    if alpha <= 0:
+        raise ValueError("alpha must be positive")
+    tokens, dimensions = values.shape
+    result = np.zeros(tokens, dtype=np.float64)
+    for token in range(tokens):
+        start = max(0, token - window + 1)
+        current = values[start : token + 1]
+        if len(current) < 2 or dimensions == 0:
+            result[token] = np.log(alpha)
+            continue
+        z = current.T
+        z = z - z.mean(axis=0, keepdims=True)
+        gram = (z.T @ z) / max(dimensions, 1)
+        gram.flat[:: len(gram) + 1] += alpha
+        sign, logdet = np.linalg.slogdet(gram)
+        if sign <= 0 or not np.isfinite(logdet):
+            eigenvalues = np.linalg.eigvalsh(gram)
+            logdet = np.log(np.maximum(eigenvalues, epsilon)).sum()
+        result[token] = logdet / float(len(current))
+    return result.astype(np.float32, copy=False)
+
+
+def spectral_state_dimension(num_layers: int, num_heads: int, top_k: int) -> int:
+    return int(num_layers) * int(num_heads) * int(top_k)
