@@ -1,6 +1,27 @@
-# Attention-conditioned graph state modeling
+# Attention-only dynamic multiplex construction
 
-当前主线是 `trajectory_geometry/` 中的无标签图状态转移模型。它把压缩
+当前研究主线位于 `attention_multiplex/`。它只研究压缩 attention 本身，将
+layer 建模为有序深度、head 建模为关系类型，并联合分解
+`(layer,response-query) × (head,prompt+response-source)` 稀疏矩阵。它不读取
+hidden state 或标签，也不输出 AUROC、异常分数和 t-SNE。
+
+所有新方法必须通过根目录 `research_dataset.py` 读取 attention；禁止在实验
+子目录直接解析 `.pt/.npz`。中央接口能够逐 channel 恢复带 censoring 掩码的
+`[R,N]` 因果矩阵：保留边使用真实值，合法未保留边默认填 cache floor
+（正式缓存为 `0.01`），未来位置为 0。PP 非对角边从未保存，因此明确不采用，
+不会伪造成完整 `[N,N]` 矩阵。
+
+一键运行：
+
+```bash
+bash attention_multiplex/run_attention_multiplex.sh
+```
+
+详见 `attention_multiplex/README.md` 和 `attention_multiplex/METHOD.md`。
+
+## Previous hidden-state experiment
+
+此前的 `trajectory_geometry/` 无标签图状态转移实验把压缩
 attention 当作有向算子，把逐层 hidden state 当作节点信号，并用真实邻接
 预测下一层状态更新：
 

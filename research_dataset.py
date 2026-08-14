@@ -38,6 +38,126 @@ class SparseAttentionBlock:
     weight: torch.Tensor
 
 
+@dataclass(frozen=True)
+class CensoredCausalAttentionChannel:
+    """One reconstructed response-query attention channel.
+
+    The formal cache stores exact diagonal values and off-diagonal response
+    rows whose values meet ``attention_floor``. It does *not* store prompt
+    query rows or the exact values of censored edges. Consequently this view
+    is ``[response query, prompt + response source]`` rather than a fabricated
+    square ``[all tokens, all tokens]`` matrix.
+
+    ``values`` contains exact retained values and the requested imputation for
+    eligible-but-censored entries. ``observed`` is therefore part of the data
+    contract: callers must not mistake an imputed floor value for an observed
+    original attention value. ``eligible`` marks the causal support, including
+    the diagonal only when it was requested.
+    """
+
+    layer: int
+    head: int
+    response_idx: int
+    attention_floor: float
+    censored_fill: float
+    values: torch.Tensor
+    observed: torch.Tensor
+    eligible: torch.Tensor
+
+    @property
+    def num_response_tokens(self) -> int:
+        return int(self.values.shape[0])
+
+    @property
+    def num_tokens(self) -> int:
+        return int(self.values.shape[1])
+
+    @property
+    def prompt_to_response(self) -> torch.Tensor:
+        """Causal source-in-prompt mask for response query rows."""
+
+        mask = torch.zeros_like(self.eligible)
+        mask[:, : self.response_idx] = True
+        return mask & self.eligible
+
+    @property
+    def response_to_response(self) -> torch.Tensor:
+        """Causal source-in-response mask, including an eligible diagonal."""
+
+        mask = torch.zeros_like(self.eligible)
+        mask[:, self.response_idx :] = True
+        return mask & self.eligible
+
+    @property
+    def censored(self) -> torch.Tensor:
+        return self.eligible & ~self.observed
+
+    def excess_over_floor(self) -> torch.Tensor:
+        """Return the sparse-equivalent signal above the censoring floor.
+
+        Censored causal entries become zero. Retained off-diagonal edges are
+        represented by their margin above ``attention_floor``. Exact diagonal
+        values are left unchanged because they were never censored by the
+        off-diagonal floor.
+        """
+
+        result = torch.zeros_like(self.values)
+        retained_off_diagonal = self.observed.clone()
+        query = torch.arange(self.num_response_tokens, device=result.device)
+        target = self.response_idx + query
+        diagonal = retained_off_diagonal[query, target]
+        retained_off_diagonal[query, target] = False
+        result[retained_off_diagonal] = (
+            self.values[retained_off_diagonal] - self.attention_floor
+        ).clamp_min(0)
+        if bool(diagonal.any()):
+            selected = query[diagonal]
+            result[selected, target[diagonal]] = self.values[
+                selected, target[diagonal]
+            ]
+        return result
+
+    def square_with_unavailable_pp(self):
+        """Place this view in ``[N,N]`` coordinates for inspection only.
+
+        Prompt-query rows are zero in ``values`` but also false in both masks,
+        which means *unavailable*, not observed zero. Algorithms should prefer
+        the bounded ``[R,N]`` representation and avoid this extra allocation.
+        """
+
+        values = torch.zeros(
+            (self.num_tokens, self.num_tokens),
+            dtype=self.values.dtype,
+            device=self.values.device,
+        )
+        observed = torch.zeros(
+            (self.num_tokens, self.num_tokens),
+            dtype=torch.bool,
+            device=self.values.device,
+        )
+        eligible = torch.zeros_like(observed)
+        values[self.response_idx :] = self.values
+        observed[self.response_idx :] = self.observed
+        eligible[self.response_idx :] = self.eligible
+        return values, observed, eligible
+
+
+@dataclass(frozen=True)
+class CensoredCausalAttentionRow:
+    """One streamed row from :class:`CensoredCausalAttentionChannel`."""
+
+    layer: int
+    head: int
+    query: int
+    target: int
+    response_idx: int
+    attention_floor: float
+    censored_fill: float
+    values: torch.Tensor
+    observed: torch.Tensor
+    eligible: torch.Tensor
+
+
 def open_research_dataset(
     split_root,
     *,
@@ -126,36 +246,148 @@ class _ResearchSampleViews:
         allocated.
         """
 
+        return self.censored_causal_response_channel(
+            layer,
+            head,
+            include_diagonal=include_diagonal,
+            censored_fill=0.0,
+            dtype=dtype,
+        ).values
+
+    def censored_causal_response_channel(
+        self,
+        layer,
+        head,
+        *,
+        include_diagonal=True,
+        censored_fill="floor",
+        dtype=torch.float32,
+    ):
+        """Restore one bounded causal channel with explicit censoring masks.
+
+        The matrix is ``[R,N]``: every query is a response token and sources
+        contain prompt tokens plus the causal response prefix. Prompt-query
+        rows (the PP block) cannot be reconstructed because they were never
+        stored and are deliberately not fabricated.
+
+        ``censored_fill='floor'`` imputes every legal but unretained
+        off-diagonal edge with the cache floor (normally ``0.01``). A numeric
+        fill or ``'zero'`` may be requested for an algorithm that treats the
+        observed sparse graph separately. In every case ``observed`` and
+        ``eligible`` distinguish measurements, censoring, and structural zeros.
+        """
+
         attention = self.attention()
         layer, head = int(layer), int(head)
         if not 0 <= layer < attention.num_layers:
             raise IndexError("layer is outside attention geometry")
         if not 0 <= head < attention.num_heads:
             raise IndexError("head is outside attention geometry")
+        if censored_fill == "floor":
+            fill = float(attention.attention_floor)
+        elif censored_fill == "zero":
+            fill = 0.0
+        else:
+            fill = float(censored_fill)
+        if not 0.0 <= fill <= float(attention.attention_floor):
+            raise ValueError(
+                "censored_fill must be zero, 'floor', or a value in "
+                "[0, attention_floor]"
+            )
+
         response_count = attention.num_response_tokens
-        output = torch.zeros(
-            (response_count, attention.num_tokens),
-            dtype=dtype,
-            device=attention.response_values.device,
+        device = attention.response_values.device
+        query = torch.arange(response_count, device=device)
+        target = attention.response_idx + query
+        source = torch.arange(attention.num_tokens, device=device)
+        eligible = source.unsqueeze(0) < target.unsqueeze(1)
+        if include_diagonal:
+            eligible[query, target] = True
+        values = torch.zeros(
+            (response_count, attention.num_tokens), dtype=dtype, device=device
         )
+        values[eligible] = fill
+        observed = torch.zeros_like(eligible)
+
         channel = layer * attention.num_heads + head
         row_offset = channel * response_count
         row_ptr = attention.response_row_ptr.long()
-        for query in range(response_count):
-            row = row_offset + query
+        for response_query in range(response_count):
+            row = row_offset + response_query
             start = int(row_ptr[row].item())
             stop = int(row_ptr[row + 1].item())
-            if stop > start:
-                output[query, attention.response_column_indices[start:stop].long()] = (
-                    attention.response_values[start:stop].to(dtype=dtype)
-                )
+            if stop <= start:
+                continue
+            columns = attention.response_column_indices[start:stop].long()
+            values[response_query, columns] = attention.response_values[
+                start:stop
+            ].to(dtype=dtype)
+            observed[response_query, columns] = True
+
         if include_diagonal:
-            query = torch.arange(response_count, device=output.device)
-            target = attention.response_idx + query
-            output[query, target] = attention.attention_diagonal[
+            values[query, target] = attention.attention_diagonal[
                 layer, head, target
             ].to(dtype=dtype)
-        return output
+            observed[query, target] = True
+
+        return CensoredCausalAttentionChannel(
+            layer=layer,
+            head=head,
+            response_idx=int(attention.response_idx),
+            attention_floor=float(attention.attention_floor),
+            censored_fill=fill,
+            values=values,
+            observed=observed,
+            eligible=eligible,
+        )
+
+    def iter_censored_causal_response_channels(
+        self,
+        *,
+        include_diagonal=True,
+        censored_fill="floor",
+        dtype=torch.float32,
+    ):
+        """Yield ``[R,N]`` channels without allocating ``[L,H,R,N]``."""
+
+        attention = self.attention()
+        for layer in range(attention.num_layers):
+            for head in range(attention.num_heads):
+                yield self.censored_causal_response_channel(
+                    layer,
+                    head,
+                    include_diagonal=include_diagonal,
+                    censored_fill=censored_fill,
+                    dtype=dtype,
+                )
+
+    def iter_censored_causal_response_rows(
+        self,
+        *,
+        include_diagonal=True,
+        censored_fill="floor",
+        dtype=torch.float32,
+    ):
+        """Yield one reconstructed row at a time in layer/head/query order."""
+
+        for channel in self.iter_censored_causal_response_channels(
+            include_diagonal=include_diagonal,
+            censored_fill=censored_fill,
+            dtype=dtype,
+        ):
+            for query in range(channel.num_response_tokens):
+                yield CensoredCausalAttentionRow(
+                    layer=channel.layer,
+                    head=channel.head,
+                    query=query,
+                    target=channel.response_idx + query,
+                    response_idx=channel.response_idx,
+                    attention_floor=channel.attention_floor,
+                    censored_fill=channel.censored_fill,
+                    values=channel.values[query],
+                    observed=channel.observed[query],
+                    eligible=channel.eligible[query],
+                )
 
     def mean_response_attention(
         self,
