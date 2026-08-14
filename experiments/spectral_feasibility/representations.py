@@ -190,7 +190,6 @@ def spectral_token_representation(sample, config: SpectralConfig | None = None):
     matrix = (
         sample.mean_response_attention(
             include_diagonal=False,
-            dtype=attention.response_values.dtype,
             block_rows=config.block_rows,
         )
         .detach()
