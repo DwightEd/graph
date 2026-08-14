@@ -39,6 +39,12 @@ class RobustReference:
         return np.sqrt(np.maximum(squared, 0.0)).astype(np.float32)
 
 
+def _string_column(value, count):
+    """Create a fixed-width Unicode column without NumPy's ``<U1`` truncation."""
+
+    return np.asarray([str(value)] * int(count), dtype=str)
+
+
 def collect_representations(
     dataset,
     *,
@@ -79,12 +85,12 @@ def collect_representations(
                 raise RuntimeError("spectral feature names changed across samples")
             count = features.shape[0]
             feature_blocks.append(features)
-            sample_column.append(np.full(count, str(sample.sample_id), dtype=str))
-            source_column.append(np.full(count, str(sample.source_id), dtype=str))
+            sample_column.append(_string_column(sample.sample_id, count))
+            source_column.append(_string_column(sample.source_id, count))
             token_column.append(np.arange(count, dtype=np.int32))
-            task_column.append(np.full(count, str(sample.task_type), dtype=str))
-            data_source_column.append(np.full(count, str(sample.data_source), dtype=str))
-            generator_column.append(np.full(count, str(sample.generator_model), dtype=str))
+            task_column.append(_string_column(sample.task_type, count))
+            data_source_column.append(_string_column(sample.data_source, count))
+            generator_column.append(_string_column(sample.generator_model, count))
             response_length_column.append(np.full(count, count, dtype=np.int32))
         finally:
             sample.release_attention()
