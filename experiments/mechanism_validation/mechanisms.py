@@ -102,7 +102,11 @@ def extract_token_mechanisms(sample, *, channel_block_size: int = 256) -> Mechan
         prompt_mean = local[:, 4] / float(sample.response_idx)
         response_mean = (local[:, 5] + local_diagonal) / (token_index + 1).float()
         routing_total = prompt_mean + response_mean
-        local[:, 0] = prompt_mean / routing_total.clamp_min(1e-12)
+        local[:, 0] = torch.where(
+            routing_total > 0,
+            prompt_mean / routing_total,
+            torch.full_like(routing_total, sample.attention_floor),
+        )
         local[:, 1] = local[:, 4] / local[:, 7].clamp_min(1e-12)
         total_mass = local[:, 7] + local[:, 8]
         local[:, 2] = local[:, 4] / total_mass.clamp_min(1e-12)
@@ -127,7 +131,6 @@ def extract_token_mechanisms(sample, *, channel_block_size: int = 256) -> Mechan
         local[:, 15] = local_diagonal / (local[:, 5] + local_diagonal + local[:, 8]).clamp_min(1e-12)
         has_retained = local[:, 7] > 0
         valid_block = torch.ones_like(local, dtype=torch.bool)
-        valid_block[:, 0] = routing_total > 0
         valid_block[:, 1] = has_retained
         valid_block[:, 2:4] = (total_mass > 0)[:, None]
         valid_block[:, 9] = category_count > 1

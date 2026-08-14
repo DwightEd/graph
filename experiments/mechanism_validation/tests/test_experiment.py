@@ -48,11 +48,11 @@ def _mechanism_features(path):
         "valid": torch.ones((2, 4), dtype=torch.bool),
     }, path / "sample.pt")
     (path / "metadata.json").write_text(json.dumps({
-        "schema": "mechanism_features.v2", "ema_decay": .9, "attention_floor": .01,
+        "schema": "mechanism_features.v3", "ema_decay": .9, "attention_floor": .01,
         "cache_bound_invalid_rows": 0, "cache_bound_total_rows": 2, "cache_bound_invalid_fraction": 0.0,
         "labels_included": False,
         "feature_names": [
-            "routing_a:global_mean", "mass_a:global_mean",
+            "retained_length_normalized_lookback:global_mean", "mass_a:global_mean",
             "concentration_a:global_mean", "locality_a:global_mean",
         ],
         "family_slices": {
@@ -98,6 +98,40 @@ def test_evaluation_loads_all_label_free_artifacts_before_opening_labels(tmp_pat
     assert result["probe_uses_labels"] is True
     assert result["analysis_status"] == "post_hoc_exploratory"
     assert result["adjusted_global_mean"]
+
+
+def test_corrected_lookback_evaluation_is_a_separate_scalar_diagnostic(tmp_path, monkeypatch):
+    train, test, output = tmp_path / "train", tmp_path / "test", tmp_path / "out"
+    _mechanism_features(train)
+    _mechanism_features(test)
+
+    class LabelDataset:
+        def __getitem__(self, sample_id):
+            return _Sample("sample", "source", _attention())
+
+        def __iter__(self):
+            return iter([_Sample("sample", "source", _attention())])
+
+        def labels(self):
+            return type(
+                "Labels", (),
+                {"response_labels": lambda _, sample: torch.tensor([0, 1])},
+            )()
+
+    monkeypatch.setattr(
+        experiment, "open_research_dataset", lambda *args, **kwargs: LabelDataset()
+    )
+
+    result = experiment.evaluate_lookback(
+        "train-split", train, "test-split", test, output, bootstrap=2
+    )
+
+    assert result["schema"] == "lookback-ratio-diagnostic-v1"
+    assert result["analysis_status"] == "post_hoc_supervised_scalar_diagnostic"
+    assert result["undefined_ratio_fill"] == .01
+    assert result["feature"] == "retained_length_normalized_lookback:global_mean"
+    assert set(result["lookback_plus_nuisance"]) == {"held_out", "point_delta"}
+    assert (output / "predictions.npz").exists()
 
 
 def test_build_graph_writes_identical_node_features_for_every_variant(tmp_path, monkeypatch):

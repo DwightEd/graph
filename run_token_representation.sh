@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-cd "$ROOT"
+PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_ROOT"
 
 BASE="${BASE:-/share/home/tm902089733300000/a903202310/lys}"
 PYTHON="${PYTHON:-$BASE/conda_envs/research/bin/python}"
-FORMAL_ROOT="${FORMAL_ROOT:-$BASE/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876}"
-OUTPUT_DIR="${OUTPUT_DIR:-$BASE/data/feature_extraction/token_representation/$(date -u +%Y%m%dT%H%M%SZ)}"
-TRAIN_SPLIT="${TRAIN_SPLIT:-$FORMAL_ROOT/train}"
-TEST_SPLIT="${TEST_SPLIT:-$FORMAL_ROOT/test}"
+DATA_ROOT="${DATA_ROOT:-$BASE/data/RAGTruth/model_traces/llama31_8b}"
+OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_ROOT/outputs/token_representation/$(date -u +%Y%m%dT%H%M%SZ)}"
+TRAIN_SPLIT="${TRAIN_SPLIT:-$DATA_ROOT/train}"
+TEST_SPLIT="${TEST_SPLIT:-$DATA_ROOT/test}"
 DEVICE="${DEVICE:-cuda}"
 SAMPLE_IDS="${SAMPLE_IDS:-}"
 DISPLAY_LAYER="${DISPLAY_LAYER:-}"
@@ -19,12 +19,16 @@ export MPLCONFIGDIR="${MPLCONFIGDIR:-${OUTPUT_DIR}.matplotlib}"
 export PYTHONUNBUFFERED=1
 mkdir -p "$(dirname -- "$OUTPUT_DIR")"
 
-printf '[start] compressed CSR -> 1024-D Lookback -> multiscale evidence-flow graph\n'
+printf '[start] compressed CSR -> 1024-D Lookback -> exact-channel one-hop evidence-flow graph\n'
 printf 'train_split=%s\ntest_split=%s\noutput=%s\n' "$TRAIN_SPLIT" "$TEST_SPLIT" "$OUTPUT_DIR"
 
 if [[ "${RUN_TESTS:-1}" == "1" ]]; then
-  printf '[preflight] running graph, data-interface, and end-to-end representation tests\n'
-  "$PYTHON" -m unittest discover -s tests -p 'test_*.py' -v
+  printf '[preflight] running Lookback graph representation tests\n'
+  "$PYTHON" -m pytest -q \
+    tests/test_attention_graph.py \
+    tests/test_data.py \
+    tests/test_evidence_flow.py \
+    tests/test_token_representation.py
 fi
 
 ARGS=(
@@ -34,10 +38,7 @@ ARGS=(
   --output-dir "$OUTPUT_DIR"
   --device "$DEVICE"
   --position-bins "${POSITION_BINS:-10}"
-  --lookback-window "${LOOKBACK_WINDOW:-8}"
   --provenance-hops "${PROVENANCE_HOPS:-2}"
-  --prompt-bins "${PROMPT_BINS:-16}"
-  --graph-head-components "${GRAPH_HEAD_COMPONENTS:-8}"
   --bootstrap-replicates "${BOOTSTRAP_REPLICATES:-200}"
   --csr-row-block "${CSR_ROW_BLOCK:-4096}"
   --display-mass-cover "${DISPLAY_MASS_COVER:-0.80}"
@@ -63,14 +64,24 @@ fi
 
 "$PYTHON" -u main.py "${ARGS[@]}" 2>&1 | tee "$LOG_FILE"
 
+if [[ -n "$SAMPLE_IDS" ]]; then
+  for SAMPLE_ID in "${REQUESTED_SAMPLES[@]}"; do
+    RENDER_ARGS=(
+      render-token-graph
+      --test-split "$TEST_SPLIT"
+      --output-dir "$OUTPUT_DIR"
+      --sample-id "$SAMPLE_ID"
+      --device "$DEVICE"
+    )
+    if [[ -n "$DISPLAY_LAYER" ]]; then
+      RENDER_ARGS+=(--display-layer "$DISPLAY_LAYER")
+    fi
+    "$PYTHON" -u main.py "${RENDER_ARGS[@]}" 2>&1 | tee -a "$LOG_FILE"
+  done
+fi
+
 printf 'complete_output=%s\n' "$OUTPUT_DIR"
 printf 'run_log=%s\n' "$LOG_FILE"
 printf 'report=%s\n' "$OUTPUT_DIR/token_representation_report.json"
-printf 'embeddings=%s\n' "$OUTPUT_DIR/token_representations_label_free.npz"
-printf 'node_representations=%s\n' "$OUTPUT_DIR/token_node_representations.float16.npy"
-printf 'evidence_flow_node_embeddings=%s\n' "$OUTPUT_DIR/evidence_flow_node_embeddings.float16.npy"
-printf 'compact_layer_structure=%s\n' "$OUTPUT_DIR/compact_layer_structure.float16.npy"
-printf 'train_reference_model=%s\n' "$OUTPUT_DIR/train_reference_model.npz"
-printf 'all_sample_graphs=%s\n' "$OUTPUT_DIR/sample_graphs"
-printf 'population_figure=%s\n' "$OUTPUT_DIR/population_token_representations.png"
-printf 'selected_sample_figure=%s\n' "$OUTPUT_DIR/sample_*_attention_structure_*.png"
+printf 'X=%s\n' "$OUTPUT_DIR/token_node_representations.float16.npy"
+printf 'Z=%s\n' "$OUTPUT_DIR/true_graph_node_representations.float16.npy"

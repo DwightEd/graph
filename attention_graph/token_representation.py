@@ -1,11 +1,9 @@
-"""Label-free token representations and multiscale causal evidence flow.
+"""Label-free token representations and exact-channel causal evidence flow.
 
 The primary node state is the complete layer-head Lookback vector. For a
-32-layer, 32-head observer this is exactly 1024 dimensions.  A fixed graph
-filter bank sends projected head signals and prompt-bin evidence over the
-actual layer-wise response topology, retaining one/two-hop diffusion
-innovations.  An incoming-route/weight-matched randomized topology is processed identically
-as a structural null control.
+32-layer, 32-head observer this is exactly 1024 dimensions. Exact CSR channels
+provide prompt and response evidence flows without projecting heads or
+binning prompt positions. A lag-matched RR rewire is the topology null.
 
 All reference fitting and projection use the unlabeled train split. Test
 labels are opened only after representations, scores and graph files freeze.
@@ -14,6 +12,7 @@ labels are opened only after representations, scores and graph files freeze.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -25,20 +24,17 @@ from sklearn.decomposition import PCA
 from sklearn.metrics import average_precision_score, roc_auc_score
 from tqdm.auto import tqdm
 
-from .graph import GraphBuildConfig, RP, RR, build_attention_graph
+from .graph import RP, RR
 from .evidence_flow import (
-    anomaly_components,
+    anomaly_components_from_attention,
+    csr_entries,
     direct_field_names,
-    evidence_flow_fields,
-    fixed_head_projection,
-    propagation_block_slices,
+    evidence_flow_from_attention,
     propagation_field_names,
 )
-from .statistics import DIRECT_FEATURES, TOKEN_FEATURES, token_statistics
 
 
-SCHEMA = "token-graph-representation-v1"
-EXACT_FEATURES = TOKEN_FEATURES + DIRECT_FEATURES
+SCHEMA = "token-graph-representation-v2"
 
 DIRECT_STRUCTURE_NAMES = (
     "retained_prompt_mass",
@@ -58,10 +54,7 @@ DIRECT_STRUCTURE_NAMES = (
 @dataclass(frozen=True)
 class TokenRepresentationConfig:
     position_bins: int = 10
-    lookback_window: int = 8
     provenance_hops: int = 2
-    prompt_bins: int = 16
-    graph_head_components: int = 8
     bootstrap_replicates: int = 200
     csr_row_block: int = 4096
     reference_size: int = 12_000
@@ -77,8 +70,7 @@ class TokenRepresentationConfig:
 
     def validate(self):
         integer = (
-            self.position_bins, self.lookback_window, self.provenance_hops,
-            self.prompt_bins, self.graph_head_components,
+            self.position_bins, self.provenance_hops,
             self.bootstrap_replicates,
             self.csr_row_block, self.reference_size,
             self.subspace_components, self.display_edges_per_type,
@@ -107,45 +99,6 @@ def structure_names(hops):
     return tuple(names)
 
 
-def _csr_entries(attention, row_start, row_end):
-    """Return global row IDs, columns and values for one CSR row block."""
-    row_ptr = attention.response_row_ptr.long()
-    starts = row_ptr[row_start:row_end]
-    lengths = row_ptr[row_start + 1:row_end + 1] - starts
-    entry_count = int(lengths.sum())
-    if entry_count == 0:
-        empty_long = torch.empty(0, dtype=torch.long, device=row_ptr.device)
-        empty_value = torch.empty(
-            0, dtype=torch.float32, device=attention.response_values.device
-        )
-        return empty_long, empty_long, empty_value
-    repeated_starts = torch.repeat_interleave(starts, lengths)
-    prefix = torch.repeat_interleave(torch.cumsum(lengths, 0) - lengths, lengths)
-    positions = repeated_starts + torch.arange(entry_count, device=row_ptr.device) - prefix
-    rows = torch.repeat_interleave(
-        torch.arange(row_start, row_end, device=row_ptr.device), lengths
-    )
-    return (
-        rows,
-        attention.response_column_indices[positions].long(),
-        attention.response_values[positions].float().clamp_min(0.0),
-    )
-
-
-def _causal_window_mean(values, width):
-    """Causal variable-width mean on a [channel, token] matrix."""
-    width = int(width)
-    cumulative = torch.cat((
-        torch.zeros((values.shape[0], 1), dtype=values.dtype, device=values.device),
-        values.cumsum(dim=1),
-    ), dim=1)
-    token = torch.arange(values.shape[1], device=values.device)
-    start = (token + 1 - width).clamp_min(0)
-    total = cumulative[:, token + 1] - cumulative[:, start]
-    count = (token + 1 - start).to(values.dtype)
-    return total / count[None, :]
-
-
 def _temporal_abs_change(values):
     output = torch.zeros_like(values)
     if values.shape[1] > 1:
@@ -166,7 +119,7 @@ def _channel_prompt_history_mass(attention, *, csr_row_block):
     history_mass = torch.zeros_like(prompt_mass)
     for row_start in range(0, rows_count, int(csr_row_block)):
         row_end = min(row_start + int(csr_row_block), rows_count)
-        rows, source, weight = _csr_entries(attention, row_start, row_end)
+        rows, source, weight = csr_entries(attention, row_start, row_end)
         if not len(rows):
             continue
         is_prompt = source < prompt_count
@@ -181,7 +134,7 @@ def _channel_prompt_history_mass(attention, *, csr_row_block):
     )
 
 
-def direct_lookback_channels(attention, *, window=1, csr_row_block=4096):
+def direct_lookback_channels(attention, *, csr_row_block=4096):
     """Return retained Lookback as ``[token, layer, head]`` without averaging."""
     response_count = int(attention.num_response_tokens)
     prompt_count = int(attention.response_idx)
@@ -202,19 +155,13 @@ def direct_lookback_channels(attention, *, window=1, csr_row_block=4096):
     generated_mean = (history_mass + diagonal) / (token[None, :] + 1.0)
     denominator = prompt_mean + generated_mean
     lookback = torch.where(
-        denominator > 0, prompt_mean / denominator, torch.zeros_like(denominator)
+        denominator > 0,
+        prompt_mean / denominator,
+        torch.full_like(denominator, float(attention.attention_floor)),
     )
-    if int(window) > 1:
-        lookback = _causal_window_mean(lookback, window)
     return lookback.T.reshape(
         response_count, attention.num_layers, attention.num_heads
     )
-
-
-def _window_lookback_channels(current, width):
-    token_count, layers, heads = current.shape
-    windowed = _causal_window_mean(current.reshape(token_count, -1).T, width).T
-    return windowed.reshape(token_count, layers, heads)
 
 
 def _max_grouped_edges(key, weight):
@@ -249,7 +196,7 @@ def _salient_layer_route(attention, *, csr_row_block):
         layer_end = layer_start + rows_per_layer
         for row_start in range(layer_start, layer_end, int(csr_row_block)):
             row_end = min(row_start + int(csr_row_block), layer_end)
-            rows, source, weight = _csr_entries(attention, row_start, row_end)
+            rows, source, weight = csr_entries(attention, row_start, row_end)
             if not len(rows):
                 continue
             target = rows.remainder(response_count)
@@ -285,6 +232,42 @@ def _layer_route_tensors(attention, *, csr_row_block):
         "source": source,
         "target": prompt_count + route_row.remainder(response_count),
         "weight": weight,
+    }
+
+
+def exact_channel_route(attention, *, csr_row_block=4096):
+    """Return every canonical CSR edge with its unmerged layer-head channel."""
+    response_count = int(attention.num_response_tokens)
+    heads = int(attention.num_heads)
+    prompt_count = int(attention.response_idx)
+    rows_count = int(attention.num_channels) * response_count
+    rows, sources, weights = [], [], []
+    for row_start in range(0, rows_count, int(csr_row_block)):
+        row_end = min(row_start + int(csr_row_block), rows_count)
+        current_rows, source, weight = csr_entries(attention, row_start, row_end)
+        if len(current_rows):
+            rows.append(current_rows)
+            sources.append(source)
+            weights.append(weight)
+    device = attention.response_values.device
+    if not rows:
+        empty_long = torch.empty(0, dtype=torch.long, device=device)
+        empty_weight = torch.empty(0, dtype=torch.float32, device=device)
+        return {
+            "channel": empty_long, "layer": empty_long, "head": empty_long,
+            "source": empty_long, "target": empty_long, "weight": empty_weight,
+            "attention_floor": float(attention.attention_floor),
+        }
+    row = torch.cat(rows)
+    channel = torch.div(row, response_count, rounding_mode="floor")
+    return {
+        "channel": channel,
+        "layer": torch.div(channel, heads, rounding_mode="floor"),
+        "head": channel.remainder(heads),
+        "source": torch.cat(sources),
+        "target": prompt_count + row.remainder(response_count),
+        "weight": torch.cat(weights),
+        "attention_floor": float(attention.attention_floor),
     }
 
 
@@ -430,7 +413,7 @@ def compact_layer_structure(attention, *, provenance_hops=2,
 
 def representation_feature_names(num_layers, num_heads):
     return tuple(
-        f"lookback_window:L{layer}:H{head}"
+        f"lookback:L{layer}:H{head}"
         for layer in range(int(num_layers)) for head in range(int(num_heads))
     )
 
@@ -444,7 +427,7 @@ def build_node_representation(lookback, *, num_layers, num_heads):
 
 
 class _PositionReservoir:
-    """Deterministic per-position-bin reservoir for a bounded train reference."""
+    """Train reference with ``size`` shared across all position bins."""
 
     def __init__(self, bins, size, seed):
         self.bins = int(bins)
@@ -484,6 +467,10 @@ class _PositionReservoir:
             values.append(self.values[bin_id, :count].astype(np.float32))
             bins.extend([bin_id] * int(count))
         return np.concatenate(values), np.asarray(bins, dtype=np.int16)
+
+    @property
+    def maximum_rows(self):
+        return self.bins * self.capacity
 
 
 class _PositionScaler:
@@ -587,21 +574,6 @@ class _ScoreCalibrator:
         return _empirical_rank(self.combined, combined)
 
 
-class _ScalarCalibrator:
-    """Calibrate a fixed combination of already calibrated view scores."""
-
-    def fit(self, values):
-        self.reference = np.sort(np.asarray(values, dtype=np.float32))
-        self.reference_scores = self.transform(values)
-        return self
-
-    def transform(self, values):
-        return _empirical_rank(self.reference, values)
-
-    def threshold(self, quantile):
-        return float(np.quantile(self.reference_scores, float(quantile)))
-
-
 class _ViewReference:
     """Position-conditioned robust reference and low-rank normal subspace."""
 
@@ -625,6 +597,7 @@ class _ViewReference:
             standardized, self.pca, self.config.tail_fraction
         )
         self.calibrator = _ScoreCalibrator().fit(tail, residual)
+        self.reference_rows = int(len(values))
         return self
 
     def transform(self, values, position):
@@ -632,12 +605,10 @@ class _ViewReference:
         tail, residual, coordinates = _score_representation(
             standardized, self.pca, self.config.tail_fraction
         )
-        latent = self.pca.transform(standardized).astype(np.float32)
         return {
             "score": self.calibrator.transform(tail, residual),
             "tail": tail, "subspace_residual": residual,
-            "coordinates": coordinates, "latent": latent,
-            "standardized": standardized,
+            "coordinates": coordinates,
         }
 
     @property
@@ -652,6 +623,7 @@ class _ViewReference:
             "explained_variance_ratio": self.pca.explained_variance_ratio_.tolist(),
             "score": "train-ECDF(max(robust-tail, PCA reconstruction residual))",
             "fit_split": "train", "fit_uses_labels": False,
+            "reference_rows": self.reference_rows,
         }
 
 
@@ -699,18 +671,11 @@ def _metadata_arrays(metadata):
     return {name: np.asarray(values, dtype=dtype[name]) for name, values in metadata.items()}
 
 
-def _exact_features(graph, current_lookback):
-    """Legacy scalar diagnostics, deriving the average from frozen channels."""
-    scalar = token_statistics(graph)
-    lookback = (1.0 - current_lookback.reshape(len(current_lookback), -1).mean(dim=1))[:, None]
-    return torch.cat((scalar, lookback), dim=1)
-
-
-def _graph_record(graph, start, end):
+def _graph_record(sample, attention, start, end):
     return {
-        "sample_id": str(graph.sample_id), "start": int(start), "end": int(end),
-        "token_ids": graph.token_ids.detach().cpu().numpy().astype(np.int32),
-        "response_idx": int(graph.response_idx),
+        "sample_id": str(sample.sample_id), "start": int(start), "end": int(end),
+        "token_ids": attention.token_ids.detach().cpu().numpy().astype(np.int32),
+        "response_idx": int(attention.response_idx),
     }
 
 
@@ -720,9 +685,10 @@ def _safe_filename(value):
 
 
 def _save_graph_index(
-    directory, graph, route, representation_file, structure_file, *,
-    graph_embedding_file=None, anomaly_score=None, anomaly_threshold=None,
-    anomaly_mask=None, anomaly_component=None,
+    directory, graph, representation_file, *,
+    canonical_split, canonical_sha256, rewire_seed,
+    true_graph_file=None, anomaly_score=None, anomaly_threshold=None,
+    anomaly_mask=None, anomaly_component=None, rewire_audit=None,
 ):
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"sample_{_safe_filename(graph['sample_id'])}.npz"
@@ -730,23 +696,32 @@ def _save_graph_index(
         schema=np.asarray(SCHEMA), labels_included=np.asarray(False),
         sample_id=np.asarray(graph["sample_id"]), token_ids=graph["token_ids"],
         response_idx=np.asarray(graph["response_idx"], dtype=np.int32),
-        compact_route_layer=route["layer"],
-        compact_route_source=route["source"],
-        compact_route_target=route["target"],
-        compact_route_weight=route["weight"],
         global_row_start=np.asarray(graph["start"], dtype=np.int64),
         global_row_end=np.asarray(graph["end"], dtype=np.int64),
         representation_file=np.asarray(representation_file.name),
-        compact_layer_structure_file=np.asarray(structure_file.name),
+        canonical_split=np.asarray(str(canonical_split)),
+        exact_route_sample_id=np.asarray(graph["sample_id"]),
+        exact_route_sha256=np.asarray(str(canonical_sha256)),
+        rewire_seed=np.asarray(rewire_seed, dtype=np.int64),
     )
-    if graph_embedding_file is not None:
-        payload["graph_embedding_file"] = np.asarray(graph_embedding_file.name)
+    if true_graph_file is not None:
+        payload["true_graph_representation_file"] = np.asarray(true_graph_file.name)
     if anomaly_score is not None:
         payload.update(
-            evidence_flow_score=np.asarray(anomaly_score, dtype=np.float32),
+            true_graph_score=np.asarray(anomaly_score, dtype=np.float32),
             anomaly_threshold=np.asarray(anomaly_threshold, dtype=np.float32),
             anomaly_mask=np.asarray(anomaly_mask, dtype=bool),
             anomaly_component=np.asarray(anomaly_component, dtype=np.int32),
+        )
+    if rewire_audit is not None:
+        payload.update(
+            rewire_rr_edges=np.asarray(rewire_audit["rr_edges"], dtype=np.int64),
+            rewire_changed_edges=np.asarray(
+                rewire_audit["rewired_changed_edges"], dtype=np.int64
+            ),
+            rewire_changed_fraction=np.asarray(
+                rewire_audit["rewired_changed_fraction"], dtype=np.float32
+            ),
         )
     np.savez_compressed(path, **payload)
     return path
@@ -959,71 +934,13 @@ def _channel_rows(values, labels, num_heads, *, description=None):
     return rows
 
 
-def _evaluate_lookback(representation_file, labels, token_index, num_heads, window):
+def _evaluate_lookback(representation_file, labels, num_heads):
     """Audit all preserved layer-head Lookback coordinates after freezing."""
     values = np.load(representation_file, mmap_mode="r")
     rows = _channel_rows(
         values, labels, num_heads, description="[6/8] AUROC Lookback channels"
     )
-    report = {"all_tokens": _signal_summary(rows)}
-    full = np.asarray(token_index) >= int(window) - 1
-    full_rows = _channel_rows(
-        np.asarray(values[full]), np.asarray(labels)[full], num_heads,
-        description="[6/8] AUROC Lookback full windows",
-    )
-    report["full_window_tokens_only"] = {
-        **_signal_summary(full_rows),
-        "tokens": int(full.sum()),
-        "rule": f"response token index >= {int(window) - 1}",
-    }
-    pooled_labels = _window_any_positive(labels, token_index, window)
-    pooled_rows = _channel_rows(
-        np.asarray(values[full]), pooled_labels[full], num_heads,
-        description="[6/8] AUROC Lookback-Lens window targets",
-    )
-    report["lookback_lens_any_positive_window_target"] = {
-        **_signal_summary(pooled_rows),
-        "tokens": int(full.sum()),
-        "rule": (
-            f"token index >= {int(window) - 1}; positive iff any of the "
-            f"previous {int(window)} response tokens is hallucinated"
-        ),
-    }
-    return report
-
-
-def _evaluate_layer_structure(structure_file, labels, names):
-    """Audit each compact mechanism per layer after label-free freezing."""
-    array = np.load(structure_file, mmap_mode="r")
-    report = {}
-    for index, mechanism in enumerate(names):
-        values = array[index]
-        rows = []
-        for layer in tqdm(
-            range(values.shape[1]), desc=f"[6/8] AUROC {mechanism}", unit="layer"
-        ):
-            metric = _separation(labels, np.asarray(values[:, layer]))
-            rows.append({
-                "layer": int(layer),
-                "raw_auroc_higher_for_hallucination": metric[
-                    "raw_auroc_higher_for_hallucination"
-                ],
-                "separability": metric["separability"],
-                "post_hoc_direction": metric["post_hoc_direction"],
-            })
-        report[mechanism] = _signal_summary(rows)
-    return report
-
-
-def _window_any_positive(labels, token_index, window):
-    """Lookback-Lens min-pool equivalent when one denotes hallucination."""
-    labels = np.asarray(labels, dtype=np.int8)
-    token_index = np.asarray(token_index, dtype=np.int64)
-    output = np.zeros_like(labels)
-    for row, index in enumerate(token_index):
-        start = row - min(int(index), int(window) - 1)
-        output[row] = int(labels[start:row + 1].max())
-    return output
+    return {"all_tokens": _signal_summary(rows)}
 
 
 def _open_label_store(evaluation_dataset, description):
@@ -1116,23 +1033,25 @@ def _display_route_edges(route, response_idx, token_count, config, layer=None):
     return chosen
 
 
-def _route_matrices(route, response_idx, response_count, layer=None):
-    """Dense RP/RR matrices of maximum salient route weight for plotting."""
+def _route_edges_by_relation(route, response_idx, response_count, layer=None):
+    """Sparse RP/RR coordinates for plotting without quadratic matrices."""
     token_count = int(response_idx) + int(response_count)
     selected = _collapsed_route_indices(route, token_count, layer=layer)
     source = np.asarray(route["source"])[selected]
     target = np.asarray(route["target"])[selected]
     weight = np.asarray(route["weight"], dtype=np.float32)[selected]
     target_relative = target - int(response_idx)
-    rp = np.zeros((response_count, response_idx), dtype=np.float32)
-    rr = np.zeros((response_count, response_count), dtype=np.float32)
     prompt = source < int(response_idx)
-    if bool(prompt.any()):
-        rp[target_relative[prompt], source[prompt]] = weight[prompt]
     history = ~prompt
-    if bool(history.any()):
-        rr[target_relative[history], source[history] - int(response_idx)] = weight[history]
-    return rp, rr, selected
+    return {
+        "rp_source": source[prompt],
+        "rp_target": target_relative[prompt],
+        "rp_weight": weight[prompt],
+        "rr_source": source[history] - int(response_idx),
+        "rr_target": target_relative[history],
+        "rr_weight": weight[history],
+        "selected": selected,
+    }
 
 
 def _weight_norm(values):
@@ -1179,14 +1098,14 @@ def _render_population(output, coordinates, scores, labels):
             s=size, alpha=alpha, label=name, rasterized=True,
         )
     axes[0].set(
-        title="Train-only PCA of true-topology diffusion innovations",
+        title="Train-only PCA visualization of the raw true graph",
         xlabel="component 1", ylabel="component 2",
     )
     axes[0].legend(frameon=False)
     for axis, key, title in (
         (axes[1], "token_only", "Token-only reference"),
-        (axes[2], "evidence_flow", "Complete evidence-flow detector"),
-        (axes[3], "randomized_topology_control", "Randomized-topology control"),
+        (axes[2], "true_graph", "True evidence-flow graph"),
+        (axes[3], "rewired_graph", "Rewired graph control"),
     ):
         metric = _ranking(labels, scores[key])
         for label, color, name in ((0, "#2ca02c", "correct"), (1, "#d62728", "hallucination")):
@@ -1220,9 +1139,10 @@ def _render_sample(output, graph, route, coordinates, structure, labels,
     token_count = len(graph["token_ids"])
     if layer is not None and not 0 <= int(layer) < int(num_layers):
         raise ValueError(f"display layer must be in [0,{int(num_layers) - 1}]")
-    rp_matrix, rr_matrix, collapsed = _route_matrices(
+    route_edges = _route_edges_by_relation(
         route, response_idx, response_count, layer=layer
     )
+    collapsed = route_edges["selected"]
     selected = _display_route_edges(
         route, response_idx, token_count, config, layer=layer
     )
@@ -1264,7 +1184,9 @@ def _render_sample(output, graph, route, coordinates, structure, labels,
         collection.set_array(rr_weight)
         axes[0].add_collection(collection)
         figure.colorbar(collection, ax=axes[0], label="salient RR route weight")
-    incoming = rr_matrix.sum(axis=1) + rp_matrix.sum(axis=1)
+    incoming = np.zeros(response_count, dtype=np.float32)
+    np.add.at(incoming, route_edges["rp_target"], route_edges["rp_weight"])
+    np.add.at(incoming, route_edges["rr_target"], route_edges["rr_weight"])
     node_size = 16.0 + 60.0 * np.sqrt(incoming / max(float(incoming.max()), 1e-12))
     label_edges = np.where(labels == 1, "#00cfe8", "#202020")
     nodes = axes[0].scatter(
@@ -1292,14 +1214,17 @@ def _render_sample(output, graph, route, coordinates, structure, labels,
         Line2D([], [], color="#7f3c8d", label="RR route; width/color = weight"),
     ], frameon=False)
 
-    # Panels 2/3: adjacency matrices expose source, target, weight and distance.
+    # Panels 2/3: sparse adjacency coordinates expose source, target and weight.
     cmap = plt.get_cmap("magma").copy()
     cmap.set_bad("white")
-    rp_norm = _weight_norm(rp_matrix)
-    image = axes[1].imshow(
-        np.ma.masked_less_equal(rp_matrix, 0), origin="lower", aspect="auto",
-        cmap=cmap, norm=rp_norm, interpolation="nearest",
-    )
+    rp_norm = _weight_norm(route_edges["rp_weight"])
+    image = None
+    if len(route_edges["rp_weight"]):
+        image = axes[1].scatter(
+            route_edges["rp_source"], route_edges["rp_target"],
+            c=route_edges["rp_weight"], s=3, cmap=cmap, norm=rp_norm,
+            marker="s", linewidths=0, rasterized=True,
+        )
     for token in np.flatnonzero(labels == 1):
         axes[1].axhline(token, color="#00ffff", lw=.35, alpha=.65)
     # Overlay every reachable hop-1 prompt provenance as a centroid and spread,
@@ -1346,16 +1271,19 @@ def _render_sample(output, graph, route, coordinates, structure, labels,
         title=f"Prompt→response weighted adjacency ({layer_text})",
         xlabel="prompt source token index", ylabel="response target token index",
     )
-    if rp_norm is not None:
+    if image is not None:
         figure.colorbar(image, ax=axes[1], label="salient RP route weight (log scale)")
     if len(provenance_rows):
         axes[1].legend(frameon=False, loc="upper right")
 
-    rr_norm = _weight_norm(rr_matrix)
-    image = axes[2].imshow(
-        np.ma.masked_less_equal(rr_matrix, 0), origin="lower", aspect="equal",
-        cmap=cmap, norm=rr_norm, interpolation="nearest",
-    )
+    rr_norm = _weight_norm(route_edges["rr_weight"])
+    image = None
+    if len(route_edges["rr_weight"]):
+        image = axes[2].scatter(
+            route_edges["rr_source"], route_edges["rr_target"],
+            c=route_edges["rr_weight"], s=3, cmap=cmap, norm=rr_norm,
+            marker="s", linewidths=0, rasterized=True,
+        )
     axes[2].plot(
         np.arange(response_count), np.arange(response_count),
         color="#00b5d8", lw=.8, linestyle="--", label="zero lag",
@@ -1368,7 +1296,7 @@ def _render_sample(output, graph, route, coordinates, structure, labels,
         xlim=(-.5, response_count - .5), ylim=(-.5, response_count - .5),
     )
     axes[2].legend(frameon=False)
-    if rr_norm is not None:
+    if image is not None:
         figure.colorbar(image, ax=axes[2], label="salient RR route weight (log scale)")
 
     # Panel 4: the detection output and graph-connected anomaly components.
@@ -1417,8 +1345,8 @@ def _render_sample(output, graph, route, coordinates, structure, labels,
     return path, {
         "visible_rr_edges": int(len(rr_selected)),
         "collapsed_route_edges": int(len(collapsed)),
-        "rp_route_edges": int(np.count_nonzero(rp_matrix)),
-        "rr_route_edges": int(np.count_nonzero(rr_matrix)),
+        "rp_route_edges": int(len(route_edges["rp_weight"])),
+        "rr_route_edges": int(len(route_edges["rr_weight"])),
         "display_layer": None if layer is None else int(layer),
     }
 
@@ -1433,13 +1361,26 @@ def render_saved_sample(dataset, *, output_dir, sample_id, layer=None):
         if not required.exists():
             raise FileNotFoundError(f"saved artifact is missing: {required}")
     saved_report = json.loads(report_path.read_text(encoding="utf-8"))
+    if saved_report["schema"] != SCHEMA:
+        raise ValueError(
+            f"unsupported token graph schema: {saved_report['schema']!r}; "
+            f"expected {SCHEMA!r}"
+        )
     saved_config = saved_report.get("config", {})
     with np.load(index_path, allow_pickle=False) as index:
-        names = tuple(map(str, index["structure_names"].tolist()))
-        structure_file = output / str(index["compact_layer_structure_file"])
+        if str(index["schema"]) != SCHEMA:
+            raise ValueError(
+                f"unsupported token graph index schema: {str(index['schema'])!r}; "
+                f"expected {SCHEMA!r}"
+            )
         coordinates_all = np.asarray(index["visualization_coordinates"], dtype=np.float32)
         saved_sample_ids = np.asarray(index["sample_id"]).astype(str)
     with np.load(graph_path, allow_pickle=False) as artifact:
+        if str(artifact["schema"]) != SCHEMA:
+            raise ValueError(
+                f"unsupported sample graph schema: {str(artifact['schema'])!r}; "
+                f"expected {SCHEMA!r}"
+            )
         start = int(artifact["global_row_start"])
         end = int(artifact["global_row_end"])
         graph = {
@@ -1448,30 +1389,10 @@ def render_saved_sample(dataset, *, output_dir, sample_id, layer=None):
             "token_ids": artifact["token_ids"],
             "response_idx": int(artifact["response_idx"]),
         }
-        route = {
-            "layer": artifact["compact_route_layer"],
-            "source": artifact["compact_route_source"],
-            "target": artifact["compact_route_target"],
-            "weight": artifact["compact_route_weight"],
-        }
-        anomaly_score = (
-            artifact["evidence_flow_score"]
-            if "evidence_flow_score" in artifact.files
-            else np.zeros(end - start, dtype=np.float32)
-        )
-        anomaly_threshold = (
-            float(artifact["anomaly_threshold"])
-            if "anomaly_threshold" in artifact.files else 1.0
-        )
-        anomaly_component = (
-            artifact["anomaly_component"]
-            if "anomaly_component" in artifact.files
-            else np.full(end - start, -1, dtype=np.int32)
-        )
-    structure_array = np.load(structure_file, mmap_mode="r")
-    structure = np.asarray(
-        structure_array[:, start:end], dtype=np.float32
-    ).transpose(1, 0, 2)
+        exact_route_sha256 = str(artifact["exact_route_sha256"])
+        anomaly_score = artifact["true_graph_score"]
+        anomaly_threshold = float(artifact["anomaly_threshold"])
+        anomaly_component = artifact["anomaly_component"]
     if not np.all(saved_sample_ids[start:end] == str(sample_id)):
         raise ValueError("saved sample rows do not match the requested sample ID")
     label_cache = output / "evaluation_token_labels.npy"
@@ -1488,20 +1409,37 @@ def render_saved_sample(dataset, *, output_dir, sample_id, layer=None):
         label_source = "dataset_after_formal_seal"
     if len(all_labels) != len(coordinates_all):
         raise ValueError("cached evaluation labels do not align with saved token rows")
-    labels = np.asarray(all_labels[start:end], dtype=np.int8)
+    labels = np.array(all_labels[start:end], dtype=np.int8, copy=True)
     if len(labels) != end - start:
         raise ValueError("saved sample rows do not align with evaluation labels")
+    if isinstance(all_labels, np.memmap):
+        all_labels._mmap.close()
     config = TokenRepresentationConfig(
-        lookback_window=int(saved_config.get("lookback_window", 8)),
         provenance_hops=int(saved_config.get("provenance_hops", 2)),
-        prompt_bins=int(saved_config.get("prompt_bins", 16)),
-        graph_head_components=int(saved_config.get("graph_head_components", 8)),
+        csr_row_block=int(saved_config.get("csr_row_block", 4096)),
         display_mass_cover=float(saved_config.get("display_mass_cover", .80)),
         display_edges_per_type=int(saved_config.get("display_edges_per_type", 2)),
         display_max_edges=int(saved_config.get("display_max_edges", 300)),
         display_layer=layer,
     )
     config.validate()
+    if str(dataset.rows[str(sample_id)]["sha256"]) != exact_route_sha256:
+        raise ValueError("canonical attention sample differs from the frozen graph input")
+    sample = dataset[str(sample_id)]
+    attention = sample.attention()
+    structure_tensor, route_tensors = compact_layer_structure(
+        attention, provenance_hops=config.provenance_hops,
+        csr_row_block=config.csr_row_block, return_route=True,
+    )
+    if int(attention.num_response_tokens) != end - start:
+        raise ValueError("canonical response length differs from the frozen graph rows")
+    structure = structure_tensor.detach().cpu().numpy().astype(np.float32)
+    route = {
+        name: route_tensors[name].detach().cpu().numpy()
+        for name in ("layer", "source", "target", "weight")
+    }
+    names = structure_names(config.provenance_hops)
+    sample.release_attention()
     figure, stats = _render_sample(
         output, graph, route, coordinates_all[start:end], structure,
         labels, names, config, int(dataset.manifest["num_layers"]), layer=layer,
@@ -1512,7 +1450,9 @@ def render_saved_sample(dataset, *, output_dir, sample_id, layer=None):
         "sample_id": str(sample_id), "attention_structure_figure": str(figure),
         "hallucination_tokens": int(labels.sum()),
         "response_nodes": int(len(labels)), "visualization_stats": stats,
-        "features_recomputed": False, "label_source": label_source,
+        "features_recomputed": False,
+        "visualization_structure_recomputed": True,
+        "label_source": label_source,
         "predicted_anomaly_nodes": int(
             np.count_nonzero(anomaly_score >= anomaly_threshold)
         ),
@@ -1523,6 +1463,25 @@ def _geometry(dataset):
     return {name: dataset.manifest.get(name) for name in (
         "schema", "num_layers", "num_heads", "attention_floor", "observer_model",
     )}
+
+
+def _manifest_fingerprint(dataset):
+    keys = (
+        "schema", "index_sha256", "attention_cache_fingerprint",
+        "num_layers", "num_heads", "attention_floor", "observer_model",
+    )
+    result = {
+        key: dataset.manifest[key]
+        for key in keys if key in dataset.manifest
+    }
+    inventory = "\n".join(
+        f"{sample_id}\t{dataset.rows[str(sample_id)]['sha256']}"
+        for sample_id in dataset.sample_ids
+    )
+    result["sample_inventory_sha256"] = hashlib.sha256(
+        inventory.encode("utf-8")
+    ).hexdigest()
+    return result
 
 
 def discover_token_representations(train_dataset, test_dataset, evaluation_dataset,
@@ -1542,24 +1501,19 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
     names = structure_names(config.provenance_hops)
     feature_names = representation_feature_names(num_layers, num_heads)
     channels = num_layers * num_heads
-    head_components = min(config.graph_head_components, num_heads)
-    head_projection = fixed_head_projection(
-        num_heads, head_components, config.seed, device="cpu"
-    )
-    direct_names = direct_field_names(num_layers, config.prompt_bins)
-    propagation_names = propagation_field_names(
-        num_layers, head_components, config.prompt_bins
+    direct_names = direct_field_names(num_layers, num_heads)
+    propagation_names = propagation_field_names(num_layers, num_heads)
+    view_names = (
+        "scalar_only", "token_only", "prompt_graph", "response_graph",
+        "true_graph", "rewired_graph", "direct_marginals",
     )
 
-    print("[1/8] building token, edge, and topology-null train references", flush=True)
+    print("[1/8] building train-only exact-channel references", flush=True)
     reservoirs = {
         name: _PositionReservoir(
             config.position_bins, config.reference_size, config.seed
         )
-        for name in (
-            "token_only", "direct_edges", "true_propagation",
-            "randomized_propagation",
-        )
+        for name in view_names
     }
     train_sources = set()
     train_tokens = 0
@@ -1568,37 +1522,26 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
     ):
         sample = train_dataset[sample_id]
         attention = sample.attention()
-        current_lookback = direct_lookback_channels(
-            attention, window=1, csr_row_block=config.csr_row_block
+        lookback = direct_lookback_channels(
+            attention, csr_row_block=config.csr_row_block
         )
-        lookback = _window_lookback_channels(current_lookback, config.lookback_window)
-        route_tensors = _layer_route_tensors(
-            attention, csr_row_block=config.csr_row_block,
+        direct, propagation, rewired_propagation, _ = evidence_flow_from_attention(
+            lookback, attention, csr_row_block=config.csr_row_block,
+            sample_id=sample_id, seed=config.seed,
         )
-        direct, true_propagation, _ = evidence_flow_fields(
-            lookback, route_tensors,
-            prompt_count=attention.response_idx,
-            prompt_bins=config.prompt_bins,
-            head_projection=head_projection,
-            sample_id=sample_id, seed=config.seed, randomize_rr=False,
-        )
-        randomized_direct, randomized_propagation, _ = evidence_flow_fields(
-            lookback, route_tensors,
-            prompt_count=attention.response_idx,
-            prompt_bins=config.prompt_bins,
-            head_projection=head_projection,
-            sample_id=sample_id, seed=config.seed, randomize_rr=True,
-        )
-        if not torch.equal(direct, randomized_direct):
-            raise RuntimeError("RR randomization changed the direct-edge field")
         representation = build_node_representation(
             lookback, num_layers=num_layers, num_heads=num_heads
         )
+        prompt_flow, response_flow = propagation[:, :channels], propagation[:, channels:]
+        rewired_response_flow = rewired_propagation[:, channels:]
         reference_views = {
+            "scalar_only": representation.mean(dim=1, keepdim=True),
             "token_only": representation,
-            "direct_edges": direct,
-            "true_propagation": true_propagation,
-            "randomized_propagation": randomized_propagation,
+            "prompt_graph": torch.cat((representation, prompt_flow), dim=1),
+            "response_graph": torch.cat((representation, response_flow), dim=1),
+            "true_graph": torch.cat((representation, prompt_flow, response_flow), dim=1),
+            "rewired_graph": torch.cat((representation, prompt_flow, rewired_response_flow), dim=1),
+            "direct_marginals": direct,
         }
         position = np.arange(len(representation), dtype=np.float32) / max(
             len(representation) - 1, 1
@@ -1608,8 +1551,8 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
         train_sources.add(str(sample.source_id))
         train_tokens += len(representation)
         sample.release_attention()
-    print("[2/8] fitting four train-only one-class reference models", flush=True)
-    references, reference_bins, true_reference_values = {}, None, None
+    print("[2/8] fitting seven train-only one-class reference models", flush=True)
+    references, reference_bins = {}, None
     for view, reservoir in reservoirs.items():
         values, bins = reservoir.matrix()
         if reference_bins is None:
@@ -1617,36 +1560,10 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
         elif not np.array_equal(reference_bins, bins):
             raise RuntimeError("view reservoirs did not retain aligned train tokens")
         references[view] = _ViewReference(view, config).fit(values, bins)
-        if view == "true_propagation":
-            true_reference_values = values
-    true_combination = np.maximum.reduce([
-        references["token_only"].reference_scores,
-        references["direct_edges"].reference_scores,
-        references["true_propagation"].reference_scores,
-    ])
-    random_combination = np.maximum.reduce([
-        references["token_only"].reference_scores,
-        references["direct_edges"].reference_scores,
-        references["randomized_propagation"].reference_scores,
-    ])
-    true_calibrator = _ScalarCalibrator().fit(true_combination)
-    random_calibrator = _ScalarCalibrator().fit(random_combination)
-    anomaly_threshold = true_calibrator.threshold(config.anomaly_quantile)
-    block_slices = propagation_block_slices(
-        num_layers, head_components, config.prompt_bins
-    )
-    reference_position = (
-        reference_bins.astype(np.float32) + 0.5
-    ) / config.position_bins
-    true_reference_standardized = references["true_propagation"].scaler.transform(
-        true_reference_values, reference_position
-    )
-    block_calibrators = {}
-    for block, columns in block_slices.items():
-        block_tail = _robust_tail(
-            true_reference_standardized[:, columns], config.tail_fraction
-        )
-        block_calibrators[block] = _ScalarCalibrator().fit(block_tail)
+    del reservoirs, values, bins, reference_bins
+    anomaly_threshold = float(np.quantile(
+        references["true_graph"].reference_scores, config.anomaly_quantile
+    ))
 
     print("[3/8] counting test nodes for compact memory-mapped output", flush=True)
     counts = []
@@ -1659,21 +1576,17 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
     if train_sources & count_sources:
         raise ValueError("train and test source groups overlap")
     total_tokens = int(sum(counts))
-    structure_file = output / "compact_layer_structure.float16.npy"
     representation_file = output / "token_node_representations.float16.npy"
-    graph_embedding_file = output / "evidence_flow_node_embeddings.float16.npy"
-    structure_gib = total_tokens * len(names) * num_layers * 2 / (1024 ** 3)
+    true_graph_file = output / "true_graph_node_representations.float16.npy"
     representation_gib = total_tokens * len(feature_names) * 2 / (1024 ** 3)
-    graph_embedding_width = int(references["true_propagation"].pca.n_components_)
-    graph_embedding_gib = total_tokens * graph_embedding_width * 2 / (1024 ** 3)
+    true_graph_gib = total_tokens * (3 * channels) * 2 / (1024 ** 3)
     print(
-        f"[3/8] test_tokens={total_tokens}; compact_structure≈{structure_gib:.2f} GiB; "
-        f"node_file≈{representation_gib:.2f} GiB; "
-        f"graph_embedding≈{graph_embedding_gib:.2f} GiB",
+        f"[3/8] test_tokens={total_tokens}; node_file~{representation_gib:.2f} GiB; "
+        f"raw_true_graph~{true_graph_gib:.2f} GiB",
         flush=True,
     )
     required = (
-        structure_gib + representation_gib + graph_embedding_gib
+        representation_gib + true_graph_gib
     ) * (1024 ** 3) * 1.10
     free = shutil.disk_usage(output).free
     if free < required:
@@ -1681,36 +1594,28 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
             f"insufficient output disk: need about {required / (1024 ** 3):.2f} GiB, "
             f"available {free / (1024 ** 3):.2f} GiB"
         )
-    structure_output = np.lib.format.open_memmap(
-        structure_file, mode="w+", dtype=np.float16,
-        # Mechanism-major layout keeps one [token,layer] audit matrix contiguous.
-        shape=(len(names), total_tokens, num_layers),
-    )
     representation_output = np.lib.format.open_memmap(
         representation_file, mode="w+", dtype=np.float16,
         shape=(total_tokens, len(feature_names)),
     )
-    graph_embedding_output = np.lib.format.open_memmap(
-        graph_embedding_file, mode="w+", dtype=np.float16,
-        shape=(total_tokens, graph_embedding_width),
+    true_graph_output = np.lib.format.open_memmap(
+        true_graph_file, mode="w+", dtype=np.float16,
+        shape=(total_tokens, 3 * channels),
     )
-    exact_output = np.empty((total_tokens, len(EXACT_FEATURES)), dtype=np.float32)
     coordinate_output = np.empty((total_tokens, 2), dtype=np.float32)
     scores = {
         name: np.empty(total_tokens, dtype=np.float32)
         for name in (
-            "token_only", "direct_edges", "true_propagation",
-            "randomized_propagation", "evidence_flow",
-            "randomized_topology_control",
-            *block_slices,
+            *view_names,
         )
     }
     metadata = _metadata_template()
     graphs, graph_paths = [], {}
+    rewire_audits = []
     graph_directory = output / "sample_graphs"
     offset = 0
 
-    print("[4/8] freezing 1024-D Lookback and compact layer graph state", flush=True)
+    print("[4/8] freezing raw Lookback and raw true-graph representations", flush=True)
     for sample_id, expected_count in tqdm(
         zip(test_dataset.sample_ids, counts), total=len(counts),
         desc="test Lookback + graph propagation", unit="sample",
@@ -1718,56 +1623,35 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
         sample = test_dataset[sample_id]
         attention = sample.attention()
         current_lookback = direct_lookback_channels(
-            attention, window=1, csr_row_block=config.csr_row_block
+            attention, csr_row_block=config.csr_row_block
         )
-        windowed_lookback = _window_lookback_channels(
-            current_lookback, config.lookback_window
+        direct, propagation, rewired_propagation, rewire_audit = evidence_flow_from_attention(
+            current_lookback, attention, csr_row_block=config.csr_row_block,
+            sample_id=sample_id, seed=config.seed,
         )
-        structure, route_tensors = compact_layer_structure(
-            attention,
-            provenance_hops=config.provenance_hops,
-            csr_row_block=config.csr_row_block,
-            return_route=True,
+        representation_tensor = build_node_representation(
+            current_lookback, num_layers=num_layers, num_heads=num_heads
         )
-        direct, true_propagation, _ = evidence_flow_fields(
-            windowed_lookback, route_tensors,
-            prompt_count=attention.response_idx,
-            prompt_bins=config.prompt_bins,
-            head_projection=head_projection,
-            sample_id=sample_id, seed=config.seed, randomize_rr=False,
-        )
-        randomized_direct, randomized_propagation, _ = evidence_flow_fields(
-            windowed_lookback, route_tensors,
-            prompt_count=attention.response_idx,
-            prompt_bins=config.prompt_bins,
-            head_projection=head_projection,
-            sample_id=sample_id, seed=config.seed, randomize_rr=True,
-        )
-        if not torch.equal(direct, randomized_direct):
-            raise RuntimeError("RR randomization changed the direct-edge field")
-        route = {
-            "layer": route_tensors["layer"].detach().cpu().numpy().astype(np.int16),
-            "source": route_tensors["source"].detach().cpu().numpy().astype(np.int32),
-            "target": route_tensors["target"].detach().cpu().numpy().astype(np.int32),
-            "weight": route_tensors["weight"].detach().cpu().numpy().astype(np.float32),
-        }
-        representation = build_node_representation(
-            windowed_lookback, num_layers=num_layers, num_heads=num_heads
-        ).detach().cpu().numpy()
+        representation = representation_tensor.detach().cpu().numpy()
         if len(representation) != expected_count:
             raise ValueError("test response length changed between passes")
         end = offset + expected_count
         position = np.arange(expected_count, dtype=np.float32) / max(expected_count - 1, 1)
         representation_saved = representation.astype(np.float16)
+        prompt_flow, response_flow = propagation[:, :channels], propagation[:, channels:]
+        rewired_response_flow = rewired_propagation[:, channels:]
+        true_graph = torch.cat((
+            representation_tensor,
+            prompt_flow, response_flow,
+        ), dim=1).detach().cpu().numpy()
         test_views = {
-            "token_only": representation_saved,
-            "direct_edges": direct.detach().cpu().numpy().astype(np.float16),
-            "true_propagation": (
-                true_propagation.detach().cpu().numpy().astype(np.float16)
-            ),
-            "randomized_propagation": (
-                randomized_propagation.detach().cpu().numpy().astype(np.float16)
-            ),
+            "scalar_only": representation.mean(axis=1, keepdims=True),
+            "token_only": representation,
+            "prompt_graph": np.concatenate((representation, prompt_flow.detach().cpu().numpy()), axis=1),
+            "response_graph": np.concatenate((representation, response_flow.detach().cpu().numpy()), axis=1),
+            "true_graph": true_graph,
+            "rewired_graph": np.concatenate((representation, prompt_flow.detach().cpu().numpy(), rewired_response_flow.detach().cpu().numpy()), axis=1),
+            "direct_marginals": direct.detach().cpu().numpy(),
         }
         transformed = {
             view: references[view].transform(values, position)
@@ -1775,90 +1659,77 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
         }
         for view in test_views:
             scores[view][offset:end] = transformed[view]["score"]
-        for block, columns in block_slices.items():
-            block_tail = _robust_tail(
-                transformed["true_propagation"]["standardized"][:, columns],
-                config.tail_fraction,
-            )
-            scores[block][offset:end] = block_calibrators[block].transform(block_tail)
-        true_raw = np.maximum.reduce([
-            transformed["token_only"]["score"],
-            transformed["direct_edges"]["score"],
-            transformed["true_propagation"]["score"],
-        ])
-        random_raw = np.maximum.reduce([
-            transformed["token_only"]["score"],
-            transformed["direct_edges"]["score"],
-            transformed["randomized_propagation"]["score"],
-        ])
-        evidence_score = true_calibrator.transform(true_raw)
-        randomized_score = random_calibrator.transform(random_raw)
-        scores["evidence_flow"][offset:end] = evidence_score
-        scores["randomized_topology_control"][offset:end] = randomized_score
-        coordinates = transformed["true_propagation"]["coordinates"]
-        graph = build_attention_graph(attention, GraphBuildConfig(selection="threshold"))
-        exact = _exact_features(graph, current_lookback).detach().cpu().numpy()
-        structure_output[:, offset:end] = (
-            structure.detach().cpu().permute(1, 0, 2).numpy().astype(np.float16)
-        )
+        true_score = transformed["true_graph"]["score"]
+        coordinates = transformed["true_graph"]["coordinates"]
         representation_output[offset:end] = representation_saved
-        graph_embedding_output[offset:end] = transformed[
-            "true_propagation"
-        ]["latent"].astype(np.float16)
-        exact_output[offset:end] = exact
+        true_graph_output[offset:end] = true_graph.astype(np.float16)
         coordinate_output[offset:end] = coordinates
         _append_metadata(metadata, sample, attention)
-        record = _graph_record(graph, offset, end)
+        record = _graph_record(sample, attention, offset, end)
         graphs.append(record)
-        active, component = anomaly_components(
-            route, prompt_count=attention.response_idx,
-            scores=evidence_score, threshold=anomaly_threshold,
+        rewire_audits.append(rewire_audit)
+        active, component = anomaly_components_from_attention(
+            attention,
+            scores=true_score, threshold=anomaly_threshold,
+            csr_row_block=config.csr_row_block,
         )
         graph_paths[record["sample_id"]] = _save_graph_index(
-            graph_directory, record, route, representation_file, structure_file,
-            graph_embedding_file=graph_embedding_file,
-            anomaly_score=evidence_score, anomaly_threshold=anomaly_threshold,
+            graph_directory, record, representation_file,
+            canonical_split=test_dataset.root,
+            canonical_sha256=test_dataset.rows[str(sample_id)]["sha256"],
+            rewire_seed=config.seed,
+            true_graph_file=true_graph_file,
+            anomaly_score=true_score, anomaly_threshold=anomaly_threshold,
             anomaly_mask=active, anomaly_component=component,
+            rewire_audit=rewire_audit,
         )
         offset = end
         sample.release_attention()
-    structure_output.flush()
     representation_output.flush()
-    graph_embedding_output.flush()
+    true_graph_output.flush()
+    representation_output._mmap.close()
+    true_graph_output._mmap.close()
     if offset != total_tokens:
         raise RuntimeError("test token count and frozen arrays do not align")
+    rewire_rr_edges = sum(audit["rr_edges"] for audit in rewire_audits)
+    rewire_changed_edges = sum(
+        audit["rewired_changed_edges"] for audit in rewire_audits
+    )
+    rewire_summary = {
+        "samples": len(rewire_audits),
+        "rr_edges": rewire_rr_edges,
+        "rewired_changed_edges": rewire_changed_edges,
+        "rewired_changed_fraction": (
+            rewire_changed_edges / rewire_rr_edges if rewire_rr_edges else 0.0
+        ),
+    }
     metadata = _metadata_arrays(metadata)
     selected_samples, selection_rule = _select_samples(config, graphs, coordinate_output)
 
     reference_model_file = output / "train_reference_model.npz"
     reference_payload = {
         "schema": np.asarray(SCHEMA), "labels_included": np.asarray(False),
-        "head_projection": head_projection.detach().cpu().numpy(),
         "representation_feature_names": np.asarray(feature_names),
         "direct_field_names": np.asarray(direct_names),
         "propagation_field_names": np.asarray(propagation_names),
-        "evidence_flow_combination_reference": true_calibrator.reference,
-        "randomized_combination_reference": random_calibrator.reference,
         "anomaly_threshold": np.asarray(anomaly_threshold, dtype=np.float32),
     }
-    for block, calibrator in block_calibrators.items():
-        reference_payload[f"{block}_reference"] = calibrator.reference
     for view, model in references.items():
         _save_view_reference(reference_payload, view, model)
     np.savez(reference_model_file, **reference_payload)
 
     index_payload = dict(
         schema=np.asarray(SCHEMA), labels_included=np.asarray(False),
-        structure_names=np.asarray(names),
         representation_feature_names=np.asarray(feature_names),
         direct_field_names=np.asarray(direct_names),
         propagation_field_names=np.asarray(propagation_names),
-        exact_feature_names=np.asarray(EXACT_FEATURES),
-        exact_token_features=exact_output,
         visualization_coordinates=coordinate_output,
-        compact_layer_structure_file=np.asarray(structure_file.name),
         node_representation_file=np.asarray(representation_file.name),
-        graph_embedding_file=np.asarray(graph_embedding_file.name),
+        true_graph_representation_file=np.asarray(true_graph_file.name),
+        exact_route_canonical_split=np.asarray(str(test_dataset.root)),
+        exact_route_storage=np.asarray("canonical sparse CSR attention"),
+        exact_route_channel_layout=np.asarray("channel=layer*num_heads+head"),
+        rewire_seed=np.asarray(config.seed, dtype=np.int64),
         anomaly_threshold=np.asarray(anomaly_threshold, dtype=np.float32),
         sample_id=metadata["sample_id"], source_id=metadata["source_id"],
         token_index=metadata["token_index"], token_id=metadata["token_id"],
@@ -1872,20 +1743,21 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
     label_free_report = {
         "schema": SCHEMA, "labels_read": False,
         "primary_node_state": {
-            "name": "causal-window layer-head Lookback",
+            "name": "direct layer-head Lookback",
             "shape_per_token": [num_layers, num_heads],
             "flattened_dimensions": channels,
             "layer_head_averaged": False,
-            "window": config.lookback_window,
         },
         "compact_layer_structure": {
             "names": list(names),
             "shape_per_token": [len(names), num_layers],
-            "storage_layout": ["mechanism", "token", "layer"],
             "mixed_into_primary_node_vector": False,
+            "role": "computed_on_demand_for_explicit_sample_visualization_only",
+            "stored_for_full_population": False,
         },
         "compression_semantics": {
-            "attention_floor": test_dataset.manifest.get("attention_floor"),
+            "undefined_lookback_fill": "attention_floor",
+            "attention_floor": float(test_dataset.manifest["attention_floor"]),
             "missing_edges_reconstructed": False,
             "interpretation": "all masses and routes use retained CSR edges only",
         },
@@ -1893,41 +1765,41 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
             "trainable": False,
             "backpropagation": False,
             "all_head_mean_used": False,
-            "route": (
-                "union of retained layer/query/source edges; each route weight "
-                "is the strongest retained head value without head averaging"
-            ),
+            "route": "exact retained CSR layer-head channels; no projection",
+            "execution": "one streaming CSR pass computes direct, true, and rewired flows",
             "raw_mass_preserved": True,
-            "conditional_message": "M1=(W X)/(W 1); M2=(W^2 X)/(W^2 1)",
-            "filter_bank": ["(W1)(X-M1)", "(W^2 1)(M1-M2)"],
-            "node_signal": (
-                f"complete {num_layers}x{num_heads} Lookback, projected within "
-                f"each layer to {head_components} fixed orthonormal channels"
-            ),
-            "prompt_signal": f"{config.prompt_bins} source-position bins per layer",
+            "node_signal": f"complete {num_layers}x{num_heads} Lookback",
+            "propagation": "[Fp, Fr] exact-channel residual flows",
+            "direct": "[prompt_mass, response_mass] exact-channel marginals",
             "direct_dimensions": len(direct_names),
             "propagation_dimensions": len(propagation_names),
             "randomized_null": (
-                "preserves every RR target, layer, route-entry count, and edge "
-                "weight; only causal history source endpoints are randomized "
-                "(parallel null routes are allowed)"
+                "preserves every RR target, layer, head, channel, weight, and "
+                "floor(log2(lag)) bucket; each causal source changes whenever "
+                "that bucket contains an alternative (parallel routes are allowed)"
             ),
+            "rewire_audit": rewire_summary,
+        },
+        "exact_route_audit": {
+            "canonical_train_split": str(train_dataset.root),
+            "canonical_test_split": str(test_dataset.root),
+            "train_manifest_fingerprint": _manifest_fingerprint(train_dataset),
+            "test_manifest_fingerprint": _manifest_fingerprint(test_dataset),
+            "stored_again_in_output": False,
+            "sample_key": "sample_id",
+            "channel_layout": "channel=layer*num_heads+head",
+            "target_layout": "target=response_idx+response_row",
+            "rewire_seed": config.seed,
+            "per_sample_rewire_audit": "sample_graphs/*.npz",
         },
         "unsupervised_scores": {
-            "primary_views": [
-                "token_only", "direct_edges", "true_propagation",
-                "randomized_propagation", "evidence_flow",
-                "randomized_topology_control",
-            ],
-            "pattern_diagnostics": list(block_slices),
+            "views": list(view_names),
+            "primary_score": "true_graph",
             "within_view": (
                 "train-ECDF of max(position-conditioned robust-tail, "
                 "train-only PCA reconstruction residual)"
             ),
-            "evidence_flow": (
-                "train-calibrated maximum of token-only, direct-edge, and "
-                "true-topology propagation views"
-            ),
+            "scalar_only": "unlabeled position-conditioned reference on mean(X); no label-selected direction",
             "anomaly_quantile": config.anomaly_quantile,
             "anomaly_threshold": anomaly_threshold,
         },
@@ -1937,13 +1809,12 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
         "structural_validation_protocol": {
             "frozen_before_labels": True,
             "comparisons": [
-                "evidence_flow minus token_only",
-                "true_propagation minus randomized_propagation",
-                "evidence_flow minus randomized_topology_control",
+                "true_graph minus token_only",
+                "true_graph minus rewired_graph",
+                "response_graph minus prompt_graph",
             ],
             "primary_success_rule": (
-                "positive AUROC and AUPRC gains for evidence_flow over token_only, "
-                "and true_propagation over its incoming-route/weight-matched randomized null"
+                "true_graph is the fixed primary score; all comparisons are paired sample bootstraps"
             ),
             "uncertainty": (
                 f"paired {config.bootstrap_replicates}-replicate bootstrap over "
@@ -1955,9 +1826,9 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
             "sample_ids": selected_samples, "rule": selection_rule, "labels_used": False,
         },
         "artifacts": {
-            "compact_layer_structure": str(structure_file),
             "node_representations": str(representation_file),
-            "evidence_flow_node_embeddings": str(graph_embedding_file),
+            "true_graph_representations": str(true_graph_file),
+            "visualization_coordinates": "PCA coordinates only; not node representations",
             "index": str(output / "token_representations_label_free.npz"),
             "train_reference_model": str(reference_model_file),
             "sample_graph_directory": str(graph_directory),
@@ -1971,54 +1842,47 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
     labels = _read_labels(evaluation_dataset, metadata)
     evaluation_labels_file = output / "evaluation_token_labels.npy"
     np.save(evaluation_labels_file, labels)
-    representation_read = np.load(representation_file, mmap_mode="r")
     lookback_signals = _evaluate_lookback(
-        representation_file, labels, metadata["token_index"],
-        num_heads, config.lookback_window,
+        representation_file, labels, num_heads,
     )
-    structure_signals = _evaluate_layer_structure(structure_file, labels, names)
-    exact_signals = {
-        name: _separation(labels, exact_output[:, index])
-        for index, name in enumerate(EXACT_FEATURES)
-    }
     score_metrics = {name: _ranking(labels, value) for name, value in scores.items()}
     comparisons = {
-        "evidence_flow_vs_token_only": _cluster_bootstrap_difference(
-            labels, scores["evidence_flow"], scores["token_only"],
+        "true_graph_vs_token_only": _cluster_bootstrap_difference(
+            labels, scores["true_graph"], scores["token_only"],
             metadata["sample_id"], seed=config.seed,
             replicates=config.bootstrap_replicates,
-            description="[6/8] bootstrap evidence vs token",
+            description="[6/8] bootstrap true graph vs token-only",
         ),
-        "true_vs_randomized_propagation": _cluster_bootstrap_difference(
-            labels, scores["true_propagation"], scores["randomized_propagation"],
+        "true_graph_vs_rewired_graph": _cluster_bootstrap_difference(
+            labels, scores["true_graph"], scores["rewired_graph"],
             metadata["sample_id"], seed=config.seed + 1,
             replicates=config.bootstrap_replicates,
-            description="[6/8] bootstrap true vs randomized propagation",
+            description="[6/8] bootstrap true graph vs rewired graph",
         ),
-        "evidence_flow_vs_randomized_topology": _cluster_bootstrap_difference(
-            labels, scores["evidence_flow"], scores["randomized_topology_control"],
+        "response_graph_vs_prompt_graph": _cluster_bootstrap_difference(
+            labels, scores["response_graph"], scores["prompt_graph"],
             metadata["sample_id"], seed=config.seed + 2,
             replicates=config.bootstrap_replicates,
-            description="[6/8] bootstrap evidence vs randomized topology",
+            description="[6/8] bootstrap response graph vs prompt graph",
         ),
     }
     topology_validation = {
         "observed_metric_gains": {
-            "evidence_flow_minus_token_only_auroc": (
-                score_metrics["evidence_flow"]["auroc"]
+            "true_graph_minus_token_only_auroc": (
+                score_metrics["true_graph"]["auroc"]
                 - score_metrics["token_only"]["auroc"]
             ),
-            "evidence_flow_minus_token_only_auprc": (
-                score_metrics["evidence_flow"]["auprc"]
+            "true_graph_minus_token_only_auprc": (
+                score_metrics["true_graph"]["auprc"]
                 - score_metrics["token_only"]["auprc"]
             ),
-            "true_minus_randomized_propagation_auroc": (
-                score_metrics["true_propagation"]["auroc"]
-                - score_metrics["randomized_propagation"]["auroc"]
+            "true_graph_minus_rewired_graph_auroc": (
+                score_metrics["true_graph"]["auroc"]
+                - score_metrics["rewired_graph"]["auroc"]
             ),
-            "true_minus_randomized_propagation_auprc": (
-                score_metrics["true_propagation"]["auprc"]
-                - score_metrics["randomized_propagation"]["auprc"]
+            "true_graph_minus_rewired_graph_auprc": (
+                score_metrics["true_graph"]["auprc"]
+                - score_metrics["rewired_graph"]["auprc"]
             ),
         },
         "paired_sample_bootstrap": comparisons,
@@ -2027,7 +1891,7 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
             for name, values in scores.items()
         },
         "fixed_threshold_detection": _threshold_metrics(
-            labels, scores["evidence_flow"], anomaly_threshold
+            labels, scores["true_graph"], anomaly_threshold
         ),
         "anomaly_component_localization": _component_detection_metrics(
             labels, graphs, graph_paths
@@ -2041,7 +1905,7 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
         comparisons[comparison][metric]["ci95"][0] is not None
         and comparisons[comparison][metric]["ci95"][0] > 0
         for comparison in (
-            "evidence_flow_vs_token_only", "true_vs_randomized_propagation"
+            "true_graph_vs_token_only", "true_graph_vs_rewired_graph"
         )
         for metric in ("auroc_difference", "auprc_difference")
     ))
@@ -2049,15 +1913,27 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
         **label_free_report,
         "labels_read": True,
         "labels_read_during": "evaluation_and_plot_coloring_only",
+        "labels_used": {"train": False, "test": "evaluation_only"},
         "evaluation_label_cache": str(evaluation_labels_file),
         "unsupervised_score_evaluation": score_metrics,
         "graph_pattern_score_evaluation": {
-            block: score_metrics[block] for block in block_slices
+            view: score_metrics[view]
+            for view in ("prompt_graph", "response_graph")
+        },
+        "raw_representations": {
+            "X": {
+                "file": str(representation_file), "dtype": "float16",
+                "shape": [total_tokens, channels],
+                "meaning": "direct Lookback [L,H] flattened without temporal smoothing",
+            },
+            "Z": {
+                "file": str(true_graph_file), "dtype": "float16",
+                "shape": [total_tokens, 3 * channels],
+                "meaning": "true_graph=[X,Fp,Fr] exact-channel representation",
+            },
         },
         "structural_validation": topology_validation,
         "lookback_layer_head_signal_evaluation": lookback_signals,
-        "compact_layer_structure_signal_evaluation": structure_signals,
-        "legacy_aggregated_exact_feature_evaluation": exact_signals,
         "protocol_warning": (
             "Per-coordinate separability is post-hoc mechanism discovery on this "
             "test set, not an unsupervised deployable score. Freeze selected "
@@ -2069,76 +1945,32 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
-    print("[7/8] rendering population and selected full-token graphs", flush=True)
+    print("[7/8] rendering the population summary", flush=True)
     population = _render_population(output, coordinate_output, scores, labels)
-    graph_by_id = {graph["sample_id"]: graph for graph in graphs}
-    structure_read = np.load(structure_file, mmap_mode="r")
-    sample_rows = []
-    for sample_id in selected_samples:
-        graph = graph_by_id[sample_id]
-        start, end = graph["start"], graph["end"]
-        with np.load(graph_paths[sample_id], allow_pickle=False) as graph_artifact:
-            route = {
-                "layer": graph_artifact["compact_route_layer"],
-                "source": graph_artifact["compact_route_source"],
-                "target": graph_artifact["compact_route_target"],
-                "weight": graph_artifact["compact_route_weight"],
-            }
-            anomaly_score = graph_artifact["evidence_flow_score"]
-            sample_threshold = float(graph_artifact["anomaly_threshold"])
-            anomaly_component = graph_artifact["anomaly_component"]
-        structure = np.asarray(
-            structure_read[:, start:end], dtype=np.float32
-        ).transpose(1, 0, 2)
-        lookback = np.asarray(representation_read[start:end], dtype=np.float32)
-        figure, visualization_stats = _render_sample(
-            output, graph, route, coordinate_output[start:end], structure,
-            labels[start:end], names, config, num_layers,
-            layer=config.display_layer,
-            anomaly_scores=anomaly_score, anomaly_threshold=sample_threshold,
-            anomaly_component=anomaly_component,
-        )
-        detail_path = output / f"sample_{_safe_filename(sample_id)}_graph_state.npz"
-        np.savez_compressed(
-            detail_path, schema=np.asarray(SCHEMA), labels_included=np.asarray(False),
-            sample_id=np.asarray(sample_id), structure_names=np.asarray(names),
-            compact_layer_structure=structure.astype(np.float16),
-            node_representation=lookback.astype(np.float16),
-            visualization_coordinates=coordinate_output[start:end],
-            evidence_flow_score=anomaly_score,
-            anomaly_threshold=np.asarray(sample_threshold, dtype=np.float32),
-            anomaly_component=anomaly_component,
-        )
-        sample_rows.append({
-            "sample_id": sample_id, "selection_rule": selection_rule,
-            "response_nodes": int(end - start),
-            "hallucination_tokens": int(labels[start:end].sum()),
-            "predicted_anomaly_tokens": int(
-                np.count_nonzero(anomaly_score >= sample_threshold)
-            ),
-            "predicted_anomaly_components": int(
-                len(set(anomaly_component[anomaly_component >= 0].tolist()))
-            ),
-            "attention_structure_figure": str(figure),
-            "visualization_stats": visualization_stats,
-            "label_free_graph": str(graph_paths[sample_id]),
-            "label_free_graph_state": str(detail_path),
-        })
     report["population_figure"] = str(population)
-    report["sample_visualizations"] = sample_rows
+    report["sample_visualizations"] = []
+    report["sample_visualization"] = {
+        "automatic": False,
+        "reason": "full routes and dense adjacency plots are explicit post-processing",
+        "recommended_sample_ids": selected_samples,
+        "command": (
+            "python main.py render-token-graph --test-split <test> "
+            f"--output-dir {output} --sample-id <sample_id>"
+        ),
+    }
     report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     print("[8/8] complete", flush=True)
     return {
         "output_dir": str(output), "report": str(report_path),
-        "label_free_embeddings": str(output / "token_representations_label_free.npz"),
-        "node_representations": str(representation_file),
-        "evidence_flow_node_embeddings": str(graph_embedding_file),
-        "compact_layer_structure": str(structure_file),
-        "train_reference_model": str(reference_model_file),
-        "sample_graph_directory": str(graph_directory),
-        "population_figure": str(population), "sample_visualizations": sample_rows,
-        "test_nodes": total_tokens, "unsupervised_score_metrics": score_metrics,
-        "structural_validation": topology_validation,
+        "test_nodes": total_tokens, "primary_score": "true_graph",
+        "score_evaluation": {
+            view: {
+                "auroc": score_metrics[view]["auroc"],
+                "auprc": score_metrics[view]["auprc"],
+            }
+            for view in view_names
+        },
+        "structural_comparisons": comparisons,
     }

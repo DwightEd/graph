@@ -7,6 +7,7 @@ import argparse
 from experiments.mechanism_validation.experiment import (
     build_graphs,
     evaluate_graphs,
+    evaluate_lookback,
     evaluate_mechanisms,
 )
 from experiments.mechanism_validation.screen import MechanismScreen
@@ -38,6 +39,16 @@ def parse_args(argv=None):
     mechanisms.add_argument("--seed", type=int, default=0)
     mechanisms.add_argument("--max-train-tokens", type=int, default=100000)
 
+    lookback = commands.add_parser("evaluate-lookback")
+    lookback.add_argument("--train-split", required=True)
+    lookback.add_argument("--train-features", required=True)
+    lookback.add_argument("--test-split", required=True)
+    lookback.add_argument("--test-features", required=True)
+    lookback.add_argument("--output-dir", required=True)
+    lookback.add_argument("--bootstrap", type=int, default=200)
+    lookback.add_argument("--seed", type=int, default=0)
+    lookback.add_argument("--max-train-tokens", type=int, default=100000)
+
     graph = commands.add_parser("build-graph")
     graph.add_argument("--split-root", required=True)
     graph.add_argument("--mechanism-features", required=True)
@@ -67,6 +78,13 @@ def main(argv=None):
         result = evaluate_mechanisms(args.train_split, args.train_features, args.test_split, args.test_features,
                                      args.output_dir, bootstrap=args.bootstrap, seed=args.seed,
                                      max_train_tokens=args.max_train_tokens)
+    elif args.command == "evaluate-lookback":
+        result = evaluate_lookback(
+            args.train_split, args.train_features,
+            args.test_split, args.test_features, args.output_dir,
+            bootstrap=args.bootstrap, seed=args.seed,
+            max_train_tokens=args.max_train_tokens,
+        )
     elif args.command == "build-graph":
         result = build_graphs(args.split_root, args.mechanism_features, args.output_dir, device=args.device,
                               variants=args.variants, seed=args.seed)
@@ -74,9 +92,45 @@ def main(argv=None):
         result = evaluate_graphs(args.train_split, args.train_graphs, args.test_split, args.test_graphs,
                                  args.output_dir, seed=args.seed, max_train_tokens=args.max_train_tokens,
                                  bootstrap=args.bootstrap)
-    if args.command == "evaluate-mechanisms":
+    if args.command == "evaluate-lookback":
+        univariate = result["univariate"]["train_oriented_test"]
+        held_out = result["lookback_plus_nuisance"]["held_out"]
+        delta = result["lookback_plus_nuisance"]["point_delta"]
+        print(
+            "lookback_ratio "
+            f"univariate AUROC={univariate['auroc']:.4f} "
+            f"AUPRC={univariate['auprc']:.4f} "
+            f"lift={univariate['lift']:.2f}x"
+        )
+        print(
+            "lookback_ratio_plus_nuisance "
+            f"AUROC={held_out['auroc']:.4f} "
+            f"AUPRC={held_out['auprc']:.4f} "
+            f"dAUROC={delta['auroc']:+.4f} "
+            f"dAUPRC={delta['auprc']:+.4f}"
+        )
+        print(f"results: {args.output_dir}/results.json")
+    elif args.command == "evaluate-mechanisms":
         top = sorted(result["adjusted_global_mean"].items(), key=lambda item: item[1]["point_delta"]["auroc"], reverse=True)[:5]
         print("adjusted AUROC delta top5:", [(name, round(value["point_delta"]["auroc"], 4)) for name, value in top])
+        lookback_key = "retained_length_normalized_lookback:global_mean"
+        lookback_univariate = result["univariate"][lookback_key]["train_oriented_test"]
+        lookback_adjusted = result["adjusted_global_mean"][lookback_key]
+        held_out = lookback_adjusted["held_out"]
+        delta = lookback_adjusted["point_delta"]
+        print(
+            "lookback_ratio "
+            f"univariate AUROC={lookback_univariate['auroc']:.4f} "
+            f"AUPRC={lookback_univariate['auprc']:.4f} "
+            f"lift={lookback_univariate['lift']:.2f}x"
+        )
+        print(
+            "lookback_ratio_plus_nuisance "
+            f"AUROC={held_out['auroc']:.4f} "
+            f"AUPRC={held_out['auprc']:.4f} "
+            f"dAUROC={delta['auroc']:+.4f} "
+            f"dAUPRC={delta['auprc']:+.4f}"
+        )
         print(f"results: {args.output_dir}/results.json")
     elif args.command == "evaluate-graphs":
         print("paired cluster intervals:", result["paired_cluster_intervals"])

@@ -42,6 +42,21 @@ def test_sparse_mechanisms_keep_layer_head_and_censor_missing_mass():
     assert_close(float(result.values[0, 0, 0, index["coarsened_entropy_lower_bound"]]), expected_entropy)
 
 
+def test_zero_denominator_lookback_uses_attention_floor_and_is_valid():
+    empty = AttentionSample(
+        "empty", "source", 1, torch.arange(2, dtype=torch.int32),
+        torch.zeros((1, 1, 2), dtype=torch.float16),
+        torch.tensor([0, 0], dtype=torch.int32),
+        torch.empty(0, dtype=torch.int32), torch.empty(0, dtype=torch.float16), .01,
+    )
+
+    result = extract_token_mechanisms(empty)
+    lookback = MECHANISM_NAMES.index("retained_length_normalized_lookback")
+
+    assert_close(float(result.values[0, 0, 0, lookback]), empty.attention_floor)
+    assert bool(result.valid[0, 0, 0, lookback])
+
+
 def test_compact_features_include_masked_temporal_and_layer_drift_features():
     raw = extract_token_mechanisms(sample())
     compact = compact_token_features(raw, ema_decay=.5)

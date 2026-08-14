@@ -1,10 +1,4 @@
-"""Fixed, label-free graph filter bank for causal attention evidence flow.
-
-This module deliberately contains no trainable message MLP.  It retains a
-high-dimensional node signal, sends it over the actual layer-wise attention
-topology, and exposes diffusion wavelets (local and scale innovations) to a
-train-only one-class reference model.
-"""
+"""One-hop, per-layer-head causal attention evidence fields."""
 
 from __future__ import annotations
 
@@ -14,70 +8,30 @@ import numpy as np
 import torch
 
 
-def fixed_head_projection(num_heads, components, seed, *, device="cpu"):
-    """Return a deterministic orthonormal head projection without fitting data."""
-    heads = int(num_heads)
-    width = min(int(components), heads)
-    if heads < 1 or width < 1:
-        raise ValueError("head projection dimensions must be positive")
-    rng = np.random.default_rng(int(seed))
-    matrix = rng.standard_normal((heads, width))
-    orthogonal, _ = np.linalg.qr(matrix, mode="reduced")
-    # Resolve QR's arbitrary column signs for byte-for-byte reproducibility.
-    pivot = np.argmax(np.abs(orthogonal), axis=0)
-    sign = np.sign(orthogonal[pivot, np.arange(width)])
-    orthogonal *= np.where(sign == 0, 1.0, sign)
-    return torch.as_tensor(
-        orthogonal.astype(np.float32), dtype=torch.float32, device=device
+def direct_field_names(num_layers, num_heads):
+    """Names for retained prompt and response masses, one value per channel."""
+    channels = [
+        f"L{layer}:H{head}"
+        for layer in range(int(num_layers))
+        for head in range(int(num_heads))
+    ]
+    return tuple(
+        [f"prompt_mass:{channel}" for channel in channels]
+        + [f"response_mass:{channel}" for channel in channels]
     )
 
 
-def direct_field_names(num_layers, prompt_bins):
-    names = []
-    for layer in range(int(num_layers)):
-        names.extend(
-            f"direct_prompt_mass:L{layer}:B{bin_id}"
-            for bin_id in range(int(prompt_bins))
-        )
-    names.extend(f"rr_log_mass_hop1:L{layer}" for layer in range(int(num_layers)))
-    return tuple(names)
-
-
-def propagation_field_names(num_layers, head_components, prompt_bins):
-    names = []
-    for block in ("node_local_innovation", "node_scale_innovation"):
-        for layer in range(int(num_layers)):
-            names.extend(
-                f"{block}:L{layer}:C{component}"
-                for component in range(int(head_components))
-            )
-    for block in ("prompt_local_innovation", "prompt_scale_innovation"):
-        for layer in range(int(num_layers)):
-            names.extend(
-                f"{block}:L{layer}:B{bin_id}"
-                for bin_id in range(int(prompt_bins))
-            )
-    names.extend(f"rr_log_mass_hop2:L{layer}" for layer in range(int(num_layers)))
-    return tuple(names)
-
-
-def propagation_block_slices(num_layers, head_components, prompt_bins):
-    """Named contiguous blocks in ``propagation_field_names`` order."""
-    layer_head = int(num_layers) * int(head_components)
-    layer_prompt = int(num_layers) * int(prompt_bins)
-    layer_mass = int(num_layers)
-    widths = (
-        ("node_local_innovation", layer_head),
-        ("node_scale_innovation", layer_head),
-        ("prompt_local_innovation", layer_prompt),
-        ("prompt_scale_innovation", layer_prompt),
-        ("two_hop_path_mass", layer_mass),
+def propagation_field_names(num_layers, num_heads):
+    """Names for prompt and response residual flow, one value per channel."""
+    channels = [
+        f"L{layer}:H{head}"
+        for layer in range(int(num_layers))
+        for head in range(int(num_heads))
+    ]
+    return tuple(
+        [f"prompt_flow:{channel}" for channel in channels]
+        + [f"response_flow:{channel}" for channel in channels]
     )
-    output, start = {}, 0
-    for name, width in widths:
-        output[name] = slice(start, start + width)
-        start += width
-    return output
 
 
 def _stable_seed(seed, sample_id):
@@ -92,14 +46,177 @@ def _route_tensor(route, name, *, device, dtype):
     return torch.as_tensor(value, device=device, dtype=dtype)
 
 
-def _random_causal_sources(source, target, *, seed, sample_id):
-    """Randomize RR endpoints while preserving every target, layer and weight."""
-    target_cpu = target.detach().cpu().numpy().astype(np.int64, copy=False)
-    rng = np.random.default_rng(_stable_seed(seed, sample_id))
-    if bool((target_cpu < 1).any()):
-        raise ValueError("an RR route into the first response token is not causal")
-    randomized = np.floor(rng.random(len(target_cpu)) * target_cpu).astype(np.int64)
-    return torch.as_tensor(randomized, dtype=source.dtype, device=source.device)
+def _lag_bin_rewired_sources(
+    source, target_relative, *, prompt_count, seed, sample_id, channel=None,
+):
+    """Choose another causal source in each edge's original log2 lag bin.
+
+    The pseudo-random draw is a stateless hash of the edge, rather than a
+    generator draw.  Consequently a CSR block boundary cannot change the
+    rewired graph.
+    """
+    if not len(source):
+        return source + int(prompt_count)
+    lag = target_relative - source
+
+    log_lag = torch.floor(torch.log2(lag.float())).long()
+    lower = torch.ones_like(lag) << log_lag
+    upper = torch.minimum((lower << 1) - 1, target_relative)
+    count = upper - lower + 1
+    original_offset = lag - lower
+    has_alternative = count > 1
+    if channel is None:
+        channel = torch.zeros_like(source)
+    # All arithmetic remains below 2**63 for the stored graph geometry.
+    modulus = 2_147_483_647
+    edge_key = (
+        (channel.long() * 1_000_003)
+        + (target_relative.long() * 97_409)
+        + (source.long() * 8_191)
+        + (_stable_seed(seed, sample_id) % modulus)
+    )
+    hashed = torch.remainder(edge_key * 48_271, modulus)
+    candidate = torch.remainder(hashed, (count - 1).clamp_min(1))
+    candidate += has_alternative & (candidate >= original_offset)
+    chosen_lag = lower + candidate
+    return (int(prompt_count) + target_relative - chosen_lag).to(dtype=source.dtype)
+
+
+def _by_token(values, layers, heads, response_count):
+    return values.reshape(layers, heads, response_count).permute(2, 0, 1).reshape(
+        response_count, layers * heads
+    )
+
+
+def csr_entries(attention, row_start, row_end):
+    """Return global CSR row IDs, columns and values for one row block."""
+    row_ptr = attention.response_row_ptr.long()
+    starts = row_ptr[row_start:row_end]
+    lengths = row_ptr[row_start + 1:row_end + 1] - starts
+    positions = torch.arange(
+        row_ptr[row_start], row_ptr[row_end], device=row_ptr.device
+    )
+    rows = torch.repeat_interleave(
+        torch.arange(row_start, row_end, device=row_ptr.device), lengths
+    )
+    return (
+        rows,
+        attention.response_column_indices[positions].long(),
+        attention.response_values[positions].float(),
+    )
+
+
+def _empty_flow_state(lookback, *, prompt_count, floor):
+    response_count, layers, heads = map(int, lookback.shape)
+    channels = layers * heads
+    rows = channels * response_count
+    return {
+        "values": lookback.float().permute(1, 2, 0).reshape(-1),
+        "prompt_mass": torch.zeros(rows, dtype=torch.float32, device=lookback.device),
+        "response_mass": torch.zeros(rows, dtype=torch.float32, device=lookback.device),
+        "prompt_flow": torch.zeros(rows, dtype=torch.float32, device=lookback.device),
+        "response_flow": torch.zeros(rows, dtype=torch.float32, device=lookback.device),
+        "rewired_response_flow": torch.zeros(rows, dtype=torch.float32, device=lookback.device),
+        "prompt_count": int(prompt_count),
+        "response_count": response_count,
+        "layers": layers,
+        "heads": heads,
+        "floor": float(floor),
+        "rr_edges": torch.zeros((), dtype=torch.int64, device=lookback.device),
+        "changed_edges": torch.zeros((), dtype=torch.int64, device=lookback.device),
+    }
+
+
+def _accumulate_block(state, rows, source, weight, *, sample_id, seed):
+    """Accumulate direct, exact, and lag-rewired fields from one CSR block."""
+    if not len(rows):
+        return None
+    response_count = state["response_count"]
+    prompt_count = state["prompt_count"]
+    channel = torch.div(rows, response_count, rounding_mode="floor")
+    target_relative = rows.remainder(response_count)
+    is_prompt = source < prompt_count
+    row = rows[is_prompt]
+    value = weight[is_prompt]
+    state["prompt_mass"].index_add_(0, row, value)
+    state["prompt_flow"].index_add_(
+        0, row, value * (state["values"][row] - state["floor"])
+    )
+    is_rr = ~is_prompt
+    row = rows[is_rr]
+    value = weight[is_rr]
+    source_relative = source[is_rr] - prompt_count
+    target = target_relative[is_rr]
+    source_row = channel[is_rr] * response_count + source_relative
+    state["response_mass"].index_add_(0, row, value)
+    state["response_flow"].index_add_(
+        0, row, value * (state["values"][row] - state["values"][source_row])
+    )
+    rewired_source = _lag_bin_rewired_sources(
+        source_relative, target, prompt_count=prompt_count, seed=seed,
+        sample_id=sample_id, channel=channel[is_rr],
+    )
+    rewired_row = channel[is_rr] * response_count + (rewired_source - prompt_count)
+    state["rewired_response_flow"].index_add_(
+        0, row, value * (state["values"][row] - state["values"][rewired_row])
+    )
+    state["rr_edges"] += len(row)
+    state["changed_edges"] += (rewired_source != source[is_rr]).sum()
+    return rewired_source, is_rr
+
+
+def _finish_flow_state(state):
+    layers, heads, response_count = (
+        state["layers"], state["heads"], state["response_count"]
+    )
+    direct = torch.cat((
+        _by_token(state["prompt_mass"], layers, heads, response_count),
+        _by_token(state["response_mass"], layers, heads, response_count),
+    ), dim=1)
+    true_propagation = torch.cat((
+        _by_token(state["prompt_flow"], layers, heads, response_count),
+        _by_token(state["response_flow"], layers, heads, response_count),
+    ), dim=1)
+    rewired_propagation = torch.cat((
+        _by_token(state["prompt_flow"], layers, heads, response_count),
+        _by_token(state["rewired_response_flow"], layers, heads, response_count),
+    ), dim=1)
+    return direct, true_propagation, rewired_propagation
+
+
+def evidence_flow_from_attention(
+    lookback, attention, *, csr_row_block=4096, sample_id="", seed=0,
+):
+    """Stream exact CSR edges into direct and one-hop graph node fields.
+
+    This is the production path.  It never materializes a whole-sample COO
+    route: each CSR block is consumed immediately on the attention device.
+    """
+    if not isinstance(lookback, torch.Tensor) or lookback.ndim != 3:
+        raise ValueError("lookback must be a [response,layer,head] tensor")
+    if int(lookback.shape[0]) != int(attention.num_response_tokens):
+        raise ValueError("lookback and attention response lengths differ")
+    state = _empty_flow_state(
+        lookback, prompt_count=attention.response_idx,
+        floor=attention.attention_floor,
+    )
+    rows_count = int(attention.num_channels) * int(attention.num_response_tokens)
+    for row_start in range(0, rows_count, int(csr_row_block)):
+        rows, source, weight = csr_entries(
+            attention, row_start, min(row_start + int(csr_row_block), rows_count)
+        )
+        _accumulate_block(state, rows, source, weight, sample_id=sample_id, seed=seed)
+    direct, true_propagation, rewired_propagation = _finish_flow_state(state)
+    rr_edges = int(state["rr_edges"].item())
+    changed_edges = int(state["changed_edges"].item())
+    audit = {
+        "rr_edges": rr_edges,
+        "rewired_changed_edges": changed_edges,
+        "rewired_changed_fraction": (
+            changed_edges / rr_edges if rr_edges else 0.0
+        ),
+    }
+    return direct, true_propagation, rewired_propagation, audit
 
 
 def evidence_flow_fields(
@@ -107,164 +224,92 @@ def evidence_flow_fields(
     route,
     *,
     prompt_count,
-    prompt_bins,
-    head_projection,
-    sample_id,
-    seed,
+    sample_id="",
+    seed=0,
     randomize_rr=False,
 ):
-    """Build direct-edge and multi-hop diffusion fields for every response node.
+    """Return direct masses and one-hop residual flows over exact CSR channels.
 
-    ``lookback`` has shape ``[response, layer, head]``.  The returned direct
-    field has prompt-bin masses and one-hop RR mass.  The propagation field
-    retains signed node/prompt diffusion wavelets plus two-hop path mass.
+    Each stored route edge acts only on its own ``channel = layer * H + head``.
+    The direct controls are prompt and response retained masses.  The two
+    propagation blocks are ``Fp = sum_prompt w * (X_target - floor)`` and
+    ``Fr = sum_RR w * (X_target - X_source)``.  Missing CSR edges contribute
+    nothing; no dense topology is inferred.
     """
     if not isinstance(lookback, torch.Tensor) or lookback.ndim != 3:
         raise ValueError("lookback must be a [response,layer,head] tensor")
     response_count, layers, heads = map(int, lookback.shape)
     prompt_count = int(prompt_count)
-    prompt_bins = int(prompt_bins)
-    if response_count < 1 or prompt_count < 1 or prompt_bins < 1:
+    if response_count < 1 or prompt_count < 1:
         raise ValueError("evidence-flow graph requires prompt and response nodes")
-    projection = head_projection.to(device=lookback.device, dtype=torch.float32)
-    if projection.ndim != 2 or projection.shape[0] != heads:
-        raise ValueError("head projection does not match Lookback geometry")
-    projected_width = int(projection.shape[1])
+    required = (
+        "channel", "layer", "head", "source", "target", "weight",
+        "attention_floor",
+    )
+    if any(name not in route for name in required):
+        raise ValueError("exact channel route is missing required COO fields")
+
     device = lookback.device
+    channel = _route_tensor(route, "channel", device=device, dtype=torch.long)
     layer = _route_tensor(route, "layer", device=device, dtype=torch.long)
+    head = _route_tensor(route, "head", device=device, dtype=torch.long)
     source = _route_tensor(route, "source", device=device, dtype=torch.long)
     target = _route_tensor(route, "target", device=device, dtype=torch.long)
     weight = _route_tensor(route, "weight", device=device, dtype=torch.float32)
-    if not (len(layer) == len(source) == len(target) == len(weight)):
+    if not all(len(value) == len(channel) for value in (layer, head, source, target, weight)):
         raise ValueError("route COO arrays have inconsistent lengths")
-    if len(layer) and (
-        int(layer.min()) < 0 or int(layer.max()) >= layers
+    channels = layers * heads
+    if len(channel) and (
+        int(channel.min()) < 0 or int(channel.max()) >= channels
+        or int(layer.min()) < 0 or int(layer.max()) >= layers
+        or int(head.min()) < 0 or int(head.max()) >= heads
+        or not torch.equal(channel, layer * heads + head)
         or int(target.min()) < prompt_count
         or int(target.max()) >= prompt_count + response_count
+        or int(source.min()) < 0
+        or bool((source >= target).any())
         or not bool(torch.isfinite(weight).all())
         or bool((weight < 0).any())
     ):
-        raise ValueError("route COO violates graph geometry")
+        raise ValueError("route COO violates exact causal channel geometry")
+    floor = float(route["attention_floor"])
+    if not np.isfinite(floor) or floor < 0:
+        raise ValueError("route attention_floor must be finite and nonnegative")
 
-    target_relative = target - prompt_count
-    row = layer * response_count + target_relative
-    rows = layers * response_count
-    prompt_profile = torch.zeros(
-        (rows, prompt_bins), dtype=torch.float32, device=device
+    row = channel * response_count + (target - prompt_count)
+    state = _empty_flow_state(lookback, prompt_count=prompt_count, floor=floor)
+    result = _accumulate_block(
+        state, row, source, weight, sample_id=sample_id, seed=seed
     )
-    is_prompt = source < prompt_count
-    if bool(is_prompt.any()):
-        prompt_bin = torch.div(
-            source[is_prompt] * prompt_bins, prompt_count, rounding_mode="floor"
-        ).clamp_max(prompt_bins - 1)
-        flat_index = row[is_prompt] * prompt_bins + prompt_bin
-        prompt_profile.view(-1).index_add_(0, flat_index, weight[is_prompt])
-
-    is_rr = ~is_prompt
-    rr_row = row[is_rr]
-    rr_source = source[is_rr] - prompt_count
-    rr_target = target_relative[is_rr]
-    rr_weight = weight[is_rr]
-    if len(rr_source) and bool((rr_source >= rr_target).any()):
-        raise ValueError("response routes must point strictly into causal history")
-    if randomize_rr and len(rr_source):
-        rr_source = _random_causal_sources(
-            rr_source, rr_target, seed=seed, sample_id=sample_id
-        )
-    rr_layer = layer[is_rr]
-    rr_source_row = rr_layer * response_count + rr_source
-
-    node = torch.einsum(
-        "tlh,hc->tlc", lookback.float(), projection
-    ).permute(1, 0, 2).reshape(rows, projected_width)
-    mass1 = torch.zeros(rows, dtype=torch.float32, device=device)
-    node_numerator1 = torch.zeros_like(node)
-    prompt_numerator1 = torch.zeros_like(prompt_profile)
-    if len(rr_row):
-        mass1.index_add_(0, rr_row, rr_weight)
-        node_numerator1.index_add_(
-            0, rr_row, rr_weight[:, None] * node[rr_source_row]
-        )
-        prompt_numerator1.index_add_(
-            0, rr_row, rr_weight[:, None] * prompt_profile[rr_source_row]
-        )
-    reachable1 = mass1 > 0
-    message1_node = torch.where(
-        reachable1[:, None], node_numerator1 / mass1[:, None].clamp_min(1e-12), 0.0
-    )
-    message1_prompt = torch.where(
-        reachable1[:, None],
-        prompt_numerator1 / mass1[:, None].clamp_min(1e-12),
-        0.0,
-    )
-
-    mass2 = torch.zeros_like(mass1)
-    node_numerator2 = torch.zeros_like(node)
-    prompt_numerator2 = torch.zeros_like(prompt_profile)
-    if len(rr_row):
-        mass2.index_add_(0, rr_row, rr_weight * mass1[rr_source_row])
-        node_numerator2.index_add_(
-            0, rr_row, rr_weight[:, None] * node_numerator1[rr_source_row]
-        )
-        prompt_numerator2.index_add_(
-            0, rr_row, rr_weight[:, None] * prompt_numerator1[rr_source_row]
-        )
-    reachable2 = mass2 > 0
-    message2_node = torch.where(
-        reachable2[:, None], node_numerator2 / mass2[:, None].clamp_min(1e-12), 0.0
-    )
-    message2_prompt = torch.where(
-        reachable2[:, None],
-        prompt_numerator2 / mass2[:, None].clamp_min(1e-12),
-        0.0,
-    )
-
-    # Multiplying conditional innovations by raw path mass makes propagation
-    # continuous at zero: an epsilon-weight route cannot transmit a full-size
-    # neighbour residual merely because it is the only retained route.
-    node_local = torch.where(
-        reachable1[:, None], mass1[:, None] * (node - message1_node), 0.0
-    )
-    node_scale = torch.where(
-        reachable2[:, None], mass2[:, None] * (message1_node - message2_node), 0.0
-    )
-    prompt_local = torch.where(
-        reachable1[:, None],
-        mass1[:, None] * (prompt_profile - message1_prompt), 0.0
-    )
-    prompt_scale = torch.where(
-        reachable2[:, None],
-        mass2[:, None] * (message1_prompt - message2_prompt), 0.0
-    )
-
-    def by_token(values):
-        return values.reshape(layers, response_count, -1).permute(1, 0, 2).reshape(
-            response_count, -1
-        )
-
-    direct = torch.cat((
-        by_token(prompt_profile),
-        mass1.reshape(layers, response_count).T.log1p(),
-    ), dim=1)
-    propagation = torch.cat((
-        by_token(node_local), by_token(node_scale),
-        by_token(prompt_local), by_token(prompt_scale),
-        mass2.reshape(layers, response_count).T.log1p(),
-    ), dim=1)
-    expected_direct = len(direct_field_names(layers, prompt_bins))
-    expected_propagation = len(
-        propagation_field_names(layers, projected_width, prompt_bins)
-    )
-    if direct.shape != (response_count, expected_direct):
+    direct, true_propagation, rewired_propagation = _finish_flow_state(state)
+    propagation = rewired_propagation if randomize_rr else true_propagation
+    if direct.shape != (response_count, len(direct_field_names(layers, heads))):
         raise RuntimeError("direct evidence-flow field differs from its schema")
-    if propagation.shape != (response_count, expected_propagation):
+    if propagation.shape != (response_count, len(propagation_field_names(layers, heads))):
         raise RuntimeError("propagation evidence-flow field differs from its schema")
     diagnostics = {
-        "rr_mass_hop1": mass1.reshape(layers, response_count).T,
-        "rr_mass_hop2": mass2.reshape(layers, response_count).T,
-        "reachable_hop1": reachable1.reshape(layers, response_count).T,
-        "reachable_hop2": reachable2.reshape(layers, response_count).T,
+        "rewire_audit": {
+            "rr_edges": int(state["rr_edges"].item()),
+            "rewired_changed_edges": int(state["changed_edges"].item()),
+            "rewired_changed_fraction": (
+                int(state["changed_edges"].item()) / int(state["rr_edges"].item())
+                if int(state["rr_edges"].item()) else 0.0
+            ),
+        }
     }
+    if randomize_rr:
+        rewired_source = source.clone()
+        if result is not None:
+            source_rewired, is_rr = result
+            rewired_source[is_rr] = source_rewired
+        diagnostics["rewired_route"] = {
+            "channel": channel,
+            "layer": layer,
+            "head": head,
+            "source": rewired_source,
+            "target": target,
+            "weight": weight,
+        }
     return direct, propagation, diagnostics
 
 
@@ -294,6 +339,53 @@ def anomaly_components(route, *, prompt_count, scores, threshold):
     for left, right in zip(source[valid], target[valid]):
         if active[left] and active[right]:
             union(left, right)
+    component = np.full(len(scores), -1, dtype=np.int32)
+    roots = {}
+    for node in np.flatnonzero(active):
+        root = find(int(node))
+        if root not in roots:
+            roots[root] = len(roots)
+        component[node] = roots[root]
+    return active, component
+
+
+def anomaly_components_from_attention(
+    attention, *, scores, threshold, csr_row_block=4096,
+):
+    """Find active-node RR components by streaming the canonical CSR graph."""
+    scores = np.asarray(scores, dtype=np.float32)
+    active = scores >= float(threshold)
+    parent = np.arange(len(scores), dtype=np.int32)
+
+    def find(node):
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = int(parent[node])
+        return node
+
+    def union(left, right):
+        left, right = find(int(left)), find(int(right))
+        if left != right:
+            parent[right] = left
+
+    device = attention.response_values.device
+    active_tensor = torch.as_tensor(active, dtype=torch.bool, device=device)
+    response_count = int(attention.num_response_tokens)
+    prompt_count = int(attention.response_idx)
+    rows_count = int(attention.num_channels) * response_count
+    for row_start in range(0, rows_count, int(csr_row_block)):
+        rows, source, _ = csr_entries(
+            attention, row_start, min(row_start + int(csr_row_block), rows_count)
+        )
+        source = source - prompt_count
+        target = rows.remainder(response_count)
+        history = source >= 0
+        source, target = source[history], target[history]
+        selected = active_tensor[source] & active_tensor[target]
+        pairs = torch.stack((source[selected], target[selected]), dim=1).cpu().numpy()
+        for left, right in pairs:
+            union(left, right)
+
     component = np.full(len(scores), -1, dtype=np.int32)
     roots = {}
     for node in np.flatnonzero(active):

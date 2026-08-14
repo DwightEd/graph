@@ -1,6 +1,7 @@
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import torch
@@ -11,6 +12,30 @@ from research_dataset import ResearchDataset, open_research_dataset
 
 
 class DataTests(unittest.TestCase):
+    def test_attention_validation_checks_csr_in_bounded_row_blocks(self):
+        response_tokens = 600
+        sample = AttentionSample(
+            "bounded", "source", 1,
+            torch.arange(response_tokens + 1, dtype=torch.int32),
+            torch.zeros((1, 1, response_tokens + 1), dtype=torch.float16),
+            torch.arange(response_tokens + 1, dtype=torch.int32),
+            torch.zeros(response_tokens, dtype=torch.int32),
+            torch.full((response_tokens,), .1, dtype=torch.float16),
+            .01,
+        )
+        original = torch.repeat_interleave
+        row_block_sizes = []
+
+        def bounded_repeat(rows, lengths):
+            row_block_sizes.append(rows.numel())
+            return original(rows, lengths)
+
+        with patch("cache.torch.repeat_interleave", side_effect=bounded_repeat):
+            sample.validate()
+
+        self.assertGreater(len(row_block_sizes), 1)
+        self.assertLessEqual(max(row_block_sizes), 256)
+
     def test_canonical_labels_stay_sidecar_and_align_to_response(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -2,7 +2,6 @@
 
 from .graph import AttentionGraph, GraphBuildConfig, RP, RR, build_attention_graph
 from .token_representation import (
-    EXACT_FEATURES,
     TokenRepresentationConfig,
     build_node_representation,
     compact_layer_structure,
@@ -14,7 +13,7 @@ from .token_representation import (
 
 __all__ = [
     "AttentionGraph", "GraphBuildConfig", "RP", "RR", "build_attention_graph",
-    "EXACT_FEATURES", "TokenRepresentationConfig", "discover_token_representations",
+    "TokenRepresentationConfig", "discover_token_representations",
     "build_node_representation", "compact_layer_structure",
     "direct_lookback_channels", "structure_names",
     "render_saved_sample",

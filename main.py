@@ -37,6 +37,19 @@ def _graph_config(args):
     )
 
 
+def _require_llama31_geometry(dataset):
+    geometry = (
+        int(dataset.manifest["num_layers"]),
+        int(dataset.manifest["num_heads"]),
+        float(dataset.manifest["attention_floor"]),
+    )
+    if geometry != (32, 32, .01):
+        raise ValueError(
+            "lookback graph validation requires Llama-3.1-8B geometry "
+            "(32 layers, 32 heads, attention_floor=0.01)"
+        )
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Attention-graph hallucination research pipeline")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -69,17 +82,14 @@ def parse_args(argv=None):
 
     p = sub.add_parser(
         "represent-tokens",
-        help="full Lookback nodes plus multiscale causal evidence-flow detection",
+        help="full Lookback nodes plus exact-channel one-hop graph detection",
     )
     p.add_argument("--train-split", required=True)
     p.add_argument("--test-split", required=True)
     p.add_argument("--output-dir", required=True)
     p.add_argument("--device", default="cuda")
     p.add_argument("--position-bins", type=int, default=10)
-    p.add_argument("--lookback-window", type=int, default=8)
     p.add_argument("--provenance-hops", type=int, default=2)
-    p.add_argument("--prompt-bins", type=int, default=16)
-    p.add_argument("--graph-head-components", type=int, default=8)
     p.add_argument("--bootstrap-replicates", type=int, default=200)
     p.add_argument("--csr-row-block", type=int, default=4096)
     p.add_argument(
@@ -150,12 +160,11 @@ def main(argv=None):
             verify_hashes=True,
             retain_embedded_labels=True,
         )
+        _require_llama31_geometry(train_dataset)
+        _require_llama31_geometry(test_dataset)
         representation_config = TokenRepresentationConfig(
             position_bins=args.position_bins,
-            lookback_window=args.lookback_window,
             provenance_hops=args.provenance_hops,
-            prompt_bins=args.prompt_bins,
-            graph_head_components=args.graph_head_components,
             bootstrap_replicates=args.bootstrap_replicates,
             csr_row_block=args.csr_row_block,
             sample_ids=tuple(args.sample_id),

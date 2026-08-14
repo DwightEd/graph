@@ -89,8 +89,13 @@ class AttentionSample:
             raise ValueError("attention_diagonal must be float16")
         if not 0 < self.response_idx < self.num_tokens:
             raise ValueError("response_idx must split prompt and response")
-        if not (torch.isfinite(self.attention_diagonal).all() and ((self.attention_diagonal >= 0) & (self.attention_diagonal <= 1)).all()):
-            raise ValueError("attention_diagonal must be finite probabilities")
+        for token_start in range(0, self.num_tokens, 4096):
+            diagonal = self.attention_diagonal[:, :, token_start:token_start + 4096]
+            if not (
+                torch.isfinite(diagonal).all()
+                and ((diagonal >= 0) & (diagonal <= 1)).all()
+            ):
+                raise ValueError("attention_diagonal must be finite probabilities")
         expected_rows = self.num_channels * self.num_response_tokens
         if self.response_row_ptr.ndim != 1 or self.response_row_ptr.numel() != expected_rows + 1:
             raise ValueError("response_row_ptr has the wrong length")
@@ -104,18 +109,41 @@ class AttentionSample:
             raise ValueError("CSR columns and values must align")
         if int(self.response_row_ptr[0]) != 0 or int(self.response_row_ptr[-1]) != self.response_values.numel():
             raise ValueError("response_row_ptr does not span response_values")
-        if bool((self.response_row_ptr[1:] < self.response_row_ptr[:-1]).any()):
-            raise ValueError("response_row_ptr must be monotone")
-        if not (torch.isfinite(self.response_values).all() and ((self.response_values >= self.attention_floor) & (self.response_values <= 1)).all()):
-            raise ValueError("response_values must be finite probabilities above attention_floor")
-        lengths = self.response_row_ptr[1:] - self.response_row_ptr[:-1]
-        rows = torch.repeat_interleave(torch.arange(expected_rows, device=lengths.device), lengths)
-        targets = self.response_idx + rows.remainder(self.num_response_tokens)
-        if self.response_column_indices.numel() and bool(((self.response_column_indices < 0) | (self.response_column_indices >= targets)).any()):
-            raise ValueError("CSR columns must point to earlier tokens")
-        same_row = rows[1:] == rows[:-1]
-        if bool((same_row & (self.response_column_indices[1:] <= self.response_column_indices[:-1])).any()):
-            raise ValueError("CSR columns must be increasing within a row")
+        for row_start in range(0, expected_rows, 65536):
+            row_end = min(row_start + 65536, expected_rows)
+            if bool((
+                self.response_row_ptr[row_start + 1:row_end + 1]
+                < self.response_row_ptr[row_start:row_end]
+            ).any()):
+                raise ValueError("response_row_ptr must be monotone")
+        for row_start in range(0, expected_rows, 256):
+            row_end = min(row_start + 256, expected_rows)
+            entry_start = int(self.response_row_ptr[row_start])
+            entry_end = int(self.response_row_ptr[row_end])
+            columns = self.response_column_indices[entry_start:entry_end]
+            values = self.response_values[entry_start:entry_end]
+            if not len(columns):
+                continue
+            if not (
+                torch.isfinite(values).all()
+                and ((values >= self.attention_floor) & (values <= 1)).all()
+            ):
+                raise ValueError(
+                    "response_values must be finite probabilities above attention_floor"
+                )
+            lengths = (
+                self.response_row_ptr[row_start + 1:row_end + 1]
+                - self.response_row_ptr[row_start:row_end]
+            )
+            rows = torch.repeat_interleave(
+                torch.arange(row_start, row_end, device=lengths.device), lengths
+            )
+            targets = self.response_idx + rows.remainder(self.num_response_tokens)
+            if bool(((columns < 0) | (columns >= targets)).any()):
+                raise ValueError("CSR columns must point to earlier tokens")
+            same_row = rows[1:] == rows[:-1]
+            if bool((same_row & (columns[1:] <= columns[:-1])).any()):
+                raise ValueError("CSR columns must be increasing within a row")
 
 
 def save_attention_sample(sample: AttentionSample, path: str | Path) -> None:

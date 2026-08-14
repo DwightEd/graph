@@ -50,7 +50,7 @@ class MechanismScreen:
             }, self.output_dir / f"{research_sample.sample_id}.pt")
             if metadata is None:
                 metadata = {
-                    "schema": "mechanism_features.v2",
+                    "schema": "mechanism_features.v3",
                     "labels_included": False,
                     "ema_decay": self.ema_decay,
                     "attention_floor": float(attention.attention_floor),

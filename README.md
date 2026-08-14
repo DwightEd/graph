@@ -139,3 +139,65 @@ test/state_<sample_id>.npz
 旧的 `run_token_representation.sh`、attention scalar statistics 和 Stage-A
 route dynamics 暂时保留为复现实验基线，不再作为当前主模型入口；待真实
 远端缓存完成对照复现后再安全删除。
+
+## Full-dimensional Lookback graph revalidation
+
+Run the complete foreground experiment on the canonical Llama-3.1-8B split:
+
+```bash
+cd /share/home/tm902089733300000/a903202310/lys/research/graph
+bash run_lookback_graph_validation.sh
+```
+
+`ROOT` defaults to
+`/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b`.
+The runner creates one timestamped directory under
+`outputs/lookback_graph_validation/`, streams progress in the foreground, and
+writes the same output to `run.log`.
+
+It has four stages:
+
+1. extract label-free mechanism features on train;
+2. extract the same features on test;
+3. freeze and score the exact-channel Lookback graph representation before
+   any other command opens labels;
+4. run the separate post-hoc supervised scalar Lookback-ratio diagnostic.
+
+The two primary reports are:
+
+- `graph_representation/token_representation_report.json` - the label-free
+  graph-representation comparison;
+- `lookback_diagnostic/results.json` - the explicitly post-hoc, supervised
+  scalar Lookback-ratio diagnostic.
+
+## Exact-channel node representation
+
+Each response token starts with its uncompressed 32-layer x 32-head Lookback
+state, `X` with 1024 coordinates. Every retained attention entry remains a
+separate `(layer, head, source, target, weight)` edge. Same-channel one-hop
+prompt and response messages are appended to form
+`Z = [X, prompt_flow, response_flow]` with 3072 coordinates.
+
+The graph comparison uses `scalar_only`, `token_only`, `prompt_graph`,
+`response_graph`, `true_graph`, `rewired_graph`, and `direct_marginals`.
+`rewired_graph` preserves each RR target, channel, weight, and lag scale while
+changing its causal response source. The scorer is fitted from unlabeled train
+vectors; test labels are opened only for final diagnostic metrics.
+
+For a focused run of this graph representation only:
+
+```bash
+bash run_token_representation.sh
+```
+
+At completion it prints the raw 1024-D `X` and 3072-D `Z` file paths together
+with `token_representation_report.json`. This runner is the current
+exact-channel one-hop implementation, not a scalar, head-union, or two-hop
+baseline.
+
+Population scoring never materializes visualization routes or dense adjacency
+matrices. To render chosen samples after the representation is frozen, set for
+example `SAMPLE_IDS=id1,id2 bash run_token_representation.sh`; the post-process
+uses sparse source/target coordinates.
+
+See [docs/method.md](docs/method.md) for the mathematical contract.

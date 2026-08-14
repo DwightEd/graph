@@ -159,7 +159,7 @@ def direct_lookback(attention, *, csr_row_block=4096):
     ratio = torch.where(
         denominator > 0,
         prompt_mean / denominator,
-        torch.zeros_like(denominator),
+        torch.full_like(denominator, float(attention.attention_floor)),
     )
     ratio = ratio.reshape(
         attention.num_layers, attention.num_heads, response_count

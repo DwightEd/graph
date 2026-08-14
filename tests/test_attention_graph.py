@@ -3,7 +3,7 @@ import unittest
 import torch
 
 from attention_graph.graph import GraphBuildConfig, build_attention_graph
-from attention_graph.statistics import TOKEN_FEATURES, token_statistics
+from attention_graph.statistics import TOKEN_FEATURES, direct_lookback, token_statistics
 
 
 class Sample:
@@ -26,6 +26,17 @@ class Sample:
 
 
 class AttentionGraphTests(unittest.TestCase):
+    def test_undefined_legacy_lookback_uses_attention_floor(self):
+        sample = Sample()
+        sample.attention_diagonal = torch.zeros_like(sample.attention_diagonal)
+        sample.response_row_ptr = torch.zeros(5, dtype=torch.int64)
+        sample.response_column_indices = torch.empty(0, dtype=torch.int32)
+        sample.response_values = torch.empty(0, dtype=torch.float16)
+
+        anomaly = direct_lookback(sample)
+
+        torch.testing.assert_close(anomaly, torch.full((2,), .99))
+
     def test_graph_preserves_pair_topology_and_channel_traces(self):
         graph = build_attention_graph(Sample(), GraphBuildConfig())
         self.assertEqual(graph.edge_index.tolist(), [[0, 1, 0, 2], [2, 2, 3, 3]])

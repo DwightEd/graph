@@ -67,7 +67,7 @@ def load_feature_split(directory: str | Path, *, max_tokens: int | None = None, 
     """Load compact per-response tensors without consulting a dataset or labels."""
     directory = Path(directory)
     metadata = _read_json(directory / "metadata.json")
-    if metadata.get("schema") != "mechanism_features.v2" or metadata.get("labels_included") is not False:
+    if metadata.get("schema") != "mechanism_features.v3" or metadata.get("labels_included") is not False:
         raise ValueError("feature metadata must exclude labels")
     files = sorted(path for path in directory.glob("*.pt") if path.name != "metadata.pt")
     if not files:
@@ -344,6 +344,103 @@ def evaluate_mechanisms(train_split, train_features, test_split, test_features, 
               "overlap_audit": _overlap_audit(train, test),
               "cache_bound_audit": {"train": {key: train_metadata[key] for key in ("cache_bound_invalid_rows", "cache_bound_total_rows", "cache_bound_invalid_fraction")}, "test": {key: test_metadata[key] for key in ("cache_bound_invalid_rows", "cache_bound_total_rows", "cache_bound_invalid_fraction")}},
               "univariate": univariate, "supervised_diagnostic": metrics, "adjusted_global_mean": adjusted_global_mean}
+    _write_json(output / "results.json", result)
+    return result
+
+
+def evaluate_lookback(train_split, train_features, test_split, test_features,
+                      output_dir, *, bootstrap=200, seed=0,
+                      max_train_tokens=100000) -> dict:
+    """Evaluate only the corrected scalar Lookback ratio as a post-hoc diagnostic."""
+    output = _empty_output(output_dir)
+    train_metadata = _read_json(Path(train_features) / "metadata.json")
+    test_metadata = _read_json(Path(test_features) / "metadata.json")
+    for key in ("schema", "ema_decay", "attention_floor", "feature_names", "family_slices"):
+        if train_metadata.get(key) != test_metadata.get(key):
+            raise ValueError(f"train/test feature metadata differ: {key}")
+    train = load_feature_split(
+        train_features, max_tokens=max_train_tokens, seed=seed
+    )
+    test = load_feature_split(test_features)
+    feature = "retained_length_normalized_lookback:global_mean"
+    column = train.names.index(feature)
+    train_labels = _load_labels(train_split, train)
+    test_labels = _load_labels(test_split, test)
+
+    medians, scale = _fit_preprocessor(
+        train.values[:, [column]], train.valid[:, [column]]
+    )
+    train_lookback = _transform(
+        train.values[:, [column]], train.valid[:, [column]], medians, scale
+    )[:, 0]
+    test_lookback = _transform(
+        test.values[:, [column]], test.valid[:, [column]], medians, scale
+    )[:, 0]
+    train_valid = train.valid[:, column]
+    test_valid = test.valid[:, column]
+    positive = train_lookback[(train_labels == 1) & train_valid]
+    negative = train_lookback[(train_labels == 0) & train_valid]
+    direction = float(positive.mean() - negative.mean())
+    selected = np.flatnonzero(test_valid)
+    test_subset = FeatureSplit(
+        test.values[selected], test.valid[selected], test.sample_ids[selected],
+        test.source_ids[selected], test.positions[selected],
+        test.prompt_lengths[selected], test.response_lengths[selected],
+        test.task_types[selected], test.data_sources[selected], test.names,
+        test.family_slices, test.inventory,
+    )
+    raw = _metric_with_control(
+        test_labels[selected], test_lookback[selected], test_subset, 0, seed
+    )
+    oriented = _metric_with_control(
+        test_labels[selected], test_lookback[selected] * np.sign(direction or 1),
+        test_subset, bootstrap, seed,
+    )
+
+    nuisance_train, nuisance_test = _standardized_nuisance(train, test)
+    train_index = _sample_train(
+        np.arange(len(train_labels)), max_train_tokens, seed
+    )
+    nuisance_score = _probe(
+        nuisance_train[train_index], train_labels[train_index], nuisance_test
+    )
+    adjusted_score = _probe(
+        np.column_stack((nuisance_train, train_lookback))[train_index],
+        train_labels[train_index],
+        np.column_stack((nuisance_test, test_lookback)),
+    )
+    nuisance = _metric_with_control(
+        test_labels, nuisance_score, test, 0, seed
+    )
+    adjusted = _metric_with_control(
+        test_labels, adjusted_score, test, bootstrap, seed
+    )
+    result = {
+        "schema": "lookback-ratio-diagnostic-v1",
+        "analysis_status": "post_hoc_supervised_scalar_diagnostic",
+        "probe_uses_labels": True,
+        "feature": feature,
+        "undefined_ratio_fill": float(train_metadata["attention_floor"]),
+        "train_direction": "higher" if direction >= 0 else "lower",
+        "univariate": {"raw_test": raw, "train_oriented_test": oriented},
+        "nuisance_only": nuisance,
+        "lookback_plus_nuisance": {
+            "held_out": adjusted,
+            "point_delta": {
+                metric: adjusted[metric] - nuisance[metric]
+                for metric in ("auroc", "auprc")
+            },
+        },
+        "train_tokens": len(train_labels),
+        "test_tokens": len(test_labels),
+        "overlap_audit": _overlap_audit(train, test),
+    }
+    np.savez_compressed(
+        output / "predictions.npz", labels=test_labels,
+        sample_ids=test.sample_ids, positions=test.positions,
+        lookback=test_lookback, nuisance=nuisance_score,
+        lookback_plus_nuisance=adjusted_score,
+    )
     _write_json(output / "results.json", result)
     return result
 
