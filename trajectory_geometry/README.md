@@ -1,12 +1,25 @@
 # Trajectory Geometry
 
-This is a standalone, label-free research project for studying whether an LLM's
-attention routes and internal-state trajectory remain coherent while it
-generates a response. It does not import, modify, or train the existing token
-graph project.
+This is the primary, label-free research project for studying whether an LLM's
+attention-conditioned internal-state transition remains coherent while it
+generates a response.
 
-The first implemented stage reads the existing formal sparse attention cache
-directly and produces one route-dynamics embedding per response token. It:
+The implemented main model is one graph dynamical system rather than a feature
+mixture:
+
+```text
+compressed attention CSR + consecutive hidden states
+  -> shared train-only hidden PCA/whitening
+  -> node-control / true-graph / causally-rewired state equations
+  -> sample-held-out reconstruction gate
+  -> per-token cross-layer residual DCT vectors
+```
+
+All state equations are solved by closed-form trimmed ridge. No labels, GNN,
+gradient training, or backpropagation are used.
+
+The earlier route-dynamics diagnostic reads the formal sparse attention cache
+and produces one attention-only embedding per response token. It:
 
 - preserves every layer and head until the final fixed projection;
 - maps variable token sources into comparable prompt/history/self/unresolved
@@ -19,6 +32,35 @@ directly and produces one route-dynamics embedding per response token. It:
 - never reads hallucination labels.
 
 The method and staged implementation gates are specified in [METHOD.md](METHOD.md).
+
+## Run the graph state model
+
+The hidden root must contain train/test sidecars aligned by sample id:
+
+```bash
+HIDDEN_ROOT=/actual/hidden_cache bash run_graph_state_model.sh
+```
+
+Smoke test:
+
+```bash
+LIMIT_TRAIN=10 LIMIT_TEST=5 \
+HIDDEN_ROOT=/actual/hidden_cache \
+bash run_graph_state_model.sh
+```
+
+Accepted hidden arrays are full-sequence consecutive states with shape
+`[layers+1,tokens,hidden_dim]` (or its token-major transpose). A cache with
+only block outputs `[layers,tokens,hidden_dim]` is aligned by skipping the first
+attention layer. Response-only and non-consecutive selected-layer caches are
+rejected because they cannot support prompt-source messages and real per-layer
+transitions.
+
+The output `manifest.json` reports only label-free prediction MSE and whether
+the true graph beats both node control and causally rewired topology. Per-token
+NPZ files contain the three residual embeddings, layerwise prediction error,
+`graph_gain`, and `rewire_gap`. This stage intentionally produces no AUROC or
+2-D plot.
 
 ## Install
 
@@ -34,7 +76,7 @@ python -m trajectory_geometry.cli inspect \
   --attention "$FORMAL_ROOT/train/attention_10005.pt"
 ```
 
-## Extract a complete split
+## Extract the attention-only route diagnostic
 
 ```bash
 LIMIT=5 bash run_route_dynamics.sh

@@ -105,7 +105,7 @@ Before adding hidden states, verify that route embeddings and diagnostics are:
 
 Failure at Gate A means route dynamics remains a diagnostic, not a detector.
 
-## 4. Stage B: hidden and FFN trajectory encoding
+## 4. Stage B: graph-conditioned hidden trajectory encoding (implemented)
 
 Apply one shared train-frozen projection `R` to every layer:
 
@@ -137,8 +137,23 @@ E_{lt}=\Delta X_{lt}-\widehat{\Delta X}_{lt}.
 \]
 
 `B_l` is solved by robust trimmed ridge regression. This is label-free matrix
-estimation, not a GNN and not backpropagation. Layer trajectories are retained
-with fixed DCT/wavelet coefficients rather than a layer mean.
+estimation, not a GNN and not backpropagation. To keep the closed-form problem
+bounded without averaging heads, a fixed balanced signed hash maps heads to a
+small number of message channels. The mapping is frozen by the run seed and
+saved in the model; every head contributes to exactly one channel. Layer
+trajectories are retained with fixed orthonormal DCT coefficients rather than a
+layer mean.
+
+The implemented node control contains the projected target state, response
+position, retained prompt share, length-normalized off-diagonal Lookback,
+self mass, and unresolved mass. Both total routing allocation and candidate-
+token-normalized RP/RR preference are therefore controlled before source
+identity is credited to the graph.
+
+The fit/calibration split is made by complete training sample. Three copies of
+the same state equation are fit independently: node control, true graph, and a
+causal source-rewired graph. Rewiring preserves layer, head, target, edge
+weight, RP/RR type, prompt position bin, and response-lag bucket.
 
 ### Gate B
 
@@ -154,6 +169,11 @@ shuffled layer order
 
 The graph-conditioned block advances only if true topology improves over both
 hidden-only and rewired topology under sample-level paired bootstrap.
+
+The current implementation performs the first, label-free part of this gate by
+reporting sample-held-out state-prediction MSE. AUROC/AUPRC are deliberately
+absent from representation construction and belong to the later frozen
+detector evaluation.
 
 ## 5. Stage C: Hessian-inspired local geometry
 

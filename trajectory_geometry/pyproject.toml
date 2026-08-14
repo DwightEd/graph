@@ -9,6 +9,7 @@ description = "Label-free attention-route and latent-trajectory geometry for tok
 requires-python = ">=3.10"
 dependencies = [
   "numpy>=1.24",
+  "scikit-learn>=1.5,<2",
   "torch>=2.0",
   "scikit-learn>=1.3",
   "tqdm>=4.66",
