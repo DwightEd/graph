@@ -1,18 +1,41 @@
 """Canonical dataset access for attention-graph experiments.
 
-This module only owns validated data access and evaluation labels. Graph
-construction, feature learning, anomaly scoring, and visualization live in the
-``attention_graph`` package.
+This module is the single data boundary for research experiments. It owns file
+format detection, validated loading, sparse CSR decoding, dense/mean attention
+views, metadata, and evaluation-only labels. Experimental code must not parse
+canonical NPZ or formal PT attention files directly.
+
+Graph construction, spectral analysis, feature learning, anomaly scoring, and
+visualization belong outside this module.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from pathlib import Path
 
 import torch
 
 from cache import AttentionDataset, load_attention_sample, sha256
+
+
+@dataclass(frozen=True)
+class SparseAttentionBlock:
+    """A bounded decoded block from canonical response-query CSR rows.
+
+    ``row`` is the global CSR row index. ``query`` is response-relative while
+    ``target`` and ``source`` are absolute prompt+response token positions.
+    Missing CSR entries remain censored; they are never materialized here.
+    """
+
+    row: torch.Tensor
+    layer: torch.Tensor
+    head: torch.Tensor
+    query: torch.Tensor
+    target: torch.Tensor
+    source: torch.Tensor
+    weight: torch.Tensor
 
 
 def open_research_dataset(
@@ -36,6 +59,141 @@ def open_research_dataset(
             retain_labels=retain_embedded_labels,
         )
     return ResearchDataset(root, device=device, verify_hashes=verify_hashes)
+
+
+class _ResearchSampleViews:
+    """Format-independent attention views shared by all research samples."""
+
+    def iter_sparse_attention_blocks(self, block_rows=4096):
+        """Stream decoded sparse response-query entries in bounded row blocks.
+
+        This is the preferred interface for experiments that can operate on
+        sparse attention. It avoids allocating ``[L,H,R,N]`` and preserves the
+        distinction between retained values and cache-censored entries.
+        """
+
+        block_rows = int(block_rows)
+        if block_rows < 1:
+            raise ValueError("block_rows must be positive")
+        attention = self.attention()
+        response_count = attention.num_response_tokens
+        rows_per_layer = attention.num_heads * response_count
+        total_rows = attention.num_channels * response_count
+        row_ptr = attention.response_row_ptr.long()
+        for row_start in range(0, total_rows, block_rows):
+            row_stop = min(row_start + block_rows, total_rows)
+            pointer = row_ptr[row_start : row_stop + 1]
+            lengths = pointer[1:] - pointer[:-1]
+            rows = torch.repeat_interleave(
+                torch.arange(
+                    row_start,
+                    row_stop,
+                    dtype=torch.long,
+                    device=row_ptr.device,
+                ),
+                lengths,
+            )
+            value_start = int(pointer[0].item())
+            value_stop = int(pointer[-1].item())
+            query = rows.remainder(response_count)
+            yield SparseAttentionBlock(
+                row=rows,
+                layer=torch.div(rows, rows_per_layer, rounding_mode="floor"),
+                head=torch.div(
+                    rows.remainder(rows_per_layer),
+                    response_count,
+                    rounding_mode="floor",
+                ),
+                query=query,
+                target=attention.response_idx + query,
+                source=attention.response_column_indices[value_start:value_stop].long(),
+                weight=attention.response_values[value_start:value_stop],
+            )
+
+    def dense_response_channel(
+        self,
+        layer,
+        head,
+        *,
+        include_diagonal=False,
+        dtype=torch.float32,
+    ):
+        """Return one cache-censored ``[R,N]`` layer/head attention matrix.
+
+        Unretained entries are filled with zero only for this requested dense
+        view. They still mean ``<= attention_floor`` rather than known original
+        attention of exactly zero. The full multi-channel dense tensor is never
+        allocated.
+        """
+
+        attention = self.attention()
+        layer, head = int(layer), int(head)
+        if not 0 <= layer < attention.num_layers:
+            raise IndexError("layer is outside attention geometry")
+        if not 0 <= head < attention.num_heads:
+            raise IndexError("head is outside attention geometry")
+        response_count = attention.num_response_tokens
+        output = torch.zeros(
+            (response_count, attention.num_tokens),
+            dtype=dtype,
+            device=attention.response_values.device,
+        )
+        channel = layer * attention.num_heads + head
+        row_offset = channel * response_count
+        row_ptr = attention.response_row_ptr.long()
+        for query in range(response_count):
+            row = row_offset + query
+            start = int(row_ptr[row].item())
+            stop = int(row_ptr[row + 1].item())
+            if stop > start:
+                output[query, attention.response_column_indices[start:stop].long()] = (
+                    attention.response_values[start:stop].to(dtype=dtype)
+                )
+        if include_diagonal:
+            query = torch.arange(response_count, device=output.device)
+            target = attention.response_idx + query
+            output[query, target] = attention.attention_diagonal[
+                layer, head, target
+            ].to(dtype=dtype)
+        return output
+
+    def mean_response_attention(
+        self,
+        *,
+        include_diagonal=False,
+        dtype=torch.float32,
+        block_rows=4096,
+    ):
+        """Return the channel-mean cache-censored response attention ``[R,N]``.
+
+        This is a reusable data view for spectral/SVD feasibility experiments.
+        It averages retained layer/head entries over the *total* channel count,
+        so absent channels contribute only through the explicit zero-fill view;
+        they must still be interpreted as censored below ``attention_floor``.
+        """
+
+        attention = self.attention()
+        output = torch.zeros(
+            (attention.num_response_tokens, attention.num_tokens),
+            dtype=dtype,
+            device=attention.response_values.device,
+        )
+        for block in self.iter_sparse_attention_blocks(block_rows=block_rows):
+            if block.weight.numel():
+                output.index_put_(
+                    (block.query, block.source),
+                    block.weight.to(dtype=dtype),
+                    accumulate=True,
+                )
+        output /= float(attention.num_channels)
+        if include_diagonal:
+            query = torch.arange(attention.num_response_tokens, device=output.device)
+            target = attention.response_idx + query
+            diagonal = attention.attention_diagonal[
+                :, :, attention.response_idx :
+            ].to(dtype=dtype).mean(dim=(0, 1))
+            output[query, target] = diagonal
+        return output
 
 
 class ResearchDataset:
@@ -94,7 +252,7 @@ class ResearchDataset:
         return LabelStore(self)
 
 
-class ResearchSample:
+class ResearchSample(_ResearchSampleViews):
     """One canonical attention sample plus lightweight metadata."""
 
     def __init__(self, dataset: ResearchDataset, sample_id: str):
@@ -233,7 +391,7 @@ class LabelStore:
 class FormalResearchDataset:
     """Lazy adapter over the existing sparse ``attention_*.pt`` archive.
 
-    No attention tensor is copied or re-serialized.  The adapter normalizes the
+    No attention tensor is copied or re-serialized. The adapter normalizes the
     in-memory object to ``AttentionSample`` and keeps embedded labels sealed
     until ``labels()`` is explicitly requested after pattern discovery.
     """
@@ -303,7 +461,7 @@ class FormalResearchDataset:
         return FormalLabelStore(self)
 
 
-class FormalResearchSample:
+class FormalResearchSample(_ResearchSampleViews):
     def __init__(self, dataset: FormalResearchDataset, sample_id: str):
         self.dataset = dataset
         self.sample_id = sample_id
@@ -375,6 +533,34 @@ class FormalResearchSample:
     def generator_model(self):
         self._load()
         return self._metadata["generator_model"]
+
+    @property
+    def observer_model(self):
+        return self.dataset.manifest.get("observer_model")
+
+    @property
+    def temperature(self):
+        self._load()
+        return self._metadata["temperature"]
+
+    @property
+    def quality(self):
+        self._load()
+        return self._metadata["quality"]
+
+    @property
+    def metadata(self):
+        return {
+            "sample_id": self.sample_id,
+            "source_id": self.source_id,
+            "split": self.split,
+            "task_type": self.task_type,
+            "data_source": self.data_source,
+            "generator_model": self.generator_model,
+            "observer_model": self.observer_model,
+            "temperature": self.temperature,
+            "quality": self.quality,
+        }
 
     def attention(self):
         self._load()
