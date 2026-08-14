@@ -22,11 +22,16 @@ def extract_one(
     spec: AnchorSpec,
     embedding_dim: int,
     seed: int,
+    csr_row_block: int,
     save_raw_route: bool,
 ) -> dict[str, object]:
     sample = load_attention_sample(attention_path)
     dynamics = encode_route_dynamics(
-        sample, spec=spec, embedding_dim=embedding_dim, seed=seed
+        sample,
+        spec=spec,
+        embedding_dim=embedding_dim,
+        seed=seed,
+        csr_row_block=csr_row_block,
     )
     payload: dict[str, object] = {
         "schema": np.asarray(SCHEMA),
@@ -72,6 +77,7 @@ def extract_many(
     spec: AnchorSpec,
     embedding_dim: int,
     seed: int,
+    csr_row_block: int,
     save_raw_route: bool,
 ) -> dict[str, object]:
     output_dir = Path(output_dir).expanduser().resolve()
@@ -88,6 +94,7 @@ def extract_many(
             spec=spec,
             embedding_dim=embedding_dim,
             seed=seed,
+            csr_row_block=csr_row_block,
             save_raw_route=save_raw_route,
         )
         rows.append(row)
@@ -103,6 +110,7 @@ def extract_many(
         "samples": total,
         "embedding_dim": embedding_dim,
         "projection_seed": seed,
+        "csr_row_block": csr_row_block,
         "prompt_bins": spec.prompt_bins,
         "history_lag_edges": list(spec.history_lag_edges),
         "save_raw_route": save_raw_route,

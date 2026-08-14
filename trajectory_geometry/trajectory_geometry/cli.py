@@ -25,6 +25,7 @@ def _parser() -> argparse.ArgumentParser:
     extract.add_argument("--history-lag-edges", default="1,2,4,8,16,32")
     extract.add_argument("--embedding-dim", type=int, default=256)
     extract.add_argument("--seed", type=int, default=20260814)
+    extract.add_argument("--csr-row-block", type=int, default=4096)
     extract.add_argument("--limit", type=int)
     extract.add_argument("--save-raw-route", action="store_true")
     return parser
@@ -71,6 +72,7 @@ def main() -> None:
         spec=_spec(arguments),
         embedding_dim=arguments.embedding_dim,
         seed=arguments.seed,
+        csr_row_block=arguments.csr_row_block,
         save_raw_route=arguments.save_raw_route,
     )
     print(json.dumps({key: value for key, value in manifest.items() if key != "records"}, indent=2))

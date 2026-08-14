@@ -23,7 +23,7 @@ The method and staged implementation gates are specified in [METHOD.md](METHOD.m
 ## Install
 
 ```bash
-cd trajectory-geometry
+cd trajectory_geometry
 python -m pip install -e .
 ```
 
@@ -31,21 +31,44 @@ python -m pip install -e .
 
 ```bash
 python -m trajectory_geometry.cli inspect \
-  --attention /path/to/attention_10005.pt
+  --attention "$FORMAL_ROOT/train/attention_10005.pt"
 ```
 
 ## Extract a complete split
 
 ```bash
-python -m trajectory_geometry.cli extract \
-  --attention-root /path/to/attention_cache \
-  --split train \
-  --output-dir /path/to/trajectory_geometry/train
+LIMIT=5 bash run_route_dynamics.sh
+```
+
+The runner defaults to the same formal cache used by
+`run_token_representation.sh`:
+
+```text
+/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/
+outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876
+```
+
+Override it only when needed:
+
+```bash
+FORMAL_ROOT=/actual/cache/root bash run_route_dynamics.sh
 ```
 
 The command searches the selected split recursively, prints progress for every
 sample, and writes a `manifest.json` only after all selected samples finish.
 Use `--limit 5` for a smoke test and `--save-raw-route` only for small audits.
+
+The data class exposes two recovery interfaces:
+
+- `iter_sparse_row_blocks(4096)` returns bounded CSR blocks and is used by the
+  main encoder;
+- `iter_dense_rows()` returns one `[tokens]` thresholded row at a time, fills
+  every absent sparse entry with zero, and never allocates `[L,H,R,N]`.
+
+An absent entry means “below the cache extraction floor,” not a known original
+attention value of exactly zero. The dense iterator follows the requested zero
+fill convention; route statistics additionally retain the total censored mass
+as `unresolved_mass` so that truncation is not mistaken for model certainty.
 
 ## Output per sample
 

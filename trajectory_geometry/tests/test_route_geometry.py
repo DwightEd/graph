@@ -1,9 +1,11 @@
 from pathlib import Path
+import tempfile
 import unittest
 
 import numpy as np
 
-from trajectory_geometry.data import SparseAttentionSample
+from trajectory_geometry.data import SparseAttentionSample, discover_attention_files
+from trajectory_geometry.pipeline import extract_one
 from trajectory_geometry.routing import AnchorSpec, encode_route_dynamics
 
 
@@ -49,6 +51,61 @@ def _sample(switched: bool = False) -> SparseAttentionSample:
 
 
 class RouteGeometryTests(unittest.TestCase):
+    def test_npz_reader_and_extraction_pipeline(self) -> None:
+        sample = _sample(True)
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "attention_synthetic.npz"
+            output = Path(directory) / "route_synthetic.npz"
+            np.savez_compressed(
+                source,
+                response_idx=np.asarray(sample.response_idx),
+                token_ids=sample.token_ids,
+                attention_diagonal=sample.diagonal,
+                response_row_ptr=sample.row_ptr,
+                response_column_indices=sample.columns,
+                response_values=sample.values,
+                attention_floor=np.asarray(sample.attention_floor),
+            )
+            row = extract_one(
+                source,
+                output,
+                spec=AnchorSpec(),
+                embedding_dim=32,
+                seed=7,
+                csr_row_block=3,
+                save_raw_route=False,
+            )
+            self.assertEqual(row["response_tokens"], sample.response_tokens)
+            self.assertTrue(output.is_file())
+            with np.load(output, allow_pickle=False) as result:
+                self.assertEqual(result["route_embedding"].shape, (2, 32))
+                self.assertNotIn("raw_route_mass", result.files)
+
+    def test_documentation_placeholder_has_actionable_error(self) -> None:
+        with self.assertRaisesRegex(FileNotFoundError, "documentation placeholder"):
+            discover_attention_files("/path/to/attention_cache", "train")
+
+    def test_dense_rows_zero_fill_without_full_tensor(self) -> None:
+        sample = _sample()
+        rows = list(sample.iter_dense_rows())
+        self.assertEqual(len(rows), sample.response_rows)
+        first = rows[0]
+        self.assertEqual((first.layer, first.head, first.query, first.target), (0, 0, 0, 3))
+        self.assertEqual(first.values.shape, (sample.token_count,))
+        self.assertAlmostEqual(float(first.values[1]), 0.6, places=6)
+        self.assertAlmostEqual(float(first.values[3]), 0.1, places=6)
+        self.assertEqual(float(first.values[0]), 0.0)
+        self.assertEqual(float(first.values[2]), 0.0)
+
+    def test_sparse_blocks_cover_every_retained_value(self) -> None:
+        sample = _sample(True)
+        blocks = list(sample.iter_sparse_row_blocks(block_rows=3))
+        self.assertGreater(len(blocks), 1)
+        self.assertEqual(sum(block.weight.size for block in blocks), sample.values.size)
+        np.testing.assert_array_equal(
+            np.concatenate([block.source for block in blocks]), sample.columns
+        )
+
     def test_route_mass_preserves_censored_mass(self) -> None:
         result = encode_route_dynamics(
             _sample(), spec=AnchorSpec(prompt_bins=3), embedding_dim=32, seed=7

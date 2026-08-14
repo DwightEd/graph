@@ -87,39 +87,37 @@ def _js(left: np.ndarray, right: np.ndarray) -> np.ndarray:
 
 
 def _build_route_mass(
-    sample: SparseAttentionSample, spec: AnchorSpec
+    sample: SparseAttentionSample, spec: AnchorSpec, csr_row_block: int
 ) -> tuple[np.ndarray, np.ndarray]:
     spec.validate()
     shape = (sample.layers, sample.heads, sample.response_tokens, spec.anchors)
-    route = np.zeros(shape, dtype=np.float64)
-    overflow = np.zeros(shape[:-1], dtype=np.float64)
-    response_tokens = sample.response_tokens
-    rows = sample.layers * sample.heads * response_tokens
+    route = np.zeros(shape, dtype=np.float32)
+    overflow = np.zeros(shape[:-1], dtype=np.float32)
+    for block in sample.iter_sparse_row_blocks(csr_row_block):
+        if not block.source.size:
+            continue
+        anchor = np.empty(block.source.shape, dtype=np.int64)
+        prompt = block.source < sample.response_idx
+        anchor[prompt] = np.minimum(
+            block.source[prompt] * spec.prompt_bins // sample.response_idx,
+            spec.prompt_bins - 1,
+        )
+        history = ~prompt
+        lag = block.target[history] - block.source[history]
+        anchor[history] = spec.prompt_bins + np.searchsorted(
+            np.asarray(spec.history_lag_edges), lag, side="left"
+        )
+        np.add.at(
+            route,
+            (block.layer, block.head, block.query, anchor),
+            block.weight,
+        )
 
-    for row in range(rows):
-        layer = row // (sample.heads * response_tokens)
-        within_layer = row % (sample.heads * response_tokens)
-        head = within_layer // response_tokens
-        query = within_layer % response_tokens
-        target = sample.response_idx + query
-        start, end = int(sample.row_ptr[row]), int(sample.row_ptr[row + 1])
-        for source, weight in zip(sample.columns[start:end], sample.values[start:end]):
-            if source < sample.response_idx:
-                anchor = min(
-                    int(source) * spec.prompt_bins // sample.response_idx,
-                    spec.prompt_bins - 1,
-                )
-            else:
-                lag = target - int(source)
-                history_bin = int(np.searchsorted(spec.history_lag_edges, lag, side="left"))
-                anchor = spec.prompt_bins + history_bin
-            route[layer, head, query, anchor] += float(weight)
-
-        diagonal = float(sample.diagonal[layer, head, target])
-        route[layer, head, query, spec.self_index] = diagonal
-        known = float(route[layer, head, query].sum())
-        overflow[layer, head, query] = max(known - 1.0, 0.0)
-        route[layer, head, query, spec.unresolved_index] = max(1.0 - known, 0.0)
+    diagonal = sample.diagonal[:, :, sample.response_idx :]
+    route[..., spec.self_index] = diagonal
+    known = route.sum(axis=-1)
+    overflow = np.maximum(known - 1.0, 0.0)
+    route[..., spec.unresolved_index] = np.maximum(1.0 - known, 0.0)
 
     if np.any(overflow > 0.02):
         maximum = float(overflow.max())
@@ -127,21 +125,56 @@ def _build_route_mass(
     return route, overflow
 
 
-def _countsketch(values: np.ndarray, output_dim: int, seed: int) -> np.ndarray:
+def _countsketch_add(
+    result: np.ndarray,
+    values: np.ndarray,
+    rng: np.random.Generator,
+) -> None:
     if values.ndim != 2:
         raise ValueError("CountSketch input must be [rows, features]")
-    if output_dim < 1:
-        raise ValueError("embedding_dim must be positive")
-    rng = np.random.default_rng(seed)
+    output_dim = result.shape[1]
     buckets = rng.integers(0, output_dim, size=values.shape[1])
     signs = rng.choice(np.asarray([-1.0, 1.0]), size=values.shape[1])
-    result = np.zeros((values.shape[0], output_dim), dtype=np.float64)
     for bucket in range(output_dim):
         selected = buckets == bucket
         if np.any(selected):
-            result[:, bucket] = values[:, selected] @ signs[selected]
-    # CountSketch preserves the squared norm in expectation without an
-    # additional 1/sqrt(output_dim) scaling.
+            result[:, bucket] += values[:, selected] @ signs[selected]
+
+
+def _route_embedding(
+    probability: np.ndarray, output_dim: int, seed: int
+) -> np.ndarray:
+    if output_dim < 1:
+        raise ValueError("embedding_dim must be positive")
+    layers, heads, response, anchors = probability.shape
+    result = np.zeros((response, output_dim), dtype=np.float64)
+    rng = np.random.default_rng(seed)
+
+    def add(values: np.ndarray) -> None:
+        flattened = values.transpose(2, 0, 1, 3).reshape(
+            response, layers * heads * anchors
+        )
+        _countsketch_add(result, flattened, rng)
+
+    add(probability)
+    delta = np.zeros_like(probability)
+    if response > 1:
+        delta[:, :, 1:] = probability[:, :, 1:] - probability[:, :, :-1]
+    add(delta)
+
+    acceleration = np.zeros_like(probability)
+    if response > 2:
+        acceleration[:, :, 2:] = (
+            probability[:, :, 2:]
+            - 2 * probability[:, :, 1:-1]
+            + probability[:, :, :-2]
+        )
+    add(acceleration)
+
+    depth = np.zeros_like(probability)
+    if layers > 1:
+        depth[1:] = probability[1:] - probability[:-1]
+    add(depth)
     return result.astype(np.float32)
 
 
@@ -151,9 +184,10 @@ def encode_route_dynamics(
     spec: AnchorSpec | None = None,
     embedding_dim: int = 256,
     seed: int = 20260814,
+    csr_row_block: int = 4096,
 ) -> RouteDynamics:
     spec = spec or AnchorSpec()
-    route_mass, overflow = _build_route_mass(sample, spec)
+    route_mass, overflow = _build_route_mass(sample, spec, csr_row_block)
     probability = _normalize(route_mass)
     layers, heads, response, anchors = probability.shape
 
@@ -173,30 +207,7 @@ def encode_route_dynamics(
         second = probability[:, :, 2:] - 2 * probability[:, :, 1:-1] + probability[:, :, :-2]
         acceleration[:, :, 2:] = np.linalg.norm(second, axis=-1)
 
-    time_delta = np.zeros_like(probability)
-    time_acceleration = np.zeros_like(probability)
-    depth_delta = np.zeros_like(probability)
-    if response > 1:
-        time_delta[:, :, 1:] = probability[:, :, 1:] - probability[:, :, :-1]
-    if response > 2:
-        time_acceleration[:, :, 2:] = (
-            probability[:, :, 2:]
-            - 2 * probability[:, :, 1:-1]
-            + probability[:, :, :-2]
-        )
-    if layers > 1:
-        depth_delta[1:] = probability[1:] - probability[:-1]
-
-    state = np.concatenate(
-        [
-            probability.transpose(2, 0, 1, 3).reshape(response, -1),
-            time_delta.transpose(2, 0, 1, 3).reshape(response, -1),
-            time_acceleration.transpose(2, 0, 1, 3).reshape(response, -1),
-            depth_delta.transpose(2, 0, 1, 3).reshape(response, -1),
-        ],
-        axis=1,
-    )
-    embedding = _countsketch(state, embedding_dim, seed)
+    embedding = _route_embedding(probability, embedding_dim, seed)
 
     prompt_slice = slice(0, spec.prompt_bins)
     history_slice = slice(spec.prompt_bins, spec.self_index)
