@@ -384,9 +384,8 @@ def spectral_volume(
         if len(current) < 2 or dimensions == 0:
             result[token] = np.log(alpha)
             continue
-        z = current.T
-        z = z - z.mean(axis=0, keepdims=True)
-        gram = (z.T @ z) / max(dimensions, 1)
+        centered = current - current.mean(axis=0, keepdims=True)
+        gram = (centered @ centered.T) / max(dimensions, 1)
         gram.flat[:: len(gram) + 1] += alpha
         sign, logdet = np.linalg.slogdet(gram)
         if sign <= 0 or not np.isfinite(logdet):
