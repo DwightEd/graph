@@ -72,8 +72,9 @@ hop distinguishes similar marginals produced by different causal paths.
 
 The control graph keeps every RR target, channel, retained weight, causal
 validity, and \(\lfloor\log_2(\mathrm{lag})\rfloor\) bin, then draws another
-source from that bin. Prompt routes and all attention marginals remain
-unchanged. The intervention does **not** preserve exact lag, source in-degree,
+source from that bin when an alternative exists; singleton bins remain
+unchanged. Prompt routes and all attention marginals remain unchanged. The
+intervention does **not** preserve exact lag, source in-degree,
 or source-collision patterns. Exact-versus-rewired performance therefore
 measures sensitivity to this joint coarse-lag-stratified source intervention;
 it cannot by itself isolate source identity from the induced degree, collision,

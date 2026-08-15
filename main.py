@@ -102,7 +102,7 @@ def parse_args(argv=None):
 
     p = sub.add_parser(
         "render-token-graph",
-        help="re-render weighted attention structure from an existing output directory",
+        help="legacy v2 artifact renderer (not used by represent-tokens)",
     )
     p.add_argument("--test-split", required=True)
     p.add_argument("--output-dir", required=True)
