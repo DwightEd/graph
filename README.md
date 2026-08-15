@@ -140,77 +140,79 @@ test/state_<sample_id>.npz
 route dynamics 暂时保留为复现实验基线，不再作为当前主模型入口；待真实
 远端缓存完成对照复现后再安全删除。
 
-## Full-dimensional Lookback graph revalidation
+## Label-free causal topology experiment
 
-Run the complete foreground experiment on the canonical Llama-3.1-8B split:
+Run the current foreground experiment on the canonical Llama-3.1-8B split:
 
 ```bash
 cd /share/home/tm902089733300000/a903202310/lys/research/graph
-bash run_lookback_graph_validation.sh
-```
-
-`ROOT` defaults to
-`/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b`.
-The runner creates one timestamped directory under
-`outputs/lookback_graph_validation/`, streams progress in the foreground, and
-writes the same output to `run.log`.
-
-Train-reference construction saves
-`graph_representation/train_reference_checkpoint.npz` every 50 completed
-samples. Resume with the same output directory; completed mechanism features
-are reused and the log is appended:
-
-```bash
-OUTPUT_ROOT=/path/from/the/previous/run bash run_lookback_graph_validation.sh
-```
-
-The exact-channel hot path uses one causal CSR pass per sample and defaults to
-65536 CSR rows per GPU block. Set `CHECKPOINT_INTERVAL` or `CSR_ROW_BLOCK` only
-when a different recovery interval or memory/speed tradeoff is required.
-
-It has four stages:
-
-1. extract label-free mechanism features on train;
-2. extract the same features on test;
-3. freeze and score the exact-channel Lookback graph representation before
-   any other command opens labels;
-4. run the separate post-hoc supervised scalar Lookback-ratio diagnostic.
-
-The two primary reports are:
-
-- `graph_representation/token_representation_report.json` - the label-free
-  graph-representation comparison;
-- `lookback_diagnostic/results.json` - the explicitly post-hoc, supervised
-  scalar Lookback-ratio diagnostic.
-
-## Exact-channel node representation
-
-Each response token starts with its uncompressed 32-layer x 32-head Lookback
-state, `X` with 1024 coordinates. Every retained attention entry remains a
-separate `(layer, head, source, target, weight)` edge. Same-channel one-hop
-prompt and response messages are appended to form
-`Z = [X, prompt_flow, response_flow]` with 3072 coordinates.
-
-The graph comparison uses `scalar_only`, `token_only`, `prompt_graph`,
-`response_graph`, `true_graph`, `rewired_graph`, and `direct_marginals`.
-`rewired_graph` preserves each RR target, channel, weight, and lag scale while
-changing its causal response source. The scorer is fitted from unlabeled train
-vectors; test labels are opened only for final diagnostic metrics.
-
-For a focused run of this graph representation only:
-
-```bash
 bash run_token_representation.sh
 ```
 
-At completion it prints the raw 1024-D `X` and 3072-D `Z` file paths together
-with `token_representation_report.json`. This runner is the current
-exact-channel one-hop implementation, not a scalar, head-union, or two-hop
-baseline.
+`DATA_ROOT` defaults to
+`/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b`.
+The runner creates a timestamped directory under `outputs/causal_topology/`,
+prints progress in the foreground, and writes the same stream to
+`${OUTPUT_DIR}.log`. `run_lookback_graph_validation.sh` remains only as a
+compatibility alias for this entry point.
 
-Population scoring never materializes visualization routes or dense adjacency
-matrices. To render chosen samples after the representation is frozen, set for
-example `SAMPLE_IDS=id1,id2 bash run_token_representation.sh`; the post-process
-uses sparse source/target coordinates.
+The encoder preserves the 32 x 32 layer-head channels while separating radial
+attention marginals from source-sensitive topology. It represents prompt
+source position with Fourier moments and response history with normalized
+one-hop mean, absolute difference, variance, and two-hop messages. A
+coarse-lag-bin RR rewire is the fixed topology null; it preserves target,
+channel, weight, and log2 lag bin, but not source in-degree, exact lag, or
+collisions. Independent atomic one-class references are fitted and calibrated
+on source/sample-disjoint unlabeled train groups, then combined by a calibrated
+hierarchy.
+
+The fixed token scores are:
+
+- `attention_marginals`, `retained_support`, and `balance_scale`;
+- `prompt_topology`;
+- `rr_one_hop_exact`, `rr_two_hop_exact`, and `rr_multihop_exact`;
+- `rr_multihop_lag_rewired`;
+- `causal_topology_exact` and `causal_topology_lag_rewired`;
+- the primary score, `full_signal`.
+
+The completed output directory contains four files:
+
+```text
+topology_one_class_model.npz
+topology_label_free.npz
+topology_label_free_report.json
+topology_experiment_report.json
+```
+
+Only scalar scores, token metadata, and two compact score coordinates are
+stored for test tokens. The experiment does not write the former population
+1024-D `X` or 3072-D `[X,Fp,Fr]` matrices.
+
+During train-reference construction,
+`train_reference_checkpoint.npz` is updated every `CHECKPOINT_INTERVAL`
+completed samples. Resume using the same output directory and unchanged
+configuration:
+
+```bash
+OUTPUT_DIR=/path/from/the/interrupted/run bash run_token_representation.sh
+```
+
+The checkpoint signature covers the train inventory, encoder settings, and
+atomic block contract. It is removed after a successful run.
+
+Four paired sample-bootstrap comparisons are fixed before evaluation:
+
+1. `full_signal` versus `attention_marginals`;
+2. `causal_topology_exact` versus `attention_marginals`;
+3. `rr_multihop_exact` versus `rr_multihop_lag_rewired`;
+4. `rr_multihop_exact` versus `rr_one_hop_exact`.
+
+"Unsupervised" describes representation learning and anomaly scoring: the
+algorithm does not expose or consume labels while encoding, fitting references,
+or freezing scores. The completed experiment still opens the evaluation labels
+afterward to report AUROC/AUPRC and paired uncertainty. A canonical cache file
+may physically contain an embedded `y_token` field when deserialized; the
+scientific contract is that this field is not supplied to the algorithm, not
+that its bytes can never enter process memory.
 
 See [docs/method.md](docs/method.md) for the mathematical contract.

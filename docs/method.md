@@ -2,9 +2,12 @@
 
 This experiment asks whether the *arrangement* of retained causal attention
 contains token-level hallucination signal beyond simple attention marginals.
-It has no learned message-passing network and reads no labels while encoding,
-fitting references, or producing anomaly scores. Labels are opened only after
-the score artifact is frozen, for AUROC/AUPRC and paired-bootstrap evaluation.
+It has no learned message-passing network, and the algorithm does not expose or
+consume labels while encoding, fitting references, or producing anomaly
+scores. Evaluation labels are supplied only after the score artifact is frozen,
+for AUROC/AUPRC and paired-bootstrap evaluation. A serialized cache may still
+physically contain an embedded label field; that field is excluded from the
+algorithmic data flow rather than claimed never to enter process memory.
 
 ## 1. Sparse attention semantics
 
@@ -61,14 +64,16 @@ Signed one-hop differences can cancel even when a neighborhood is abnormal.
 The absolute difference and variance retain that dispersion, while the second
 hop distinguishes similar marginals produced by different causal paths.
 
-## 4. Lag-matched topology null
+## 4. Coarse-lag-stratified topology null
 
-The control graph keeps every RR target, channel, excess weight, and causal lag
-scale, but rewires the source within the same
-\(\lfloor\log_2(\mathrm{lag})\rfloor\) bin. Prompt routes and all attention
-marginals remain unchanged. Comparing exact RR propagation with this lag
-rewire tests source arrangement, rather than degree, mass, or short-versus-long
-lookback alone.
+The control graph keeps every RR target, channel, excess weight, causal
+validity, and \(\lfloor\log_2(\mathrm{lag})\rfloor\) bin, then draws another
+source from that bin. Prompt routes and all attention marginals remain
+unchanged. The intervention does **not** preserve exact lag, source in-degree,
+or source-collision patterns. Exact-versus-rewired performance therefore
+measures sensitivity to this joint coarse-lag-stratified source intervention;
+it cannot by itself isolate source identity from the induced degree, collision,
+and within-bin lag changes.
 
 ## 5. Atomic one-class references
 
@@ -106,13 +111,15 @@ balance/scale, retained support, and exact causal topology.
 The report gives paired sample-bootstrap intervals for four predeclared
 comparisons:
 
-1. `full_signal` versus `attention_marginals` — does the complete method add
+1. `full_signal` versus `attention_marginals`: does the complete method add
    information beyond radial attention mass?
-2. `causal_topology_exact` versus `attention_marginals` — is topology itself
+2. `causal_topology_exact` versus `attention_marginals`: is topology itself
    useful without the other families?
-3. `rr_multihop_exact` versus `rr_multihop_lag_rewired` — does exact source
-   arrangement matter after preserving lag scale and weights?
-4. `rr_multihop_exact` versus `rr_one_hop_exact` — does the second hop add
+3. `rr_multihop_exact` versus `rr_multihop_lag_rewired`: is the score sensitive
+   to coarse-lag-stratified source rewiring? This comparison does not isolate
+   exact source identity because in-degree, collisions, and exact lag may also
+   change.
+4. `rr_multihop_exact` versus `rr_one_hop_exact`: does the second hop add
    information beyond local neighborhoods?
 
 The label-free artifact stores scalar scores, token metadata, and two compact
