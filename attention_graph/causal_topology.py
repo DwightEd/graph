@@ -18,6 +18,7 @@ class CausalTopologyConfig:
     fourier_frequencies: int = 4
     rewire_seed: int = 0
     epsilon: float = 1e-8
+    row_block_size: int = 4096
 
 
 @dataclass(frozen=True)
@@ -39,42 +40,58 @@ def _as_token_channels(values: torch.Tensor, layers: int, heads: int) -> torch.T
     return values.permute(1, 0, 2).reshape(tokens, layers, heads, features)
 
 
-def _rr_features(
-    base_state: torch.Tensor,
-    target_rows: torch.Tensor,
-    source_rows: torch.Tensor,
-    weights: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Encode one and two RR hops without averaging channels or signed deltas."""
-    rows, _ = base_state.shape
-    mass = torch.zeros(rows, dtype=weights.dtype, device=weights.device)
-    mass.index_add_(0, target_rows, weights)
-    normalized = weights / mass[target_rows]
+def _csr_blocks(attention, row_ptr: torch.Tensor, row_count: int, block_size: int):
+    """Yield bounded COO views of channel-major CSR rows."""
+    device = attention.response_values.device
+    for row_start in range(0, row_count, block_size):
+        row_end = min(row_start + block_size, row_count)
+        lengths = row_ptr[row_start + 1:row_end + 1] - row_ptr[row_start:row_end]
+        entry_start = int(row_ptr[row_start])
+        entry_end = int(row_ptr[row_end])
+        rows = torch.repeat_interleave(
+            torch.arange(row_start, row_end, device=device),
+            lengths,
+            output_size=entry_end - entry_start,
+        )
+        yield (
+            rows,
+            attention.response_column_indices[entry_start:entry_end].to(
+                device=device, dtype=torch.long
+            ),
+            attention.response_values[entry_start:entry_end].to(
+                device=device, dtype=torch.float32
+            ),
+        )
 
-    neighbor_mean = torch.zeros_like(base_state)
-    neighbor_mean.index_add_(
-        0, target_rows, normalized[:, None] * base_state[source_rows]
+
+def _rr_routes(
+    rows: torch.Tensor,
+    sources: torch.Tensor,
+    weights: torch.Tensor,
+    *,
+    prompt_count: int,
+    response_count: int,
+    sample_id: str,
+    seed: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    rr_mask = sources >= prompt_count
+    target_rows = rows[rr_mask]
+    rr_sources = sources[rr_mask]
+    rr_weights = weights[rr_mask]
+    channel = torch.div(target_rows, response_count, rounding_mode="floor")
+    target_relative = target_rows.remainder(response_count)
+    source_relative = rr_sources - prompt_count
+    source_rows = channel * response_count + source_relative
+    rewired_sources = _lag_bin_rewired_sources(
+        source_relative,
+        target_relative,
+        prompt_count=prompt_count,
+        seed=seed,
+        sample_id=sample_id,
+        channel=channel,
     )
-    absolute_difference = torch.zeros_like(base_state)
-    absolute_difference.index_add_(
-        0,
-        target_rows,
-        normalized[:, None] * (base_state[target_rows] - base_state[source_rows]).abs(),
-    )
-    neighborhood_variance = torch.zeros_like(base_state)
-    neighborhood_variance.index_add_(
-        0,
-        target_rows,
-        normalized[:, None] * (base_state[source_rows] - neighbor_mean[target_rows]).square(),
-    )
-    two_hop = torch.zeros_like(base_state)
-    two_hop.index_add_(
-        0, target_rows, normalized[:, None] * neighbor_mean[source_rows]
-    )
-    one_hop = torch.cat(
-        (neighbor_mean, absolute_difference, neighborhood_variance), dim=1
-    )
-    return one_hop, two_hop
+    rewired_source_rows = channel * response_count + rewired_sources - prompt_count
+    return target_rows, source_rows, rewired_source_rows, rr_weights
 
 
 class CausalTopologyEncoder:
@@ -85,6 +102,8 @@ class CausalTopologyEncoder:
             raise ValueError("fourier_frequencies must be positive")
         if config.epsilon <= 0:
             raise ValueError("epsilon must be positive")
+        if config.row_block_size < 1:
+            raise ValueError("row_block_size must be positive")
         self.config = config
 
     def encode(self, attention: AttentionSample) -> TopologyEncoding:
@@ -102,46 +121,51 @@ class CausalTopologyEncoder:
         row_count = channels * response_count
 
         row_ptr = attention.response_row_ptr.to(device=device, dtype=torch.long)
-        row_lengths = row_ptr[1:] - row_ptr[:-1]
-        rows = torch.repeat_interleave(
-            torch.arange(row_count, device=device), row_lengths,
-            output_size=int(attention.response_values.numel()),
-        )
-        sources = attention.response_column_indices.to(device=device, dtype=torch.long)
-        weights = attention.response_values.to(device=device, dtype=torch.float32)
-        floor = torch.as_tensor(
-            attention.attention_floor,
-            dtype=attention.response_values.dtype,
-            device=device,
-        ).float()
-        excess = (weights - floor).clamp_min(0)
-
-        prompt_mask = sources < prompt_count
-        prompt_rows = rows[prompt_mask]
-        prompt_weights = weights[prompt_mask]
-        prompt_excess = excess[prompt_mask]
-        prompt_mass = torch.full(
-            (row_count,), prompt_count * floor, dtype=weights.dtype, device=device
-        )
-        prompt_mass.index_add_(0, prompt_rows, prompt_excess)
+        dtype = torch.float32
+        prompt_mass = torch.zeros(row_count, dtype=dtype, device=device)
+        rr_mass = torch.zeros_like(prompt_mass)
         prompt_support = torch.zeros_like(prompt_mass)
-        prompt_support.index_add_(0, prompt_rows, torch.ones_like(prompt_weights))
-
-        rr_mask = ~prompt_mask
-        rr_rows = rows[rr_mask]
-        rr_sources = sources[rr_mask]
-        rr_weights = weights[rr_mask]
-        rr_excess = excess[rr_mask]
-        target_position = torch.arange(response_count, device=device).repeat(channels)
-        rr_mass = target_position.to(weights.dtype) * floor
-        rr_mass.index_add_(0, rr_rows, rr_excess)
         rr_support = torch.zeros_like(prompt_mass)
-        rr_support.index_add_(0, rr_rows, torch.ones_like(rr_weights))
+        target_position = torch.arange(response_count, device=device).repeat(channels)
+
+        frequencies = torch.arange(
+            1, self.config.fourier_frequencies + 1, device=device, dtype=dtype
+        )
+        prompt_positions = torch.arange(prompt_count, device=device, dtype=dtype)
+        phases = 2 * torch.pi * prompt_positions[:, None] * frequencies / prompt_count
+        prompt_code = torch.cat((torch.sin(phases), torch.cos(phases)), dim=1)
+        provenance = torch.zeros(
+            row_count, prompt_code.shape[1], dtype=dtype, device=device
+        )
+
+        def blocks():
+            return _csr_blocks(
+                attention, row_ptr, row_count, self.config.row_block_size
+            )
+        for rows, sources, weights in blocks():
+            prompt_mask = sources < prompt_count
+            prompt_rows = rows[prompt_mask]
+            prompt_weights = weights[prompt_mask]
+            prompt_mass.index_add_(0, prompt_rows, prompt_weights)
+            prompt_support.index_add_(
+                0, prompt_rows, torch.ones_like(prompt_weights)
+            )
+            provenance.index_add_(
+                0,
+                prompt_rows,
+                prompt_weights[:, None] * prompt_code[sources[prompt_mask]],
+            )
+
+            rr_mask = ~prompt_mask
+            rr_rows = rows[rr_mask]
+            rr_weights = weights[rr_mask]
+            rr_mass.index_add_(0, rr_rows, rr_weights)
+            rr_support.index_add_(0, rr_rows, torch.ones_like(rr_weights))
 
         diagonal = attention.attention_diagonal.to(device=device, dtype=torch.float32)
         diagonal = diagonal.reshape(channels, -1)[:, prompt_count:].reshape(-1)
         prompt_mean = prompt_mass / float(prompt_count)
-        generated_mean = (rr_mass + diagonal) / (target_position + 1).to(weights.dtype)
+        generated_mean = (rr_mass + diagonal) / (target_position + 1).to(dtype)
         total_mean = prompt_mean + generated_mean
         balance = torch.where(
             total_mean > 0,
@@ -156,55 +180,92 @@ class CausalTopologyEncoder:
             prompt_support / float(prompt_count),
             torch.where(
                 target_position > 0,
-                rr_support / target_position.to(weights.dtype),
+                rr_support / target_position.to(dtype),
                 torch.zeros_like(rr_support),
             ),
         ), dim=1)
-
-        frequencies = torch.arange(
-            1, self.config.fourier_frequencies + 1, device=device, dtype=weights.dtype
-        )
-        prompt_positions = torch.arange(prompt_count, device=device, dtype=weights.dtype)
-        phases = 2 * torch.pi * prompt_positions[:, None] * frequencies / prompt_count
-        prompt_code = torch.cat((torch.sin(phases), torch.cos(phases)), dim=1)
-        provenance = torch.zeros(
-            row_count, prompt_code.shape[1], dtype=weights.dtype, device=device
-        )
-        provenance.index_add_(
-            0, prompt_rows, prompt_excess[:, None] * prompt_code[sources[prompt_mask]]
-        )
         provenance = torch.where(
-            prompt_mass[:, None] > prompt_count * floor,
-            provenance / (
-                prompt_mass[:, None] - prompt_count * floor
-            ).clamp_min(self.config.epsilon),
+            prompt_mass[:, None] > 0,
+            provenance / prompt_mass[:, None].clamp_min(self.config.epsilon),
             torch.zeros_like(provenance),
         )
 
-        informative_rr = rr_excess > 0
-        rr_rows = rr_rows[informative_rr]
-        rr_sources = rr_sources[informative_rr]
-        rr_excess = rr_excess[informative_rr]
-        channel = torch.div(rr_rows, response_count, rounding_mode="floor")
-        rr_source_relative = rr_sources - prompt_count
-        rr_source_rows = channel * response_count + rr_source_relative
-        rr_one_hop, rr_two_hop = _rr_features(
-            base_state, rr_rows, rr_source_rows, rr_excess
-        )
+        neighbor_mean = torch.zeros_like(base_state)
+        rewired_neighbor_mean = torch.zeros_like(base_state)
+        for rows, sources, weights in blocks():
+            target_rows, source_rows, rewired_rows, rr_weights = _rr_routes(
+                rows,
+                sources,
+                weights,
+                prompt_count=prompt_count,
+                response_count=response_count,
+                sample_id=str(attention.sample_id),
+                seed=self.config.rewire_seed,
+            )
+            normalized = rr_weights / rr_mass[target_rows]
+            neighbor_mean.index_add_(
+                0, target_rows, normalized[:, None] * base_state[source_rows]
+            )
+            rewired_neighbor_mean.index_add_(
+                0, target_rows, normalized[:, None] * base_state[rewired_rows]
+            )
 
-        rr_target_relative = rr_rows.remainder(response_count)
-        rewired_sources = _lag_bin_rewired_sources(
-            rr_source_relative,
-            rr_target_relative,
-            prompt_count=prompt_count,
-            seed=self.config.rewire_seed,
-            sample_id=attention.sample_id,
-            channel=channel,
-        )
-        rewired_source_rows = channel * response_count + (rewired_sources - prompt_count)
-        rewired_one_hop, rewired_two_hop = _rr_features(
-            base_state, rr_rows, rewired_source_rows, rr_excess
-        )
+        absolute_difference = torch.zeros_like(base_state)
+        neighborhood_variance = torch.zeros_like(base_state)
+        two_hop = torch.zeros_like(base_state)
+        rewired_absolute_difference = torch.zeros_like(base_state)
+        rewired_neighborhood_variance = torch.zeros_like(base_state)
+        rewired_two_hop = torch.zeros_like(base_state)
+        for rows, sources, weights in blocks():
+            target_rows, source_rows, rewired_rows, rr_weights = _rr_routes(
+                rows,
+                sources,
+                weights,
+                prompt_count=prompt_count,
+                response_count=response_count,
+                sample_id=str(attention.sample_id),
+                seed=self.config.rewire_seed,
+            )
+            normalized = rr_weights / rr_mass[target_rows]
+            scaled = normalized[:, None]
+            absolute_difference.index_add_(
+                0,
+                target_rows,
+                scaled * (base_state[target_rows] - base_state[source_rows]).abs(),
+            )
+            neighborhood_variance.index_add_(
+                0,
+                target_rows,
+                scaled * (base_state[source_rows] - neighbor_mean[target_rows]).square(),
+            )
+            two_hop.index_add_(
+                0, target_rows, scaled * neighbor_mean[source_rows]
+            )
+            rewired_absolute_difference.index_add_(
+                0,
+                target_rows,
+                scaled * (base_state[target_rows] - base_state[rewired_rows]).abs(),
+            )
+            rewired_neighborhood_variance.index_add_(
+                0,
+                target_rows,
+                scaled * (
+                    base_state[rewired_rows] - rewired_neighbor_mean[target_rows]
+                ).square(),
+            )
+            rewired_two_hop.index_add_(
+                0, target_rows, scaled * rewired_neighbor_mean[rewired_rows]
+            )
+
+        rr_one_hop = torch.cat((
+            neighbor_mean, absolute_difference, neighborhood_variance,
+        ), dim=1)
+        rr_two_hop = two_hop
+        rewired_one_hop = torch.cat((
+            rewired_neighbor_mean,
+            rewired_absolute_difference,
+            rewired_neighborhood_variance,
+        ), dim=1)
 
         return TopologyEncoding(
             balance_log_scale=_as_token_channels(
