@@ -30,6 +30,8 @@ def parse_args(argv=None):
     fit.add_argument("--pca-dim", type=int, default=32)
     fit.add_argument("--reference-per-sample", type=int, default=6)
     fit.add_argument("--trim-fraction", type=float, default=0.90)
+    fit.add_argument("--calibration-fraction", type=float, default=0.25)
+    fit.add_argument("--split-seed", type=int, default=20260815)
     fit.add_argument("--channel-tail-fraction", type=float, default=0.05)
     fit.add_argument("--attribution-topk", type=int, default=8)
     fit.add_argument("--block-rows", type=int, default=8192)
@@ -65,6 +67,8 @@ def main(argv=None):
             pca_dim=args.pca_dim,
             reference_per_sample=args.reference_per_sample,
             trim_fraction=args.trim_fraction,
+            calibration_fraction=args.calibration_fraction,
+            split_seed=args.split_seed,
             channel_tail_fraction=args.channel_tail_fraction,
             attribution_topk=args.attribution_topk,
         )

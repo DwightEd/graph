@@ -6,10 +6,9 @@ attention as a causal directed adjacency operator. The corresponding
 Laplacian is triangular, so its diagonal is its spectrum. Strongest-magnitude
 spectral coordinates are kept per channel without averaging layer/head axes.
 
-Prompt transport remains available as a separate diagnostic utility, but it is
-not concatenated into the active RR subspace detector. Missing CSR entries are
-cache-censored (<= ``attention_floor``); they are never reconstructed as exact
-zeros.
+Prompt routing belongs to the separate topology-dynamics audit. Missing CSR
+entries are cache-censored (<= ``attention_floor``); they are never
+reconstructed as exact zeros.
 """
 
 from __future__ import annotations
@@ -28,6 +27,8 @@ class SpectralConfig:
     pca_dim: int = 32
     reference_per_sample: int = 6
     trim_fraction: float = 0.90
+    calibration_fraction: float = 0.25
+    split_seed: int = 20260815
     channel_tail_fraction: float = 0.05
     attribution_topk: int = 8
     epsilon: float = 1e-8
@@ -45,6 +46,10 @@ class SpectralConfig:
             raise ValueError("reference_per_sample must be positive")
         if not 0.5 <= float(self.trim_fraction) <= 1.0:
             raise ValueError("trim_fraction must be in [0.5, 1]")
+        if not 0.0 < float(self.calibration_fraction) < 1.0:
+            raise ValueError("calibration_fraction must be in (0, 1)")
+        if int(self.split_seed) < 0:
+            raise ValueError("split_seed must be non-negative")
         if not 0.0 < float(self.channel_tail_fraction) <= 1.0:
             raise ValueError("channel_tail_fraction must be in (0, 1]")
         if self.attribution_topk < 1:
@@ -235,76 +240,6 @@ def prefix_laplacian_spectrum(
     """Signed strongest-magnitude causal RR-Laplacian spectrum per channel."""
     modes = prefix_laplacian_modes(sample, positions=positions, config=config)
     return modes.values.reshape(len(modes.positions), -1)
-
-
-def prompt_transport_profile(
-    sample,
-    *,
-    positions=None,
-    prompt_bins: int = 8,
-    block_rows: int = 8192,
-) -> np.ndarray:
-    """Return an RP routing profile for post-hoc diagnostics only.
-
-    Prompt query rows are unavailable, so this does not fabricate a prompt
-    Laplacian. Retained response-to-prompt weights are accumulated into fixed
-    relative prompt-position bins independently per layer/head. The active RR
-    detector never consumes this profile.
-    """
-    prompt_bins = int(prompt_bins)
-    block_rows = int(block_rows)
-    if prompt_bins < 2:
-        raise ValueError("prompt_bins must be at least two")
-    if block_rows < 1:
-        raise ValueError("block_rows must be positive")
-    attention = sample.attention()
-    response_count = int(attention.num_response_tokens)
-    prompt_count = int(attention.response_idx)
-    if prompt_count < 1:
-        raise ValueError("response_idx must leave at least one prompt token")
-    device = attention.response_values.device
-    profile = torch.zeros(
-        (response_count, attention.num_channels, prompt_bins),
-        dtype=torch.float32,
-        device=device,
-    )
-
-    for block in sample.iter_sparse_attention_blocks(block_rows=block_rows):
-        prompt = block.source < attention.response_idx
-        if not bool(prompt.any()):
-            continue
-        query = block.query[prompt].long()
-        channel = (
-            block.layer[prompt] * attention.num_heads + block.head[prompt]
-        ).long()
-        source = block.source[prompt].long()
-        weight = block.weight[prompt].float()
-        bucket = torch.div(
-            source * prompt_bins,
-            prompt_count,
-            rounding_mode="floor",
-        ).clamp_(0, prompt_bins - 1)
-        profile.index_put_((query, channel, bucket), weight, accumulate=True)
-
-    if positions is None:
-        selected = profile
-    else:
-        requested = _requested_positions(response_count, positions)
-        if requested.size == 0:
-            return np.empty(
-                (0, attention.num_channels * prompt_bins), dtype=np.float32
-            )
-        selected = profile[
-            torch.as_tensor(requested, dtype=torch.long, device=device)
-        ]
-
-    return (
-        selected.reshape(selected.shape[0], -1)
-        .detach()
-        .cpu()
-        .numpy()
-        .astype(np.float32, copy=False)
-    )
 
 
 def rr_spectral_dimension(num_layers: int, num_heads: int, top_k: int) -> int:

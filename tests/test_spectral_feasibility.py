@@ -14,16 +14,18 @@ from cache import (
     write_split_index,
 )
 from experiments.spectral_feasibility.experiment import (
-    _empirical_upper_tail,
     _localized_channel_anomaly,
     evaluate_score_artifact,
     fit_spectral_reference,
     score_spectral_dataset,
 )
+from experiments.spectral_feasibility.subspace import (
+    empirical_upper_tail,
+    project_subspace,
+)
 from experiments.spectral_feasibility.representations import (
     SpectralConfig,
     prefix_laplacian_spectrum,
-    prompt_transport_profile,
     rr_spectral_dimension,
 )
 from research_dataset import ResearchDataset
@@ -121,31 +123,11 @@ class SpectralFeasibilityTests(unittest.TestCase):
             self.assertEqual(rr_spectral_dimension(1, 2, 2), 4)
             sample.release_attention()
 
-    def test_prompt_profile_remains_separate_diagnostic(self):
-        with tempfile.TemporaryDirectory() as directory:
-            dataset = _write_dataset(Path(directory), [1.0])
-            sample = dataset["r0"]
-            profile = prompt_transport_profile(
-                sample,
-                positions=[1, 2],
-                prompt_bins=2,
-            ).reshape(2, 2, 2)
-            np.testing.assert_allclose(profile[0], 0.0, atol=1e-6)
-            np.testing.assert_allclose(profile[1, 0], [0.0, 0.15], atol=2e-4)
-            np.testing.assert_allclose(profile[1, 1], [0.05, 0.0], atol=2e-4)
-            np.testing.assert_allclose(
-                profile[1].sum(axis=1), [0.15, 0.05], atol=2e-4
-            )
-            sample.release_attention()
-
     def test_empirical_tail_is_monotone_with_anomaly_magnitude(self):
         reference = np.asarray([1.0, 2.0, 3.0, 4.0])
-        bins = np.zeros(4, dtype=np.int16)
-        score = _empirical_upper_tail(
+        score = empirical_upper_tail(
             reference,
-            bins,
             np.asarray([1.5, 5.0]),
-            np.zeros(2, dtype=np.int16),
         )
         self.assertGreater(score[1], score[0])
 
@@ -154,12 +136,10 @@ class SpectralFeasibilityTests(unittest.TestCase):
             [[0.0, 1.0, 2.0, 9.0], [0.0, 0.5, 0.5, 0.5]],
             dtype=np.float32,
         )
-        bins = np.zeros(2, dtype=np.int16)
-        center = np.zeros((1, 4), dtype=np.float32)
-        scale = np.ones((1, 4), dtype=np.float32)
+        center = np.zeros(4, dtype=np.float32)
+        scale = np.ones(4, dtype=np.float32)
         aggregate, normalized, count = _localized_channel_anomaly(
             energy,
-            bins,
             center,
             scale,
             tail_fraction=0.25,
@@ -167,6 +147,30 @@ class SpectralFeasibilityTests(unittest.TestCase):
         self.assertEqual(count, 1)
         np.testing.assert_allclose(aggregate, [9.0, 0.5])
         np.testing.assert_allclose(normalized, energy)
+
+    def test_ppca_retains_in_subspace_distance(self):
+        reference = {
+            "rr_pca_mean": np.zeros(2, dtype=np.float32),
+            "rr_pca_components": np.asarray([[1.0, 0.0]], dtype=np.float32),
+            "rr_pca_explained_variance": np.ones(1, dtype=np.float32),
+            "rr_pca_noise_variance": np.asarray(1.0, dtype=np.float32),
+        }
+        projected = project_subspace(
+            np.asarray([[0.0, 1.0], [10.0, 0.0]], dtype=np.float32),
+            reference,
+        )
+        self.assertGreater(
+            float(projected.residual_energy[0]),
+            float(projected.residual_energy[1]),
+        )
+        self.assertGreater(
+            float(projected.latent_energy[1]),
+            float(projected.latent_energy[0]),
+        )
+        self.assertGreater(
+            float(projected.ppca_energy[1]),
+            float(projected.ppca_energy[0]),
+        )
 
     def test_label_free_rr_fit_score_then_posthoc_evaluation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -191,35 +195,47 @@ class SpectralFeasibilityTests(unittest.TestCase):
             fit = fit_spectral_reference(train, reference_path, config=config)
             self.assertFalse(fit["labels_read"])
             self.assertEqual(fit["rr_spectral_dim"], 4)
+            self.assertEqual(fit["fit_groups"], 3)
+            self.assertEqual(fit["calibration_groups"], 1)
             self.assertLessEqual(
-                fit["trimmed_reference_tokens"], fit["reference_tokens"]
+                fit["retained_fit_tokens"], fit["fit_reference_tokens"]
             )
             with np.load(reference_path, allow_pickle=False) as arrays:
                 self.assertNotIn("label", arrays.files)
                 self.assertNotIn("y_token", arrays.files)
                 self.assertIn("rr_pca_components", arrays.files)
-                self.assertIn("rr_untrimmed_pca_components", arrays.files)
+                self.assertIn("rr_pca_explained_variance", arrays.files)
+                self.assertIn("rr_pca_noise_variance", arrays.files)
                 self.assertIn("channel_center", arrays.files)
-                self.assertIn("calibration_rr_global", arrays.files)
+                self.assertIn("calibration_rr_residual", arrays.files)
+                self.assertIn("calibration_rr_ppca", arrays.files)
+                self.assertTrue(
+                    set(arrays["fit_group_id"].tolist()).isdisjoint(
+                        arrays["calibration_group_id"].tolist()
+                    )
+                )
                 self.assertNotIn("dynamic_coef", arrays.files)
                 self.assertNotIn("calibration_prompt", arrays.files)
+                self.assertNotIn("rr_untrimmed_pca_components", arrays.files)
 
             scored = score_spectral_dataset(test, reference_path, score_path)
             self.assertFalse(scored["labels_read"])
             self.assertEqual(scored["tokens"], 6)
             self.assertEqual(
-                scored["primary_detector"], "rr_trimmed_subspace_tail"
+                scored["primary_detector"], "rr_subspace_residual_tail"
             )
             with np.load(score_path, allow_pickle=False) as arrays:
                 self.assertNotIn("label", arrays.files)
                 self.assertNotIn("y_token", arrays.files)
-                self.assertIn("score_rr_global", arrays.files)
+                self.assertIn("score_rr_residual", arrays.files)
+                self.assertIn("score_rr_latent", arrays.files)
+                self.assertIn("score_rr_ppca", arrays.files)
                 self.assertIn("score_rr_localized", arrays.files)
-                self.assertIn("score_rr_untrimmed_ablation", arrays.files)
                 self.assertIn("top_channel_index", arrays.files)
+                self.assertIn("reference_sha256", arrays.files)
                 self.assertEqual(arrays["top_channel_index"].shape, (6, 2))
                 np.testing.assert_allclose(
-                    arrays["score"], arrays["score_rr_global"]
+                    arrays["score"], arrays["score_rr_residual"]
                 )
                 self.assertNotIn("score_dynamic", arrays.files)
                 self.assertNotIn("prompt_channel_volume", arrays.files)
@@ -228,12 +244,29 @@ class SpectralFeasibilityTests(unittest.TestCase):
             self.assertEqual(report["metrics"]["tokens"], 6)
             self.assertEqual(report["metrics"]["positive_tokens"], 1)
             self.assertEqual(
-                report["primary_detector"], "rr_trimmed_subspace_tail"
+                report["primary_detector"], "rr_subspace_residual_tail"
             )
-            self.assertIn("rr_trimmed_subspace", report["components"])
-            self.assertIn("rr_untrimmed_pca_ablation", report["components"])
+            self.assertIn("rr_subspace_residual_tail", report["components"])
+            self.assertIn("rr_in_subspace_tail", report["components"])
+            self.assertIn("rr_ppca_tail", report["components"])
             self.assertIn("rr_localized_channel_tail", report["components"])
+            self.assertEqual(len(report["reference_sha256"]), 64)
             self.assertTrue(report_path.is_file())
+
+    def test_tiny_train_smoke_is_rejected_before_pca_interpolation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            train = _write_dataset(Path(directory), [0.8, 1.0, 1.2, 1.1])
+            config = SpectralConfig(
+                top_k=2,
+                pca_dim=4,
+                reference_per_sample=3,
+            )
+            with self.assertRaisesRegex(ValueError, "underdetermined"):
+                fit_spectral_reference(
+                    train,
+                    Path(directory) / "reference.npz",
+                    config=config,
+                )
 
 
 if __name__ == "__main__":

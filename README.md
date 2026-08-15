@@ -1,6 +1,22 @@
-# Attention-only dynamic multiplex construction
+# Attention graph research
 
-当前研究主线位于 `attention_multiplex/`。它只研究压缩 attention 本身，将
+The active spectral method is in `experiments/spectral_feasibility/`. It keeps
+signed RR causal-prefix modes independently for every layer/head, fits a robust
+PCA on one set of unlabeled source groups, and calibrates anomaly tails on a
+disjoint set. Run it with:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 DEVICE=cuda \
+  bash experiments/spectral_feasibility/run.sh
+```
+
+Its mechanism audit is in `experiments/rr_topology_dynamics/`. The earlier
+causal-topology encoder remains a research baseline; the reported true-graph
+versus rewired/token-only comparisons do not establish a useful topology gain.
+
+## Attention-only dynamic multiplex construction
+
+`attention_multiplex/` 只研究压缩 attention 本身，将
 layer 建模为有序深度、head 建模为关系类型，并联合分解
 `(layer,response-query) × (head,prompt+response-source)` 稀疏矩阵。它不读取
 hidden state 或标签，也不输出 AUROC、异常分数和 t-SNE。
@@ -151,10 +167,10 @@ bash run_token_representation.sh
 
 `DATA_ROOT` defaults to
 `/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/model_traces/llama31_8b`.
-The runner creates a timestamped directory under `outputs/causal_topology/`,
+The baseline runner creates a timestamped directory under `outputs/causal_topology/`,
 prints progress in the foreground, and writes the same stream to
-`${OUTPUT_DIR}.log`. `run_lookback_graph_validation.sh` remains only as a
-compatibility alias for this entry point.
+`${OUTPUT_DIR}.log`. Use the named runner directly; the historical Lookback
+compatibility alias has been removed.
 
 The encoder preserves the 32 x 32 layer-head channels while separating retained
 attention marginals from source-sensitive topology. Missing CSR edges remain
