@@ -37,6 +37,23 @@ class ScoreResult:
     coordinates: np.ndarray
 
 
+class _ConstantSubspace:
+    """PCA-compatible zero subspace for a constant normal reference."""
+
+    def __init__(self, width: int):
+        self.n_components_ = 1
+        self.mean_ = np.zeros(width, dtype=np.float32)
+        self.components_ = np.zeros((1, width), dtype=np.float32)
+        self.explained_variance_ = np.zeros(1, dtype=np.float32)
+        self.explained_variance_ratio_ = np.zeros(1, dtype=np.float32)
+
+    def transform(self, values: np.ndarray) -> np.ndarray:
+        return np.zeros((len(values), 1), dtype=np.float32)
+
+    def inverse_transform(self, values: np.ndarray) -> np.ndarray:
+        return np.zeros((len(values), self.mean_.size), dtype=np.float32)
+
+
 def _values(values: np.ndarray, *, name: str) -> np.ndarray:
     result = np.asarray(values, dtype=np.float32)
     if result.ndim != 2 or not len(result) or not result.shape[1]:
@@ -96,10 +113,13 @@ class OneClassReference:
             int(self.config.subspace_components), standardized_fit.shape[1],
             len(standardized_fit) - 1,
         )
-        self.pca = PCA(
-            n_components=max(1, components), svd_solver="randomized",
-            random_state=int(self.config.seed),
-        ).fit(standardized_fit)
+        if np.any(standardized_fit):
+            self.pca = PCA(
+                n_components=max(1, components), svd_solver="randomized",
+                random_state=int(self.config.seed),
+            ).fit(standardized_fit)
+        else:
+            self.pca = _ConstantSubspace(standardized_fit.shape[1])
 
         standardized_cal = self._standardize_bins(cal_values, cal_bins)
         tail, residual, _ = self._diagnostics(standardized_cal)
@@ -110,6 +130,7 @@ class OneClassReference:
             _empirical_rank(self.residual_reference, residual),
         )
         self.combined_reference = np.sort(combined)
+        self.calibration_score = _empirical_rank(self.combined_reference, combined)
         self.fit_rows = len(fit_values)
         self.calibration_rows = len(cal_values)
         return self

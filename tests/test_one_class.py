@@ -1,4 +1,5 @@
 import unittest
+import warnings
 
 import numpy as np
 
@@ -10,6 +11,21 @@ from attention_graph.one_class import (
 
 
 class OneClassReferenceTests(unittest.TestCase):
+    def test_constant_reference_is_scored_without_pca_warning(self):
+        zeros = np.zeros((6, 4), dtype=np.float32)
+        bins = np.zeros(6, dtype=np.int16)
+
+        with warnings.catch_warnings(record=True) as caught:
+            reference = OneClassReference(
+                OneClassConfig(position_bins=1, subspace_components=2)
+            ).fit(zeros, bins, zeros, bins)
+            result = reference.transform(
+                np.asarray([[1.0, 0.0, 0.0, 0.0]], dtype=np.float32), [.5]
+            )
+
+        self.assertEqual(caught, [])
+        self.assertGreater(float(result.subspace_residual[0]), 0.0)
+
     def test_calibration_outlier_does_not_change_fit_subspace(self):
         fit_values = np.asarray([
             [-2.0, -2.0], [-1.0, -1.0], [0.0, 0.0],
