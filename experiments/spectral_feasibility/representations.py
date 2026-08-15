@@ -1,13 +1,13 @@
 """Causal response-history spectral states for sparse attention graphs.
 
-The active detector in this package is deliberately RR-only.  For every
+The active detector in this package is deliberately RR-only. For every
 layer/head channel and response prefix we treat retained response-to-response
-attention as a causal directed adjacency operator.  The corresponding
-Laplacian is triangular, so its diagonal is its spectrum.  Strongest-magnitude
+attention as a causal directed adjacency operator. The corresponding
+Laplacian is triangular, so its diagonal is its spectrum. Strongest-magnitude
 spectral coordinates are kept per channel without averaging layer/head axes.
 
 Prompt transport remains available as a separate diagnostic utility, but it is
-not concatenated into the active RR subspace detector.  Missing CSR entries are
+not concatenated into the active RR subspace detector. Missing CSR entries are
 cache-censored (<= ``attention_floor``); they are never reconstructed as exact
 zeros.
 """
@@ -53,6 +53,23 @@ class SpectralConfig:
             raise ValueError("epsilon must be positive and finite")
 
 
+@dataclass(frozen=True)
+class PrefixLaplacianModes:
+    """Selected causal RR-Laplacian coordinates and their source identities.
+
+    Arrays have shape ``[requested_token, layer_head_channel, top_k]``.
+    ``source_index`` is response-relative and uses ``-1`` for padding when the
+    prefix contains fewer than ``top_k`` source nodes. ``lag`` is measured from
+    the requested response token to that selected source and uses ``-1`` for
+    padding. Values retain their original signs.
+    """
+
+    positions: np.ndarray
+    values: np.ndarray
+    source_index: np.ndarray
+    lag: np.ndarray
+
+
 def response_position_bin(position: int, response_count: int, bins: int) -> int:
     """Map a response-relative token index to a relative-position bin."""
     if response_count < 1:
@@ -79,6 +96,19 @@ def reference_positions(response_count: int, count: int) -> np.ndarray:
     quantiles = (np.arange(count, dtype=np.float64) + 0.5) / float(count)
     positions = np.rint(quantiles * (response_count - 1)).astype(np.int64)
     return np.unique(np.clip(positions, 0, response_count - 1))
+
+
+def _requested_positions(response_count: int, positions) -> np.ndarray:
+    if positions is None:
+        return np.arange(response_count, dtype=np.int64)
+    requested = np.asarray(list(positions), dtype=np.int64)
+    if requested.ndim != 1:
+        raise ValueError("positions must be one-dimensional")
+    if requested.size == 0:
+        return np.empty(0, dtype=np.int64)
+    if np.any(requested < 0) or np.any(requested >= response_count):
+        raise IndexError("requested response position is outside the response")
+    return np.unique(requested)
 
 
 def _retained_response_edges(sample, *, block_rows: int):
@@ -112,13 +142,13 @@ def _retained_response_edges(sample, *, block_rows: int):
     )
 
 
-def prefix_laplacian_spectrum(
+def prefix_laplacian_modes(
     sample,
     *,
     positions=None,
     config: SpectralConfig | None = None,
-) -> np.ndarray:
-    """Signed strongest-magnitude causal RR-Laplacian spectrum per channel.
+) -> PrefixLaplacianModes:
+    """Return selected RR spectral values together with their causal sources.
 
     For channel ``c=(layer, head)``, response prefix ``t`` and response source
     node ``j <= t``::
@@ -127,31 +157,25 @@ def prefix_laplacian_spectrum(
         lambda[c,t,j] = d[c,t,j] - A_c[j,j]
 
     The causal Laplacian is triangular, therefore its diagonal is its spectrum.
-    ``top_k`` entries with largest absolute magnitude are retained independently
-    for every layer/head and their original signs are preserved.
+    ``top_k`` entries with largest absolute magnitude are selected independently
+    for every layer/head. Unlike :func:`prefix_laplacian_spectrum`, this method
+    retains the response-relative source index and lag of each selected mode so
+    downstream topology audits can identify what the reconstruction residual is
+    actually attached to.
     """
     config = SpectralConfig() if config is None else config
     config.validate()
     attention = sample.attention()
     response_count = int(attention.num_response_tokens)
-    if response_count < 1:
-        return np.empty(
-            (0, attention.num_channels * config.top_k), dtype=np.float32
+    requested = _requested_positions(response_count, positions)
+    shape = (len(requested), int(attention.num_channels), int(config.top_k))
+    if response_count < 1 or len(requested) == 0:
+        return PrefixLaplacianModes(
+            positions=requested,
+            values=np.zeros(shape, dtype=np.float32),
+            source_index=np.full(shape, -1, dtype=np.int32),
+            lag=np.full(shape, -1, dtype=np.int32),
         )
-
-    if positions is None:
-        requested = np.arange(response_count, dtype=np.int64)
-    else:
-        requested = np.asarray(list(positions), dtype=np.int64)
-        if requested.ndim != 1:
-            raise ValueError("positions must be one-dimensional")
-        if requested.size == 0:
-            return np.empty(
-                (0, attention.num_channels * config.top_k), dtype=np.float32
-            )
-        if np.any(requested < 0) or np.any(requested >= response_count):
-            raise IndexError("requested response position is outside the response")
-        requested = np.unique(requested)
 
     device = attention.response_values.device
     diagonal = (
@@ -164,11 +188,9 @@ def prefix_laplacian_spectrum(
         sample, block_rows=config.block_rows
     )
 
-    output = torch.zeros(
-        (requested.size, attention.num_channels, config.top_k),
-        dtype=torch.float32,
-        device=device,
-    )
+    output = torch.zeros(shape, dtype=torch.float32, device=device)
+    output_source = torch.full(shape, -1, dtype=torch.long, device=device)
+    output_lag = torch.full(shape, -1, dtype=torch.long, device=device)
     previous_prefix = -1
     for output_index, prefix in enumerate(requested.tolist()):
         if edge_query.numel():
@@ -192,15 +214,27 @@ def prefix_laplacian_spectrum(
             eigenvalues.abs(), k=keep, dim=1, largest=True, sorted=True
         ).indices
         output[output_index, :, :keep] = torch.gather(eigenvalues, 1, indices)
+        output_source[output_index, :, :keep] = indices
+        output_lag[output_index, :, :keep] = int(prefix) - indices
         previous_prefix = prefix
 
-    return (
-        output.reshape(requested.size, attention.num_channels * config.top_k)
-        .detach()
-        .cpu()
-        .numpy()
-        .astype(np.float32, copy=False)
+    return PrefixLaplacianModes(
+        positions=requested,
+        values=output.detach().cpu().numpy().astype(np.float32, copy=False),
+        source_index=output_source.detach().cpu().numpy().astype(np.int32, copy=False),
+        lag=output_lag.detach().cpu().numpy().astype(np.int32, copy=False),
     )
+
+
+def prefix_laplacian_spectrum(
+    sample,
+    *,
+    positions=None,
+    config: SpectralConfig | None = None,
+) -> np.ndarray:
+    """Signed strongest-magnitude causal RR-Laplacian spectrum per channel."""
+    modes = prefix_laplacian_modes(sample, positions=positions, config=config)
+    return modes.values.reshape(len(modes.positions), -1)
 
 
 def prompt_transport_profile(
@@ -213,8 +247,8 @@ def prompt_transport_profile(
     """Return an RP routing profile for post-hoc diagnostics only.
 
     Prompt query rows are unavailable, so this does not fabricate a prompt
-    Laplacian.  Retained response-to-prompt weights are accumulated into fixed
-    relative prompt-position bins independently per layer/head.  The active RR
+    Laplacian. Retained response-to-prompt weights are accumulated into fixed
+    relative prompt-position bins independently per layer/head. The active RR
     detector never consumes this profile.
     """
     prompt_bins = int(prompt_bins)
@@ -255,16 +289,11 @@ def prompt_transport_profile(
     if positions is None:
         selected = profile
     else:
-        requested = np.asarray(list(positions), dtype=np.int64)
-        if requested.ndim != 1:
-            raise ValueError("positions must be one-dimensional")
+        requested = _requested_positions(response_count, positions)
         if requested.size == 0:
             return np.empty(
                 (0, attention.num_channels * prompt_bins), dtype=np.float32
             )
-        if np.any(requested < 0) or np.any(requested >= response_count):
-            raise IndexError("requested response position is outside the response")
-        requested = np.unique(requested)
         selected = profile[
             torch.as_tensor(requested, dtype=torch.long, device=device)
         ]
