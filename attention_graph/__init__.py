@@ -11,7 +11,6 @@ from .one_class import CalibratedMaxFusion, OneClassConfig, OneClassReference, S
 from .topology_one_class import TopologyOneClassModel, TopologyScoreResult, atomic_blocks
 from .topology_experiment import TopologyExperiment, TopologyExperimentConfig
 from .token_representation import (
-    build_node_representation,
     compact_layer_structure,
     direct_lookback_channels,
     render_saved_sample,
@@ -25,7 +24,7 @@ __all__ = [
     "OneClassConfig", "OneClassReference", "ScoreResult", "CalibratedMaxFusion",
     "TopologyOneClassModel", "TopologyScoreResult", "atomic_blocks",
     "TopologyExperiment", "TopologyExperimentConfig",
-    "build_node_representation", "compact_layer_structure",
+    "compact_layer_structure",
     "direct_lookback_channels", "structure_names",
     "render_saved_sample",
 ]

@@ -1,31 +1,19 @@
-import json
-from pathlib import Path
-import tempfile
 import unittest
-from unittest.mock import patch
 
 import numpy as np
 import torch
 
 from attention_graph.token_representation import (
-    TokenRepresentationConfig,
-    build_node_representation,
     compact_layer_structure,
     direct_lookback_channels,
-    discover_token_representations,
     exact_channel_route,
-    render_saved_sample,
-    representation_feature_names,
     structure_names,
-    _read_dataset_labels,
     _cluster_bootstrap_difference,
-    _PositionReservoir,
-    _reference_views_from_primitives,
+    _read_dataset_labels,
     _route_edges_by_relation,
 )
-from cache import AttentionSample, index_row, save_attention_sample, sha256, write_split_index
+from cache import AttentionSample
 from main import _require_llama31_geometry, parse_args
-from research_dataset import ResearchDataset
 
 
 def _sample(sample_id="sample", source_id="source"):
@@ -53,58 +41,6 @@ def _multi_channel_sample():
         "multi", "multi-source", 2, torch.arange(4, dtype=torch.int32), diagonal,
         torch.arange(9, dtype=torch.int32), torch.zeros(8, dtype=torch.int32),
         masses, .01,
-    )
-
-
-def _varied_sample(sample_id, source_id, variant):
-    prompt_source = variant % 3
-    prompt = .14 + .015 * variant
-    history = .22 + .012 * variant
-    diagonal = torch.zeros((1, 1, 6), dtype=torch.float16)
-    diagonal[:, :, 3:] = torch.tensor(
-        [.08 + .005 * variant, .10 + .004 * variant, .12 + .003 * variant],
-        dtype=torch.float16,
-    )
-    return AttentionSample(
-        sample_id, source_id, 3, torch.arange(6, dtype=torch.int32), diagonal,
-        torch.tensor([0, 1, 3, 6], dtype=torch.int32),
-        torch.tensor([prompt_source, prompt_source, 3, prompt_source, 3, 4], dtype=torch.int32),
-        torch.tensor([prompt, prompt + .03, history, prompt + .05,
-                      history - .04, history + .02], dtype=torch.float16), .01,
-    )
-
-
-def _write_split(root, split, count, source_prefix):
-    (root / "attention").mkdir(parents=True)
-    rows, labels = [], []
-    for index in range(count):
-        sample = _varied_sample(
-            f"{split}-{index}", f"{source_prefix}-{index}",
-            index + (0 if split == "train" else 7),
-        )
-        path = root / "attention" / f"{sample.sample_id}.npz"
-        save_attention_sample(sample, path)
-        rows.append(index_row(root, sample, path, metadata={
-            "split": split, "task_type": "QA" if index % 2 else "Summary",
-            "data_source": "MARCO" if index % 2 else "CNN/DM",
-            "generator_model": "generator",
-        }))
-        labels.append({
-            "sample_id": sample.sample_id,
-            "positive_runs": [[1, 2]] if index % 2 else [],
-        })
-    label_path = root / "labels.jsonl"
-    label_path.write_text(
-        "".join(json.dumps(row) + "\n" for row in labels), encoding="utf-8"
-    )
-    write_split_index(
-        root, rows, attention_floor=.01, num_layers=1, num_heads=1,
-        alignment="post_token_query_at_same_position",
-        extra={
-            "schema": "ragtruth-attention-split-v1", "split": split,
-            "observer_model": "observer", "generator_model": "generator",
-            "labels_sha256": sha256(label_path),
-        },
     )
 
 
@@ -194,30 +130,6 @@ class TokenGraphRepresentationTests(unittest.TestCase):
         )
         self.assertAlmostEqual(float(route["weight"][0]), .8, places=3)
 
-    def test_node_vector_is_exact_flattened_lookback(self):
-        sample = _multi_channel_sample()
-        lookback = direct_lookback_channels(sample)
-        node = build_node_representation(
-            lookback, num_layers=2, num_heads=2
-        )
-        expected_width = 4
-        self.assertEqual(tuple(node.shape), (2, expected_width))
-        schema = representation_feature_names(2, 2)
-        self.assertEqual(len(schema), expected_width)
-        torch.testing.assert_close(
-            node, lookback.reshape(2, 4)
-        )
-
-    def test_llama31_node_vector_keeps_all_1024_layer_head_coordinates(self):
-        lookback = torch.arange(2 * 32 * 32, dtype=torch.float32).reshape(2, 32, 32)
-
-        node = build_node_representation(
-            lookback, num_layers=32, num_heads=32
-        )
-
-        self.assertEqual(tuple(node.shape), (2, 1024))
-        torch.testing.assert_close(node, lookback.reshape(2, 1024))
-
     def test_exact_channel_route_keeps_each_csr_edge_in_its_layer_head_channel(self):
         route = exact_channel_route(_multi_channel_sample())
         torch.testing.assert_close(
@@ -269,47 +181,6 @@ class PipelineContractTests(unittest.TestCase):
         _require_llama31_geometry(valid)
         with self.assertRaisesRegex(ValueError, "Llama-3.1-8B geometry"):
             _require_llama31_geometry(invalid)
-
-    def test_reference_size_is_a_total_position_reservoir_budget(self):
-        reservoir = _PositionReservoir(bins=3, size=10, seed=0)
-        values = np.arange(36, dtype=np.float32).reshape(12, 3)
-        reservoir.add(values, np.linspace(0.0, .99, 12))
-        retained, _ = reservoir.matrix()
-        self.assertLessEqual(len(retained), 12)
-        self.assertEqual(reservoir.maximum_rows, 12)
-
-    def test_position_reservoir_resume_matches_uninterrupted_sampling(self):
-        values = np.arange(180, dtype=np.float32).reshape(30, 6)
-        position = np.linspace(0.0, .99, len(values))
-        complete = _PositionReservoir(bins=3, size=12, seed=9)
-        complete.add(values, position)
-
-        partial = _PositionReservoir(bins=3, size=12, seed=9)
-        partial.add(values[:13], position[:13])
-        resumed = _PositionReservoir(bins=3, size=12, seed=9)
-        resumed.restore(partial.snapshot())
-        resumed.add(values[13:], position[13:])
-
-        complete_values, complete_bins = complete.matrix()
-        resumed_values, resumed_bins = resumed.matrix()
-        np.testing.assert_array_equal(resumed_values, complete_values)
-        np.testing.assert_array_equal(resumed_bins, complete_bins)
-
-    def test_primitive_reservoir_derives_all_seven_aligned_views(self):
-        primitives = np.arange(24, dtype=np.float32).reshape(2, 12)
-        views = _reference_views_from_primitives(primitives, channels=2)
-
-        np.testing.assert_array_equal(views["token_only"], primitives[:, :2])
-        np.testing.assert_array_equal(
-            views["true_graph"], primitives[:, :6]
-        )
-        np.testing.assert_array_equal(
-            views["rewired_graph"],
-            np.concatenate((primitives[:, :4], primitives[:, 6:8]), axis=1),
-        )
-        np.testing.assert_array_equal(
-            views["direct_marginals"], primitives[:, 8:12]
-        )
 
     def test_paired_bootstrap_keeps_response_clusters_and_detects_gain(self):
         labels = np.asarray([0, 1, 0, 1, 0, 1], dtype=np.int8)
@@ -378,188 +249,6 @@ class PipelineContractTests(unittest.TestCase):
             "display_layer", "anomaly_quantile",
         ):
             self.assertFalse(hasattr(args, obsolete))
-
-    def test_end_to_end_freezes_graph_state_before_reading_labels(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            train_root, test_root = root / "train", root / "test"
-            _write_split(train_root, "train", 5, "train-source")
-            _write_split(test_root, "test", 4, "test-source")
-            output = root / "output"
-            with patch(
-                "attention_graph.token_representation.exact_channel_route",
-                side_effect=AssertionError("production pipeline must stream CSR"),
-            ), patch(
-                "attention_graph.token_representation.compact_layer_structure",
-                side_effect=AssertionError(
-                    "population pipeline must not materialize visualization routes"
-                ),
-            ):
-                result = discover_token_representations(
-                    ResearchDataset(train_root), ResearchDataset(test_root),
-                    ResearchDataset(test_root), output_dir=output,
-                    config=TokenRepresentationConfig(
-                        position_bins=2, provenance_hops=2,
-                        reference_size=8, subspace_components=2,
-                        bootstrap_replicates=10,
-                        sample_ids=("test-1",), seed=7,
-                    ),
-                )
-
-            self.assertEqual(result["test_nodes"], 12)
-            self.assertEqual(result["primary_score"], "true_graph")
-            self.assertEqual(
-                set(result["score_evaluation"]),
-                {
-                    "scalar_only", "token_only", "prompt_graph",
-                    "response_graph", "true_graph", "rewired_graph",
-                    "direct_marginals",
-                },
-            )
-            self.assertIn(
-                "true_graph_vs_rewired_graph", result["structural_comparisons"]
-            )
-            nodes = np.load(output / "token_node_representations.float16.npy", mmap_mode="r")
-            self.assertFalse((output / "compact_layer_structure.float16.npy").exists())
-            self.assertEqual(nodes.shape[0], 12)
-            true_graph = np.load(
-                output / "true_graph_node_representations.float16.npy", mmap_mode="r"
-            )
-            self.assertEqual(nodes.shape, (12, 1))
-            self.assertEqual(true_graph.shape, (12, 3))
-            with np.load(output / "token_representations_label_free.npz", allow_pickle=False) as artifact:
-                self.assertEqual(str(artifact["schema"]), "token-graph-representation-v2")
-                self.assertFalse(bool(artifact["labels_included"]))
-                self.assertNotIn("label", artifact.files)
-                self.assertNotIn("exact_token_features", artifact.files)
-                self.assertIn("scalar_only_score", artifact.files)
-                self.assertIn("true_graph_score", artifact.files)
-                self.assertIn("rewired_graph_score", artifact.files)
-                self.assertIn("response_graph_score", artifact.files)
-                self.assertIn("prompt_graph_score", artifact.files)
-                self.assertIn("exact_route_canonical_split", artifact.files)
-                self.assertNotIn("evidence_flow_score", artifact.files)
-                self.assertEqual(str(artifact["true_graph_representation_file"]), "true_graph_node_representations.float16.npy")
-            with np.load(output / "train_reference_model.npz", allow_pickle=False) as model:
-                self.assertFalse(bool(model["labels_included"]))
-                self.assertIn("token_only_pca_components", model.files)
-                self.assertIn("true_graph_pca_components", model.files)
-            with np.load(output / "sample_graphs" / "sample_test-1.npz", allow_pickle=False) as graph:
-                self.assertEqual(str(graph["schema"]), "token-graph-representation-v2")
-                self.assertFalse(bool(graph["labels_included"]))
-                self.assertIn("global_row_start", graph.files)
-                self.assertNotIn("compact_route_layer", graph.files)
-                self.assertIn("exact_route_sha256", graph.files)
-                self.assertIn("true_graph_score", graph.files)
-                self.assertIn("anomaly_component", graph.files)
-                self.assertIn("rewire_rr_edges", graph.files)
-                self.assertIn("rewire_changed_fraction", graph.files)
-                self.assertEqual(str(graph["exact_route_sample_id"]), "test-1")
-                self.assertEqual(int(graph["rewire_seed"]), 7)
-            report = json.loads((output / "token_representation_report.json").read_text())
-            self.assertFalse(report["primary_node_state"]["layer_head_averaged"])
-            self.assertFalse(report["evidence_flow_graph"]["all_head_mean_used"])
-            self.assertFalse(report["evidence_flow_graph"]["trainable"])
-            self.assertIn("rewire_audit", report["evidence_flow_graph"])
-            self.assertEqual(
-                report["compact_layer_structure"]["role"],
-                "computed_on_demand_for_explicit_sample_visualization_only",
-            )
-            self.assertFalse(report["sample_visualization"]["automatic"])
-            self.assertEqual(report["exact_route_audit"]["canonical_test_split"], str(test_root))
-            self.assertEqual(report["unsupervised_scores"]["primary_score"], "true_graph")
-            self.assertEqual(report["labels_used"], {"train": False, "test": "evaluation_only"})
-            self.assertIn("structural_validation", report)
-            self.assertIn("graph_pattern_score_evaluation", report)
-            self.assertIn(
-                "anomaly_component_localization", report["structural_validation"]
-            )
-            self.assertEqual(report["labels_read_during"], "evaluation_and_plot_coloring_only")
-            self.assertTrue((output / "evaluation_token_labels.npy").exists())
-            del nodes, true_graph
-            rendered = render_saved_sample(
-                ResearchDataset(test_root), output_dir=output,
-                sample_id="test-1", layer=0,
-            )
-            self.assertFalse(rendered["features_recomputed"])
-            self.assertTrue(rendered["visualization_structure_recomputed"])
-            self.assertEqual(rendered["label_source"], "saved_evaluation_cache")
-            self.assertTrue(Path(rendered["attention_structure_figure"]).exists())
-            self.assertIn("layer_0", rendered["attention_structure_figure"])
-            graph_path = output / "sample_graphs" / "sample_test-1.npz"
-            with np.load(graph_path, allow_pickle=False) as graph:
-                graph_payload = {name: np.array(graph[name]) for name in graph.files}
-            graph_payload["schema"] = np.asarray("token-graph-representation-v1")
-            np.savez_compressed(graph_path, **graph_payload)
-            with self.assertRaisesRegex(ValueError, "unsupported sample graph schema"):
-                render_saved_sample(
-                    ResearchDataset(test_root), output_dir=output,
-                    sample_id="test-1", layer=0,
-                )
-
-    def test_interrupted_train_reference_resumes_from_last_complete_sample(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            train_root, test_root = root / "train", root / "test"
-            _write_split(train_root, "train", 5, "train-source")
-            _write_split(test_root, "test", 4, "test-source")
-            output = root / "output"
-            config = TokenRepresentationConfig(
-                position_bins=2, reference_size=8,
-                subspace_components=2, bootstrap_replicates=5,
-                checkpoint_interval=1, seed=17,
-            )
-            from attention_graph import token_representation as module
-
-            original = module.lookback_evidence_from_attention
-
-            def interrupt_third_train(attention, **kwargs):
-                if kwargs.get("sample_id") == "train-2":
-                    raise KeyboardInterrupt
-                return original(attention, **kwargs)
-
-            with patch.object(
-                module, "lookback_evidence_from_attention",
-                side_effect=interrupt_third_train,
-            ):
-                with self.assertRaises(KeyboardInterrupt):
-                    discover_token_representations(
-                        ResearchDataset(train_root), ResearchDataset(test_root),
-                        ResearchDataset(test_root), output_dir=output,
-                        config=config,
-                    )
-
-            checkpoint = output / "train_reference_checkpoint.npz"
-            self.assertTrue(checkpoint.exists())
-            with np.load(checkpoint, allow_pickle=False) as saved:
-                self.assertEqual(int(saved["next_sample_index"]), 2)
-
-            resumed_calls = []
-            resume_config = TokenRepresentationConfig(
-                position_bins=2, reference_size=8,
-                subspace_components=2, bootstrap_replicates=5,
-                checkpoint_interval=1, csr_row_block=1, seed=17,
-            )
-
-            def record_resume(attention, **kwargs):
-                resumed_calls.append(kwargs.get("sample_id"))
-                return original(attention, **kwargs)
-
-            with patch.object(
-                module, "lookback_evidence_from_attention",
-                side_effect=record_resume,
-            ):
-                discover_token_representations(
-                    ResearchDataset(train_root), ResearchDataset(test_root),
-                    ResearchDataset(test_root), output_dir=output,
-                    config=resume_config,
-                )
-
-            train_calls = [
-                value for value in resumed_calls if value.startswith("train-")
-            ]
-            self.assertEqual(train_calls, ["train-2", "train-3", "train-4"])
-            self.assertFalse(checkpoint.exists())
 
 
 if __name__ == "__main__":

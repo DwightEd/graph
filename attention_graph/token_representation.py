@@ -1,41 +1,21 @@
-"""Label-free token representations and exact-channel causal evidence flow.
-
-The primary node state is the complete layer-head Lookback vector. For a
-32-layer, 32-head observer this is exactly 1024 dimensions. Exact CSR channels
-provide prompt and response evidence flows without projecting heads or
-binning prompt positions. A lag-matched RR rewire is the topology null.
-
-All reference fitting and projection use the unlabeled train split. Test
-labels are opened only after representations, scores and graph files freeze.
-"""
+"""Sparse attention structure helpers and saved-sample rendering."""
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-import hashlib
+from dataclasses import dataclass
 import json
-import math
 from pathlib import Path
-import shutil
 
 import numpy as np
 import torch
-from sklearn.decomposition import PCA
 from sklearn.metrics import average_precision_score, roc_auc_score
 from tqdm.auto import tqdm
 
 from .graph import RP, RR
-from .evidence_flow import (
-    anomaly_components_from_attention,
-    csr_entries,
-    direct_field_names,
-    lookback_evidence_from_attention,
-    propagation_field_names,
-)
+from .evidence_flow import csr_entries
 
 
 SCHEMA = "token-graph-representation-v2"
-REFERENCE_CHECKPOINT_SCHEMA = "exact-channel-train-reference-v1"
 
 DIRECT_STRUCTURE_NAMES = (
     "retained_prompt_mass",
@@ -53,42 +33,21 @@ DIRECT_STRUCTURE_NAMES = (
 
 
 @dataclass(frozen=True)
-class TokenRepresentationConfig:
-    position_bins: int = 10
+class _DisplayConfig:
     provenance_hops: int = 2
-    bootstrap_replicates: int = 200
-    csr_row_block: int = 65536
-    reference_size: int = 12_000
-    checkpoint_interval: int = 50
-    subspace_components: int = 32
-    tail_fraction: float = 0.05
-    anomaly_quantile: float = 0.95
+    csr_row_block: int = 4096
     display_mass_cover: float = 0.80
     display_edges_per_type: int = 2
     display_max_edges: int = 300
-    display_layer: int | None = None
-    sample_ids: tuple[str, ...] = ()
-    seed: int = 42
 
     def validate(self):
-        integer = (
-            self.position_bins, self.provenance_hops,
-            self.bootstrap_replicates,
-            self.csr_row_block, self.reference_size,
-            self.checkpoint_interval,
-            self.subspace_components, self.display_edges_per_type,
-            self.display_max_edges,
-        )
-        if min(integer) < 1:
-            raise ValueError("representation limits must be positive")
-        if not 0.0 < float(self.tail_fraction) <= 1.0:
-            raise ValueError("tail_fraction must be in (0,1]")
-        if not 0.0 < float(self.anomaly_quantile) < 1.0:
-            raise ValueError("anomaly_quantile must be in (0,1)")
+        if min(
+            self.provenance_hops, self.csr_row_block,
+            self.display_edges_per_type, self.display_max_edges,
+        ) < 1:
+            raise ValueError("display limits must be positive")
         if not 0.0 < float(self.display_mass_cover) <= 1.0:
             raise ValueError("display_mass_cover must be in (0,1]")
-        if self.display_layer is not None and int(self.display_layer) < 0:
-            raise ValueError("display_layer must be nonnegative")
 
 
 def structure_names(hops):
@@ -237,7 +196,6 @@ def _layer_route_tensors(attention, *, csr_row_block):
         "target": prompt_count + route_row.remainder(response_count),
         "weight": weight,
     }
-
 
 def exact_channel_route(attention, *, csr_row_block=4096):
     """Return every canonical CSR edge with its unmerged layer-head channel."""
@@ -415,302 +373,6 @@ def compact_layer_structure(attention, *, provenance_hops=2,
     return matrix, route_tensors
 
 
-def representation_feature_names(num_layers, num_heads):
-    return tuple(
-        f"lookback:L{layer}:H{head}"
-        for layer in range(int(num_layers)) for head in range(int(num_heads))
-    )
-
-
-def build_node_representation(lookback, *, num_layers, num_heads):
-    """Flatten complete ``[layer,head]`` Lookback without averaging."""
-    token_count, layers, heads = lookback.shape
-    if layers != int(num_layers) or heads != int(num_heads):
-        raise ValueError("Lookback tensor does not match layer-head geometry")
-    return lookback.reshape(token_count, layers * heads).float()
-
-
-class _PositionReservoir:
-    """Vectorized uniform bottom-k sample within each position bin."""
-
-    def __init__(self, bins, size, seed):
-        self.bins = int(bins)
-        self.capacity = max(1, int(math.ceil(size / bins)))
-        self.rng = np.random.default_rng(seed)
-        self.values = None
-        self.priorities = None
-        self.filled = np.zeros(self.bins, dtype=np.int64)
-        self.seen = np.zeros(self.bins, dtype=np.int64)
-
-    def add(self, values, position):
-        values = np.asarray(values, dtype=np.float32)
-        position = np.asarray(position, dtype=np.float64)
-        if self.values is None:
-            self.values = np.zeros(
-                (self.bins, self.capacity, values.shape[1]), dtype=np.float16
-            )
-            self.priorities = np.full(
-                (self.bins, self.capacity), np.inf, dtype=np.float64
-            )
-        if values.ndim != 2 or values.shape[1] != self.values.shape[2]:
-            raise ValueError("train reference vectors have inconsistent width")
-        bins = np.minimum((position * self.bins).astype(int), self.bins - 1)
-        priorities = self.rng.random(len(values))
-        for bin_id in range(self.bins):
-            selected = bins == bin_id
-            count = int(selected.sum())
-            if not count:
-                continue
-            new_values = values[selected].astype(np.float16)
-            new_priorities = priorities[selected]
-            retained = int(self.filled[bin_id])
-            append = min(self.capacity - retained, count)
-            if append:
-                end = retained + append
-                self.values[bin_id, retained:end] = new_values[:append]
-                self.priorities[bin_id, retained:end] = new_priorities[:append]
-                retained = end
-                self.filled[bin_id] = retained
-            if append < count:
-                remaining_priorities = new_priorities[append:]
-                candidates = np.concatenate((
-                    self.priorities[bin_id, :retained], remaining_priorities
-                ))
-                keep = np.argpartition(candidates, self.capacity - 1)[
-                    :self.capacity
-                ]
-                kept_old = keep[keep < retained]
-                kept_new = keep[keep >= retained] - retained
-                evicted = np.setdiff1d(
-                    np.arange(retained), kept_old, assume_unique=True
-                )
-                self.values[bin_id, evicted] = new_values[append:][kept_new]
-                self.priorities[bin_id, evicted] = remaining_priorities[kept_new]
-            self.seen[bin_id] += count
-
-    def matrix(self):
-        if self.values is None or not int(self.filled.sum()):
-            raise ValueError("train split produced no reference tokens")
-        values, bins = [], []
-        for bin_id, count in enumerate(self.filled):
-            order = np.argsort(
-                self.priorities[bin_id, :count], kind="stable"
-            )
-            values.append(self.values[bin_id, :count][order].astype(np.float32))
-            bins.extend([bin_id] * int(count))
-        return np.concatenate(values), np.asarray(bins, dtype=np.int16)
-
-    @property
-    def maximum_rows(self):
-        return self.bins * self.capacity
-
-    def snapshot(self):
-        return {
-            "values": self.values,
-            "priorities": self.priorities,
-            "filled": self.filled,
-            "seen": self.seen,
-            "rng_state": self.rng.bit_generator.state,
-        }
-
-    def restore(self, state):
-        self.values = np.asarray(state["values"], dtype=np.float16).copy()
-        self.priorities = np.asarray(
-            state["priorities"], dtype=np.float64
-        ).copy()
-        self.filled = np.asarray(state["filled"], dtype=np.int64).copy()
-        self.seen = np.asarray(state["seen"], dtype=np.int64).copy()
-        self.rng.bit_generator.state = state["rng_state"]
-        return self
-
-
-def _reference_views_from_primitives(values, *, channels):
-    """Derive the seven aligned views from one sampled primitive matrix."""
-    values = np.asarray(values, dtype=np.float32)
-    channels = int(channels)
-    token = values[:, :channels]
-    prompt = values[:, channels:2 * channels]
-    response = values[:, 2 * channels:3 * channels]
-    rewired = values[:, 3 * channels:4 * channels]
-    direct = values[:, 4 * channels:6 * channels]
-    return {
-        "scalar_only": token.mean(axis=1, keepdims=True),
-        "token_only": token,
-        "prompt_graph": np.concatenate((token, prompt), axis=1),
-        "response_graph": np.concatenate((token, response), axis=1),
-        "true_graph": np.concatenate((token, prompt, response), axis=1),
-        "rewired_graph": np.concatenate((token, prompt, rewired), axis=1),
-        "direct_marginals": direct,
-    }
-
-
-class _PositionScaler:
-    """Median/MAD calibration fitted only on the unlabeled train reservoir."""
-
-    def __init__(self, bins):
-        self.bins = int(bins)
-
-    @staticmethod
-    def _statistics(values):
-        center = np.median(values, axis=0)
-        mad = 1.4826 * np.median(np.abs(values - center), axis=0)
-        std = values.std(axis=0)
-        scale = np.where(mad > 1e-6, mad, np.where(std > 1e-6, std, 1.0))
-        return center.astype(np.float32), scale.astype(np.float32)
-
-    def fit(self, values, bins, *, column_block=128):
-        values = np.asarray(values, dtype=np.float32)
-        bins = np.asarray(bins, dtype=np.int16)
-        self.center = np.empty((self.bins, values.shape[1]), dtype=np.float32)
-        self.scale = np.empty_like(self.center)
-        for start in range(0, values.shape[1], int(column_block)):
-            end = min(start + int(column_block), values.shape[1])
-            global_center, global_scale = self._statistics(values[:, start:end])
-            for bin_id in range(self.bins):
-                selected = values[bins == bin_id, start:end]
-                if len(selected) >= 3:
-                    center, scale = self._statistics(selected)
-                else:
-                    center, scale = global_center, global_scale
-                self.center[bin_id, start:end] = center
-                self.scale[bin_id, start:end] = scale
-        self.count = [int((bins == bin_id).sum()) for bin_id in range(self.bins)]
-        return self
-
-    def transform(self, values, position):
-        bins = np.minimum(
-            (np.asarray(position, dtype=np.float64) * self.bins).astype(int),
-            self.bins - 1,
-        )
-        output = (np.asarray(values, dtype=np.float32) - self.center[bins]) / self.scale[bins]
-        return np.nan_to_num(output, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
-
-    def report(self):
-        return {
-            "type": "train_reservoir_position_conditioned_median_mad",
-            "position_bins": self.bins,
-            "reference_tokens_per_bin": self.count,
-            "fit_uses_labels": False,
-        }
-
-
-def _robust_tail(standardized, tail_fraction):
-    absolute = np.abs(standardized)
-    keep = max(1, int(math.ceil(absolute.shape[1] * float(tail_fraction))))
-    return np.partition(
-        absolute, absolute.shape[1] - keep, axis=1
-    )[:, -keep:].mean(1).astype(np.float32)
-
-
-def _score_representation(standardized, pca, tail_fraction):
-    tail = _robust_tail(standardized, tail_fraction)
-    latent = pca.transform(standardized)
-    reconstructed = pca.inverse_transform(latent)
-    residual = np.mean((standardized - reconstructed) ** 2, axis=1)
-    coordinates = np.zeros((len(standardized), 2), dtype=np.float32)
-    coordinates[:, :min(2, latent.shape[1])] = latent[:, :2]
-    return tail.astype(np.float32), residual.astype(np.float32), coordinates
-
-
-def _empirical_rank(sorted_reference, values):
-    reference = np.asarray(sorted_reference, dtype=np.float64)
-    values = np.asarray(values, dtype=np.float64)
-    if reference.ndim != 1 or not len(reference):
-        raise ValueError("empirical calibration requires a one-dimensional reference")
-    return (
-        (np.searchsorted(reference, values, side="right") + 0.5)
-        / (len(reference) + 1.0)
-    ).astype(np.float32)
-
-
-class _ScoreCalibrator:
-    """Turn two unsupervised diagnostics into one train-calibrated tail score."""
-
-    def fit(self, tail, residual):
-        self.tail = np.sort(np.asarray(tail, dtype=np.float32))
-        self.residual = np.sort(np.asarray(residual, dtype=np.float32))
-        combined = np.maximum(
-            _empirical_rank(self.tail, tail),
-            _empirical_rank(self.residual, residual),
-        )
-        self.combined = np.sort(combined)
-        self.reference_scores = self.transform(tail, residual)
-        return self
-
-    def transform(self, tail, residual):
-        combined = np.maximum(
-            _empirical_rank(self.tail, tail),
-            _empirical_rank(self.residual, residual),
-        )
-        return _empirical_rank(self.combined, combined)
-
-
-class _ViewReference:
-    """Position-conditioned robust reference and low-rank normal subspace."""
-
-    def __init__(self, name, config):
-        self.name = str(name)
-        self.config = config
-
-    def fit(self, values, bins):
-        self.scaler = _PositionScaler(self.config.position_bins).fit(values, bins)
-        position = (np.asarray(bins, dtype=np.float32) + 0.5) / self.config.position_bins
-        standardized = self.scaler.transform(values, position)
-        components = min(
-            int(self.config.subspace_components), standardized.shape[1],
-            max(1, len(standardized) - 1),
-        )
-        self.pca = PCA(
-            n_components=components, svd_solver="randomized",
-            random_state=self.config.seed,
-        ).fit(standardized)
-        tail, residual, _ = _score_representation(
-            standardized, self.pca, self.config.tail_fraction
-        )
-        self.calibrator = _ScoreCalibrator().fit(tail, residual)
-        self.reference_rows = int(len(values))
-        return self
-
-    def transform(self, values, position):
-        standardized = self.scaler.transform(values, position)
-        tail, residual, coordinates = _score_representation(
-            standardized, self.pca, self.config.tail_fraction
-        )
-        return {
-            "score": self.calibrator.transform(tail, residual),
-            "tail": tail, "subspace_residual": residual,
-            "coordinates": coordinates,
-        }
-
-    @property
-    def reference_scores(self):
-        return self.calibrator.reference_scores
-
-    def report(self):
-        return {
-            "calibration": self.scaler.report(),
-            "input_dimensions": int(self.scaler.center.shape[1]),
-            "components": int(self.pca.n_components_),
-            "explained_variance_ratio": self.pca.explained_variance_ratio_.tolist(),
-            "score": "train-ECDF(max(robust-tail, PCA reconstruction residual))",
-            "fit_split": "train", "fit_uses_labels": False,
-            "reference_rows": self.reference_rows,
-        }
-
-
-def _save_view_reference(payload, prefix, model):
-    payload[f"{prefix}_position_center"] = model.scaler.center
-    payload[f"{prefix}_position_scale"] = model.scaler.scale
-    payload[f"{prefix}_pca_mean"] = model.pca.mean_.astype(np.float32)
-    payload[f"{prefix}_pca_components"] = model.pca.components_.astype(np.float32)
-    payload[f"{prefix}_pca_explained_variance"] = (
-        model.pca.explained_variance_.astype(np.float32)
-    )
-    payload[f"{prefix}_tail_reference"] = model.calibrator.tail
-    payload[f"{prefix}_residual_reference"] = model.calibrator.residual
-    payload[f"{prefix}_combined_reference"] = model.calibrator.combined
-
-
 def _metadata_template():
     return {name: [] for name in (
         "sample_id", "source_id", "token_index", "token_id", "relative_position",
@@ -742,60 +404,9 @@ def _metadata_arrays(metadata):
     return {name: np.asarray(values, dtype=dtype[name]) for name, values in metadata.items()}
 
 
-def _graph_record(sample, attention, start, end):
-    return {
-        "sample_id": str(sample.sample_id), "start": int(start), "end": int(end),
-        "token_ids": attention.token_ids.detach().cpu().numpy().astype(np.int32),
-        "response_idx": int(attention.response_idx),
-    }
-
-
 def _safe_filename(value):
     value = "".join(c if c.isalnum() or c in "-_." else "_" for c in str(value))
     return (value.strip("._") or "sample")[:120]
-
-
-def _save_graph_index(
-    directory, graph, representation_file, *,
-    canonical_split, canonical_sha256, rewire_seed,
-    true_graph_file=None, anomaly_score=None, anomaly_threshold=None,
-    anomaly_mask=None, anomaly_component=None, rewire_audit=None,
-):
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"sample_{_safe_filename(graph['sample_id'])}.npz"
-    payload = dict(
-        schema=np.asarray(SCHEMA), labels_included=np.asarray(False),
-        sample_id=np.asarray(graph["sample_id"]), token_ids=graph["token_ids"],
-        response_idx=np.asarray(graph["response_idx"], dtype=np.int32),
-        global_row_start=np.asarray(graph["start"], dtype=np.int64),
-        global_row_end=np.asarray(graph["end"], dtype=np.int64),
-        representation_file=np.asarray(representation_file.name),
-        canonical_split=np.asarray(str(canonical_split)),
-        exact_route_sample_id=np.asarray(graph["sample_id"]),
-        exact_route_sha256=np.asarray(str(canonical_sha256)),
-        rewire_seed=np.asarray(rewire_seed, dtype=np.int64),
-    )
-    if true_graph_file is not None:
-        payload["true_graph_representation_file"] = np.asarray(true_graph_file.name)
-    if anomaly_score is not None:
-        payload.update(
-            true_graph_score=np.asarray(anomaly_score, dtype=np.float32),
-            anomaly_threshold=np.asarray(anomaly_threshold, dtype=np.float32),
-            anomaly_mask=np.asarray(anomaly_mask, dtype=bool),
-            anomaly_component=np.asarray(anomaly_component, dtype=np.int32),
-        )
-    if rewire_audit is not None:
-        payload.update(
-            rewire_rr_edges=np.asarray(rewire_audit["rr_edges"], dtype=np.int64),
-            rewire_changed_edges=np.asarray(
-                rewire_audit["rewired_changed_edges"], dtype=np.int64
-            ),
-            rewire_changed_fraction=np.asarray(
-                rewire_audit["rewired_changed_fraction"], dtype=np.float32
-            ),
-        )
-    np.savez_compressed(path, **payload)
-    return path
 
 
 def _ranking(labels, scores):
@@ -813,90 +424,6 @@ def _ranking(labels, scores):
         "auprc": float(average_precision_score(labels, scores)),
         "correct_median": float(np.median(scores[labels == 0])),
         "hallucination_median": float(np.median(scores[labels == 1])),
-    }
-
-
-def _threshold_metrics(labels, scores, threshold):
-    labels = np.asarray(labels, dtype=np.int8)
-    predicted = np.asarray(scores) >= float(threshold)
-    true_positive = int(np.count_nonzero(predicted & (labels == 1)))
-    false_positive = int(np.count_nonzero(predicted & (labels == 0)))
-    false_negative = int(np.count_nonzero(~predicted & (labels == 1)))
-    precision = true_positive / max(true_positive + false_positive, 1)
-    recall = true_positive / max(true_positive + false_negative, 1)
-    return {
-        "threshold": float(threshold), "predicted_nodes": int(predicted.sum()),
-        "predicted_fraction": float(predicted.mean()),
-        "precision": float(precision), "recall": float(recall),
-        "f1": float(2 * precision * recall / max(precision + recall, 1e-12)),
-    }
-
-
-def _metrics_by_group(labels, scores, groups):
-    groups = np.asarray(groups).astype(str)
-    return {
-        value: _ranking(np.asarray(labels)[groups == value], np.asarray(scores)[groups == value])
-        for value in sorted(set(groups.tolist()))
-    }
-
-
-def _positive_runs_from_mask(mask):
-    mask = np.asarray(mask, dtype=bool)
-    padded = np.pad(mask.astype(np.int8), (1, 1))
-    change = np.diff(padded)
-    return [
-        np.arange(start, end, dtype=np.int32)
-        for start, end in zip(np.flatnonzero(change == 1), np.flatnonzero(change == -1))
-    ]
-
-
-def _component_detection_metrics(labels, graphs, graph_paths):
-    """Measure whether fixed-threshold graph components localize labeled spans."""
-    true_best_iou, predicted_best_iou = [], []
-    true_overlap, predicted_overlap = [], []
-    predicted_count = 0
-    for graph in graphs:
-        start, end = graph["start"], graph["end"]
-        true_groups = _positive_runs_from_mask(np.asarray(labels)[start:end] == 1)
-        with np.load(graph_paths[graph["sample_id"]], allow_pickle=False) as artifact:
-            component = artifact["anomaly_component"]
-        predicted_groups = [
-            np.flatnonzero(component == component_id)
-            for component_id in sorted(set(component[component >= 0].tolist()))
-        ]
-        predicted_count += len(predicted_groups)
-
-        def best_iou(group, candidates):
-            current = set(map(int, group))
-            values = []
-            for candidate in candidates:
-                other = set(map(int, candidate))
-                values.append(len(current & other) / max(len(current | other), 1))
-            return max(values, default=0.0)
-
-        for group in true_groups:
-            value = best_iou(group, predicted_groups)
-            true_best_iou.append(value)
-            true_overlap.append(value > 0)
-        for group in predicted_groups:
-            value = best_iou(group, true_groups)
-            predicted_best_iou.append(value)
-            predicted_overlap.append(value > 0)
-    return {
-        "true_hallucination_spans": int(len(true_best_iou)),
-        "predicted_graph_components": int(predicted_count),
-        "mean_best_iou_per_true_span": (
-            float(np.mean(true_best_iou)) if true_best_iou else None
-        ),
-        "true_span_any_overlap_rate": (
-            float(np.mean(true_overlap)) if true_overlap else None
-        ),
-        "mean_best_iou_per_predicted_component": (
-            float(np.mean(predicted_best_iou)) if predicted_best_iou else None
-        ),
-        "predicted_component_any_overlap_rate": (
-            float(np.mean(predicted_overlap)) if predicted_overlap else None
-        ),
     }
 
 
@@ -941,79 +468,6 @@ def _cluster_bootstrap_difference(
             "probability_gain_gt_zero": float(np.mean(values > 0)),
         }
     return {"auroc_difference": summary(auroc), "auprc_difference": summary(auprc)}
-
-
-def _separation(labels, values):
-    result = _ranking(labels, values)
-    raw = result.get("auroc")
-    if raw is None:
-        return {
-            **result, "raw_auroc_higher_for_hallucination": None,
-            "separability": None, "post_hoc_direction": None,
-        }
-    return {
-        **result, "raw_auroc_higher_for_hallucination": raw,
-        "separability": max(raw, 1.0 - raw),
-        "post_hoc_direction": (
-            "higher_for_hallucination" if raw >= 0.5 else "lower_for_hallucination"
-        ),
-    }
-
-
-def _signal_summary(rows):
-    valid = [row for row in rows if row["separability"] is not None]
-    if not valid:
-        return {
-            "dimensions": int(len(rows)), "evaluated_dimensions": 0,
-            "median_separability": None, "q90_separability": None,
-            "q95_separability": None, "best_separability": None,
-            "count_ge_0_60": 0, "count_ge_0_65": 0,
-            "count_ge_0_70": 0, "top_dimensions": [],
-        }
-    separability = np.asarray([row["separability"] for row in valid], dtype=np.float64)
-    order = np.argsort(-separability, kind="stable")
-    return {
-        "dimensions": int(len(rows)),
-        "evaluated_dimensions": int(len(valid)),
-        "median_separability": float(np.median(separability)),
-        "q90_separability": float(np.quantile(separability, 0.90)),
-        "q95_separability": float(np.quantile(separability, 0.95)),
-        "best_separability": float(separability[order[0]]),
-        "count_ge_0_60": int((separability >= 0.60).sum()),
-        "count_ge_0_65": int((separability >= 0.65).sum()),
-        "count_ge_0_70": int((separability >= 0.70).sum()),
-        "top_dimensions": [valid[index] for index in order[:20]],
-    }
-
-
-def _channel_rows(values, labels, num_heads, *, description=None):
-    rows = []
-    for channel in tqdm(
-        range(values.shape[1]), desc=description, unit="channel",
-        disable=description is None,
-    ):
-        metric = _separation(labels, np.asarray(values[:, channel]))
-        rows.append({
-            "layer": int(channel // num_heads),
-            "head": int(channel % num_heads),
-            "raw_auroc_higher_for_hallucination": metric[
-                "raw_auroc_higher_for_hallucination"
-            ],
-            "separability": metric["separability"],
-            "post_hoc_direction": metric["post_hoc_direction"],
-        })
-    return rows
-
-
-def _evaluate_lookback(representation_file, labels, num_heads):
-    """Audit all preserved layer-head Lookback coordinates after freezing."""
-    values = np.load(representation_file, mmap_mode="r")
-    rows = _channel_rows(
-        values, labels, num_heads, description="[6/8] AUROC Lookback channels"
-    )
-    return {"all_tokens": _signal_summary(rows)}
-
-
 def _open_label_store(evaluation_dataset, description):
     """Open labels, completing the formal-cache seal when it is still closed."""
     try:
@@ -1039,15 +493,6 @@ def _read_dataset_labels(evaluation_dataset, description):
     return np.asarray(rows, dtype=np.int8)
 
 
-def _read_labels(evaluation_dataset, metadata):
-    labels = _read_dataset_labels(
-        evaluation_dataset, "[5/8] open sealed labels"
-    )
-    if len(labels) != len(metadata["sample_id"]):
-        raise ValueError("evaluation labels do not align with frozen token rows")
-    return labels
-
-
 def _collapsed_route_indices(route, token_count, layer=None):
     """Return one maximum-weight layer route for each source-target pair."""
     source = route["source"]
@@ -1062,7 +507,6 @@ def _collapsed_route_indices(route, token_count, layer=None):
         source[candidates].astype(np.int64) * int(token_count)
         + target[candidates].astype(np.int64)
     )
-    # Sort by pair first and descending weight second; keep the first member.
     order = np.lexsort((-weight[candidates], pair))
     ranked = candidates[order]
     ranked_pair = pair[order]
@@ -1138,62 +582,6 @@ def _weight_norm(values):
     if upper <= lower:
         lower = max(upper * .5, np.finfo(np.float32).tiny)
     return LogNorm(vmin=lower, vmax=upper)
-
-
-def _select_samples(config, graphs, coordinates):
-    available = {graph["sample_id"] for graph in graphs}
-    if config.sample_ids:
-        requested = list(dict.fromkeys(map(str, config.sample_ids)))
-        missing = [sample_id for sample_id in requested if sample_id not in available]
-        if missing:
-            raise ValueError(f"sample IDs are absent from test split: {missing}")
-        return requested, "user_requested_before_labels"
-    ranked = []
-    for graph in graphs:
-        values = coordinates[graph["start"]:graph["end"]]
-        dispersion = float(np.linalg.norm(values - values.mean(0), axis=1).mean())
-        ranked.append((dispersion, len(values), graph["sample_id"]))
-    return [max(ranked)[2]], "label_free_max_lookback_embedding_dispersion"
-
-
-def _render_population(output, coordinates, scores, labels):
-    import matplotlib.pyplot as plt
-    figure, axes = plt.subplots(1, 4, figsize=(21, 5), constrained_layout=True)
-    for label, color, name, size, alpha in (
-        (0, "#2ca02c", "correct", 4, .12),
-        (1, "#d62728", "hallucination", 10, .65),
-    ):
-        selected = labels == label
-        axes[0].scatter(
-            coordinates[selected, 0], coordinates[selected, 1], c=color,
-            s=size, alpha=alpha, label=name, rasterized=True,
-        )
-    axes[0].set(
-        title="Train-only PCA visualization of the raw true graph",
-        xlabel="component 1", ylabel="component 2",
-    )
-    axes[0].legend(frameon=False)
-    for axis, key, title in (
-        (axes[1], "token_only", "Token-only reference"),
-        (axes[2], "true_graph", "True evidence-flow graph"),
-        (axes[3], "rewired_graph", "Rewired graph control"),
-    ):
-        metric = _ranking(labels, scores[key])
-        for label, color, name in ((0, "#2ca02c", "correct"), (1, "#d62728", "hallucination")):
-            axis.hist(
-                scores[key][labels == label], bins=60, density=True,
-                alpha=.55, color=color, label=name,
-            )
-        auc = "N/A" if metric["auroc"] is None else f"{metric['auroc']:.3f}"
-        axis.set(
-            title=f"{title}; AUROC={auc}",
-            xlabel="label-free anomaly score", ylabel="density",
-        )
-        axis.legend(frameon=False)
-    path = output / "population_token_representations.png"
-    figure.savefig(path, dpi=240)
-    plt.close(figure)
-    return path
 
 
 def _render_sample(output, graph, route, coordinates, structure, labels,
@@ -1336,10 +724,10 @@ def _render_sample(output, graph, route, coordinates, structure, labels,
         axes[1].scatter(
             center, provenance_rows, s=7.0 + 40.0 * np.sqrt(relative_mass),
             facecolors="none", edgecolors="#2d6cdf", linewidths=.65,
-            label="hop-1 inherited prompt centroid ± spread",
+            label="hop-1 inherited prompt centroid 鍗?spread",
         )
     axes[1].set(
-        title=f"Prompt→response weighted adjacency ({layer_text})",
+        title=f"Prompt閳姰esponse weighted adjacency ({layer_text})",
         xlabel="prompt source token index", ylabel="response target token index",
     )
     if image is not None:
@@ -1362,7 +750,7 @@ def _render_sample(output, graph, route, coordinates, structure, labels,
     for token in np.flatnonzero(labels == 1):
         axes[2].axhline(token, color="#00ffff", lw=.35, alpha=.65)
     axes[2].set(
-        title=f"Response→response weighted adjacency ({layer_text})",
+        title=f"Response閳姰esponse weighted adjacency ({layer_text})",
         xlabel="history source token index", ylabel="response target token index",
         xlim=(-.5, response_count - .5), ylim=(-.5, response_count - .5),
     )
@@ -1485,13 +873,12 @@ def render_saved_sample(dataset, *, output_dir, sample_id, layer=None):
         raise ValueError("saved sample rows do not align with evaluation labels")
     if isinstance(all_labels, np.memmap):
         all_labels._mmap.close()
-    config = TokenRepresentationConfig(
+    config = _DisplayConfig(
         provenance_hops=int(saved_config.get("provenance_hops", 2)),
         csr_row_block=int(saved_config.get("csr_row_block", 4096)),
         display_mass_cover=float(saved_config.get("display_mass_cover", .80)),
         display_edges_per_type=int(saved_config.get("display_edges_per_type", 2)),
         display_max_edges=int(saved_config.get("display_max_edges", 300)),
-        display_layer=layer,
     )
     config.validate()
     if str(dataset.rows[str(sample_id)]["sha256"]) != exact_route_sha256:
@@ -1527,604 +914,4 @@ def render_saved_sample(dataset, *, output_dir, sample_id, layer=None):
         "predicted_anomaly_nodes": int(
             np.count_nonzero(anomaly_score >= anomaly_threshold)
         ),
-    }
-
-
-def _geometry(dataset):
-    return {name: dataset.manifest.get(name) for name in (
-        "schema", "num_layers", "num_heads", "attention_floor", "observer_model",
-    )}
-
-
-def _manifest_fingerprint(dataset):
-    keys = (
-        "schema", "index_sha256", "attention_cache_fingerprint",
-        "num_layers", "num_heads", "attention_floor", "observer_model",
-    )
-    result = {
-        key: dataset.manifest[key]
-        for key in keys if key in dataset.manifest
-    }
-    inventory = "\n".join(
-        f"{sample_id}\t{dataset.rows[str(sample_id)]['sha256']}"
-        for sample_id in dataset.sample_ids
-    )
-    result["sample_inventory_sha256"] = hashlib.sha256(
-        inventory.encode("utf-8")
-    ).hexdigest()
-    return result
-
-
-def _reference_signature(dataset, config, channels):
-    contract = {
-        "schema": REFERENCE_CHECKPOINT_SCHEMA,
-        "train_split": _manifest_fingerprint(dataset),
-        "channels": int(channels),
-        "position_bins": int(config.position_bins),
-        "reference_size": int(config.reference_size),
-        "seed": int(config.seed),
-        "primitive_layout": "X,Fp,Fr,Fr_rewired,direct",
-    }
-    return hashlib.sha256(
-        json.dumps(contract, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
-
-
-def _save_reference_checkpoint(
-    path, reservoir, *, signature, next_sample_index,
-    train_tokens, train_sources,
-):
-    state = reservoir.snapshot()
-    temporary = path.with_suffix(".tmp")
-    with temporary.open("wb") as handle:
-        np.savez(
-            handle,
-            schema=np.asarray(REFERENCE_CHECKPOINT_SCHEMA),
-            signature=np.asarray(signature),
-            next_sample_index=np.asarray(next_sample_index, dtype=np.int64),
-            train_tokens=np.asarray(train_tokens, dtype=np.int64),
-            train_sources=np.asarray(sorted(train_sources)),
-            values=state["values"],
-            priorities=state["priorities"],
-            filled=state["filled"],
-            seen=state["seen"],
-            rng_state=np.asarray(json.dumps(state["rng_state"], sort_keys=True)),
-        )
-    temporary.replace(path)
-
-
-def _load_reference_checkpoint(path, reservoir, *, signature):
-    with np.load(path, allow_pickle=False) as saved:
-        if (
-            str(saved["schema"]) != REFERENCE_CHECKPOINT_SCHEMA
-            or str(saved["signature"]) != signature
-        ):
-            raise ValueError("train reference checkpoint does not match this run")
-        reservoir.restore({
-            "values": saved["values"],
-            "priorities": saved["priorities"],
-            "filled": saved["filled"],
-            "seen": saved["seen"],
-            "rng_state": json.loads(str(saved["rng_state"])),
-        })
-        return {
-            "next_sample_index": int(saved["next_sample_index"]),
-            "train_tokens": int(saved["train_tokens"]),
-            "train_sources": set(saved["train_sources"].astype(str).tolist()),
-        }
-
-
-def discover_token_representations(train_dataset, test_dataset, evaluation_dataset,
-                                   *, output_dir, config=None):
-    config = TokenRepresentationConfig() if config is None else config
-    num_layers = int(train_dataset.manifest["num_layers"])
-    num_heads = int(train_dataset.manifest["num_heads"])
-    config.validate()
-    if _geometry(train_dataset) != _geometry(test_dataset):
-        raise ValueError("train and test attention geometry differ")
-    if list(map(str, test_dataset.sample_ids)) != list(map(str, evaluation_dataset.sample_ids)):
-        raise ValueError("evaluation dataset does not match ordered test sample IDs")
-    output = Path(output_dir)
-    checkpoint_file = output / "train_reference_checkpoint.npz"
-    checkpoint_file.with_suffix(".tmp").unlink(missing_ok=True)
-    if output.exists() and any(
-        path.name != checkpoint_file.name for path in output.iterdir()
-    ):
-        raise ValueError("token representation output directory must be empty")
-    output.mkdir(parents=True, exist_ok=True)
-    names = structure_names(config.provenance_hops)
-    feature_names = representation_feature_names(num_layers, num_heads)
-    channels = num_layers * num_heads
-    direct_names = direct_field_names(num_layers, num_heads)
-    propagation_names = propagation_field_names(num_layers, num_heads)
-    view_names = (
-        "scalar_only", "token_only", "prompt_graph", "response_graph",
-        "true_graph", "rewired_graph", "direct_marginals",
-    )
-
-    print("[1/8] building train-only exact-channel references", flush=True)
-    reservoir = _PositionReservoir(
-        config.position_bins, config.reference_size, config.seed
-    )
-    signature = _reference_signature(train_dataset, config, channels)
-    train_sources = set()
-    train_tokens = 0
-    start_index = 0
-    if checkpoint_file.exists():
-        resumed = _load_reference_checkpoint(
-            checkpoint_file, reservoir, signature=signature
-        )
-        start_index = resumed["next_sample_index"]
-        train_tokens = resumed["train_tokens"]
-        train_sources = resumed["train_sources"]
-        print(
-            f"[1/8] resuming at train sample {start_index}/{len(train_dataset)}",
-            flush=True,
-        )
-    train_ids = list(map(str, train_dataset.sample_ids))
-    for index, sample_id in enumerate(tqdm(
-        train_ids[start_index:],
-        initial=start_index, total=len(train_ids),
-        desc="train evidence-flow nodes", unit="sample",
-    ), start=start_index):
-        sample = train_dataset[sample_id]
-        attention = sample.attention()
-        lookback, direct, propagation, rewired_propagation, _ = (
-            lookback_evidence_from_attention(
-                attention, csr_row_block=config.csr_row_block,
-                sample_id=sample_id, seed=config.seed,
-            )
-        )
-        representation = build_node_representation(
-            lookback, num_layers=num_layers, num_heads=num_heads
-        )
-        prompt_flow = propagation[:, :channels]
-        response_flow = propagation[:, channels:]
-        rewired_response_flow = rewired_propagation[:, channels:]
-        primitives = torch.cat((
-            representation, prompt_flow, response_flow,
-            rewired_response_flow, direct,
-        ), dim=1).detach().cpu().numpy()
-        position = np.arange(len(representation), dtype=np.float32) / max(
-            len(representation) - 1, 1
-        )
-        reservoir.add(primitives, position)
-        train_sources.add(str(sample.source_id))
-        train_tokens += len(representation)
-        sample.release_attention()
-        next_index = index + 1
-        if next_index % config.checkpoint_interval == 0:
-            _save_reference_checkpoint(
-                checkpoint_file, reservoir, signature=signature,
-                next_sample_index=next_index, train_tokens=train_tokens,
-                train_sources=train_sources,
-            )
-    _save_reference_checkpoint(
-        checkpoint_file, reservoir, signature=signature,
-        next_sample_index=len(train_ids), train_tokens=train_tokens,
-        train_sources=train_sources,
-    )
-    print("[2/8] fitting seven train-only one-class reference models", flush=True)
-    primitive_values, reference_bins = reservoir.matrix()
-    reference_views = _reference_views_from_primitives(
-        primitive_values, channels=channels
-    )
-    references = {
-        view: _ViewReference(view, config).fit(values, reference_bins)
-        for view, values in reference_views.items()
-    }
-    del reservoir, primitive_values, reference_bins, reference_views
-    anomaly_threshold = float(np.quantile(
-        references["true_graph"].reference_scores, config.anomaly_quantile
-    ))
-
-    print("[3/8] counting test nodes for compact memory-mapped output", flush=True)
-    counts = []
-    count_sources = set()
-    for sample_id in tqdm(test_dataset.sample_ids, desc="count test tokens", unit="sample"):
-        sample = test_dataset[sample_id]
-        counts.append(int(sample.attention().num_response_tokens))
-        count_sources.add(str(sample.source_id))
-        sample.release_attention()
-    if train_sources & count_sources:
-        raise ValueError("train and test source groups overlap")
-    total_tokens = int(sum(counts))
-    representation_file = output / "token_node_representations.float16.npy"
-    true_graph_file = output / "true_graph_node_representations.float16.npy"
-    representation_gib = total_tokens * len(feature_names) * 2 / (1024 ** 3)
-    true_graph_gib = total_tokens * (3 * channels) * 2 / (1024 ** 3)
-    print(
-        f"[3/8] test_tokens={total_tokens}; node_file~{representation_gib:.2f} GiB; "
-        f"raw_true_graph~{true_graph_gib:.2f} GiB",
-        flush=True,
-    )
-    required = (
-        representation_gib + true_graph_gib
-    ) * (1024 ** 3) * 1.10
-    free = shutil.disk_usage(output).free
-    if free < required:
-        raise OSError(
-            f"insufficient output disk: need about {required / (1024 ** 3):.2f} GiB, "
-            f"available {free / (1024 ** 3):.2f} GiB"
-        )
-    representation_output = np.lib.format.open_memmap(
-        representation_file, mode="w+", dtype=np.float16,
-        shape=(total_tokens, len(feature_names)),
-    )
-    true_graph_output = np.lib.format.open_memmap(
-        true_graph_file, mode="w+", dtype=np.float16,
-        shape=(total_tokens, 3 * channels),
-    )
-    coordinate_output = np.empty((total_tokens, 2), dtype=np.float32)
-    scores = {
-        name: np.empty(total_tokens, dtype=np.float32)
-        for name in (
-            *view_names,
-        )
-    }
-    metadata = _metadata_template()
-    graphs, graph_paths = [], {}
-    rewire_audits = []
-    graph_directory = output / "sample_graphs"
-    offset = 0
-
-    print("[4/8] freezing raw Lookback and raw true-graph representations", flush=True)
-    for sample_id, expected_count in tqdm(
-        zip(test_dataset.sample_ids, counts), total=len(counts),
-        desc="test Lookback + graph propagation", unit="sample",
-    ):
-        sample = test_dataset[sample_id]
-        attention = sample.attention()
-        (
-            current_lookback, direct, propagation,
-            rewired_propagation, rewire_audit,
-        ) = lookback_evidence_from_attention(
-            attention, csr_row_block=config.csr_row_block,
-            sample_id=sample_id, seed=config.seed,
-        )
-        representation_tensor = build_node_representation(
-            current_lookback, num_layers=num_layers, num_heads=num_heads
-        )
-        representation = representation_tensor.detach().cpu().numpy()
-        if len(representation) != expected_count:
-            raise ValueError("test response length changed between passes")
-        end = offset + expected_count
-        position = np.arange(expected_count, dtype=np.float32) / max(expected_count - 1, 1)
-        representation_saved = representation.astype(np.float16)
-        prompt_flow, response_flow = propagation[:, :channels], propagation[:, channels:]
-        rewired_response_flow = rewired_propagation[:, channels:]
-        true_graph = torch.cat((
-            representation_tensor,
-            prompt_flow, response_flow,
-        ), dim=1).detach().cpu().numpy()
-        test_views = {
-            "scalar_only": representation.mean(axis=1, keepdims=True),
-            "token_only": representation,
-            "prompt_graph": np.concatenate((representation, prompt_flow.detach().cpu().numpy()), axis=1),
-            "response_graph": np.concatenate((representation, response_flow.detach().cpu().numpy()), axis=1),
-            "true_graph": true_graph,
-            "rewired_graph": np.concatenate((representation, prompt_flow.detach().cpu().numpy(), rewired_response_flow.detach().cpu().numpy()), axis=1),
-            "direct_marginals": direct.detach().cpu().numpy(),
-        }
-        transformed = {
-            view: references[view].transform(values, position)
-            for view, values in test_views.items()
-        }
-        for view in test_views:
-            scores[view][offset:end] = transformed[view]["score"]
-        true_score = transformed["true_graph"]["score"]
-        coordinates = transformed["true_graph"]["coordinates"]
-        representation_output[offset:end] = representation_saved
-        true_graph_output[offset:end] = true_graph.astype(np.float16)
-        coordinate_output[offset:end] = coordinates
-        _append_metadata(metadata, sample, attention)
-        record = _graph_record(sample, attention, offset, end)
-        graphs.append(record)
-        rewire_audits.append(rewire_audit)
-        active, component = anomaly_components_from_attention(
-            attention,
-            scores=true_score, threshold=anomaly_threshold,
-            csr_row_block=config.csr_row_block,
-        )
-        graph_paths[record["sample_id"]] = _save_graph_index(
-            graph_directory, record, representation_file,
-            canonical_split=test_dataset.root,
-            canonical_sha256=test_dataset.rows[str(sample_id)]["sha256"],
-            rewire_seed=config.seed,
-            true_graph_file=true_graph_file,
-            anomaly_score=true_score, anomaly_threshold=anomaly_threshold,
-            anomaly_mask=active, anomaly_component=component,
-            rewire_audit=rewire_audit,
-        )
-        offset = end
-        sample.release_attention()
-    representation_output.flush()
-    true_graph_output.flush()
-    representation_output._mmap.close()
-    true_graph_output._mmap.close()
-    if offset != total_tokens:
-        raise RuntimeError("test token count and frozen arrays do not align")
-    rewire_rr_edges = sum(audit["rr_edges"] for audit in rewire_audits)
-    rewire_changed_edges = sum(
-        audit["rewired_changed_edges"] for audit in rewire_audits
-    )
-    rewire_summary = {
-        "samples": len(rewire_audits),
-        "rr_edges": rewire_rr_edges,
-        "rewired_changed_edges": rewire_changed_edges,
-        "rewired_changed_fraction": (
-            rewire_changed_edges / rewire_rr_edges if rewire_rr_edges else 0.0
-        ),
-    }
-    metadata = _metadata_arrays(metadata)
-    selected_samples, selection_rule = _select_samples(config, graphs, coordinate_output)
-
-    reference_model_file = output / "train_reference_model.npz"
-    reference_payload = {
-        "schema": np.asarray(SCHEMA), "labels_included": np.asarray(False),
-        "representation_feature_names": np.asarray(feature_names),
-        "direct_field_names": np.asarray(direct_names),
-        "propagation_field_names": np.asarray(propagation_names),
-        "anomaly_threshold": np.asarray(anomaly_threshold, dtype=np.float32),
-    }
-    for view, model in references.items():
-        _save_view_reference(reference_payload, view, model)
-    np.savez(reference_model_file, **reference_payload)
-
-    index_payload = dict(
-        schema=np.asarray(SCHEMA), labels_included=np.asarray(False),
-        representation_feature_names=np.asarray(feature_names),
-        direct_field_names=np.asarray(direct_names),
-        propagation_field_names=np.asarray(propagation_names),
-        visualization_coordinates=coordinate_output,
-        node_representation_file=np.asarray(representation_file.name),
-        true_graph_representation_file=np.asarray(true_graph_file.name),
-        exact_route_canonical_split=np.asarray(str(test_dataset.root)),
-        exact_route_storage=np.asarray("canonical sparse CSR attention"),
-        exact_route_channel_layout=np.asarray("channel=layer*num_heads+head"),
-        rewire_seed=np.asarray(config.seed, dtype=np.int64),
-        anomaly_threshold=np.asarray(anomaly_threshold, dtype=np.float32),
-        sample_id=metadata["sample_id"], source_id=metadata["source_id"],
-        token_index=metadata["token_index"], token_id=metadata["token_id"],
-        relative_position=metadata["relative_position"],
-        task_type=metadata["task_type"], data_source=metadata["data_source"],
-        generator_model=metadata["generator_model"],
-    )
-    for name, values in scores.items():
-        index_payload[f"{name}_score"] = values
-    np.savez(output / "token_representations_label_free.npz", **index_payload)
-    label_free_report = {
-        "schema": SCHEMA, "labels_read": False,
-        "primary_node_state": {
-            "name": "direct layer-head Lookback",
-            "shape_per_token": [num_layers, num_heads],
-            "flattened_dimensions": channels,
-            "layer_head_averaged": False,
-        },
-        "compact_layer_structure": {
-            "names": list(names),
-            "shape_per_token": [len(names), num_layers],
-            "mixed_into_primary_node_vector": False,
-            "role": "computed_on_demand_for_explicit_sample_visualization_only",
-            "stored_for_full_population": False,
-        },
-        "compression_semantics": {
-            "undefined_lookback_fill": "attention_floor",
-            "attention_floor": float(test_dataset.manifest["attention_floor"]),
-            "missing_edges_reconstructed": False,
-            "interpretation": "all masses and routes use retained CSR edges only",
-        },
-        "evidence_flow_graph": {
-            "trainable": False,
-            "backpropagation": False,
-            "all_head_mean_used": False,
-            "route": "exact retained CSR layer-head channels; no projection",
-            "execution": "one streaming CSR pass computes direct, true, and rewired flows",
-            "raw_mass_preserved": True,
-            "node_signal": f"complete {num_layers}x{num_heads} Lookback",
-            "propagation": "[Fp, Fr] exact-channel residual flows",
-            "direct": "[prompt_mass, response_mass] exact-channel marginals",
-            "direct_dimensions": len(direct_names),
-            "propagation_dimensions": len(propagation_names),
-            "randomized_null": (
-                "preserves every RR target, layer, head, channel, weight, and "
-                "floor(log2(lag)) bucket; each causal source changes whenever "
-                "that bucket contains an alternative (parallel routes are allowed)"
-            ),
-            "rewire_audit": rewire_summary,
-        },
-        "exact_route_audit": {
-            "canonical_train_split": str(train_dataset.root),
-            "canonical_test_split": str(test_dataset.root),
-            "train_manifest_fingerprint": _manifest_fingerprint(train_dataset),
-            "test_manifest_fingerprint": _manifest_fingerprint(test_dataset),
-            "stored_again_in_output": False,
-            "sample_key": "sample_id",
-            "channel_layout": "channel=layer*num_heads+head",
-            "target_layout": "target=response_idx+response_row",
-            "rewire_seed": config.seed,
-            "per_sample_rewire_audit": "sample_graphs/*.npz",
-        },
-        "unsupervised_scores": {
-            "views": list(view_names),
-            "primary_score": "true_graph",
-            "within_view": (
-                "train-ECDF of max(position-conditioned robust-tail, "
-                "train-only PCA reconstruction residual)"
-            ),
-            "scalar_only": "unlabeled position-conditioned reference on mean(X); no label-selected direction",
-            "anomaly_quantile": config.anomaly_quantile,
-            "anomaly_threshold": anomaly_threshold,
-        },
-        "reference_models": {
-            view: model.report() for view, model in references.items()
-        },
-        "structural_validation_protocol": {
-            "frozen_before_labels": True,
-            "comparisons": [
-                "true_graph minus token_only",
-                "true_graph minus rewired_graph",
-                "response_graph minus prompt_graph",
-            ],
-            "primary_success_rule": (
-                "true_graph is the fixed primary score; all comparisons are paired sample bootstraps"
-            ),
-            "uncertainty": (
-                f"paired {config.bootstrap_replicates}-replicate bootstrap over "
-                "whole response samples"
-            ),
-        },
-        "train_tokens": int(train_tokens), "test_tokens": total_tokens,
-        "sample_selection": {
-            "sample_ids": selected_samples, "rule": selection_rule, "labels_used": False,
-        },
-        "artifacts": {
-            "node_representations": str(representation_file),
-            "true_graph_representations": str(true_graph_file),
-            "visualization_coordinates": "PCA coordinates only; not node representations",
-            "index": str(output / "token_representations_label_free.npz"),
-            "train_reference_model": str(reference_model_file),
-            "sample_graph_directory": str(graph_directory),
-        },
-        "config": asdict(config),
-    }
-    (output / "label_free_report.json").write_text(
-        json.dumps(label_free_report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-
-    labels = _read_labels(evaluation_dataset, metadata)
-    evaluation_labels_file = output / "evaluation_token_labels.npy"
-    np.save(evaluation_labels_file, labels)
-    lookback_signals = _evaluate_lookback(
-        representation_file, labels, num_heads,
-    )
-    score_metrics = {name: _ranking(labels, value) for name, value in scores.items()}
-    comparisons = {
-        "true_graph_vs_token_only": _cluster_bootstrap_difference(
-            labels, scores["true_graph"], scores["token_only"],
-            metadata["sample_id"], seed=config.seed,
-            replicates=config.bootstrap_replicates,
-            description="[6/8] bootstrap true graph vs token-only",
-        ),
-        "true_graph_vs_rewired_graph": _cluster_bootstrap_difference(
-            labels, scores["true_graph"], scores["rewired_graph"],
-            metadata["sample_id"], seed=config.seed + 1,
-            replicates=config.bootstrap_replicates,
-            description="[6/8] bootstrap true graph vs rewired graph",
-        ),
-        "response_graph_vs_prompt_graph": _cluster_bootstrap_difference(
-            labels, scores["response_graph"], scores["prompt_graph"],
-            metadata["sample_id"], seed=config.seed + 2,
-            replicates=config.bootstrap_replicates,
-            description="[6/8] bootstrap response graph vs prompt graph",
-        ),
-    }
-    topology_validation = {
-        "observed_metric_gains": {
-            "true_graph_minus_token_only_auroc": (
-                score_metrics["true_graph"]["auroc"]
-                - score_metrics["token_only"]["auroc"]
-            ),
-            "true_graph_minus_token_only_auprc": (
-                score_metrics["true_graph"]["auprc"]
-                - score_metrics["token_only"]["auprc"]
-            ),
-            "true_graph_minus_rewired_graph_auroc": (
-                score_metrics["true_graph"]["auroc"]
-                - score_metrics["rewired_graph"]["auroc"]
-            ),
-            "true_graph_minus_rewired_graph_auprc": (
-                score_metrics["true_graph"]["auprc"]
-                - score_metrics["rewired_graph"]["auprc"]
-            ),
-        },
-        "paired_sample_bootstrap": comparisons,
-        "by_task_type": {
-            name: _metrics_by_group(labels, values, metadata["task_type"])
-            for name, values in scores.items()
-        },
-        "fixed_threshold_detection": _threshold_metrics(
-            labels, scores["true_graph"], anomaly_threshold
-        ),
-        "anomaly_component_localization": _component_detection_metrics(
-            labels, graphs, graph_paths
-        ),
-    }
-    topology_validation["primary_success_rule_satisfied"] = bool(all(
-        gain > 0
-        for gain in topology_validation["observed_metric_gains"].values()
-    ))
-    topology_validation["strong_bootstrap_evidence"] = bool(all(
-        comparisons[comparison][metric]["ci95"][0] is not None
-        and comparisons[comparison][metric]["ci95"][0] > 0
-        for comparison in (
-            "true_graph_vs_token_only", "true_graph_vs_rewired_graph"
-        )
-        for metric in ("auroc_difference", "auprc_difference")
-    ))
-    report = {
-        **label_free_report,
-        "labels_read": True,
-        "labels_read_during": "evaluation_and_plot_coloring_only",
-        "labels_used": {"train": False, "test": "evaluation_only"},
-        "evaluation_label_cache": str(evaluation_labels_file),
-        "unsupervised_score_evaluation": score_metrics,
-        "graph_pattern_score_evaluation": {
-            view: score_metrics[view]
-            for view in ("prompt_graph", "response_graph")
-        },
-        "raw_representations": {
-            "X": {
-                "file": str(representation_file), "dtype": "float16",
-                "shape": [total_tokens, channels],
-                "meaning": "direct Lookback [L,H] flattened without temporal smoothing",
-            },
-            "Z": {
-                "file": str(true_graph_file), "dtype": "float16",
-                "shape": [total_tokens, 3 * channels],
-                "meaning": "true_graph=[X,Fp,Fr] exact-channel representation",
-            },
-        },
-        "structural_validation": topology_validation,
-        "lookback_layer_head_signal_evaluation": lookback_signals,
-        "protocol_warning": (
-            "Per-coordinate separability is post-hoc mechanism discovery on this "
-            "test set, not an unsupervised deployable score. Freeze selected "
-            "layers/heads on validation before a new held-out test result."
-        ),
-    }
-    report_path = output / "token_representation_report.json"
-    report_path.write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-
-    print("[7/8] rendering the population summary", flush=True)
-    population = _render_population(output, coordinate_output, scores, labels)
-    report["population_figure"] = str(population)
-    report["sample_visualizations"] = []
-    report["sample_visualization"] = {
-        "automatic": False,
-        "reason": "full routes and dense adjacency plots are explicit post-processing",
-        "recommended_sample_ids": selected_samples,
-        "command": (
-            "python main.py render-token-graph --test-split <test> "
-            f"--output-dir {output} --sample-id <sample_id>"
-        ),
-    }
-    report_path.write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    checkpoint_file.unlink()
-    print("[8/8] complete", flush=True)
-    return {
-        "output_dir": str(output), "report": str(report_path),
-        "test_nodes": total_tokens, "primary_score": "true_graph",
-        "score_evaluation": {
-            view: {
-                "auroc": score_metrics[view]["auroc"],
-                "auprc": score_metrics[view]["auprc"],
-            }
-            for view in view_names
-        },
-        "structural_comparisons": comparisons,
     }
