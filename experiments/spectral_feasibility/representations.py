@@ -1,19 +1,14 @@
-"""Causal channel-preserving spectral states for sparse attention graphs.
+"""Causal response-history spectral states for sparse attention graphs.
 
-The representation is built only from information that is exactly available in
-``ResearchSample`` response-query caches:
+The active detector in this package is deliberately RR-only.  For every
+layer/head channel and response prefix we treat retained response-to-response
+attention as a causal directed adjacency operator.  The corresponding
+Laplacian is triangular, so its diagonal is its spectrum.  Strongest-magnitude
+spectral coordinates are kept per channel without averaging layer/head axes.
 
-* RR (response-history) topology: for every layer/head and causal response
-  prefix, use the triangular directed Laplacian spectrum.  We keep the signed
-  eigenvalues with largest absolute magnitude so strong positive and negative
-  departures are both retained.
-* RP (response-to-prompt) transport: prompt query rows are unavailable, so a
-  prompt-node Laplacian would be fabricated.  Instead retained prompt attention
-  is accumulated into fixed relative prompt-position bins independently for
-  every layer/head.  The bin sum is the exact retained prompt mass.
-
-Layer/head channels are never averaged before the raw state is formed.  Missing
-CSR entries remain cache-censored (<= ``attention_floor``), not reconstructed
+Prompt transport remains available as a separate diagnostic utility, but it is
+not concatenated into the active RR subspace detector.  Missing CSR entries are
+cache-censored (<= ``attention_floor``); they are never reconstructed as exact
 zeros.
 """
 
@@ -28,25 +23,18 @@ import torch
 @dataclass(frozen=True)
 class SpectralConfig:
     top_k: int = 5
-    prompt_bins: int = 8
     block_rows: int = 8192
     position_bins: int = 4
     pca_dim: int = 32
     reference_per_sample: int = 6
     trim_fraction: float = 0.90
-    neighbors: int = 10
-    spectral_window: int = 8
-    dynamic_lags: int = 3
-    dynamic_ridge: float = 1e-2
-    logdet_alpha: float = 1e-3
+    channel_tail_fraction: float = 0.05
     attribution_topk: int = 8
     epsilon: float = 1e-8
 
     def validate(self) -> None:
         if self.top_k < 1:
             raise ValueError("top_k must be positive")
-        if self.prompt_bins < 2:
-            raise ValueError("prompt_bins must be at least two")
         if self.block_rows < 1:
             raise ValueError("block_rows must be positive")
         if self.position_bins < 1:
@@ -57,16 +45,8 @@ class SpectralConfig:
             raise ValueError("reference_per_sample must be positive")
         if not 0.5 <= float(self.trim_fraction) <= 1.0:
             raise ValueError("trim_fraction must be in [0.5, 1]")
-        if self.neighbors < 1:
-            raise ValueError("neighbors must be positive")
-        if self.spectral_window < 2:
-            raise ValueError("spectral_window must be at least two")
-        if self.dynamic_lags < 1:
-            raise ValueError("dynamic_lags must be positive")
-        if not np.isfinite(self.dynamic_ridge) or self.dynamic_ridge <= 0:
-            raise ValueError("dynamic_ridge must be positive and finite")
-        if not np.isfinite(self.logdet_alpha) or self.logdet_alpha <= 0:
-            raise ValueError("logdet_alpha must be positive and finite")
+        if not 0.0 < float(self.channel_tail_fraction) <= 1.0:
+            raise ValueError("channel_tail_fraction must be in (0, 1]")
         if self.attribution_topk < 1:
             raise ValueError("attribution_topk must be positive")
         if not np.isfinite(self.epsilon) or self.epsilon <= 0:
@@ -138,7 +118,7 @@ def prefix_laplacian_spectrum(
     positions=None,
     config: SpectralConfig | None = None,
 ) -> np.ndarray:
-    """Signed strongest-magnitude causal RR-Laplacian eigenvalues per channel.
+    """Signed strongest-magnitude causal RR-Laplacian spectrum per channel.
 
     For channel ``c=(layer, head)``, response prefix ``t`` and response source
     node ``j <= t``::
@@ -147,8 +127,8 @@ def prefix_laplacian_spectrum(
         lambda[c,t,j] = d[c,t,j] - A_c[j,j]
 
     The causal Laplacian is triangular, therefore its diagonal is its spectrum.
-    We keep the ``top_k`` entries with largest absolute magnitude and preserve
-    their signs.  This avoids discarding strong negative spectral departures.
+    ``top_k`` entries with largest absolute magnitude are retained independently
+    for every layer/head and their original signs are preserved.
     """
     config = SpectralConfig() if config is None else config
     config.validate()
@@ -211,8 +191,7 @@ def prefix_laplacian_spectrum(
         indices = torch.topk(
             eigenvalues.abs(), k=keep, dim=1, largest=True, sorted=True
         ).indices
-        strongest = torch.gather(eigenvalues, 1, indices)
-        output[output_index, :, :keep] = strongest
+        output[output_index, :, :keep] = torch.gather(eigenvalues, 1, indices)
         previous_prefix = prefix
 
     return (
@@ -228,18 +207,22 @@ def prompt_transport_profile(
     sample,
     *,
     positions=None,
-    config: SpectralConfig | None = None,
+    prompt_bins: int = 8,
+    block_rows: int = 8192,
 ) -> np.ndarray:
-    """Channel-preserving RP routing profiles in fixed relative prompt bins.
+    """Return an RP routing profile for post-hoc diagnostics only.
 
-    Each retained prompt source ``p`` is assigned to a deterministic relative
-    prompt-position bin.  For every response token and layer/head channel,
-    weights are accumulated without normalization.  Therefore the sum across
-    bins is exactly the retained prompt mass while the bin pattern preserves
-    coarse source location without CountSketch collisions.
+    Prompt query rows are unavailable, so this does not fabricate a prompt
+    Laplacian.  Retained response-to-prompt weights are accumulated into fixed
+    relative prompt-position bins independently per layer/head.  The active RR
+    detector never consumes this profile.
     """
-    config = SpectralConfig() if config is None else config
-    config.validate()
+    prompt_bins = int(prompt_bins)
+    block_rows = int(block_rows)
+    if prompt_bins < 2:
+        raise ValueError("prompt_bins must be at least two")
+    if block_rows < 1:
+        raise ValueError("block_rows must be positive")
     attention = sample.attention()
     response_count = int(attention.num_response_tokens)
     prompt_count = int(attention.response_idx)
@@ -247,12 +230,12 @@ def prompt_transport_profile(
         raise ValueError("response_idx must leave at least one prompt token")
     device = attention.response_values.device
     profile = torch.zeros(
-        (response_count, attention.num_channels, config.prompt_bins),
+        (response_count, attention.num_channels, prompt_bins),
         dtype=torch.float32,
         device=device,
     )
 
-    for block in sample.iter_sparse_attention_blocks(block_rows=config.block_rows):
+    for block in sample.iter_sparse_attention_blocks(block_rows=block_rows):
         prompt = block.source < attention.response_idx
         if not bool(prompt.any()):
             continue
@@ -263,10 +246,10 @@ def prompt_transport_profile(
         source = block.source[prompt].long()
         weight = block.weight[prompt].float()
         bucket = torch.div(
-            source * config.prompt_bins,
+            source * prompt_bins,
             prompt_count,
             rounding_mode="floor",
-        ).clamp_(0, config.prompt_bins - 1)
+        ).clamp_(0, prompt_bins - 1)
         profile.index_put_((query, channel, bucket), weight, accumulate=True)
 
     if positions is None:
@@ -277,7 +260,7 @@ def prompt_transport_profile(
             raise ValueError("positions must be one-dimensional")
         if requested.size == 0:
             return np.empty(
-                (0, attention.num_channels * config.prompt_bins), dtype=np.float32
+                (0, attention.num_channels * prompt_bins), dtype=np.float32
             )
         if np.any(requested < 0) or np.any(requested >= response_count):
             raise IndexError("requested response position is outside the response")
@@ -295,98 +278,5 @@ def prompt_transport_profile(
     )
 
 
-def prompt_channel_volume(
-    prompt_profile: np.ndarray,
-    *,
-    num_channels: int,
-    prompt_bins: int,
-    alpha: float,
-    epsilon: float = 1e-8,
-) -> np.ndarray:
-    """EigenScore-inspired LogDet of RP routing diversity across channels."""
-    values = np.asarray(prompt_profile, dtype=np.float64)
-    if values.ndim != 2 or values.shape[1] != num_channels * prompt_bins:
-        raise ValueError("prompt profile shape does not match channel geometry")
-    if alpha <= 0:
-        raise ValueError("alpha must be positive")
-    reshaped = values.reshape(len(values), num_channels, prompt_bins)
-    centered = reshaped - reshaped.mean(axis=1, keepdims=True)
-    covariance = np.einsum(
-        "tcm,tcn->tmn", centered, centered, optimize=True
-    ) / max(num_channels, 1)
-    diagonal = np.arange(prompt_bins)
-    covariance[:, diagonal, diagonal] += alpha
-    sign, logdet = np.linalg.slogdet(covariance)
-    if np.any(sign <= 0) or not np.all(np.isfinite(logdet)):
-        eigenvalues = np.linalg.eigvalsh(covariance)
-        logdet = np.log(np.maximum(eigenvalues, epsilon)).sum(axis=1)
-    return (logdet / float(prompt_bins)).astype(np.float32, copy=False)
-
-
-def causal_spectral_state(
-    sample,
-    *,
-    positions=None,
-    config: SpectralConfig | None = None,
-):
-    """Return raw causal RR-spectrum + RP-transport state and RP LogDet."""
-    config = SpectralConfig() if config is None else config
-    config.validate()
-    rr = prefix_laplacian_spectrum(sample, positions=positions, config=config)
-    rp = prompt_transport_profile(sample, positions=positions, config=config)
-    if len(rr) != len(rp):
-        raise RuntimeError("RR spectrum and RP transport views are misaligned")
-    state = np.concatenate((rr, rp), axis=1).astype(np.float32, copy=False)
-    attention = sample.attention()
-    volume = prompt_channel_volume(
-        rp,
-        num_channels=int(attention.num_channels),
-        prompt_bins=config.prompt_bins,
-        alpha=config.logdet_alpha,
-        epsilon=config.epsilon,
-    )
-    return state, volume
-
-
-def spectral_volume(
-    embeddings: np.ndarray,
-    *,
-    window: int = 8,
-    alpha: float = 1e-3,
-    epsilon: float = 1e-8,
-) -> np.ndarray:
-    """Causal LogDet volume of the recent learned spectral trajectory."""
-    values = np.asarray(embeddings, dtype=np.float64)
-    if values.ndim != 2:
-        raise ValueError("embeddings must have shape [tokens, dimensions]")
-    if window < 2:
-        raise ValueError("window must be at least two")
-    if alpha <= 0:
-        raise ValueError("alpha must be positive")
-    tokens, dimensions = values.shape
-    result = np.zeros(tokens, dtype=np.float64)
-    for token in range(tokens):
-        start = max(0, token - window + 1)
-        current = values[start : token + 1]
-        if len(current) < 2 or dimensions == 0:
-            result[token] = np.log(alpha)
-            continue
-        centered = current - current.mean(axis=0, keepdims=True)
-        gram = (centered @ centered.T) / max(dimensions, 1)
-        gram.flat[:: len(gram) + 1] += alpha
-        sign, logdet = np.linalg.slogdet(gram)
-        if sign <= 0 or not np.isfinite(logdet):
-            eigenvalues = np.linalg.eigvalsh(gram)
-            logdet = np.log(np.maximum(eigenvalues, epsilon)).sum()
-        result[token] = logdet / float(len(current))
-    return result.astype(np.float32, copy=False)
-
-
-def spectral_state_dimension(
-    num_layers: int,
-    num_heads: int,
-    top_k: int,
-    prompt_bins: int,
-) -> int:
-    channels = int(num_layers) * int(num_heads)
-    return channels * (int(top_k) + int(prompt_bins))
+def rr_spectral_dimension(num_layers: int, num_heads: int, top_k: int) -> int:
+    return int(num_layers) * int(num_heads) * int(top_k)
