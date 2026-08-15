@@ -156,8 +156,10 @@ prints progress in the foreground, and writes the same stream to
 `${OUTPUT_DIR}.log`. `run_lookback_graph_validation.sh` remains only as a
 compatibility alias for this entry point.
 
-The encoder preserves the 32 x 32 layer-head channels while separating radial
-attention marginals from source-sensitive topology. It represents prompt
+The encoder preserves the 32 x 32 layer-head channels while separating retained
+attention marginals from source-sensitive topology. Missing CSR edges remain
+censored rather than being assigned the threshold as an exact weight; the
+undefined Lookback balance alone falls back to `attention_floor`. It represents prompt
 source position with Fourier moments and response history with normalized
 one-hop mean, absolute difference, variance, and two-hop messages. A
 coarse-lag-bin RR rewire is the fixed topology null; it preserves target,

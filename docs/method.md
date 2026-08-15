@@ -11,14 +11,16 @@ algorithmic data flow rather than claimed never to enter process memory.
 
 ## 1. Sparse attention semantics
 
-Let the cache threshold be \(f=0.01\). A missing CSR entry is not an edge with
-weight \(0.01\). Instead, \(0.01\) is the implicit background used only to
-reconstruct attention *marginals* over all eligible causal sources:
+Let the cache threshold be \(f=0.01\). A missing CSR entry only tells us that
+the original edge was below the retention threshold; its exact weight is not
+identifiable. The primary representation therefore uses the retained-mass
+point estimate rather than assigning every missing edge the upper bound
+\(0.01\):
 
 \[
-M^P_{t,c}=|P|f+\sum_{s\in P\cap E_{t,c}}(a_{t,s,c}-f)_+,
+M^P_{t,c}=\sum_{s\in P\cap E_{t,c}}a_{t,s,c},
 \qquad
-M^R_{t,c}=t f+\sum_{s<t,\,s\in E_{t,c}}(a_{t,s,c}-f)_+.
+M^R_{t,c}=\sum_{s<t,\,s\in E_{t,c}}a_{t,s,c}.
 \]
 
 Here \(c=(l,h)\) is one exact layer-head channel. The diagonal is read from its
@@ -32,9 +34,11 @@ x_{t,c}=\left[
 \right].
 \]
 
-Topology uses only retained **excess** weights
-\(e_{t,s,c}=(a_{t,s,c}-f)_+\). Therefore a threshold-valued entry contributes
-to retained-support diagnostics but does not invent a routed message.
+If both retained means and the stored diagonal are zero, the undefined balance
+coordinate is filled with \(f=0.01\); this is the requested fallback for an
+undefined Lookback value, not a claim that every censored edge equals \(f\).
+Retained prompt/history edge fractions are stored separately, so the anomaly
+model can represent how strongly a row was censored.
 
 ## 2. Prompt provenance without prompt-length pooling
 
@@ -44,14 +48,14 @@ A prompt source position \(s\) is encoded by \(K\) Fourier frequencies:
 \phi_K(s)=\left[\sin(2\pi ks/|P|),\cos(2\pi ks/|P|)\right]_{k=1}^{K}.
 \]
 
-For every token and layer-head channel, the encoder stores the excess-weighted
+For every token and layer-head channel, the encoder stores the retained-weight
 mean of \(\phi_K(s)\). This preserves coarse and fine prompt-source location
 while keeping a fixed \(2K\)-coordinate interface for different prompt
 lengths. `FOURIER_FREQUENCIES` controls \(K\); the default is 4.
 
 ## 3. Response-history topology
 
-For each response target and channel, excess RR weights are normalized over its
+For each response target and channel, retained RR weights are normalized over its
 retained history neighbors. The encoder does not mean-pool layers or heads. It
 emits, per channel:
 
@@ -66,7 +70,7 @@ hop distinguishes similar marginals produced by different causal paths.
 
 ## 4. Coarse-lag-stratified topology null
 
-The control graph keeps every RR target, channel, excess weight, causal
+The control graph keeps every RR target, channel, retained weight, causal
 validity, and \(\lfloor\log_2(\mathrm{lag})\rfloor\) bin, then draws another
 source from that bin. Prompt routes and all attention marginals remain
 unchanged. The intervention does **not** preserve exact lag, source in-degree,
