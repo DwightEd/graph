@@ -83,6 +83,8 @@ class TopologyExperiment:
         reservoir = self._build_train_reference()
         fit_bins = reservoir.bins("fit")
         calibration_bins = reservoir.bins("cal")
+        fit_rows = len(fit_bins)
+        calibration_rows = len(calibration_bins)
         model = TopologyOneClassModel(self.config.one_class).fit_loaders(
             reservoir.block_names,
             fit_bins,
@@ -92,6 +94,7 @@ class TopologyExperiment:
         )
         signature = self._signature(reservoir)
         self._save_model(model, signature)
+        del reservoir, fit_bins, calibration_bins
 
         scores, metadata = self._score_test(model)
         artifact_path = self._save_label_free_artifact(
@@ -115,8 +118,8 @@ class TopologyExperiment:
                 "mutually_exclusive": True,
                 "total_budget": int(self.config.reference_size),
                 "per_group_budget": int(math.ceil(self.config.reference_size / 2)),
-                "fit_rows": int(len(fit_bins)),
-                "calibration_rows": int(len(calibration_bins)),
+                "fit_rows": int(fit_rows),
+                "calibration_rows": int(calibration_rows),
             },
             "model_file": "topology_one_class_model.npz",
             "artifact_file": artifact_path.name,
