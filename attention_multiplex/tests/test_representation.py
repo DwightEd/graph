@@ -1,4 +1,6 @@
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -17,6 +19,7 @@ from attention_multiplex.representation import (  # noqa: E402
     build_multiplex_unfolding,
     represent_attention_multiplex,
 )
+from attention_multiplex.pipeline import build_dataset_representations  # noqa: E402
 from cache import AttentionSample  # noqa: E402
 
 
@@ -24,6 +27,11 @@ class _Sample:
     """Small ResearchSample-compatible object; no file parsing in the method."""
 
     def __init__(self):
+        self.sample_id = "r1"
+        self.source_id = "s1"
+        self.task_type = "QA"
+        self.data_source = "MARCO"
+        self.sparse_passes = 0
         # L=2, H=2, N=4, response starts at 2, R=2.
         diagonal = torch.tensor(
             [
@@ -62,6 +70,7 @@ class _Sample:
         return self._attention
 
     def iter_sparse_attention_blocks(self, block_rows=4096):
+        self.sparse_passes += 1
         from research_dataset import SparseAttentionBlock
 
         attention = self._attention
@@ -91,6 +100,23 @@ class _Sample:
                 weight=attention.response_values[start:stop],
             )
 
+    def release_attention(self):
+        return None
+
+
+class _Dataset:
+    def __init__(self, root):
+        self.root = Path(root)
+        self.sample_ids = ["r1"]
+        self.manifest = {"split": "train", "num_layers": 2, "num_heads": 2}
+        self.loads = 0
+
+    def __getitem__(self, sample_id):
+        self.loads += 1
+        sample = _Sample()
+        sample.sample_id = str(sample_id)
+        return sample
+
 
 class MultiplexRepresentationTests(unittest.TestCase):
     def test_unfolding_preserves_layer_head_and_query_source_roles(self):
@@ -112,8 +138,9 @@ class MultiplexRepresentationTests(unittest.TestCase):
         self.assertEqual(float(dense[0, 1]), 0.0)
 
     def test_representation_keeps_layer_and_head_trajectories(self):
+        sample = _Sample()
         result = represent_attention_multiplex(
-            _Sample(), config=MultiplexConfig(rank=2, block_rows=3)
+            sample, config=MultiplexConfig(rank=2, block_rows=3)
         )
         self.assertEqual(result.mass.query_by_layer.shape, (2, 2, 2))
         self.assertEqual(result.mass.source_by_head.shape, (2, 4, 2))
@@ -125,6 +152,7 @@ class MultiplexRepresentationTests(unittest.TestCase):
         self.assertGreater(result.mass.captured_energy, 0.0)
         self.assertLessEqual(result.mass.captured_energy, 1.00001)
         self.assertTrue((result.unresolved_row_mass >= 0).all())
+        self.assertEqual(sample.sparse_passes, 1)
 
     def test_fixed_seed_is_deterministic(self):
         config = MultiplexConfig(rank=2, block_rows=2, random_seed=7)
@@ -136,6 +164,65 @@ class MultiplexRepresentationTests(unittest.TestCase):
         self.assertTrue(
             np.allclose(first.shape.source_by_head, second.shape.source_by_head)
         )
+
+    def test_pipeline_resumes_without_reloading_completed_sample(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            dataset = _Dataset(Path(temporary) / "input")
+            output = Path(temporary) / "output"
+            config = MultiplexConfig(rank=2, block_rows=3, random_seed=7)
+            first = build_dataset_representations(
+                dataset, output, config=config, checkpoint_every=1
+            )
+            self.assertEqual(first["computed_samples"], 1)
+            self.assertEqual(dataset.loads, 1)
+
+            second = build_dataset_representations(
+                dataset,
+                output,
+                config=config,
+                resume=True,
+                checkpoint_every=1,
+            )
+            self.assertEqual(second["resumed_samples"], 1)
+            self.assertEqual(second["computed_samples"], 0)
+            self.assertEqual(dataset.loads, 1)
+            state = json.loads((output / "run_state.json").read_text())
+            self.assertEqual(state["state"], "complete")
+
+    def test_resume_recomputes_incomplete_atomic_artifact(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            dataset = _Dataset(Path(temporary) / "input")
+            output = Path(temporary) / "output"
+            config = MultiplexConfig(rank=2, block_rows=3, random_seed=7)
+            build_dataset_representations(dataset, output, config=config)
+            artifact = output / "samples" / "multiplex_r1.npz"
+            artifact.write_bytes(b"interrupted")
+
+            result = build_dataset_representations(
+                dataset, output, config=config, resume=True
+            )
+            self.assertEqual(result["resumed_samples"], 0)
+            self.assertEqual(result["computed_samples"], 1)
+            self.assertEqual(dataset.loads, 2)
+            with np.load(artifact, allow_pickle=False) as archive:
+                self.assertEqual(str(archive["sample_id"]), "r1")
+
+    def test_resume_rejects_changed_representation_contract(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            dataset = _Dataset(Path(temporary) / "input")
+            output = Path(temporary) / "output"
+            build_dataset_representations(
+                dataset,
+                output,
+                config=MultiplexConfig(rank=2, random_seed=7),
+            )
+            with self.assertRaisesRegex(ValueError, "incompatible run"):
+                build_dataset_representations(
+                    dataset,
+                    output,
+                    config=MultiplexConfig(rank=1, random_seed=7),
+                    resume=True,
+                )
 
 
 if __name__ == "__main__":

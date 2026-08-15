@@ -41,12 +41,38 @@ Fast interface check:
 LIMIT=5 RANK=8 bash attention_multiplex/run_attention_multiplex.sh
 ```
 
+## Resume and CPU parallelism
+
+Every sample is written atomically.  The runner now validates existing sample
+artifacts, skips valid ones, and maintains ``run_state.json`` plus an atomic
+``index.jsonl`` checkpoint.  To continue an interrupted run, reuse its exact
+top-level output directory and the same rank/seed/diagonal settings:
+
+```bash
+OUTPUT_ROOT=/path/to/existing/run \
+RESUME=1 WORKERS=2 RANK=16 \
+bash attention_multiplex/run_attention_multiplex.sh
+```
+
+The two sparse randomized SVDs are CPU operations; setting
+``CUDA_VISIBLE_DEVICES`` does not accelerate them. ``WORKERS`` runs different
+samples concurrently. Start with 2, and use 4 only when RAM and CPU headroom
+are available. The script pins the native BLAS/OpenMP pools to one thread to
+avoid oversubscription.
+
+Artifacts from the immediately preceding non-checkpointing version can also
+be adopted with ``RESUME=1``. This is safe only when the resumed command uses
+the same ``RANK``, ``SEED``, and ``INCLUDE_DIAGONAL`` values as the interrupted
+command; those legacy files predate embedded configuration metadata.
+
 The progress bar advances once per sample. Each split contains:
 
 ```text
 manifest.json
+run_state.json
 index.jsonl
 samples/multiplex_<sample_id>.npz
+samples/multiplex_<sample_id>.json
 ```
 
 See [METHOD.md](METHOD.md) for the exact graph and matrix definitions.

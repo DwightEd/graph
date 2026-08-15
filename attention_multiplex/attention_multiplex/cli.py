@@ -22,6 +22,9 @@ def parse_args(argv=None):
     parser.add_argument("--block-rows", type=int, default=4096)
     parser.add_argument("--seed", type=int, default=20260815)
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--checkpoint-every", type=int, default=10)
+    parser.add_argument("--resume", action="store_true")
     parser.add_argument("--exclude-diagonal", action="store_true")
     return parser.parse_args(argv)
 
@@ -44,6 +47,9 @@ def main(argv=None):
             include_diagonal=not arguments.exclude_diagonal,
         ),
         limit=arguments.limit,
+        resume=arguments.resume,
+        workers=arguments.workers,
+        checkpoint_every=arguments.checkpoint_every,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return result

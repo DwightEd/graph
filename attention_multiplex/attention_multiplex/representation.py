@@ -45,6 +45,9 @@ class MultiplexUnfolding:
     response_idx: int
     attention_floor: float
     retained_off_diagonal_edges: int
+    self_attention: np.ndarray
+    retained_row_mass: np.ndarray
+    unresolved_row_mass: np.ndarray
 
 
 @dataclass(frozen=True)
@@ -114,6 +117,14 @@ def build_multiplex_unfolding(
     response_idx = int(attention.response_idx)
     floor = float(attention.attention_floor)
 
+    # These row statistics use the same sparse pass as the unfolding.  The
+    # previous implementation decoded every retained edge a second time after
+    # both SVDs, which was pure duplicate work on the full cache.
+    self_attention = _as_numpy(
+        attention.attention_diagonal[:, :, response_idx:], dtype=np.float32
+    )
+    retained_row_mass = self_attention.copy()
+
     row_parts: list[np.ndarray] = []
     column_parts: list[np.ndarray] = []
     mass_parts: list[np.ndarray] = []
@@ -133,6 +144,11 @@ def build_multiplex_unfolding(
         mass_parts.append(np.maximum(weight - floor, 0.0))
         shape_parts.append(
             np.maximum(np.sqrt(weight) - np.sqrt(floor), 0.0)
+        )
+        np.add.at(
+            retained_row_mass,
+            (layer, head, query),
+            weight.astype(np.float32, copy=False),
         )
         retained_edges += int(weight.size)
 
@@ -168,6 +184,11 @@ def build_multiplex_unfolding(
             response_idx=response_idx,
             attention_floor=floor,
             retained_off_diagonal_edges=retained_edges,
+            self_attention=self_attention,
+            retained_row_mass=retained_row_mass,
+            unresolved_row_mass=np.maximum(
+                1.0 - retained_row_mass, 0.0
+            ).astype(np.float32),
         )
 
     rows = np.concatenate(row_parts)
@@ -190,6 +211,11 @@ def build_multiplex_unfolding(
         response_idx=response_idx,
         attention_floor=floor,
         retained_off_diagonal_edges=retained_edges,
+        self_attention=self_attention,
+        retained_row_mass=retained_row_mass,
+        unresolved_row_mass=np.maximum(
+            1.0 - retained_row_mass, 0.0
+        ).astype(np.float32),
     )
 
 
@@ -278,27 +304,12 @@ def represent_attention_multiplex(
         random_seed=config.random_seed,
     )
 
-    attention = sample.attention()
-    self_attention = _as_numpy(
-        attention.attention_diagonal[:, :, attention.response_idx :],
-        dtype=np.float32,
-    )
-    retained_mass = self_attention.copy()
-    for block in sample.iter_sparse_attention_blocks(block_rows=config.block_rows):
-        if int(block.weight.numel()) == 0:
-            continue
-        layer = _as_numpy(block.layer, dtype=np.int64)
-        head = _as_numpy(block.head, dtype=np.int64)
-        query = _as_numpy(block.query, dtype=np.int64)
-        weight = _as_numpy(block.weight, dtype=np.float32)
-        np.add.at(retained_mass, (layer, head, query), weight)
-    unresolved = np.maximum(1.0 - retained_mass, 0.0).astype(np.float32)
     return MultiplexRepresentation(
         mass=mass,
         shape=shape,
-        self_attention=self_attention,
-        retained_row_mass=retained_mass,
-        unresolved_row_mass=unresolved,
+        self_attention=unfolding.self_attention,
+        retained_row_mass=unfolding.retained_row_mass,
+        unresolved_row_mass=unfolding.unresolved_row_mass,
         response_idx=unfolding.response_idx,
         token_count=unfolding.tokens,
         retained_off_diagonal_edges=unfolding.retained_off_diagonal_edges,
