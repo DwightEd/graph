@@ -1,0 +1,37 @@
+name: rr-spectral-validation
+
+on:
+  pull_request:
+    paths:
+      - "experiments/spectral_feasibility/**"
+      - "tests/test_spectral_feasibility.py"
+      - "tests/test_research_views.py"
+      - "tests/test_experiment_data_contract.py"
+      - ".github/workflows/rr-spectral-validation.yml"
+
+jobs:
+  rr-spectral-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Compile modified modules
+        run: |
+          python -m py_compile \
+            experiments/spectral_feasibility/representations.py \
+            experiments/spectral_feasibility/experiment.py \
+            experiments/spectral_feasibility/main.py \
+            tests/test_spectral_feasibility.py
+          bash -n experiments/spectral_feasibility/run.sh
+      - name: Run RR spectral and data-contract tests
+        run: |
+          python -m unittest \
+            tests.test_spectral_feasibility \
+            tests.test_research_views \
+            tests.test_experiment_data_contract -v
