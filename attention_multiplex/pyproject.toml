@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 attention-multiplex = "attention_multiplex.cli:main"
+attention-multiplex-audit = "attention_multiplex.signal_audit:main"
 
 [tool.setuptools.packages.find]
 include = ["attention_multiplex*"]

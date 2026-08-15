@@ -76,3 +76,36 @@ samples/multiplex_<sample_id>.json
 ```
 
 See [METHOD.md](METHOD.md) for the exact graph and matrix definitions.
+
+## Which token features carry label separation?
+
+The manifests only prove extraction completeness. They do not contain token
+labels or feature-separation results. After both splits finish, run the
+post-hoc signal audit on the saved roles:
+
+```bash
+bash attention_multiplex/run_signal_audit.sh \
+  /path/to/attention_multiplex/run
+```
+
+The audit first freezes rotation-invariant features from all train/test NPZ
+files. Only then does it open the canonical evaluation labels. It reports each
+feature independently; it does not fit a combined detector. Candidate families
+are query leverage, layer velocity/acceleration, prompt/history route strength
+per available source, head disagreement, self routing, and unresolved mass.
+The prompt/history comparison divides by the respective source-token counts.
+
+Train labels determine the exploratory direction and nonredundant shortlist;
+test labels evaluate that frozen direction. A train-only robust position-bin
+reference is reported alongside raw metrics to expose positional confounding.
+Outputs are:
+
+```text
+signal_audit/feature_signal_report.json
+signal_audit/feature_signal_ranking.csv
+signal_audit/feature_signal_ranking.png
+signal_audit/position_reference.npz
+```
+
+Because train labels are used for mechanism discovery, this audit identifies
+promising signals but is not itself the final unsupervised detector result.
