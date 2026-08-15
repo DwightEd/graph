@@ -43,6 +43,12 @@ class AlignedReservoir:
             raise ValueError("reservoir has no token rows")
         return self._block_names
 
+    @property
+    def block_widths(self) -> dict[str, int]:
+        if self._widths is None:
+            raise ValueError("reservoir has no token rows")
+        return dict(self._widths)
+
     def add(self, group: str, blocks: Mapping[str, np.ndarray],
             position: np.ndarray) -> None:
         """Add one token batch to one stream using shared bottom-k priorities."""
@@ -127,20 +133,21 @@ class AlignedReservoir:
             for bin_id, count in enumerate(self._filled[group]) if count
         ])
 
-    def snapshot(self) -> dict:
+    def snapshot(self, *, copy_arrays: bool = True) -> dict:
         """Return the minimal state required to continue sampling bit-for-bit."""
+        copy = (lambda value: value.copy()) if copy_arrays else (lambda value: value)
         return {
             "block_names": self._block_names,
             "widths": dict(self._widths) if self._widths is not None else None,
             "values": None if self._values is None else {
-                group: {name: values.copy() for name, values in block_values.items()}
+                group: {name: copy(values) for name, values in block_values.items()}
                 for group, block_values in self._values.items()
             },
             "priorities": None if self._priorities is None else {
-                group: values.copy() for group, values in self._priorities.items()
+                group: copy(values) for group, values in self._priorities.items()
             },
             "filled": None if self._filled is None else {
-                group: values.copy() for group, values in self._filled.items()
+                group: copy(values) for group, values in self._filled.items()
             },
             "rng_state": {
                 group: deepcopy(rng.bit_generator.state)
@@ -148,23 +155,24 @@ class AlignedReservoir:
             },
         }
 
-    def restore(self, state: dict) -> "AlignedReservoir":
+    def restore(self, state: dict, *, copy_arrays: bool = True) -> "AlignedReservoir":
         """Restore a snapshot produced by an equivalent reservoir."""
+        copy = (lambda value: value.copy()) if copy_arrays else (lambda value: value)
         self._block_names = tuple(state["block_names"])
         self._widths = {name: int(width) for name, width in state["widths"].items()}
         self._values = {
             group: {
-                name: np.asarray(values, dtype=np.float16).copy()
+                name: copy(np.asarray(values, dtype=np.float16))
                 for name, values in block_values.items()
             }
             for group, block_values in state["values"].items()
         }
         self._priorities = {
-            group: np.asarray(values, dtype=np.float64).copy()
+            group: copy(np.asarray(values, dtype=np.float64))
             for group, values in state["priorities"].items()
         }
         self._filled = {
-            group: np.asarray(values, dtype=np.int64).copy()
+            group: copy(np.asarray(values, dtype=np.int64))
             for group, values in state["filled"].items()
         }
         for group, rng_state in state["rng_state"].items():
@@ -180,7 +188,7 @@ class AlignedReservoir:
         self._widths = {name: int(value.shape[1]) for name, value in values.items()}
         self._values = {
             group: {
-                name: np.empty(
+                name: np.zeros(
                     (self.position_bins, self.capacity, width), dtype=np.float16
                 )
                 for name, width in self._widths.items()

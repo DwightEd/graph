@@ -265,10 +265,7 @@ class TopologyExperiment:
         return "cal" if digest[0] % 2 else "fit"
 
     def _signature(self, reservoir: AlignedReservoir) -> str:
-        snapshot = reservoir.snapshot()
-        contract = {
-            name: int(snapshot["widths"][name]) for name in reservoir.block_names
-        }
+        contract = reservoir.block_widths
         encoder_config = getattr(self.encoder, "config", None)
         if is_dataclass(encoder_config):
             encoder_config = asdict(encoder_config)
@@ -317,8 +314,9 @@ class TopologyExperiment:
     def _save_checkpoint(
         self, reservoir: AlignedReservoir, next_sample_index: int
     ) -> None:
-        snapshot = reservoir.snapshot()
-        names = tuple(snapshot["block_names"])
+        snapshot = reservoir.snapshot(copy_arrays=False)
+        names = reservoir.block_names
+        widths = reservoir.block_widths
         groups = tuple(reservoir.groups)
         payload: dict[str, np.ndarray] = {
             "schema": np.asarray(CHECKPOINT_SCHEMA),
@@ -326,7 +324,7 @@ class TopologyExperiment:
             "next_sample_index": np.asarray(next_sample_index, dtype=np.int32),
             "block_names": np.asarray(names),
             "block_widths": np.asarray(
-                [snapshot["widths"][name] for name in names], dtype=np.int32
+                [widths[name] for name in names], dtype=np.int32
             ),
             "groups": np.asarray(groups),
         }
@@ -339,10 +337,7 @@ class TopologyExperiment:
                 default=lambda value: int(value),
             ))
             for index, name in enumerate(names):
-                values = snapshot["values"][group][name].copy()
-                for bin_id, count in enumerate(filled):
-                    values[bin_id, int(count):] = 0
-                payload[f"values/{group}/{index}"] = values
+                payload[f"values/{group}/{index}"] = snapshot["values"][group][name]
         temporary = self._checkpoint_path.with_name(
             f"{self._checkpoint_path.stem}.tmp.npz"
         )
@@ -392,7 +387,7 @@ class TopologyExperiment:
             }
             next_sample_index = int(saved["next_sample_index"])
             signature = str(saved["signature"])
-        reservoir.restore(state)
+        reservoir.restore(state, copy_arrays=False)
         if signature != self._signature(reservoir):
             raise ValueError("topology checkpoint signature does not match this run")
         if not 0 <= next_sample_index <= len(self.train_dataset.sample_ids):

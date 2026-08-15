@@ -72,6 +72,23 @@ class AlignedReservoirTests(unittest.TestCase):
                 resumed_state["filled"][group], direct_state["filled"][group]
             )
 
+    def test_checkpoint_snapshot_and_restore_can_reuse_array_storage(self):
+        rows = np.arange(6, dtype=np.float32)[:, None]
+        reservoir = AlignedReservoir(position_bins=1, size=4, seed=5)
+        reservoir.add("fit", {"x": rows}, np.zeros(6))
+        checkpoint = reservoir.snapshot(copy_arrays=False)
+        restored = AlignedReservoir(position_bins=1, size=4, seed=5).restore(
+            checkpoint, copy_arrays=False
+        )
+
+        self.assertIs(
+            restored.snapshot(copy_arrays=False)["values"]["fit"]["x"],
+            checkpoint["values"]["fit"]["x"],
+        )
+        np.testing.assert_array_equal(
+            restored.block("fit", "x"), reservoir.block("fit", "x")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
