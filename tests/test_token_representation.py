@@ -336,6 +336,7 @@ class PipelineContractTests(unittest.TestCase):
         self.assertFalse(hasattr(args, "prompt_bins"))
         self.assertFalse(hasattr(args, "graph_head_components"))
         self.assertEqual(args.bootstrap_replicates, 200)
+        self.assertEqual(args.csr_row_block, 65536)
         self.assertEqual(args.anomaly_quantile, .95)
         self.assertFalse(hasattr(args, "layer_bins"))
         self.assertFalse(hasattr(args, "diffusion_hops"))

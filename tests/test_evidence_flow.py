@@ -10,6 +10,7 @@ from attention_graph.evidence_flow import (
     direct_field_names,
     evidence_flow_from_attention,
     evidence_flow_fields,
+    lookback_evidence_from_attention,
     propagation_field_names,
 )
 from cache import AttentionSample
@@ -28,6 +29,39 @@ def _route(*, source):
 
 
 class EvidenceFlowTests(unittest.TestCase):
+    def test_fused_lookback_and_evidence_matches_two_pass_reference(self):
+        attention = AttentionSample(
+            "fused", "source", 2, torch.arange(6, dtype=torch.int32),
+            torch.tensor([[[.0, .0, .1, .2, .1, .3],
+                           [.0, .0, .2, .1, .2, .1]]], dtype=torch.float16),
+            torch.tensor([0, 1, 2, 4, 5, 6, 7, 9, 10], dtype=torch.int32),
+            torch.tensor([0, 1, 0, 2, 3, 1, 2, 0, 2, 4], dtype=torch.int32),
+            torch.tensor([.2, .3, .1, .4, .2, .5, .3, .2, .1, .6], dtype=torch.float16),
+            .01,
+        )
+        attention.validate()
+        from attention_graph.token_representation import direct_lookback_channels
+
+        expected_lookback = direct_lookback_channels(attention, csr_row_block=3)
+        expected = evidence_flow_from_attention(
+            expected_lookback, attention, csr_row_block=3,
+            sample_id="fused", seed=7,
+        )
+        actual = lookback_evidence_from_attention(
+            attention, csr_row_block=3, sample_id="fused", seed=7,
+        )
+        fragmented = lookback_evidence_from_attention(
+            attention, csr_row_block=1, sample_id="fused", seed=7,
+        )
+
+        torch.testing.assert_close(actual[0], expected_lookback)
+        for left, right in zip(actual[1:4], expected[:3]):
+            torch.testing.assert_close(left, right)
+        self.assertEqual(actual[4], expected[3])
+        for left, right in zip(actual[:4], fragmented[:4]):
+            torch.testing.assert_close(left, right)
+        self.assertEqual(actual[4], fragmented[4])
+
     def test_streaming_attention_flow_is_block_size_invariant(self):
         """Production flow reads CSR blocks, not a materialized edge route."""
         attention = AttentionSample(

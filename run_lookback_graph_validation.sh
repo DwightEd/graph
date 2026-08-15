@@ -49,7 +49,7 @@ printf '\n[3/4] freeze exact 1024-D Lookback graph representation before labels\
   --output-dir "$OUTPUT_ROOT/graph_representation" \
   --device "$DEVICE" \
   --bootstrap-replicates "$BOOTSTRAP" \
-  --csr-row-block "${CSR_ROW_BLOCK:-4096}" \
+  --csr-row-block "${CSR_ROW_BLOCK:-65536}" \
   --position-bins "${POSITION_BINS:-10}" \
   --provenance-hops "${PROVENANCE_HOPS:-2}" \
   --reference-size "${REFERENCE_SIZE:-12000}" \

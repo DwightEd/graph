@@ -88,21 +88,20 @@ def _by_token(values, layers, heads, response_count):
     )
 
 
-def csr_entries(attention, row_start, row_end):
+def csr_entries(attention, row_start, row_end, *, row_ptr=None):
     """Return global CSR row IDs, columns and values for one row block."""
-    row_ptr = attention.response_row_ptr.long()
-    starts = row_ptr[row_start:row_end]
-    lengths = row_ptr[row_start + 1:row_end + 1] - starts
-    positions = torch.arange(
-        row_ptr[row_start], row_ptr[row_end], device=row_ptr.device
-    )
+    row_ptr = attention.response_row_ptr.long() if row_ptr is None else row_ptr
+    lengths = row_ptr[row_start + 1:row_end + 1] - row_ptr[row_start:row_end]
+    entry_start = int(row_ptr[row_start])
+    entry_end = int(row_ptr[row_end])
     rows = torch.repeat_interleave(
-        torch.arange(row_start, row_end, device=row_ptr.device), lengths
+        torch.arange(row_start, row_end, device=row_ptr.device), lengths,
+        output_size=entry_end - entry_start,
     )
     return (
         rows,
-        attention.response_column_indices[positions].long(),
-        attention.response_values[positions].float(),
+        attention.response_column_indices[entry_start:entry_end].long(),
+        attention.response_values[entry_start:entry_end].float(),
     )
 
 
@@ -201,9 +200,11 @@ def evidence_flow_from_attention(
         floor=attention.attention_floor,
     )
     rows_count = int(attention.num_channels) * int(attention.num_response_tokens)
+    row_ptr = attention.response_row_ptr.long()
     for row_start in range(0, rows_count, int(csr_row_block)):
         rows, source, weight = csr_entries(
-            attention, row_start, min(row_start + int(csr_row_block), rows_count)
+            attention, row_start, min(row_start + int(csr_row_block), rows_count),
+            row_ptr=row_ptr,
         )
         _accumulate_block(state, rows, source, weight, sample_id=sample_id, seed=seed)
     direct, true_propagation, rewired_propagation = _finish_flow_state(state)
@@ -217,6 +218,126 @@ def evidence_flow_from_attention(
         ),
     }
     return direct, true_propagation, rewired_propagation, audit
+
+
+def lookback_evidence_from_attention(
+    attention, *, csr_row_block=65536, sample_id="", seed=0,
+):
+    """Compute Lookback and same-channel evidence fields in one CSR pass.
+
+    CSR rows are channel-major and causal within each channel.  A block can
+    therefore compute every row's Lookback state before using earlier response
+    rows as sources for the residual-flow messages.
+    """
+    response_count = int(attention.num_response_tokens)
+    prompt_count = int(attention.response_idx)
+    layers = int(attention.num_layers)
+    heads = int(attention.num_heads)
+    channels = layers * heads
+    rows_count = channels * response_count
+    device = attention.response_values.device
+    floor = float(attention.attention_floor)
+    row_ptr = attention.response_row_ptr.long()
+    diagonal = (
+        attention.attention_diagonal.float()[:, :, prompt_count:]
+        .reshape(rows_count)
+    )
+
+    values = torch.empty(rows_count, dtype=torch.float32, device=device)
+    prompt_mass = torch.zeros(rows_count, dtype=torch.float32, device=device)
+    response_mass = torch.zeros_like(prompt_mass)
+    prompt_flow = torch.zeros_like(prompt_mass)
+    response_flow = torch.zeros_like(prompt_mass)
+    rewired_response_flow = torch.zeros_like(prompt_mass)
+    rr_edges = torch.zeros((), dtype=torch.int64, device=device)
+    changed_edges = torch.zeros((), dtype=torch.int64, device=device)
+
+    for row_start in range(0, rows_count, int(csr_row_block)):
+        row_end = min(row_start + int(csr_row_block), rows_count)
+        rows, source, weight = csr_entries(
+            attention, row_start, row_end, row_ptr=row_ptr
+        )
+        local_rows = rows - row_start
+        block_prompt = torch.zeros(
+            row_end - row_start, dtype=torch.float32, device=device
+        )
+        block_response = torch.zeros_like(block_prompt)
+        is_prompt = source < prompt_count
+        block_prompt.index_add_(
+            0, local_rows[is_prompt], weight[is_prompt]
+        )
+        is_response = ~is_prompt
+        block_response.index_add_(
+            0, local_rows[is_response], weight[is_response]
+        )
+
+        target = torch.arange(row_start, row_end, device=device).remainder(
+            response_count
+        )
+        prompt_mean = block_prompt / float(prompt_count)
+        generated_mean = (
+            block_response + diagonal[row_start:row_end]
+        ) / (target.float() + 1.0)
+        denominator = prompt_mean + generated_mean
+        block_values = torch.where(
+            denominator > 0,
+            prompt_mean / denominator,
+            torch.full_like(denominator, floor),
+        )
+        values[row_start:row_end] = block_values
+        prompt_mass[row_start:row_end] = block_prompt
+        response_mass[row_start:row_end] = block_response
+        prompt_flow[row_start:row_end] = block_prompt * (block_values - floor)
+
+        rr_rows = rows[is_response]
+        rr_weight = weight[is_response]
+        rr_channel = torch.div(
+            rr_rows, response_count, rounding_mode="floor"
+        )
+        rr_target = rr_rows.remainder(response_count)
+        source_relative = source[is_response] - prompt_count
+        source_rows = rr_channel * response_count + source_relative
+        response_flow.index_add_(
+            0, rr_rows,
+            rr_weight * (values[rr_rows] - values[source_rows]),
+        )
+        rewired_source = _lag_bin_rewired_sources(
+            source_relative, rr_target, prompt_count=prompt_count,
+            seed=seed, sample_id=sample_id, channel=rr_channel,
+        )
+        rewired_rows = (
+            rr_channel * response_count + rewired_source - prompt_count
+        )
+        rewired_response_flow.index_add_(
+            0, rr_rows,
+            rr_weight * (values[rr_rows] - values[rewired_rows]),
+        )
+        rr_edges += len(rr_rows)
+        changed_edges += (rewired_source != source[is_response]).sum()
+
+    lookback = _by_token(values, layers, heads, response_count).reshape(
+        response_count, layers, heads
+    )
+    direct = torch.cat((
+        _by_token(prompt_mass, layers, heads, response_count),
+        _by_token(response_mass, layers, heads, response_count),
+    ), dim=1)
+    propagation = torch.cat((
+        _by_token(prompt_flow, layers, heads, response_count),
+        _by_token(response_flow, layers, heads, response_count),
+    ), dim=1)
+    rewired_propagation = torch.cat((
+        _by_token(prompt_flow, layers, heads, response_count),
+        _by_token(rewired_response_flow, layers, heads, response_count),
+    ), dim=1)
+    rr_count = int(rr_edges.item())
+    changed_count = int(changed_edges.item())
+    audit = {
+        "rr_edges": rr_count,
+        "rewired_changed_edges": changed_count,
+        "rewired_changed_fraction": changed_count / rr_count if rr_count else 0.0,
+    }
+    return lookback, direct, propagation, rewired_propagation, audit
 
 
 def evidence_flow_fields(

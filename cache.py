@@ -116,8 +116,8 @@ class AttentionSample:
                 < self.response_row_ptr[row_start:row_end]
             ).any()):
                 raise ValueError("response_row_ptr must be monotone")
-        for row_start in range(0, expected_rows, 256):
-            row_end = min(row_start + 256, expected_rows)
+        for row_start in range(0, expected_rows, 4096):
+            row_end = min(row_start + 4096, expected_rows)
             entry_start = int(self.response_row_ptr[row_start])
             entry_end = int(self.response_row_ptr[row_end])
             columns = self.response_column_indices[entry_start:entry_end]

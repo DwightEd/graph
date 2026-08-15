@@ -29,7 +29,7 @@ from .evidence_flow import (
     anomaly_components_from_attention,
     csr_entries,
     direct_field_names,
-    evidence_flow_from_attention,
+    lookback_evidence_from_attention,
     propagation_field_names,
 )
 
@@ -56,7 +56,7 @@ class TokenRepresentationConfig:
     position_bins: int = 10
     provenance_hops: int = 2
     bootstrap_replicates: int = 200
-    csr_row_block: int = 4096
+    csr_row_block: int = 65536
     reference_size: int = 12_000
     subspace_components: int = 32
     tail_fraction: float = 0.05
@@ -117,17 +117,18 @@ def _channel_prompt_history_mass(attention, *, csr_row_block):
     device = attention.response_values.device
     prompt_mass = torch.zeros(rows_count, dtype=torch.float32, device=device)
     history_mass = torch.zeros_like(prompt_mass)
+    row_ptr = attention.response_row_ptr.long()
     for row_start in range(0, rows_count, int(csr_row_block)):
         row_end = min(row_start + int(csr_row_block), rows_count)
-        rows, source, weight = csr_entries(attention, row_start, row_end)
+        rows, source, weight = csr_entries(
+            attention, row_start, row_end, row_ptr=row_ptr
+        )
         if not len(rows):
             continue
         is_prompt = source < prompt_count
-        if bool(is_prompt.any()):
-            prompt_mass.index_add_(0, rows[is_prompt], weight[is_prompt])
+        prompt_mass.index_add_(0, rows[is_prompt], weight[is_prompt])
         history = ~is_prompt
-        if bool(history.any()):
-            history_mass.index_add_(0, rows[history], weight[history])
+        history_mass.index_add_(0, rows[history], weight[history])
     return (
         prompt_mass.reshape(channels, response_count),
         history_mass.reshape(channels, response_count),
@@ -1522,12 +1523,11 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
     ):
         sample = train_dataset[sample_id]
         attention = sample.attention()
-        lookback = direct_lookback_channels(
-            attention, csr_row_block=config.csr_row_block
-        )
-        direct, propagation, rewired_propagation, _ = evidence_flow_from_attention(
-            lookback, attention, csr_row_block=config.csr_row_block,
-            sample_id=sample_id, seed=config.seed,
+        lookback, direct, propagation, rewired_propagation, _ = (
+            lookback_evidence_from_attention(
+                attention, csr_row_block=config.csr_row_block,
+                sample_id=sample_id, seed=config.seed,
+            )
         )
         representation = build_node_representation(
             lookback, num_layers=num_layers, num_heads=num_heads
@@ -1622,11 +1622,11 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
     ):
         sample = test_dataset[sample_id]
         attention = sample.attention()
-        current_lookback = direct_lookback_channels(
-            attention, csr_row_block=config.csr_row_block
-        )
-        direct, propagation, rewired_propagation, rewire_audit = evidence_flow_from_attention(
-            current_lookback, attention, csr_row_block=config.csr_row_block,
+        (
+            current_lookback, direct, propagation,
+            rewired_propagation, rewire_audit,
+        ) = lookback_evidence_from_attention(
+            attention, csr_row_block=config.csr_row_block,
             sample_id=sample_id, seed=config.seed,
         )
         representation_tensor = build_node_representation(

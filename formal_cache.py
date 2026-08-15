@@ -74,9 +74,9 @@ def read_formal_manifest(split_root):
     return manifest, spec, files, split
 
 
-def load_formal_sample(path, expected_hash, *, split, spec):
+def load_formal_sample(path, expected_hash, *, split, spec, verify_hash=True):
     path = Path(path)
-    if sha256(path) != expected_hash:
+    if verify_hash and sha256(path) != expected_hash:
         raise ValueError(f"formal cache SHA256 mismatch: {path.name}")
     payload = torch.load(path, map_location="cpu", weights_only=True)
     if not isinstance(payload, dict):

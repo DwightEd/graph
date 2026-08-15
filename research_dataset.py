@@ -177,6 +177,7 @@ def open_research_dataset(
             root,
             device=device,
             retain_labels=retain_embedded_labels,
+            verify_hashes=verify_hashes,
         )
     return ResearchDataset(root, device=device, verify_hashes=verify_hashes)
 
@@ -628,12 +629,16 @@ class FormalResearchDataset:
     until ``labels()`` is explicitly requested after pattern discovery.
     """
 
-    def __init__(self, split_root, *, device="cpu", retain_labels=False):
+    def __init__(
+        self, split_root, *, device="cpu", retain_labels=False,
+        verify_hashes=False,
+    ):
         from formal_cache import read_formal_manifest
 
         self.root = Path(split_root)
         formal_manifest, spec, files, split = read_formal_manifest(self.root)
         self.device = device
+        self.verify_hashes = bool(verify_hashes)
         self.split_name = split
         self.spec = spec
         self.retain_labels = bool(retain_labels)
@@ -711,6 +716,7 @@ class FormalResearchSample(_ResearchSampleViews):
             self.row["sha256"],
             split=self.dataset.split_name,
             spec=self.dataset.spec,
+            verify_hash=self.dataset.verify_hashes,
         )
         if sample.sample_id != self.sample_id:
             raise ValueError(

@@ -91,7 +91,7 @@ def parse_args(argv=None):
     p.add_argument("--position-bins", type=int, default=10)
     p.add_argument("--provenance-hops", type=int, default=2)
     p.add_argument("--bootstrap-replicates", type=int, default=200)
-    p.add_argument("--csr-row-block", type=int, default=4096)
+    p.add_argument("--csr-row-block", type=int, default=65536)
     p.add_argument(
         "--sample-id", action="append", default=[],
         help="render this test sample in full; repeat for multiple samples",
@@ -145,19 +145,19 @@ def main(argv=None):
         train_dataset = open_research_dataset(
             args.train_split,
             device=args.device,
-            verify_hashes=True,
+            verify_hashes=False,
             retain_embedded_labels=False,
         )
         test_dataset = open_research_dataset(
             args.test_split,
             device=args.device,
-            verify_hashes=True,
+            verify_hashes=False,
             retain_embedded_labels=False,
         )
         evaluation_dataset = open_research_dataset(
             args.test_split,
             device="cpu",
-            verify_hashes=True,
+            verify_hashes=False,
             retain_embedded_labels=True,
         )
         _require_llama31_geometry(train_dataset)

@@ -40,7 +40,7 @@ ARGS=(
   --position-bins "${POSITION_BINS:-10}"
   --provenance-hops "${PROVENANCE_HOPS:-2}"
   --bootstrap-replicates "${BOOTSTRAP_REPLICATES:-200}"
-  --csr-row-block "${CSR_ROW_BLOCK:-4096}"
+  --csr-row-block "${CSR_ROW_BLOCK:-65536}"
   --display-mass-cover "${DISPLAY_MASS_COVER:-0.80}"
   --display-edges-per-type "${DISPLAY_EDGES_PER_TYPE:-2}"
   --display-max-edges "${DISPLAY_MAX_EDGES:-300}"

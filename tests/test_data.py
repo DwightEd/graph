@@ -33,8 +33,8 @@ class DataTests(unittest.TestCase):
         with patch("cache.torch.repeat_interleave", side_effect=bounded_repeat):
             sample.validate()
 
-        self.assertGreater(len(row_block_sizes), 1)
-        self.assertLessEqual(max(row_block_sizes), 256)
+        self.assertEqual(row_block_sizes, [response_tokens])
+        self.assertLessEqual(max(row_block_sizes), 4096)
 
     def test_canonical_labels_stay_sidecar_and_align_to_response(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -121,13 +121,17 @@ class DataTests(unittest.TestCase):
                 json.dumps(manifest), encoding="utf-8"
             )
 
-            dataset = open_research_dataset(
-                root, retain_embedded_labels=True
-            )
-            sample = dataset["r1"]
-            self.assertEqual(sample.attention().num_response_tokens, 2)
-            self.assertEqual(sample.task_type, "QA")
-            self.assertEqual(dataset.labels().response_labels(sample).tolist(), [0, 1])
+            with patch("formal_cache.sha256") as file_hash:
+                dataset = open_research_dataset(
+                    root, verify_hashes=False, retain_embedded_labels=True
+                )
+                sample = dataset["r1"]
+                self.assertEqual(sample.attention().num_response_tokens, 2)
+                self.assertEqual(sample.task_type, "QA")
+                self.assertEqual(
+                    dataset.labels().response_labels(sample).tolist(), [0, 1]
+                )
+                file_hash.assert_not_called()
             self.assertEqual(list(root.glob("*.npz")), [])
 
 
