@@ -6,6 +6,7 @@ from .causal_topology import (
     CausalTopologyEncoder,
     TopologyEncoding,
 )
+from .one_class import CalibratedMaxFusion, OneClassConfig, OneClassReference, ScoreResult
 from .token_representation import (
     TokenRepresentationConfig,
     build_node_representation,
@@ -19,6 +20,7 @@ from .token_representation import (
 __all__ = [
     "AttentionGraph", "GraphBuildConfig", "RP", "RR", "build_attention_graph",
     "CausalTopologyConfig", "CausalTopologyEncoder", "TopologyEncoding",
+    "OneClassConfig", "OneClassReference", "ScoreResult", "CalibratedMaxFusion",
     "TokenRepresentationConfig", "discover_token_representations",
     "build_node_representation", "compact_layer_structure",
     "direct_lookback_channels", "structure_names",
