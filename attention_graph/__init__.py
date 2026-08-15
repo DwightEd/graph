@@ -9,6 +9,7 @@ from .causal_topology import (
 from .aligned_reservoir import AlignedReservoir
 from .one_class import CalibratedMaxFusion, OneClassConfig, OneClassReference, ScoreResult
 from .topology_one_class import TopologyOneClassModel, TopologyScoreResult, atomic_blocks
+from .topology_experiment import TopologyExperiment, TopologyExperimentConfig
 from .token_representation import (
     TokenRepresentationConfig,
     build_node_representation,
@@ -25,6 +26,7 @@ __all__ = [
     "AlignedReservoir",
     "OneClassConfig", "OneClassReference", "ScoreResult", "CalibratedMaxFusion",
     "TopologyOneClassModel", "TopologyScoreResult", "atomic_blocks",
+    "TopologyExperiment", "TopologyExperimentConfig",
     "TokenRepresentationConfig", "discover_token_representations",
     "build_node_representation", "compact_layer_structure",
     "direct_lookback_channels", "structure_names",
