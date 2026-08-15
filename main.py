@@ -104,6 +104,7 @@ def parse_args(argv=None):
         help="render this layer; default collapses each edge by maximum layer weight",
     )
     p.add_argument("--reference-size", type=int, default=12_000)
+    p.add_argument("--checkpoint-interval", type=int, default=50)
     p.add_argument("--subspace-components", type=int, default=32)
     p.add_argument("--tail-fraction", type=float, default=0.05)
     p.add_argument("--anomaly-quantile", type=float, default=0.95)
@@ -173,6 +174,7 @@ def main(argv=None):
             display_max_edges=args.display_max_edges,
             display_layer=args.display_layer,
             reference_size=args.reference_size,
+            checkpoint_interval=args.checkpoint_interval,
             subspace_components=args.subspace_components,
             tail_fraction=args.tail_fraction,
             anomaly_quantile=args.anomaly_quantile,

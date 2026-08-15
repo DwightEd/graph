@@ -35,6 +35,7 @@ from .evidence_flow import (
 
 
 SCHEMA = "token-graph-representation-v2"
+REFERENCE_CHECKPOINT_SCHEMA = "exact-channel-train-reference-v1"
 
 DIRECT_STRUCTURE_NAMES = (
     "retained_prompt_mass",
@@ -58,6 +59,7 @@ class TokenRepresentationConfig:
     bootstrap_replicates: int = 200
     csr_row_block: int = 65536
     reference_size: int = 12_000
+    checkpoint_interval: int = 50
     subspace_components: int = 32
     tail_fraction: float = 0.05
     anomaly_quantile: float = 0.95
@@ -73,6 +75,7 @@ class TokenRepresentationConfig:
             self.position_bins, self.provenance_hops,
             self.bootstrap_replicates,
             self.csr_row_block, self.reference_size,
+            self.checkpoint_interval,
             self.subspace_components, self.display_edges_per_type,
             self.display_max_edges,
         )
@@ -428,13 +431,14 @@ def build_node_representation(lookback, *, num_layers, num_heads):
 
 
 class _PositionReservoir:
-    """Train reference with ``size`` shared across all position bins."""
+    """Vectorized uniform bottom-k sample within each position bin."""
 
     def __init__(self, bins, size, seed):
         self.bins = int(bins)
         self.capacity = max(1, int(math.ceil(size / bins)))
         self.rng = np.random.default_rng(seed)
         self.values = None
+        self.priorities = None
         self.filled = np.zeros(self.bins, dtype=np.int64)
         self.seen = np.zeros(self.bins, dtype=np.int64)
 
@@ -442,36 +446,102 @@ class _PositionReservoir:
         values = np.asarray(values, dtype=np.float32)
         position = np.asarray(position, dtype=np.float64)
         if self.values is None:
-            self.values = np.empty(
+            self.values = np.zeros(
                 (self.bins, self.capacity, values.shape[1]), dtype=np.float16
+            )
+            self.priorities = np.full(
+                (self.bins, self.capacity), np.inf, dtype=np.float64
             )
         if values.ndim != 2 or values.shape[1] != self.values.shape[2]:
             raise ValueError("train reference vectors have inconsistent width")
         bins = np.minimum((position * self.bins).astype(int), self.bins - 1)
-        for row, bin_id in zip(values, bins):
-            seen = int(self.seen[bin_id])
-            self.seen[bin_id] += 1
-            if self.filled[bin_id] < self.capacity:
-                slot = int(self.filled[bin_id])
-                self.filled[bin_id] += 1
-            else:
-                slot = int(self.rng.integers(seen + 1))
-                if slot >= self.capacity:
-                    continue
-            self.values[bin_id, slot] = row.astype(np.float16)
+        priorities = self.rng.random(len(values))
+        for bin_id in range(self.bins):
+            selected = bins == bin_id
+            count = int(selected.sum())
+            if not count:
+                continue
+            new_values = values[selected].astype(np.float16)
+            new_priorities = priorities[selected]
+            retained = int(self.filled[bin_id])
+            append = min(self.capacity - retained, count)
+            if append:
+                end = retained + append
+                self.values[bin_id, retained:end] = new_values[:append]
+                self.priorities[bin_id, retained:end] = new_priorities[:append]
+                retained = end
+                self.filled[bin_id] = retained
+            if append < count:
+                remaining_priorities = new_priorities[append:]
+                candidates = np.concatenate((
+                    self.priorities[bin_id, :retained], remaining_priorities
+                ))
+                keep = np.argpartition(candidates, self.capacity - 1)[
+                    :self.capacity
+                ]
+                kept_old = keep[keep < retained]
+                kept_new = keep[keep >= retained] - retained
+                evicted = np.setdiff1d(
+                    np.arange(retained), kept_old, assume_unique=True
+                )
+                self.values[bin_id, evicted] = new_values[append:][kept_new]
+                self.priorities[bin_id, evicted] = remaining_priorities[kept_new]
+            self.seen[bin_id] += count
 
     def matrix(self):
         if self.values is None or not int(self.filled.sum()):
             raise ValueError("train split produced no reference tokens")
         values, bins = [], []
         for bin_id, count in enumerate(self.filled):
-            values.append(self.values[bin_id, :count].astype(np.float32))
+            order = np.argsort(
+                self.priorities[bin_id, :count], kind="stable"
+            )
+            values.append(self.values[bin_id, :count][order].astype(np.float32))
             bins.extend([bin_id] * int(count))
         return np.concatenate(values), np.asarray(bins, dtype=np.int16)
 
     @property
     def maximum_rows(self):
         return self.bins * self.capacity
+
+    def snapshot(self):
+        return {
+            "values": self.values,
+            "priorities": self.priorities,
+            "filled": self.filled,
+            "seen": self.seen,
+            "rng_state": self.rng.bit_generator.state,
+        }
+
+    def restore(self, state):
+        self.values = np.asarray(state["values"], dtype=np.float16).copy()
+        self.priorities = np.asarray(
+            state["priorities"], dtype=np.float64
+        ).copy()
+        self.filled = np.asarray(state["filled"], dtype=np.int64).copy()
+        self.seen = np.asarray(state["seen"], dtype=np.int64).copy()
+        self.rng.bit_generator.state = state["rng_state"]
+        return self
+
+
+def _reference_views_from_primitives(values, *, channels):
+    """Derive the seven aligned views from one sampled primitive matrix."""
+    values = np.asarray(values, dtype=np.float32)
+    channels = int(channels)
+    token = values[:, :channels]
+    prompt = values[:, channels:2 * channels]
+    response = values[:, 2 * channels:3 * channels]
+    rewired = values[:, 3 * channels:4 * channels]
+    direct = values[:, 4 * channels:6 * channels]
+    return {
+        "scalar_only": token.mean(axis=1, keepdims=True),
+        "token_only": token,
+        "prompt_graph": np.concatenate((token, prompt), axis=1),
+        "response_graph": np.concatenate((token, response), axis=1),
+        "true_graph": np.concatenate((token, prompt, response), axis=1),
+        "rewired_graph": np.concatenate((token, prompt, rewired), axis=1),
+        "direct_marginals": direct,
+    }
 
 
 class _PositionScaler:
@@ -1485,6 +1555,65 @@ def _manifest_fingerprint(dataset):
     return result
 
 
+def _reference_signature(dataset, config, channels):
+    contract = {
+        "schema": REFERENCE_CHECKPOINT_SCHEMA,
+        "train_split": _manifest_fingerprint(dataset),
+        "channels": int(channels),
+        "position_bins": int(config.position_bins),
+        "reference_size": int(config.reference_size),
+        "seed": int(config.seed),
+        "primitive_layout": "X,Fp,Fr,Fr_rewired,direct",
+    }
+    return hashlib.sha256(
+        json.dumps(contract, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _save_reference_checkpoint(
+    path, reservoir, *, signature, next_sample_index,
+    train_tokens, train_sources,
+):
+    state = reservoir.snapshot()
+    temporary = path.with_suffix(".tmp")
+    with temporary.open("wb") as handle:
+        np.savez(
+            handle,
+            schema=np.asarray(REFERENCE_CHECKPOINT_SCHEMA),
+            signature=np.asarray(signature),
+            next_sample_index=np.asarray(next_sample_index, dtype=np.int64),
+            train_tokens=np.asarray(train_tokens, dtype=np.int64),
+            train_sources=np.asarray(sorted(train_sources)),
+            values=state["values"],
+            priorities=state["priorities"],
+            filled=state["filled"],
+            seen=state["seen"],
+            rng_state=np.asarray(json.dumps(state["rng_state"], sort_keys=True)),
+        )
+    temporary.replace(path)
+
+
+def _load_reference_checkpoint(path, reservoir, *, signature):
+    with np.load(path, allow_pickle=False) as saved:
+        if (
+            str(saved["schema"]) != REFERENCE_CHECKPOINT_SCHEMA
+            or str(saved["signature"]) != signature
+        ):
+            raise ValueError("train reference checkpoint does not match this run")
+        reservoir.restore({
+            "values": saved["values"],
+            "priorities": saved["priorities"],
+            "filled": saved["filled"],
+            "seen": saved["seen"],
+            "rng_state": json.loads(str(saved["rng_state"])),
+        })
+        return {
+            "next_sample_index": int(saved["next_sample_index"]),
+            "train_tokens": int(saved["train_tokens"]),
+            "train_sources": set(saved["train_sources"].astype(str).tolist()),
+        }
+
+
 def discover_token_representations(train_dataset, test_dataset, evaluation_dataset,
                                    *, output_dir, config=None):
     config = TokenRepresentationConfig() if config is None else config
@@ -1496,7 +1625,11 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
     if list(map(str, test_dataset.sample_ids)) != list(map(str, evaluation_dataset.sample_ids)):
         raise ValueError("evaluation dataset does not match ordered test sample IDs")
     output = Path(output_dir)
-    if output.exists() and any(output.iterdir()):
+    checkpoint_file = output / "train_reference_checkpoint.npz"
+    checkpoint_file.with_suffix(".tmp").unlink(missing_ok=True)
+    if output.exists() and any(
+        path.name != checkpoint_file.name for path in output.iterdir()
+    ):
         raise ValueError("token representation output directory must be empty")
     output.mkdir(parents=True, exist_ok=True)
     names = structure_names(config.provenance_hops)
@@ -1510,17 +1643,30 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
     )
 
     print("[1/8] building train-only exact-channel references", flush=True)
-    reservoirs = {
-        name: _PositionReservoir(
-            config.position_bins, config.reference_size, config.seed
-        )
-        for name in view_names
-    }
+    reservoir = _PositionReservoir(
+        config.position_bins, config.reference_size, config.seed
+    )
+    signature = _reference_signature(train_dataset, config, channels)
     train_sources = set()
     train_tokens = 0
-    for sample_id in tqdm(
-        train_dataset.sample_ids, desc="train evidence-flow nodes", unit="sample"
-    ):
+    start_index = 0
+    if checkpoint_file.exists():
+        resumed = _load_reference_checkpoint(
+            checkpoint_file, reservoir, signature=signature
+        )
+        start_index = resumed["next_sample_index"]
+        train_tokens = resumed["train_tokens"]
+        train_sources = resumed["train_sources"]
+        print(
+            f"[1/8] resuming at train sample {start_index}/{len(train_dataset)}",
+            flush=True,
+        )
+    train_ids = list(map(str, train_dataset.sample_ids))
+    for index, sample_id in enumerate(tqdm(
+        train_ids[start_index:],
+        initial=start_index, total=len(train_ids),
+        desc="train evidence-flow nodes", unit="sample",
+    ), start=start_index):
         sample = train_dataset[sample_id]
         attention = sample.attention()
         lookback, direct, propagation, rewired_propagation, _ = (
@@ -1532,35 +1678,42 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
         representation = build_node_representation(
             lookback, num_layers=num_layers, num_heads=num_heads
         )
-        prompt_flow, response_flow = propagation[:, :channels], propagation[:, channels:]
+        prompt_flow = propagation[:, :channels]
+        response_flow = propagation[:, channels:]
         rewired_response_flow = rewired_propagation[:, channels:]
-        reference_views = {
-            "scalar_only": representation.mean(dim=1, keepdim=True),
-            "token_only": representation,
-            "prompt_graph": torch.cat((representation, prompt_flow), dim=1),
-            "response_graph": torch.cat((representation, response_flow), dim=1),
-            "true_graph": torch.cat((representation, prompt_flow, response_flow), dim=1),
-            "rewired_graph": torch.cat((representation, prompt_flow, rewired_response_flow), dim=1),
-            "direct_marginals": direct,
-        }
+        primitives = torch.cat((
+            representation, prompt_flow, response_flow,
+            rewired_response_flow, direct,
+        ), dim=1).detach().cpu().numpy()
         position = np.arange(len(representation), dtype=np.float32) / max(
             len(representation) - 1, 1
         )
-        for view, values in reference_views.items():
-            reservoirs[view].add(values.detach().cpu().numpy(), position)
+        reservoir.add(primitives, position)
         train_sources.add(str(sample.source_id))
         train_tokens += len(representation)
         sample.release_attention()
+        next_index = index + 1
+        if next_index % config.checkpoint_interval == 0:
+            _save_reference_checkpoint(
+                checkpoint_file, reservoir, signature=signature,
+                next_sample_index=next_index, train_tokens=train_tokens,
+                train_sources=train_sources,
+            )
+    _save_reference_checkpoint(
+        checkpoint_file, reservoir, signature=signature,
+        next_sample_index=len(train_ids), train_tokens=train_tokens,
+        train_sources=train_sources,
+    )
     print("[2/8] fitting seven train-only one-class reference models", flush=True)
-    references, reference_bins = {}, None
-    for view, reservoir in reservoirs.items():
-        values, bins = reservoir.matrix()
-        if reference_bins is None:
-            reference_bins = bins
-        elif not np.array_equal(reference_bins, bins):
-            raise RuntimeError("view reservoirs did not retain aligned train tokens")
-        references[view] = _ViewReference(view, config).fit(values, bins)
-    del reservoirs, values, bins, reference_bins
+    primitive_values, reference_bins = reservoir.matrix()
+    reference_views = _reference_views_from_primitives(
+        primitive_values, channels=channels
+    )
+    references = {
+        view: _ViewReference(view, config).fit(values, reference_bins)
+        for view, values in reference_views.items()
+    }
+    del reservoir, primitive_values, reference_bins, reference_views
     anomaly_threshold = float(np.quantile(
         references["true_graph"].reference_scores, config.anomaly_quantile
     ))
@@ -1961,6 +2114,7 @@ def discover_token_representations(train_dataset, test_dataset, evaluation_datas
     report_path.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    checkpoint_file.unlink()
     print("[8/8] complete", flush=True)
     return {
         "output_dir": str(output), "report": str(report_path),

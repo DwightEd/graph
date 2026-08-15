@@ -41,6 +41,12 @@ response-to-response routing add anomaly-relevant information beyond the
 1024-D token state? This is fixed message passing, not a GNN: no backpropagation
 or learned edge weights are used.
 
+The implementation computes the Lookback state and both message families in
+one channel-major causal CSR pass. Train sampling stores the shared primitive
+matrix `[X,Fp,Fr,Fr_rewired,direct]`; the seven views are derived only after
+sampling, so they use exactly the same train tokens. The bounded train state is
+checkpointed periodically and can resume without changing the sampled rows.
+
 ## Views and structural control
 
 The validation compares seven frozen views: `scalar_only`, `token_only`,

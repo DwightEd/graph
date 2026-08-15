@@ -45,6 +45,7 @@ ARGS=(
   --display-edges-per-type "${DISPLAY_EDGES_PER_TYPE:-2}"
   --display-max-edges "${DISPLAY_MAX_EDGES:-300}"
   --reference-size "${REFERENCE_SIZE:-12000}"
+  --checkpoint-interval "${CHECKPOINT_INTERVAL:-50}"
   --subspace-components "${SUBSPACE_COMPONENTS:-32}"
   --tail-fraction "${TAIL_FRACTION:-0.05}"
   --anomaly-quantile "${ANOMALY_QUANTILE:-0.95}"

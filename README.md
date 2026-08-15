@@ -155,6 +155,19 @@ The runner creates one timestamped directory under
 `outputs/lookback_graph_validation/`, streams progress in the foreground, and
 writes the same output to `run.log`.
 
+Train-reference construction saves
+`graph_representation/train_reference_checkpoint.npz` every 50 completed
+samples. Resume with the same output directory; completed mechanism features
+are reused and the log is appended:
+
+```bash
+OUTPUT_ROOT=/path/from/the/previous/run bash run_lookback_graph_validation.sh
+```
+
+The exact-channel hot path uses one causal CSR pass per sample and defaults to
+65536 CSR rows per GPU block. Set `CHECKPOINT_INTERVAL` or `CSR_ROW_BLOCK` only
+when a different recovery interval or memory/speed tradeoff is required.
+
 It has four stages:
 
 1. extract label-free mechanism features on train;

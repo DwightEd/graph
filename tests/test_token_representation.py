@@ -20,6 +20,7 @@ from attention_graph.token_representation import (
     _read_dataset_labels,
     _cluster_bootstrap_difference,
     _PositionReservoir,
+    _reference_views_from_primitives,
     _route_edges_by_relation,
 )
 from cache import AttentionSample, index_row, save_attention_sample, sha256, write_split_index
@@ -277,6 +278,39 @@ class PipelineContractTests(unittest.TestCase):
         self.assertLessEqual(len(retained), 12)
         self.assertEqual(reservoir.maximum_rows, 12)
 
+    def test_position_reservoir_resume_matches_uninterrupted_sampling(self):
+        values = np.arange(180, dtype=np.float32).reshape(30, 6)
+        position = np.linspace(0.0, .99, len(values))
+        complete = _PositionReservoir(bins=3, size=12, seed=9)
+        complete.add(values, position)
+
+        partial = _PositionReservoir(bins=3, size=12, seed=9)
+        partial.add(values[:13], position[:13])
+        resumed = _PositionReservoir(bins=3, size=12, seed=9)
+        resumed.restore(partial.snapshot())
+        resumed.add(values[13:], position[13:])
+
+        complete_values, complete_bins = complete.matrix()
+        resumed_values, resumed_bins = resumed.matrix()
+        np.testing.assert_array_equal(resumed_values, complete_values)
+        np.testing.assert_array_equal(resumed_bins, complete_bins)
+
+    def test_primitive_reservoir_derives_all_seven_aligned_views(self):
+        primitives = np.arange(24, dtype=np.float32).reshape(2, 12)
+        views = _reference_views_from_primitives(primitives, channels=2)
+
+        np.testing.assert_array_equal(views["token_only"], primitives[:, :2])
+        np.testing.assert_array_equal(
+            views["true_graph"], primitives[:, :6]
+        )
+        np.testing.assert_array_equal(
+            views["rewired_graph"],
+            np.concatenate((primitives[:, :4], primitives[:, 6:8]), axis=1),
+        )
+        np.testing.assert_array_equal(
+            views["direct_marginals"], primitives[:, 8:12]
+        )
+
     def test_paired_bootstrap_keeps_response_clusters_and_detects_gain(self):
         labels = np.asarray([0, 1, 0, 1, 0, 1], dtype=np.int8)
         sample_ids = np.asarray(["a", "a", "b", "b", "c", "c"])
@@ -337,6 +371,7 @@ class PipelineContractTests(unittest.TestCase):
         self.assertFalse(hasattr(args, "graph_head_components"))
         self.assertEqual(args.bootstrap_replicates, 200)
         self.assertEqual(args.csr_row_block, 65536)
+        self.assertEqual(args.checkpoint_interval, 50)
         self.assertEqual(args.anomaly_quantile, .95)
         self.assertFalse(hasattr(args, "layer_bins"))
         self.assertFalse(hasattr(args, "diffusion_hops"))
@@ -368,6 +403,7 @@ class PipelineContractTests(unittest.TestCase):
                         sample_ids=("test-1",), seed=7,
                     ),
                 )
+
             self.assertEqual(result["test_nodes"], 12)
             self.assertEqual(result["primary_score"], "true_graph")
             self.assertEqual(
@@ -458,6 +494,70 @@ class PipelineContractTests(unittest.TestCase):
                     ResearchDataset(test_root), output_dir=output,
                     sample_id="test-1", layer=0,
                 )
+
+    def test_interrupted_train_reference_resumes_from_last_complete_sample(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            train_root, test_root = root / "train", root / "test"
+            _write_split(train_root, "train", 5, "train-source")
+            _write_split(test_root, "test", 4, "test-source")
+            output = root / "output"
+            config = TokenRepresentationConfig(
+                position_bins=2, reference_size=8,
+                subspace_components=2, bootstrap_replicates=5,
+                checkpoint_interval=1, seed=17,
+            )
+            from attention_graph import token_representation as module
+
+            original = module.lookback_evidence_from_attention
+
+            def interrupt_third_train(attention, **kwargs):
+                if kwargs.get("sample_id") == "train-2":
+                    raise KeyboardInterrupt
+                return original(attention, **kwargs)
+
+            with patch.object(
+                module, "lookback_evidence_from_attention",
+                side_effect=interrupt_third_train,
+            ):
+                with self.assertRaises(KeyboardInterrupt):
+                    discover_token_representations(
+                        ResearchDataset(train_root), ResearchDataset(test_root),
+                        ResearchDataset(test_root), output_dir=output,
+                        config=config,
+                    )
+
+            checkpoint = output / "train_reference_checkpoint.npz"
+            self.assertTrue(checkpoint.exists())
+            with np.load(checkpoint, allow_pickle=False) as saved:
+                self.assertEqual(int(saved["next_sample_index"]), 2)
+
+            resumed_calls = []
+            resume_config = TokenRepresentationConfig(
+                position_bins=2, reference_size=8,
+                subspace_components=2, bootstrap_replicates=5,
+                checkpoint_interval=1, csr_row_block=1, seed=17,
+            )
+
+            def record_resume(attention, **kwargs):
+                resumed_calls.append(kwargs.get("sample_id"))
+                return original(attention, **kwargs)
+
+            with patch.object(
+                module, "lookback_evidence_from_attention",
+                side_effect=record_resume,
+            ):
+                discover_token_representations(
+                    ResearchDataset(train_root), ResearchDataset(test_root),
+                    ResearchDataset(test_root), output_dir=output,
+                    config=resume_config,
+                )
+
+            train_calls = [
+                value for value in resumed_calls if value.startswith("train-")
+            ]
+            self.assertEqual(train_calls, ["train-2", "train-3", "train-4"])
+            self.assertFalse(checkpoint.exists())
 
 
 if __name__ == "__main__":
