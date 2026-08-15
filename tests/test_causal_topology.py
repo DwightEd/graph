@@ -38,7 +38,7 @@ class CausalTopologyEncoderTests(unittest.TestCase):
         encoding = self.encoder.encode(_sample())
 
         self.assertEqual(encoding.balance_log_scale.shape, (4, 1, 1, 2))
-        self.assertEqual(encoding.retained_marginals.shape, (4, 1, 1, 3))
+        self.assertEqual(encoding.attention_marginals.shape, (4, 1, 1, 3))
         self.assertEqual(encoding.retained_support.shape, (4, 1, 1, 2))
         self.assertEqual(encoding.prompt_provenance.shape, (4, 1, 1, 6))
         self.assertEqual(encoding.rr_one_hop.shape, (4, 1, 1, 6))
@@ -46,12 +46,15 @@ class CausalTopologyEncoderTests(unittest.TestCase):
         for value in vars(encoding).values():
             self.assertEqual(value.device, _sample().response_values.device)
 
-        # t=1 has prompt mean .2/3 and generated mean (.5 + .1)/2.
+        # Missing eligible off-diagonal edges are imputed at the .01 floor.
+        # t=1 therefore has prompt mass .2 + 2*.01 and history mass .5.
         prompt_weight = float(torch.tensor(.2, dtype=torch.float16))
         response_weight = float(torch.tensor(.5, dtype=torch.float16))
         diagonal = float(torch.tensor(.1, dtype=torch.float16))
-        expected_total = (prompt_weight / 3) + (response_weight + diagonal) / 2
-        expected_balance = (prompt_weight / 3) / expected_total
+        floor = float(torch.tensor(.01, dtype=torch.float16))
+        prompt_mass = prompt_weight + 2 * floor
+        expected_total = (prompt_mass / 3) + (response_weight + diagonal) / 2
+        expected_balance = (prompt_mass / 3) / expected_total
         self.assertAlmostEqual(float(encoding.balance_log_scale[1, 0, 0, 0]), expected_balance, places=6)
         self.assertAlmostEqual(
             float(encoding.balance_log_scale[1, 0, 0, 1]),
@@ -59,8 +62,8 @@ class CausalTopologyEncoderTests(unittest.TestCase):
             places=6,
         )
         torch.testing.assert_close(
-            encoding.retained_marginals[1, 0, 0],
-            torch.tensor([prompt_weight, response_weight, diagonal]),
+            encoding.attention_marginals[1, 0, 0],
+            torch.tensor([prompt_mass, response_weight, diagonal]),
         )
 
     def test_prompt_provenance_distinguishes_equal_mass_at_different_sources(self):
@@ -72,19 +75,19 @@ class CausalTopologyEncoderTests(unittest.TestCase):
             first.prompt_provenance[-1], second.prompt_provenance[-1]
         ))
 
-    def test_prompt_provenance_is_conditioned_on_mass(self):
+    def test_prompt_provenance_includes_the_imputed_uniform_background(self):
         first = self.encoder.encode(_sample(last_prompt_source=1, last_prompt_weight=.20))
         second = self.encoder.encode(_sample(last_prompt_source=1, last_prompt_weight=.40))
 
-        torch.testing.assert_close(
+        self.assertFalse(torch.allclose(
             first.prompt_provenance[-1], second.prompt_provenance[-1]
-        )
+        ))
         self.assertNotEqual(
-            float(first.retained_marginals[-1, 0, 0, 0]),
-            float(second.retained_marginals[-1, 0, 0, 0]),
+            float(first.attention_marginals[-1, 0, 0, 0]),
+            float(second.attention_marginals[-1, 0, 0, 0]),
         )
 
-    def test_absent_csr_edges_are_not_invented_at_the_attention_floor(self):
+    def test_absent_csr_edges_are_imputed_at_the_attention_floor(self):
         attention = AttentionSample(
             "censored", "source", 2, torch.arange(3, dtype=torch.int32),
             torch.tensor([[[.0, .0, .20]]], dtype=torch.float16),
@@ -97,10 +100,28 @@ class CausalTopologyEncoderTests(unittest.TestCase):
         encoding = self.encoder.encode(attention)
 
         torch.testing.assert_close(
-            encoding.retained_marginals[0, 0, 0],
-            torch.tensor([0.0, 0.0, float(torch.tensor(.20, dtype=torch.float16))]),
+            encoding.attention_marginals[0, 0, 0],
+            torch.tensor([
+                2 * float(torch.tensor(.01, dtype=torch.float16)),
+                0.0,
+                float(torch.tensor(.20, dtype=torch.float16)),
+            ]),
         )
-        self.assertEqual(float(encoding.balance_log_scale[0, 0, 0, 0]), 0.0)
+        self.assertGreater(float(encoding.balance_log_scale[0, 0, 0, 0]), 0.0)
+
+    def test_floor_weight_edges_do_not_create_topology_messages(self):
+        attention = AttentionSample(
+            "floor-edge", "source", 1, torch.arange(3, dtype=torch.int32),
+            torch.zeros((1, 1, 3), dtype=torch.float16),
+            torch.tensor([0, 0, 1], dtype=torch.int32),
+            torch.tensor([1], dtype=torch.int32),
+            torch.tensor([.01], dtype=torch.float16), .01,
+        )
+
+        encoding = self.encoder.encode(attention)
+
+        self.assertEqual(float(encoding.rr_one_hop.abs().sum()), 0.0)
+        self.assertEqual(float(encoding.rr_two_hop.abs().sum()), 0.0)
 
     def test_retained_support_reports_prompt_and_history_coverage(self):
         encoding = self.encoder.encode(_sample())
@@ -125,11 +146,11 @@ class CausalTopologyEncoderTests(unittest.TestCase):
 
         encoding = self.encoder.encode(attention)
 
-        self.assertEqual(encoding.retained_marginals.shape, (2, 1, 2, 3))
+        self.assertEqual(encoding.attention_marginals.shape, (2, 1, 2, 3))
         torch.testing.assert_close(
-            encoding.retained_marginals[:, 0, :, :2],
+            encoding.attention_marginals[:, 0, :, :2],
             torch.tensor(
-                [[[.2, 0.0], [.6, 0.0]], [[.4, 0.0], [0.0, .7]]],
+                [[[.2, 0.0], [.6, 0.0]], [[.4, .01], [.01, .7]]],
                 dtype=torch.float16,
             ).float(),
         )

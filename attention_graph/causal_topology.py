@@ -25,7 +25,7 @@ class TopologyEncoding:
     """Per-response-token tensors, all shaped ``[T, L, H, feature]``."""
 
     balance_log_scale: torch.Tensor
-    retained_marginals: torch.Tensor
+    attention_marginals: torch.Tensor
     retained_support: torch.Tensor
     prompt_provenance: torch.Tensor
     rr_one_hop: torch.Tensor
@@ -109,12 +109,21 @@ class CausalTopologyEncoder:
         )
         sources = attention.response_column_indices.to(device=device, dtype=torch.long)
         weights = attention.response_values.to(device=device, dtype=torch.float32)
+        floor = torch.as_tensor(
+            attention.attention_floor,
+            dtype=attention.response_values.dtype,
+            device=device,
+        ).float()
+        excess = (weights - floor).clamp_min(0)
 
         prompt_mask = sources < prompt_count
         prompt_rows = rows[prompt_mask]
         prompt_weights = weights[prompt_mask]
-        prompt_mass = torch.zeros(row_count, dtype=weights.dtype, device=device)
-        prompt_mass.index_add_(0, prompt_rows, prompt_weights)
+        prompt_excess = excess[prompt_mask]
+        prompt_mass = torch.full(
+            (row_count,), prompt_count * floor, dtype=weights.dtype, device=device
+        )
+        prompt_mass.index_add_(0, prompt_rows, prompt_excess)
         prompt_support = torch.zeros_like(prompt_mass)
         prompt_support.index_add_(0, prompt_rows, torch.ones_like(prompt_weights))
 
@@ -122,14 +131,15 @@ class CausalTopologyEncoder:
         rr_rows = rows[rr_mask]
         rr_sources = sources[rr_mask]
         rr_weights = weights[rr_mask]
-        rr_mass = torch.zeros_like(prompt_mass)
-        rr_mass.index_add_(0, rr_rows, rr_weights)
+        rr_excess = excess[rr_mask]
+        target_position = torch.arange(response_count, device=device).repeat(channels)
+        rr_mass = target_position.to(weights.dtype) * floor
+        rr_mass.index_add_(0, rr_rows, rr_excess)
         rr_support = torch.zeros_like(prompt_mass)
         rr_support.index_add_(0, rr_rows, torch.ones_like(rr_weights))
 
         diagonal = attention.attention_diagonal.to(device=device, dtype=torch.float32)
         diagonal = diagonal.reshape(channels, -1)[:, prompt_count:].reshape(-1)
-        target_position = torch.arange(response_count, device=device).repeat(channels)
         prompt_mean = prompt_mass / float(prompt_count)
         generated_mean = (rr_mass + diagonal) / (target_position + 1).to(weights.dtype)
         total_mean = prompt_mean + generated_mean
@@ -157,11 +167,11 @@ class CausalTopologyEncoder:
         prompt_positions = torch.arange(prompt_count, device=device, dtype=weights.dtype)
         phases = 2 * torch.pi * prompt_positions[:, None] * frequencies / prompt_count
         prompt_code = torch.cat((torch.sin(phases), torch.cos(phases)), dim=1)
-        provenance = torch.zeros(
-            row_count, prompt_code.shape[1], dtype=weights.dtype, device=device
-        )
+        provenance = (
+            floor * prompt_code.sum(dim=0, keepdim=True)
+        ).expand(row_count, -1).clone()
         provenance.index_add_(
-            0, prompt_rows, prompt_weights[:, None] * prompt_code[sources[prompt_mask]]
+            0, prompt_rows, prompt_excess[:, None] * prompt_code[sources[prompt_mask]]
         )
         provenance = torch.where(
             prompt_mass[:, None] > 0,
@@ -169,11 +179,15 @@ class CausalTopologyEncoder:
             torch.zeros_like(provenance),
         )
 
+        informative_rr = rr_excess > 0
+        rr_rows = rr_rows[informative_rr]
+        rr_sources = rr_sources[informative_rr]
+        rr_excess = rr_excess[informative_rr]
         channel = torch.div(rr_rows, response_count, rounding_mode="floor")
         rr_source_relative = rr_sources - prompt_count
         rr_source_rows = channel * response_count + rr_source_relative
         rr_one_hop, rr_two_hop = _rr_features(
-            base_state, rr_rows, rr_source_rows, rr_weights
+            base_state, rr_rows, rr_source_rows, rr_excess
         )
 
         rr_target_relative = rr_rows.remainder(response_count)
@@ -187,14 +201,14 @@ class CausalTopologyEncoder:
         )
         rewired_source_rows = channel * response_count + (rewired_sources - prompt_count)
         rewired_one_hop, rewired_two_hop = _rr_features(
-            base_state, rr_rows, rewired_source_rows, rr_weights
+            base_state, rr_rows, rewired_source_rows, rr_excess
         )
 
         return TopologyEncoding(
             balance_log_scale=_as_token_channels(
                 base_state.reshape(channels, response_count, -1), layers, heads
             ),
-            retained_marginals=_as_token_channels(
+            attention_marginals=_as_token_channels(
                 torch.stack((prompt_mass, rr_mass, diagonal), dim=1).reshape(
                     channels, response_count, -1
                 ),
