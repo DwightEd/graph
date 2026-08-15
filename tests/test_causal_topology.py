@@ -75,13 +75,13 @@ class CausalTopologyEncoderTests(unittest.TestCase):
             first.prompt_provenance[-1], second.prompt_provenance[-1]
         ))
 
-    def test_prompt_provenance_includes_the_imputed_uniform_background(self):
+    def test_prompt_provenance_removes_uniform_floor_before_endpoint_encoding(self):
         first = self.encoder.encode(_sample(last_prompt_source=1, last_prompt_weight=.20))
         second = self.encoder.encode(_sample(last_prompt_source=1, last_prompt_weight=.40))
 
-        self.assertFalse(torch.allclose(
+        torch.testing.assert_close(
             first.prompt_provenance[-1], second.prompt_provenance[-1]
-        ))
+        )
         self.assertNotEqual(
             float(first.attention_marginals[-1, 0, 0, 0]),
             float(second.attention_marginals[-1, 0, 0, 0]),
@@ -122,6 +122,19 @@ class CausalTopologyEncoderTests(unittest.TestCase):
 
         self.assertEqual(float(encoding.rr_one_hop.abs().sum()), 0.0)
         self.assertEqual(float(encoding.rr_two_hop.abs().sum()), 0.0)
+
+    def test_floor_weight_prompt_edge_does_not_create_provenance(self):
+        attention = AttentionSample(
+            "floor-prompt", "source", 2, torch.arange(3, dtype=torch.int32),
+            torch.zeros((1, 1, 3), dtype=torch.float16),
+            torch.tensor([0, 1], dtype=torch.int32),
+            torch.tensor([0], dtype=torch.int32),
+            torch.tensor([.01], dtype=torch.float16), .01,
+        )
+
+        encoding = self.encoder.encode(attention)
+
+        self.assertEqual(float(encoding.prompt_provenance.abs().sum()), 0.0)
 
     def test_retained_support_reports_prompt_and_history_coverage(self):
         encoding = self.encoder.encode(_sample())

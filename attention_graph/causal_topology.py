@@ -167,15 +167,17 @@ class CausalTopologyEncoder:
         prompt_positions = torch.arange(prompt_count, device=device, dtype=weights.dtype)
         phases = 2 * torch.pi * prompt_positions[:, None] * frequencies / prompt_count
         prompt_code = torch.cat((torch.sin(phases), torch.cos(phases)), dim=1)
-        provenance = (
-            floor * prompt_code.sum(dim=0, keepdim=True)
-        ).expand(row_count, -1).clone()
+        provenance = torch.zeros(
+            row_count, prompt_code.shape[1], dtype=weights.dtype, device=device
+        )
         provenance.index_add_(
             0, prompt_rows, prompt_excess[:, None] * prompt_code[sources[prompt_mask]]
         )
         provenance = torch.where(
-            prompt_mass[:, None] > 0,
-            provenance / prompt_mass[:, None].clamp_min(self.config.epsilon),
+            prompt_mass[:, None] > prompt_count * floor,
+            provenance / (
+                prompt_mass[:, None] - prompt_count * floor
+            ).clamp_min(self.config.epsilon),
             torch.zeros_like(provenance),
         )
 
