@@ -47,7 +47,7 @@ printf '\n[run] encode topology, fit independent one-class references, score tes
   --position-bins "${POSITION_BINS:-10}" \
   --bootstrap-replicates "${BOOTSTRAP_REPLICATES:-200}" \
   --reference-size "$REFERENCE_SIZE" \
-  --checkpoint-interval "${CHECKPOINT_INTERVAL:-50}" \
+  --checkpoint-interval "${CHECKPOINT_INTERVAL:-250}" \
   --subspace-components "${SUBSPACE_COMPONENTS:-32}" \
   --tail-fraction "${TAIL_FRACTION:-0.05}" \
   --fourier-frequencies "$FOURIER_FREQUENCIES" \

@@ -93,7 +93,7 @@ def parse_args(argv=None):
     p.add_argument("--position-bins", type=int, default=10)
     p.add_argument("--bootstrap-replicates", type=int, default=200)
     p.add_argument("--reference-size", type=int, default=12_000)
-    p.add_argument("--checkpoint-interval", type=int, default=50)
+    p.add_argument("--checkpoint-interval", type=int, default=250)
     p.add_argument("--subspace-components", type=int, default=32)
     p.add_argument("--tail-fraction", type=float, default=0.05)
     p.add_argument("--fourier-frequencies", type=int, default=4)

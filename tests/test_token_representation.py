@@ -238,7 +238,7 @@ class PipelineContractTests(unittest.TestCase):
         self.assertEqual(args.position_bins, 10)
         self.assertEqual(args.bootstrap_replicates, 200)
         self.assertEqual(args.reference_size, 12_000)
-        self.assertEqual(args.checkpoint_interval, 50)
+        self.assertEqual(args.checkpoint_interval, 250)
         self.assertEqual(args.subspace_components, 32)
         self.assertEqual(args.tail_fraction, .05)
         self.assertEqual(args.fourier_frequencies, 6)

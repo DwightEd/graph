@@ -1,3 +1,4 @@
+from dataclasses import asdict
 import json
 from pathlib import Path
 import tempfile
@@ -176,6 +177,7 @@ class TopologyExperimentTests(unittest.TestCase):
                     self.assertEqual(artifact[f"{score_name}_score"].ndim, 1)
             label_free_report = json.loads(required[2].read_text(encoding="utf-8"))
             self.assertFalse(label_free_report["labels_used"])
+            self.assertEqual(label_free_report["config"], asdict(config))
             self.assertEqual(label_free_report["reference_split"]["per_group_budget"], 4)
             self.assertTrue(label_free_report["reference_split"]["mutually_exclusive"])
             self.assertEqual(

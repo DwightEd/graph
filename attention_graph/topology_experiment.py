@@ -36,7 +36,7 @@ class TopologyExperimentConfig:
     """Runtime choices for the fixed label-free topology experiment."""
 
     reference_size: int = 12_000
-    checkpoint_interval: int = 50
+    checkpoint_interval: int = 250
     bootstrap_replicates: int = 200
     seed: int = 42
     topology: CausalTopologyConfig = field(default_factory=CausalTopologyConfig)
@@ -103,6 +103,7 @@ class TopologyExperiment:
         label_free_report = {
             "schema": SCHEMA,
             "labels_used": False,
+            "config": asdict(self.config),
             "primary_score": "full_signal",
             "score_names": list(scores),
             "test_nodes": int(len(next(iter(scores.values())))),
