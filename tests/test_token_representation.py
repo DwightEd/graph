@@ -242,6 +242,7 @@ class PipelineContractTests(unittest.TestCase):
         self.assertEqual(args.subspace_components, 32)
         self.assertEqual(args.tail_fraction, .05)
         self.assertEqual(args.fourier_frequencies, 6)
+        self.assertEqual(args.row_block_size, 4096)
         self.assertEqual(args.seed, 42)
         for obsolete in (
             "provenance_hops", "csr_row_block", "sample_id",

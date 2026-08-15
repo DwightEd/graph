@@ -51,6 +51,7 @@ printf '\n[run] encode topology, fit independent one-class references, score tes
   --subspace-components "${SUBSPACE_COMPONENTS:-32}" \
   --tail-fraction "${TAIL_FRACTION:-0.05}" \
   --fourier-frequencies "$FOURIER_FREQUENCIES" \
+  --row-block-size "${ROW_BLOCK_SIZE:-4096}" \
   --seed "${SEED:-42}"
 
 printf '\ncomplete\n'

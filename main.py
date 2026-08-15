@@ -97,6 +97,7 @@ def parse_args(argv=None):
     p.add_argument("--subspace-components", type=int, default=32)
     p.add_argument("--tail-fraction", type=float, default=0.05)
     p.add_argument("--fourier-frequencies", type=int, default=4)
+    p.add_argument("--row-block-size", type=int, default=4096)
     p.add_argument("--seed", type=int, default=42)
 
     p = sub.add_parser(
@@ -160,6 +161,7 @@ def main(argv=None):
             topology=CausalTopologyConfig(
                 fourier_frequencies=args.fourier_frequencies,
                 rewire_seed=args.seed,
+                row_block_size=args.row_block_size,
             ),
             one_class=OneClassConfig(
                 position_bins=args.position_bins,

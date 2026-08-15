@@ -122,7 +122,11 @@ comparisons:
 3. `rr_multihop_exact` versus `rr_multihop_lag_rewired`: is the score sensitive
    to coarse-lag-stratified source rewiring? This comparison does not isolate
    exact source identity because in-degree, collisions, and exact lag may also
-   change.
+change.
+
+The three CSR passes are streamed in `ROW_BLOCK_SIZE` rows (4096 by default),
+so temporary edge tensors scale with one block rather than the largest sample's
+complete edge set. Changing the block size does not change the encoding.
 4. `rr_multihop_exact` versus `rr_one_hop_exact`: does the second hop add
    information beyond local neighborhoods?
 
