@@ -7,10 +7,12 @@ import json
 
 from attention_graph.graph import GraphBuildConfig
 from attention_graph.statistics import collect_statistics, evaluate_statistics
-from attention_graph.token_representation import (
-    TokenRepresentationConfig,
-    discover_token_representations,
-    render_saved_sample,
+from attention_graph.causal_topology import CausalTopologyConfig
+from attention_graph.one_class import OneClassConfig
+from attention_graph.token_representation import render_saved_sample
+from attention_graph.topology_experiment import (
+    TopologyExperiment,
+    TopologyExperimentConfig,
 )
 from extract import AttentionExtractor, ExtractionConfig
 from metadata import enrich_ragtruth_indices
@@ -82,32 +84,19 @@ def parse_args(argv=None):
 
     p = sub.add_parser(
         "represent-tokens",
-        help="full Lookback nodes plus exact-channel one-hop graph detection",
+        help="label-free causal topology token anomaly experiment",
     )
     p.add_argument("--train-split", required=True)
     p.add_argument("--test-split", required=True)
     p.add_argument("--output-dir", required=True)
     p.add_argument("--device", default="cuda")
     p.add_argument("--position-bins", type=int, default=10)
-    p.add_argument("--provenance-hops", type=int, default=2)
     p.add_argument("--bootstrap-replicates", type=int, default=200)
-    p.add_argument("--csr-row-block", type=int, default=65536)
-    p.add_argument(
-        "--sample-id", action="append", default=[],
-        help="render this test sample in full; repeat for multiple samples",
-    )
-    p.add_argument("--display-mass-cover", type=float, default=0.80)
-    p.add_argument("--display-edges-per-type", type=int, default=2)
-    p.add_argument("--display-max-edges", type=int, default=300)
-    p.add_argument(
-        "--display-layer", type=int,
-        help="render this layer; default collapses each edge by maximum layer weight",
-    )
     p.add_argument("--reference-size", type=int, default=12_000)
     p.add_argument("--checkpoint-interval", type=int, default=50)
     p.add_argument("--subspace-components", type=int, default=32)
     p.add_argument("--tail-fraction", type=float, default=0.05)
-    p.add_argument("--anomaly-quantile", type=float, default=0.95)
+    p.add_argument("--fourier-frequencies", type=int, default=4)
     p.add_argument("--seed", type=int, default=42)
 
     p = sub.add_parser(
@@ -163,30 +152,29 @@ def main(argv=None):
         )
         _require_llama31_geometry(train_dataset)
         _require_llama31_geometry(test_dataset)
-        representation_config = TokenRepresentationConfig(
-            position_bins=args.position_bins,
-            provenance_hops=args.provenance_hops,
-            bootstrap_replicates=args.bootstrap_replicates,
-            csr_row_block=args.csr_row_block,
-            sample_ids=tuple(args.sample_id),
-            display_mass_cover=args.display_mass_cover,
-            display_edges_per_type=args.display_edges_per_type,
-            display_max_edges=args.display_max_edges,
-            display_layer=args.display_layer,
+        experiment_config = TopologyExperimentConfig(
             reference_size=args.reference_size,
             checkpoint_interval=args.checkpoint_interval,
-            subspace_components=args.subspace_components,
-            tail_fraction=args.tail_fraction,
-            anomaly_quantile=args.anomaly_quantile,
+            bootstrap_replicates=args.bootstrap_replicates,
             seed=args.seed,
+            topology=CausalTopologyConfig(
+                fourier_frequencies=args.fourier_frequencies,
+                rewire_seed=args.seed,
+            ),
+            one_class=OneClassConfig(
+                position_bins=args.position_bins,
+                subspace_components=args.subspace_components,
+                tail_fraction=args.tail_fraction,
+                seed=args.seed,
+            ),
         )
-        result = discover_token_representations(
+        result = TopologyExperiment(
             train_dataset,
             test_dataset,
             evaluation_dataset,
             output_dir=args.output_dir,
-            config=representation_config,
-        )
+            config=experiment_config,
+        ).run()
     elif args.command == "render-token-graph":
         dataset = open_research_dataset(
             args.test_split,

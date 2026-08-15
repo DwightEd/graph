@@ -359,23 +359,25 @@ class PipelineContractTests(unittest.TestCase):
         np.testing.assert_array_equal(labels, np.asarray([0, 1], dtype=np.int8))
         self.assertEqual(dataset.processed, {"a", "b"})
 
-    def test_cli_exposes_only_current_compact_graph_controls(self):
+    def test_cli_exposes_only_causal_topology_experiment_controls(self):
         args = parse_args([
             "represent-tokens", "--train-split", "train", "--test-split", "test",
-            "--output-dir", "output", "--sample-id", "42",
+            "--output-dir", "output", "--fourier-frequencies", "6",
         ])
-        self.assertFalse(hasattr(args, "lookback_window"))
-        self.assertEqual(args.provenance_hops, 2)
-        self.assertFalse(hasattr(args, "route_top_heads"))
-        self.assertFalse(hasattr(args, "prompt_bins"))
-        self.assertFalse(hasattr(args, "graph_head_components"))
+        self.assertEqual(args.position_bins, 10)
         self.assertEqual(args.bootstrap_replicates, 200)
-        self.assertEqual(args.csr_row_block, 65536)
+        self.assertEqual(args.reference_size, 12_000)
         self.assertEqual(args.checkpoint_interval, 50)
-        self.assertEqual(args.anomaly_quantile, .95)
-        self.assertFalse(hasattr(args, "layer_bins"))
-        self.assertFalse(hasattr(args, "diffusion_hops"))
-        self.assertFalse(hasattr(args, "visual_reference_size"))
+        self.assertEqual(args.subspace_components, 32)
+        self.assertEqual(args.tail_fraction, .05)
+        self.assertEqual(args.fourier_frequencies, 6)
+        self.assertEqual(args.seed, 42)
+        for obsolete in (
+            "provenance_hops", "csr_row_block", "sample_id",
+            "display_mass_cover", "display_edges_per_type", "display_max_edges",
+            "display_layer", "anomaly_quantile",
+        ):
+            self.assertFalse(hasattr(args, obsolete))
 
     def test_end_to_end_freezes_graph_state_before_reading_labels(self):
         with tempfile.TemporaryDirectory() as directory:
