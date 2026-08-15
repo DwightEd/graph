@@ -35,5 +35,8 @@ separate post-hoc evaluation stage after representations/scores are frozen.
 ## Current experiments
 
 - `mechanism_validation/`: attention mechanism and graph-ablation diagnostics.
-- `spectral_feasibility/`: node-local spectral representations derived from
-  RP/RR response-attention transport matrices.
+- `spectral_feasibility/`: RR causal Laplacian spectral-subspace detection and
+  source-aware spectral-mode utilities.
+- `rr_topology_dynamics/`: label-free extraction followed by post-hoc analysis
+  of route convergence, prompt-grounded versus self-reinforcing RR flow, and
+  layer/head/source/lag attribution of spectral-subspace escape.
