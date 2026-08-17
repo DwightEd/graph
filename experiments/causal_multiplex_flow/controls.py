@@ -23,6 +23,20 @@ def _ordered_without_replacement(values: list[int], *, key_parts) -> list[int]:
     )
 
 
+def event_target(events: CausalEventSample, edge_index: int) -> int:
+    """Recover the response-relative target token of one selected event."""
+    edge_index = int(edge_index)
+    if not 0 <= edge_index < events.num_events:
+        raise IndexError("event index is outside the selected event list")
+    return int(
+        torch.searchsorted(
+            events.target_ptr[1:],
+            torch.as_tensor(edge_index, device=events.target_ptr.device),
+            right=True,
+        ).item()
+    )
+
+
 def lag_preserving_rewired_source(
     events: CausalEventSample,
     edge_index: int,
@@ -31,20 +45,14 @@ def lag_preserving_rewired_source(
 ) -> int:
     """Choose a different legal prior source in the same coarse lag bin.
 
-    If the bin contains no alternative source, fall back to any other prior
-    source.  If the target has no alternative prior source at all, return the
-    true source; callers should then mark the counterfactual unavailable.
+    If the lag bin contains no legal alternative, return the true source.  This
+    keeps the topology gate honest: fallback negatives remain useful for source
+    prediction, but they are not mislabeled as lag-preserving rewires.
     """
     edge_index = int(edge_index)
     if int(events.relation[edge_index]) != RR:
         raise ValueError("source rewiring is defined only for RR events")
-    token = int(
-        torch.searchsorted(
-            events.target_ptr[1:],
-            torch.as_tensor(edge_index, device=events.target_ptr.device),
-            right=True,
-        ).item()
-    )
+    token = event_target(events, edge_index)
     true_source = int(events.source[edge_index].item())
     if not 0 <= true_source < token:
         raise ValueError("RR event source is outside the causal prefix")
@@ -54,13 +62,10 @@ def lag_preserving_rewired_source(
         for source in range(token)
         if source != true_source and log_lag_bin(token - source) == target_bin
     ]
-    candidates = same_bin or [
-        source for source in range(token) if source != true_source
-    ]
-    if not candidates:
+    if not same_bin:
         return true_source
     ordered = _ordered_without_replacement(
-        candidates,
+        same_bin,
         key_parts=(
             "cmrp-rewire-v1",
             seed,
@@ -87,13 +92,7 @@ def source_candidates(
     edge_index = int(edge_index)
     if int(events.relation[edge_index]) != RR:
         raise ValueError("source candidates are defined only for RR events")
-    token = int(
-        torch.searchsorted(
-            events.target_ptr[1:],
-            torch.as_tensor(edge_index, device=events.target_ptr.device),
-            right=True,
-        ).item()
-    )
+    token = event_target(events, edge_index)
     true_source = int(events.source[edge_index].item())
     target_bin = log_lag_bin(token - true_source)
     same_bin = [
@@ -101,10 +100,11 @@ def source_candidates(
         for source in range(token)
         if source != true_source and log_lag_bin(token - source) == target_bin
     ]
+    same_bin_set = set(same_bin)
     fallback = [
         source
         for source in range(token)
-        if source != true_source and source not in set(same_bin)
+        if source != true_source and source not in same_bin_set
     ]
     key = (
         "cmrp-candidates-v1",
@@ -118,8 +118,7 @@ def source_candidates(
     ordered.extend(
         _ordered_without_replacement(fallback, key_parts=key + ("fallback",))
     )
-    chosen = ordered[:negatives]
-    values = [true_source, *chosen]
+    values = [true_source, *ordered[:negatives]]
     return torch.as_tensor(
         values,
         dtype=torch.long,
@@ -127,12 +126,19 @@ def source_candidates(
     )
 
 
-def first_rewired_candidate(candidates: torch.Tensor) -> tuple[int, bool]:
-    """Return the first non-true candidate index and its availability flag."""
+def first_lag_preserving_candidate(
+    events: CausalEventSample,
+    edge_index: int,
+    candidates: torch.Tensor,
+) -> tuple[int, bool]:
+    """Return the first same-lag-bin non-true candidate, if one exists."""
     if candidates.ndim != 1 or len(candidates) < 1:
         raise ValueError("candidate source tensor must be non-empty and one-dimensional")
+    token = event_target(events, edge_index)
     true_source = int(candidates[0])
+    true_bin = log_lag_bin(token - true_source)
     for index in range(1, len(candidates)):
-        if int(candidates[index]) != true_source:
+        source = int(candidates[index])
+        if source != true_source and log_lag_bin(token - source) == true_bin:
             return index, True
     return 0, False
