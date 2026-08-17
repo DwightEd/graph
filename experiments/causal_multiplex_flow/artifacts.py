@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 
 
-REFERENCE_SCHEMA = "cmrp-reference-v1"
-SCORE_SCHEMA = "cmrp-score-v1"
-EVALUATION_SCHEMA = "cmrp-evaluation-v1"
+REFERENCE_SCHEMA = "cmrp-reference-v2"
+SCORE_SCHEMA = "cmrp-score-v2"
+EVALUATION_SCHEMA = "cmrp-evaluation-v2"
 
 
 def file_sha256(path) -> str:
@@ -48,8 +48,10 @@ def load_reference(path):
         "calibration_raw_route_surprise",
         "topology_gate_mean_gap",
         "topology_gate_median_gap",
+        "topology_gate_evaluated_edge_count",
+        "topology_gate_selected_edge_count",
+        "topology_gate_coverage",
         "topology_gate_positive_fraction",
-        "topology_gate_count",
         "topology_gate_pass",
     }
     missing = required.difference(reference)
@@ -71,6 +73,31 @@ def load_reference(path):
         raise ValueError("CMRP calibration score distribution is invalid")
     if not bool(np.isfinite(calibration).all()):
         raise ValueError("CMRP calibration score distribution is non-finite")
+    evaluated = int(reference["topology_gate_evaluated_edge_count"])
+    selected = int(reference["topology_gate_selected_edge_count"])
+    coverage = float(reference["topology_gate_coverage"])
+    mean_gap = float(reference["topology_gate_mean_gap"])
+    median_gap = float(reference["topology_gate_median_gap"])
+    positive_fraction = float(reference["topology_gate_positive_fraction"])
+    if evaluated < 0 or selected < evaluated:
+        raise ValueError("CMRP topology gate edge counts are inconsistent")
+    if evaluated == 0:
+        if (
+            coverage != 0.0
+            or np.isfinite(mean_gap)
+            or np.isfinite(median_gap)
+            or np.isfinite(positive_fraction)
+            or bool(reference["topology_gate_pass"])
+        ):
+            raise ValueError("CMRP empty topology gate is inconsistent")
+    elif (
+        not np.isfinite(mean_gap)
+        or not np.isfinite(median_gap)
+        or not np.isclose(coverage, evaluated / selected)
+        or not 0.0 <= positive_fraction <= 1.0
+        or bool(reference["topology_gate_pass"]) != bool(mean_gap > 0.0)
+    ):
+        raise ValueError("CMRP topology gate summary is inconsistent")
     return reference
 
 
@@ -103,6 +130,11 @@ def load_score_artifact(path):
         "schema",
         "reference_sha256",
         "model_sha256",
+        "fit_group_id",
+        "calibration_group_id",
+        "test_group_id",
+        "test_sample_id",
+        "audit_scope",
     }
     missing = required.difference(artifact)
     if missing:
@@ -123,4 +155,26 @@ def load_score_artifact(path):
     for digest_name in ("reference_sha256", "model_sha256"):
         if len(_scalar_text(artifact, digest_name)) != 64:
             raise ValueError(f"CMRP score artifact has invalid {digest_name}")
+    fit_groups = set(map(str, artifact["fit_group_id"].tolist()))
+    calibration_groups = set(map(str, artifact["calibration_group_id"].tolist()))
+    test_groups = set(map(str, artifact["test_group_id"].tolist()))
+    test_sample_ids = tuple(map(str, artifact["test_sample_id"].tolist()))
+    if (
+        not fit_groups
+        or not calibration_groups
+        or not test_groups
+        or fit_groups & calibration_groups
+        or fit_groups & test_groups
+        or calibration_groups & test_groups
+    ):
+        raise ValueError("CMRP score artifact has an invalid source-group audit")
+    if (
+        not test_sample_ids
+        or len(set(test_sample_ids)) != len(test_sample_ids)
+        or set(test_sample_ids) != set(map(str, artifact["sample_id"].tolist()))
+    ):
+        raise ValueError("CMRP score artifact has an invalid test sample scope")
+    audit_scope = _scalar_text(artifact, "audit_scope")
+    if audit_scope not in {"complete_split", "selected_samples"}:
+        raise ValueError("CMRP score artifact has an invalid audit scope")
     return artifact

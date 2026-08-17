@@ -11,6 +11,26 @@ from experiments.conditioned_benchmark.dataset import align_artifacts
 
 
 class ArtifactAdapterTests(unittest.TestCase):
+    def test_cmrp_v2_schema_registers_only_the_frozen_primary_method(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "cmrp-scores.npz"
+            np.savez_compressed(
+                path,
+                schema=np.asarray("cmrp-score-v2"),
+                sample_id=np.asarray(["a", "a", "b"]),
+                token_index=np.asarray([0, 1, 0]),
+                score=np.asarray([0.1, 0.2, 0.3]),
+                raw_route_surprise=np.asarray([1.0, 2.0, 3.0]),
+            )
+
+            artifact = load_score_artifact(ArtifactSpec("cmrp", str(path)))
+
+            self.assertEqual(set(artifact.methods), {"cmrp.primary"})
+            method = artifact.methods["cmrp.primary"]
+            self.assertEqual(method.protocol, "label_free_frozen_score")
+            self.assertEqual(method.source_field, "score")
+            np.testing.assert_array_equal(method.values, [0.1, 0.2, 0.3])
+
     def test_spectral_schema_registers_canonical_methods(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "scores.npz"

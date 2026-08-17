@@ -50,6 +50,7 @@ class RouterOutput:
     weight_error: torch.Tensor
     rewired_source_nll: torch.Tensor
     rewire_gap: torch.Tensor
+    rewire_edge_gap: torch.Tensor
     selected_rr_edges: torch.Tensor
     state: torch.Tensor
 
@@ -61,6 +62,10 @@ class RouterOutput:
             "weight_error": self.weight_error.detach().cpu().numpy().astype(np.float32),
             "rewired_source_nll": self.rewired_source_nll.detach().cpu().numpy().astype(np.float32),
             "rewire_gap": self.rewire_gap.detach().cpu().numpy().astype(np.float32),
+            "rewire_edge_gap": self.rewire_edge_gap.detach()
+            .cpu()
+            .numpy()
+            .astype(np.float32),
             "selected_rr_edges": self.selected_rr_edges.detach().cpu().numpy().astype(np.int32),
             "state": self.state.detach().cpu().numpy().astype(np.float32),
         }
@@ -176,13 +181,19 @@ class CausalMultiplexRouter(torch.nn.Module):
         states: list[torch.Tensor],
         token: int,
         position: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
         """Vectorized source contrast, weight error, and paired rewire gate."""
         device = previous_state.device
         zero = torch.zeros((), dtype=torch.float32, device=device)
         if rr_indices.numel() == 0:
             nan = torch.full((), float("nan"), device=device)
-            return zero, zero, nan, nan
+            return zero, zero, nan, nan, torch.empty(0, device=device)
 
         candidate_rows = [
             source_candidates(
@@ -249,24 +260,20 @@ class CausalMultiplexRouter(torch.nn.Module):
         logits = logits.masked_fill(~candidate_mask, torch.finfo(logits.dtype).min)
         log_probability = F.log_softmax(logits, dim=1)
 
-        candidate_count = candidate_mask.sum(dim=1).to(torch.float32)
-        normalizer = torch.where(
-            candidate_count > 1,
-            candidate_count.log(),
-            torch.ones_like(candidate_count),
-        )
-        true_loss = -log_probability[:, 0] / normalizer
+        true_loss = -log_probability[:, 0]
         source_nll = true_loss.mean()
 
         available = rewired_index >= 0
         if bool(available.any()):
             row = torch.nonzero(available, as_tuple=False).flatten()
-            rewired_loss = -log_probability[row, rewired_index[row]] / normalizer[row]
+            rewired_loss = -log_probability[row, rewired_index[row]]
             rewired_nll = rewired_loss.mean()
-            rewire_gap = (rewired_loss - true_loss[row]).mean()
+            edge_gap = rewired_loss - true_loss[row]
+            rewire_gap = edge_gap.mean()
         else:
             rewired_nll = torch.full((), float("nan"), device=device)
             rewire_gap = torch.full((), float("nan"), device=device)
+            edge_gap = torch.empty(0, dtype=torch.float32, device=device)
 
         predicted_log_weight = self.weight_head(
             torch.cat((query, source_value[:, 0]), dim=1)
@@ -277,7 +284,7 @@ class CausalMultiplexRouter(torch.nn.Module):
             target_log_weight,
             reduction="mean",
         )
-        return source_nll, weight_error, rewired_nll, rewire_gap
+        return source_nll, weight_error, rewired_nll, rewire_gap, edge_gap
 
     def _event_messages(
         self,
@@ -339,6 +346,7 @@ class CausalMultiplexRouter(torch.nn.Module):
         weight_rows = []
         rewired_rows = []
         gap_rows = []
+        edge_gap_rows = []
         count_rows = []
 
         for token in range(events.response_count):
@@ -356,7 +364,7 @@ class CausalMultiplexRouter(torch.nn.Module):
                 current.start, current.stop, dtype=torch.long, device=device
             )
             rr_indices = local_indices[events.relation[current] == RR]
-            source_nll, weight_error, rewired_nll, rewire_gap = (
+            source_nll, weight_error, rewired_nll, rewire_gap, edge_gap = (
                 self._source_objectives(
                     events=events,
                     rr_indices=rr_indices,
@@ -391,6 +399,7 @@ class CausalMultiplexRouter(torch.nn.Module):
             weight_rows.append(weight_error)
             rewired_rows.append(rewired_nll)
             gap_rows.append(rewire_gap)
+            edge_gap_rows.append(edge_gap)
             count_rows.append(
                 torch.as_tensor(len(rr_indices), dtype=torch.int64, device=device)
             )
@@ -401,6 +410,7 @@ class CausalMultiplexRouter(torch.nn.Module):
         weight = torch.stack(weight_rows)
         rewired = torch.stack(rewired_rows)
         gap = torch.stack(gap_rows)
+        edge_gap = torch.cat(edge_gap_rows)
         count = torch.stack(count_rows)
         state = torch.stack(states)
         loss = raw.mean() + float(self.config.weight_loss_weight) * weight.mean()
@@ -412,6 +422,7 @@ class CausalMultiplexRouter(torch.nn.Module):
             weight_error=weight,
             rewired_source_nll=rewired,
             rewire_gap=gap,
+            rewire_edge_gap=edge_gap,
             selected_rr_edges=count,
             state=state,
         )

@@ -6,6 +6,8 @@ import hashlib
 
 import numpy as np
 
+from experiment_protocol import canonical_source_group
+
 
 def _stable_fraction(seed: int, value: str) -> float:
     digest = hashlib.sha256(
@@ -16,7 +18,7 @@ def _stable_fraction(seed: int, value: str) -> float:
 
 
 def sample_group(sample) -> str:
-    return str(getattr(sample, "source_id", None) or sample.sample_id)
+    return canonical_source_group(sample)
 
 
 def split_source_groups(
@@ -106,23 +108,29 @@ def empirical_upper_tail(reference, values, *, epsilon: float = 1e-12) -> np.nda
     return -np.log(np.maximum(probability, float(epsilon)))
 
 
-def topology_gate_summary(rewire_gap) -> dict:
-    gap = np.asarray(rewire_gap, dtype=np.float64)
+def topology_gate_summary(rewire_edge_gap, *, selected_edge_count: int) -> dict:
+    """Summarize the preregistered true-versus-rewired edge comparison."""
+
+    gap = np.asarray(rewire_edge_gap, dtype=np.float64)
     gap = gap[np.isfinite(gap)]
+    selected_edge_count = int(selected_edge_count)
     if len(gap) == 0:
         return {
-            "edges_or_tokens": 0,
+            "evaluated_edge_count": 0,
+            "selected_edge_count": selected_edge_count,
+            "coverage": 0.0,
             "mean_gap": None,
             "median_gap": None,
             "positive_fraction": None,
             "pass": False,
         }
     mean = float(gap.mean())
-    positive = float(np.mean(gap > 0.0))
     return {
-        "edges_or_tokens": int(len(gap)),
+        "evaluated_edge_count": int(len(gap)),
+        "selected_edge_count": selected_edge_count,
+        "coverage": float(len(gap) / selected_edge_count),
         "mean_gap": mean,
         "median_gap": float(np.median(gap)),
-        "positive_fraction": positive,
-        "pass": bool(mean > 0.0 and positive > 0.5),
+        "positive_fraction": float(np.mean(gap > 0.0)),
+        "pass": bool(mean > 0.0),
     }

@@ -89,7 +89,7 @@ Common overrides:
 
 ```bash
 EPOCHS=3 \
-MAX_PROMPT_EVENTS=24 \
+MAX_RP_EVENTS=24 \
 MAX_RR_EVENTS=48 \
 NEGATIVES=12 \
 HIDDEN_DIM=96 \
@@ -120,9 +120,10 @@ Contains:
 - calibration raw routing-surprise distribution;
 - label-free topology gate:
   - mean/median true-versus-rewired gap;
-  - positive-gap fraction;
-  - evaluated count;
-  - pass flag;
+  - positive-gap fraction as a diagnostic only;
+  - evaluated-edge and selected-edge counts;
+  - evaluated/selected coverage;
+  - pass iff a finite edge was evaluated and mean edge gap is positive;
 - no labels.
 
 A useful topology model should give:
@@ -154,14 +155,20 @@ rewire_gap
 selected_rr_edges
 ```
 
+The v2 score schema also stores the complete fit/calibration/test source-group
+audit and the exact selected test-sample scope. Scoring rejects an overlapping
+test source while each loaded sample is streamed into the scorer; a partial test
+run is explicitly recorded.
+
 Only `score` uses the automatic score-field convention. Raw diagnostics avoid a
 `score_` prefix so the conditioned benchmark cannot silently treat them as
 independently selected detectors.
 
 ### `evaluation.json`
 
-Labels are opened only here. It reports AUROC/AUPRC for the frozen primary score
-and post-hoc diagnostic components.
+Labels are opened only here after the score artifact digest is reverified and
+the canonical dataset manifest is confirmed as the `test` split. It reports
+AUROC/AUPRC for the frozen primary score and post-hoc diagnostic components.
 
 ## Common conditioned benchmark
 

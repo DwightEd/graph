@@ -145,7 +145,7 @@ def _automatic_methods(spec: ArtifactSpec, arrays, schema: str, row_count: int):
             )
         return methods
 
-    if schema == "cmrp-score-v1":
+    if schema in {"cmrp-score-v1", "cmrp-score-v2"}:
         if "score" not in arrays:
             raise ValueError("CMRP score artifact misses its frozen primary score")
         name = f"{spec.name}.primary"

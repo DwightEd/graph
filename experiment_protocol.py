@@ -16,6 +16,8 @@ class SourceGroupAudit:
     fit_source_ids: tuple[str, ...]
     calibration_source_ids: tuple[str, ...]
     test_source_ids: tuple[str, ...]
+    test_sample_ids: tuple[str, ...]
+    test_scope: str
 
 
 @dataclass(frozen=True)
@@ -48,29 +50,145 @@ class FrozenFile:
             raise ValueError("frozen file digest differs from the captured artifact")
 
 
-def audit_source_groups(
-    *,
-    fit_source_ids,
-    calibration_source_ids,
-    test_source_ids,
-) -> SourceGroupAudit:
-    """Verify that complete source groups do not cross protocol roles."""
+@dataclass(frozen=True)
+class FrozenEvaluation:
+    """Evaluation permission bound to one frozen artifact and dataset split."""
 
-    fit = tuple(sorted({str(source_id) for source_id in fit_source_ids}))
-    calibration = tuple(
-        sorted({str(source_id) for source_id in calibration_source_ids})
-    )
-    test = tuple(sorted({str(source_id) for source_id in test_source_ids}))
-    groups = (set(fit), set(calibration), set(test))
-    if not all(groups):
-        raise ValueError("fit, calibration, and test source groups must be non-empty")
-    if any(
-        left & right
-        for index, left in enumerate(groups)
-        for right in groups[index + 1 :]
+    artifact: FrozenFile
+    expected_split: str = "test"
+
+    @classmethod
+    def capture(cls, artifact_path, *, expected_split="test") -> "FrozenEvaluation":
+        return cls(FrozenFile.capture(artifact_path), str(expected_split))
+
+    def load_and_align(self, dataset, loader) -> tuple[object, EvaluationLabels]:
+        """Load the captured artifact, reverify it, then align test labels."""
+
+        rows = loader(self.artifact.path)
+        self.artifact.verify(self.artifact.path)
+        actual_split = str(dataset.manifest.get("split"))
+        if actual_split != self.expected_split:
+            raise ValueError(
+                f"evaluation dataset split {actual_split!r} does not match "
+                f"expected split {self.expected_split!r}"
+            )
+        try:
+            sample_ids = rows["sample_id"]
+            token_indices = rows["token_index"]
+        except KeyError as error:
+            raise ValueError("artifact rows require sample_id and token_index") from error
+        labels = _align_evaluation_labels(dataset, sample_ids, token_indices)
+        return rows, labels
+
+
+class HeldOutSourceAudit:
+    """Stream one held-out split through a frozen fit/calibration audit."""
+
+    def __init__(
+        self,
+        dataset,
+        *,
+        selected_sample_ids,
+        fit_source_ids,
+        calibration_source_ids,
+        require_complete_split=True,
     ):
-        raise ValueError("fit, calibration, and test source groups must be disjoint")
-    return SourceGroupAudit(fit, calibration, test)
+        self.fit_source_ids = _recorded_source_groups(fit_source_ids)
+        self.calibration_source_ids = _recorded_source_groups(
+            calibration_source_ids
+        )
+        if not self.fit_source_ids or not self.calibration_source_ids:
+            raise ValueError("fit and calibration source groups must be non-empty")
+        if set(self.fit_source_ids) & set(self.calibration_source_ids):
+            raise ValueError("fit and calibration source groups must be disjoint")
+        self._dataset = dataset
+        self._reference_source_ids = set(self.fit_source_ids) | set(
+            self.calibration_source_ids
+        )
+        self.test_sample_ids = _selected_sample_ids(
+            dataset,
+            selected_sample_ids,
+            require_complete_split=require_complete_split,
+        )
+        self.test_scope = (
+            "complete_split" if require_complete_split else "selected_samples"
+        )
+        self._observed_source_ids: dict[str, str] = {}
+
+    def observe(self, sample) -> None:
+        """Record a loaded sample before its held-out features are scored."""
+
+        if sample.dataset is not self._dataset:
+            raise ValueError("observed sample belongs to a different dataset")
+        sample_id = str(sample.sample_id)
+        if sample_id not in self.test_sample_ids:
+            raise ValueError("observed sample is outside the selected test scope")
+        if sample_id in self._observed_source_ids:
+            raise ValueError("selected test sample was observed more than once")
+        source_id = canonical_source_group(sample)
+        if source_id in self._reference_source_ids:
+            raise ValueError("fit, calibration, and test source groups must be disjoint")
+        self._observed_source_ids[sample_id] = source_id
+
+    def finish(self) -> SourceGroupAudit:
+        """Require one observation for every selected sample and persist it."""
+
+        missing = set(self.test_sample_ids).difference(self._observed_source_ids)
+        if missing:
+            raise ValueError("selected test samples were not observed")
+        return SourceGroupAudit(
+            self.fit_source_ids,
+            self.calibration_source_ids,
+            tuple(sorted(set(self._observed_source_ids.values()))),
+            self.test_sample_ids,
+            self.test_scope,
+        )
+
+
+def canonical_source_group(sample) -> str:
+    """Return a valid source ID, or isolate an ungrouped sample by its ID."""
+
+    source_id = getattr(sample, "source_id", None)
+    text = _valid_source_id(source_id)
+    if text is not None:
+        return text
+    return str(sample.sample_id)
+
+
+def _recorded_source_groups(source_ids) -> tuple[str, ...]:
+    groups = []
+    for source_id in source_ids:
+        text = _valid_source_id(source_id)
+        if text is None:
+            raise ValueError("frozen source groups must contain valid source IDs")
+        groups.append(text)
+    return tuple(sorted(set(groups)))
+
+
+def _valid_source_id(source_id) -> str | None:
+    if source_id is None:
+        return None
+    text = str(source_id).strip()
+    if not text or text.lower() in {"none", "null", "nan"}:
+        return None
+    return text
+
+
+def _selected_sample_ids(
+    dataset,
+    sample_ids,
+    *,
+    require_complete_split: bool,
+) -> tuple[str, ...]:
+    selected = tuple(map(str, sample_ids))
+    available = tuple(map(str, dataset.sample_ids))
+    if not selected or len(set(selected)) != len(selected):
+        raise ValueError("selected sample IDs must be non-empty and unique")
+    if not set(selected).issubset(available):
+        raise ValueError("selected sample IDs are outside the dataset split")
+    if require_complete_split and set(selected) != set(available):
+        raise ValueError("source audit requires the complete split by default")
+    return selected
 
 
 def _file_sha256(path: Path) -> str:
@@ -100,20 +218,18 @@ def _as_numpy_labels(values) -> np.ndarray:
     return np.asarray(values, dtype=np.int8)
 
 
-def align_evaluation_labels(
-    dataset,
-    *,
-    sample_ids,
-    token_indices,
-) -> EvaluationLabels:
+def _align_evaluation_labels(dataset, sample_ids, token_indices) -> EvaluationLabels:
     """Unlock labels at evaluation and align complete canonical response facts."""
 
     sample_ids = np.asarray(sample_ids, dtype=str)
-    token_indices = np.asarray(token_indices, dtype=np.int64)
-    if sample_ids.ndim != 1 or token_indices.ndim != 1:
+    raw_token_indices = np.asarray(token_indices)
+    if sample_ids.ndim != 1 or raw_token_indices.ndim != 1:
         raise ValueError("sample_ids and token_indices must be one-dimensional")
-    if len(sample_ids) != len(token_indices):
+    if len(sample_ids) != len(raw_token_indices):
         raise ValueError("sample_ids and token_indices must have the same length")
+    if not np.issubdtype(raw_token_indices.dtype, np.integer):
+        raise ValueError("token_indices must use an integer dtype")
+    token_indices = raw_token_indices.astype(np.int64, copy=False)
     if bool((token_indices < 0).any()):
         raise ValueError("token_indices must be non-negative")
 
@@ -125,7 +241,7 @@ def align_evaluation_labels(
             token_label = _as_numpy_labels(labels.response_labels(sample))
             canonical[sample_id] = (
                 token_label,
-                str(sample.source_id),
+                canonical_source_group(sample),
                 int(len(token_label)),
                 int(token_label.any()),
             )

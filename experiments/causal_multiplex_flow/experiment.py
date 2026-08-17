@@ -11,6 +11,8 @@ import torch
 from sklearn.metrics import average_precision_score, roc_auc_score
 from tqdm.auto import tqdm
 
+from experiment_protocol import FrozenEvaluation, HeldOutSourceAudit
+
 from .artifacts import (
     EVALUATION_SCHEMA,
     REFERENCE_SCHEMA,
@@ -117,7 +119,15 @@ def _load_model(reference_path, *, device):
     return model, event_config, reference, model_path
 
 
-def _score_samples(model, dataset, sample_ids, *, event_config, description):
+def _score_samples(
+    model,
+    dataset,
+    sample_ids,
+    *,
+    event_config,
+    description,
+    source_audit=None,
+):
     rows = {
         name: []
         for name in (
@@ -136,13 +146,18 @@ def _score_samples(model, dataset, sample_ids, *, event_config, description):
             "selected_rr_edges",
         )
     }
+    edge_gaps = []
     with torch.no_grad():
         for sample_id in tqdm(sample_ids, desc=description, unit="sample"):
             sample = dataset[sample_id]
             try:
+                sample.attention()
+                if source_audit is not None:
+                    source_audit.observe(sample)
                 events = extract_causal_events(sample, config=event_config)
                 output = model(events)
                 values = output.detached_numpy()
+                edge_gaps.append(values["rewire_edge_gap"])
                 count = events.response_count
                 rows["sample_id"].extend([str(sample.sample_id)] * count)
                 rows["source_id"].extend([_metadata_text(sample.source_id)] * count)
@@ -184,7 +199,7 @@ def _score_samples(model, dataset, sample_ids, *, event_config, description):
     output["selected_rr_edges"] = np.concatenate(rows["selected_rr_edges"]).astype(
         np.int32, copy=False
     )
-    return output
+    return output, np.concatenate(edge_gaps).astype(np.float32, copy=False)
 
 
 def fit_cmrp(
@@ -205,6 +220,10 @@ def fit_cmrp(
     train_config.validate()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    torch.manual_seed(train_config.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(train_config.seed)
 
     split = split_source_groups(
         dataset,
@@ -266,7 +285,7 @@ def fit_cmrp(
         train_config=train_config,
     )
     model.eval()
-    calibration_rows = _score_samples(
+    calibration_rows, calibration_edge_gaps = _score_samples(
         model,
         dataset,
         split["calibration_sample_ids"],
@@ -276,7 +295,10 @@ def fit_cmrp(
     calibration_raw = finite_reference(
         calibration_rows["raw_route_surprise"], minimum=2
     ).astype(np.float32)
-    gate = topology_gate_summary(calibration_rows["rewire_gap"])
+    gate = topology_gate_summary(
+        calibration_edge_gaps,
+        selected_edge_count=int(calibration_rows["selected_rr_edges"].sum()),
+    )
     reference_path = output_dir / "reference.npz"
     np.savez_compressed(
         reference_path,
@@ -297,13 +319,19 @@ def fit_cmrp(
         topology_gate_median_gap=np.asarray(
             np.nan if gate["median_gap"] is None else gate["median_gap"], dtype=np.float32
         ),
+        topology_gate_evaluated_edge_count=np.asarray(
+            gate["evaluated_edge_count"], dtype=np.int32
+        ),
+        topology_gate_selected_edge_count=np.asarray(
+            gate["selected_edge_count"], dtype=np.int32
+        ),
+        topology_gate_coverage=np.asarray(gate["coverage"], dtype=np.float32),
         topology_gate_positive_fraction=np.asarray(
             np.nan
             if gate["positive_fraction"] is None
             else gate["positive_fraction"],
             dtype=np.float32,
         ),
-        topology_gate_count=np.asarray(gate["edges_or_tokens"], dtype=np.int32),
         topology_gate_pass=np.asarray(gate["pass"]),
         epoch_loss=np.asarray(epoch_losses, dtype=np.float32),
         fit_samples=np.asarray(len(split["fit_sample_ids"]), dtype=np.int32),
@@ -339,13 +367,22 @@ def score_cmrp(dataset, reference_path, output_path, *, limit=None):
     ):
         raise ValueError("test attention geometry differs from the CMRP model")
     sample_ids = _selected_sample_ids(dataset, limit)
-    rows = _score_samples(
+    source_audit = HeldOutSourceAudit(
+        dataset,
+        selected_sample_ids=sample_ids,
+        fit_source_ids=reference["fit_group_id"].tolist(),
+        calibration_source_ids=reference["calibration_group_id"].tolist(),
+        require_complete_split=limit is None,
+    )
+    rows, _ = _score_samples(
         model,
         dataset,
         sample_ids,
         event_config=event_config,
         description="score CMRP test",
+        source_audit=source_audit,
     )
+    audit = source_audit.finish()
     score = empirical_upper_tail(
         reference["calibration_raw_route_surprise"],
         rows["raw_route_surprise"],
@@ -357,6 +394,11 @@ def score_cmrp(dataset, reference_path, output_path, *, limit=None):
         schema=np.asarray(SCORE_SCHEMA),
         reference_sha256=np.asarray(file_sha256(reference_path)),
         model_sha256=np.asarray(file_sha256(model_path)),
+        fit_group_id=np.asarray(audit.fit_source_ids, dtype=str),
+        calibration_group_id=np.asarray(audit.calibration_source_ids, dtype=str),
+        test_group_id=np.asarray(audit.test_source_ids, dtype=str),
+        test_sample_id=np.asarray(audit.test_sample_ids, dtype=str),
+        audit_scope=np.asarray(audit.test_scope),
         score=score,
         **rows,
     )
@@ -368,38 +410,6 @@ def score_cmrp(dataset, reference_path, output_path, *, limit=None):
         "tokens": int(len(score)),
         "primary_detector": "calibrated_causal_route_surprise",
     }
-
-
-def _label_store_for_evaluation(dataset):
-    try:
-        return dataset.labels()
-    except RuntimeError as error:
-        message = str(error)
-        if "every attention sample" not in message and "only after every" not in message:
-            raise
-        for sample_id in tqdm(
-            dataset.sample_ids, desc="unlock CMRP evaluation labels", unit="sample"
-        ):
-            sample = dataset[sample_id]
-            sample.attention()
-            sample.release_attention()
-        return dataset.labels()
-
-
-def _aligned_labels(dataset, artifact):
-    labels = _label_store_for_evaluation(dataset)
-    cache = {}
-    result = np.empty(len(artifact["token_index"]), dtype=np.int64)
-    for row, (sample_id, token_index) in enumerate(
-        zip(artifact["sample_id"], artifact["token_index"], strict=True)
-    ):
-        sample_id = str(sample_id)
-        if sample_id not in cache:
-            sample = dataset[sample_id]
-            cache[sample_id] = labels.response_labels(sample).cpu().numpy()
-            sample.release_attention()
-        result[row] = int(cache[sample_id][int(token_index)])
-    return result
 
 
 def _binary_metrics(labels, values):
@@ -425,8 +435,9 @@ def _binary_metrics(labels, values):
 
 def evaluate_cmrp(dataset, score_path, output_path):
     """Open labels only after the CMRP score artifact is frozen."""
-    artifact = load_score_artifact(score_path)
-    labels = _aligned_labels(dataset, artifact)
+    evaluation = FrozenEvaluation.capture(score_path, expected_split="test")
+    artifact, aligned = evaluation.load_and_align(dataset, load_score_artifact)
+    labels = aligned.token_label
     components = {
         "calibrated_causal_route_surprise": artifact["score"],
         "raw_route_surprise": artifact["raw_route_surprise"],

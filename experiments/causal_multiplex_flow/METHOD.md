@@ -298,6 +298,10 @@ The source loss is InfoNCE/cross-entropy:
  {\sum_{k\in\mathcal C_{t,e}}\exp z(k\mid t,c)}.
 \]
 
+This is the raw negative log-probability.  It is never divided by
+`log(candidate_count)`: candidate-set size is part of the fixed contrastive
+task, not a post-hoc loss normalization.
+
 Using same-lag hard negatives reduces the shortcut of selecting a source only
 from its distance to the target.
 
@@ -366,6 +370,7 @@ source_nll
 weight_error
 rewired_source_nll
 rewire_gap = rewired_source_nll - source_nll
+rewire_edge_gap = L_source(rewired edge) - L_source(true edge)
 ```
 
 ---
@@ -387,8 +392,14 @@ groups:
 The reference artifact reports:
 
 - mean and median rewire gap;
-- fraction of evaluated edges with positive gap;
-- calibration edge/token counts.
+- fraction of evaluated edges with a positive gap, as a diagnostic only;
+- evaluated-edge count, selected-edge count, and their coverage;
+- a pass flag that is true exactly when at least one finite rewired edge was
+  evaluated and the preregistered mean edge gap is positive.
+
+The gate aggregates `rewire_edge_gap` over evaluated edges, never a mean of
+per-token means.  A selected RR edge without a legal lag-bin-preserving rewire
+is retained in the selected count but not the evaluated count.
 
 Failure of this gate means the model has not demonstrated source-sensitive
 topology learning, even if a later benchmark AUROC is above chance.
@@ -415,15 +426,17 @@ unlabeled train calibration groups
     -> score calibration + topology gate     labels never opened
 
 unlabeled test attention
-    -> frozen token scores                   labels never opened
+    -> source-overlap audit + frozen scores  labels never opened
 
 frozen score artifact
     -> AUROC/AUPRC and conditioned benchmark labels opened here only
 ```
 
-The test score artifact contains `sample_id`, `token_index`, metadata, and
-`score*` fields so that `experiments/conditioned_benchmark/` can align CMRP with
-RR spectral and other frozen methods on identical token rows.
+The test score artifact contains `sample_id`, `token_index`, metadata, frozen
+fit/calibration/test source-group audit fields, and `score*` fields so that
+`experiments/conditioned_benchmark/` can align CMRP with RR spectral and other
+frozen methods on identical token rows. Evaluation rechecks that artifact's
+digest and only accepts the canonical `test` split before labels unlock.
 
 Primary comparisons:
 

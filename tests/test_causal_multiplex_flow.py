@@ -21,6 +21,7 @@ from experiments.causal_multiplex_flow.controls import (
     lag_preserving_rewired_source,
     source_candidates,
 )
+from experiments.causal_multiplex_flow.calibration import topology_gate_summary
 from experiments.causal_multiplex_flow.events import (
     CausalEventSample,
     EventConfig,
@@ -71,12 +72,18 @@ def _sample(sample_id: str, source_id: str, multiplier: float = 1.0):
     )
 
 
-def _write_dataset(root: Path, multipliers, *, positive_sample: int | None = None):
+def _write_dataset(
+    root: Path,
+    multipliers,
+    *,
+    positive_sample: int | None = None,
+    source_prefix: str = "source",
+):
     (root / "attention").mkdir(parents=True)
     rows = []
     label_rows = []
     for index, multiplier in enumerate(multipliers):
-        sample = _sample(f"r{index}", f"source-{index}", float(multiplier))
+        sample = _sample(f"r{index}", f"{source_prefix}-{index}", float(multiplier))
         path = root / "attention" / f"r{index}.npz"
         save_attention_sample(sample, path)
         rows.append(
@@ -210,6 +217,56 @@ class CausalMultiplexFlowTests(unittest.TestCase):
             self.assertIsNotNone(model.query_mlp.network[0].weight.grad)
             sample.release_attention()
 
+    def test_router_reports_raw_source_nll_and_edge_level_rewire_gaps(self):
+        events = CausalEventSample(
+            sample_id="manual",
+            response_count=5,
+            num_layers=1,
+            num_heads=1,
+            attention_floor=0.01,
+            target_ptr=torch.tensor([0, 0, 0, 0, 0, 1]),
+            relation=torch.tensor([RR]),
+            source=torch.tensor([1]),
+            channel=torch.tensor([0]),
+            weight=torch.tensor([0.4]),
+            lag=torch.tensor([3]),
+            role_summary=torch.tensor(
+                [[0.0, 0.0, 0.0, 0.0]] * 4 + [[0.0, 0.4, 0.0, 1.0]]
+            ),
+        ).validate()
+        model = CausalMultiplexRouter(
+            num_layers=1,
+            num_heads=1,
+            config=ModelConfig(
+                hidden_dim=8,
+                channel_embedding_dim=2,
+                relation_embedding_dim=2,
+                lag_frequencies=1,
+                negatives_per_edge=1,
+                dropout=0.0,
+                seed=7,
+            ),
+        )
+        for parameter in model.parameters():
+            parameter.data.zero_()
+
+        output = model(events)
+
+        self.assertAlmostEqual(
+            float(output.source_nll[4].detach()), float(np.log(2))
+        )
+        np.testing.assert_allclose(output.rewire_edge_gap.detach().numpy(), [0.0])
+
+    def test_topology_gate_fails_without_a_finite_rewired_edge(self):
+        gate = topology_gate_summary([], selected_edge_count=3)
+
+        self.assertEqual(gate["evaluated_edge_count"], 0)
+        self.assertEqual(gate["selected_edge_count"], 3)
+        self.assertEqual(gate["coverage"], 0.0)
+        self.assertIsNone(gate["mean_gap"])
+        self.assertIsNone(gate["positive_fraction"])
+        self.assertFalse(gate["pass"])
+
     def test_label_free_fit_score_then_posthoc_evaluation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -218,7 +275,10 @@ class CausalMultiplexFlowTests(unittest.TestCase):
                 [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4],
             )
             test = _write_dataset(
-                root / "test", [1.0, 1.2], positive_sample=1
+                root / "test",
+                [1.0, 1.2],
+                positive_sample=1,
+                source_prefix="test-source",
             )
             output_dir = root / "cmrp"
             score_path = output_dir / "test_scores.npz"
@@ -260,6 +320,23 @@ class CausalMultiplexFlowTests(unittest.TestCase):
                 self.assertNotIn("label", arrays.files)
                 self.assertNotIn("y_token", arrays.files)
                 self.assertIn("calibration_raw_route_surprise", arrays.files)
+                self.assertIn("topology_gate_evaluated_edge_count", arrays.files)
+                self.assertIn("topology_gate_selected_edge_count", arrays.files)
+                self.assertIn("topology_gate_coverage", arrays.files)
+                self.assertIn("topology_gate_positive_fraction", arrays.files)
+                evaluated = int(arrays["topology_gate_evaluated_edge_count"])
+                selected = int(arrays["topology_gate_selected_edge_count"])
+                self.assertLessEqual(evaluated, selected)
+                self.assertAlmostEqual(
+                    float(arrays["topology_gate_coverage"]),
+                    evaluated / selected,
+                )
+                positive_fraction = float(arrays["topology_gate_positive_fraction"])
+                if evaluated:
+                    self.assertGreaterEqual(positive_fraction, 0.0)
+                    self.assertLessEqual(positive_fraction, 1.0)
+                else:
+                    self.assertTrue(np.isnan(positive_fraction))
 
             scored = score_cmrp(test, output_dir / "reference.npz", score_path)
             self.assertFalse(scored["labels_read"])
@@ -270,6 +347,9 @@ class CausalMultiplexFlowTests(unittest.TestCase):
                 self.assertNotIn("label", arrays.files)
                 self.assertNotIn("y_token", arrays.files)
                 self.assertIn("raw_route_surprise", arrays.files)
+                self.assertIn("test_group_id", arrays.files)
+                self.assertEqual(arrays["test_sample_id"].tolist(), ["r0", "r1"])
+                self.assertEqual(str(arrays["audit_scope"].item()), "complete_split")
                 self.assertNotIn("score_source_nll", arrays.files)
 
             report = evaluate_cmrp(test, score_path, report_path)
@@ -278,6 +358,97 @@ class CausalMultiplexFlowTests(unittest.TestCase):
             self.assertEqual(report["metrics"]["positive_tokens"], 1)
             self.assertIn("source_nll", report["components"])
             self.assertTrue(report_path.is_file())
+
+    def test_fit_reproduces_model_initialization_and_dropout_sequence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            train = _write_dataset(root / "train", [0.7, 0.8, 0.9, 1.0])
+            event_config = EventConfig(
+                max_prompt_events_per_token=2,
+                max_rr_events_per_token=4,
+            )
+            model_config = ModelConfig(
+                hidden_dim=12,
+                channel_embedding_dim=4,
+                relation_embedding_dim=3,
+                lag_frequencies=2,
+                negatives_per_edge=2,
+                dropout=0.2,
+                seed=11,
+            )
+            train_config = TrainConfig(
+                epochs=1,
+                learning_rate=1e-3,
+                weight_decay=0.0,
+                gradient_clip=1.0,
+                calibration_fraction=0.25,
+                seed=11,
+            )
+            first = root / "first"
+            second = root / "second"
+
+            fit_cmrp(
+                train,
+                first,
+                event_config=event_config,
+                model_config=model_config,
+                train_config=train_config,
+            )
+            fit_cmrp(
+                train,
+                second,
+                event_config=event_config,
+                model_config=model_config,
+                train_config=train_config,
+            )
+
+            first_state = torch.load(first / "model.pt", weights_only=False)[
+                "state_dict"
+            ]
+            second_state = torch.load(second / "model.pt", weights_only=False)[
+                "state_dict"
+            ]
+            for name, value in first_state.items():
+                self.assertTrue(torch.equal(value, second_state[name]), name)
+
+    def test_score_rejects_test_source_overlap_with_frozen_reference(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            train = _write_dataset(root / "train", [0.7, 0.8, 0.9, 1.0])
+            test = _write_dataset(root / "test", [1.0], positive_sample=0)
+            output_dir = root / "cmrp"
+            reference_path = output_dir / "reference.npz"
+            score_path = output_dir / "test_scores.npz"
+
+            fit_cmrp(
+                train,
+                output_dir,
+                event_config=EventConfig(
+                    max_prompt_events_per_token=2,
+                    max_rr_events_per_token=4,
+                ),
+                model_config=ModelConfig(
+                    hidden_dim=12,
+                    channel_embedding_dim=4,
+                    relation_embedding_dim=3,
+                    lag_frequencies=2,
+                    negatives_per_edge=2,
+                    dropout=0.0,
+                    seed=11,
+                ),
+                train_config=TrainConfig(
+                    epochs=1,
+                    learning_rate=1e-3,
+                    weight_decay=0.0,
+                    gradient_clip=1.0,
+                    calibration_fraction=0.25,
+                    seed=11,
+                ),
+            )
+
+            with self.assertRaisesRegex(ValueError, "source groups must be disjoint"):
+                score_cmrp(test, reference_path, score_path)
+            self.assertFalse(score_path.exists())
 
 
 if __name__ == "__main__":

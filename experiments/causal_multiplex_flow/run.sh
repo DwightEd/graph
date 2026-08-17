@@ -47,7 +47,7 @@ echo "device=$DEVICE"
 echo "train_limit=${TRAIN_LIMIT:-all}"
 echo "test_limit=${TEST_LIMIT:-all}"
 echo "epochs=${EPOCHS:-$EPOCHS_DEFAULT}"
-echo "max_prompt_events=${MAX_PROMPT_EVENTS:-16}"
+echo "max_rp_events=${MAX_RP_EVENTS:-16}"
 echo "max_rr_events=${MAX_RR_EVENTS:-32}"
 echo "negatives=${NEGATIVES:-8}"
 echo "hidden_dim=${HIDDEN_DIM:-64}"
@@ -58,7 +58,7 @@ printf '\n[1/3] fit label-free causal multiplex router\n'
   --output-dir "$OUT" \
   --device "$DEVICE" \
   --block-rows "${BLOCK_ROWS:-8192}" \
-  --max-prompt-events "${MAX_PROMPT_EVENTS:-16}" \
+  --max-prompt-events "${MAX_RP_EVENTS:-16}" \
   --max-rr-events "${MAX_RR_EVENTS:-32}" \
   --hidden-dim "${HIDDEN_DIM:-64}" \
   --channel-embedding-dim "${CHANNEL_EMBEDDING_DIM:-8}" \

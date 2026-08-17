@@ -140,6 +140,16 @@ rewire_gap
 selected_rr_edges
 ```
 
+Returned edge-level topology diagnostic:
+
+```text
+rewire_edge_gap
+```
+
+Each finite entry is the raw source NLL difference for one evaluated rewired
+RR edge. Source cross-entropy terms are raw NLLs, without candidate-count
+normalization.
+
 Returned scalar training loss:
 
 ```text
@@ -165,9 +175,9 @@ The primary score remains `raw_route_surprise`; weight error is diagnostic.
 Schemas:
 
 ```text
-cmrp-reference-v1
-cmrp-score-v1
-cmrp-evaluation-v1
+cmrp-reference-v2
+cmrp-score-v2
+cmrp-evaluation-v2
 ```
 
 Reference files store:
@@ -176,7 +186,11 @@ Reference files store:
 - model file name and SHA-256;
 - fit/calibration group IDs;
 - calibration raw-route-surprise distribution;
-- calibration topology-gate summaries.
+- edge-level calibration topology-gate fields
+  `topology_gate_evaluated_edge_count`,
+  `topology_gate_selected_edge_count`, `topology_gate_coverage`,
+  `topology_gate_mean_gap`, `topology_gate_median_gap`,
+  `topology_gate_positive_fraction`, and `topology_gate_pass`.
 
 Score files store:
 
@@ -184,6 +198,8 @@ Score files store:
 - calibrated primary `score`;
 - all raw diagnostic score arrays;
 - reference/model digests;
+- the frozen source audit: `fit_group_id`, `calibration_group_id`,
+  `test_group_id`, `test_sample_id`, and `audit_scope`;
 - no hallucination labels.
 
 Strict loaders fail on schema, dimensional, digest, or finite-value mismatch.
@@ -214,11 +230,13 @@ Strict loaders fail on schema, dimensional, digest, or finite-value mismatch.
 
 #### `evaluate_cmrp(...)`
 
-1. load the frozen score artifact;
-2. open the evaluation label store only now;
-3. align by `(sample_id, token_index)`;
-4. report AUROC/AUPRC for the primary and diagnostics;
-5. write `evaluation.json`.
+1. capture the score artifact path and SHA-256;
+2. load the artifact only through that captured path;
+3. reverify the digest and expected test split;
+4. open the evaluation label store only now and align by
+   `(sample_id, token_index)`;
+5. report AUROC/AUPRC for the primary and diagnostics;
+6. write `evaluation.json`.
 
 The score artifact follows the generic `score*` convention so it can be used by
 `experiments/conditioned_benchmark/` without a method-specific evaluator.
