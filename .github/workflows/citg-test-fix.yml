@@ -1,0 +1,39 @@
+name: citg-test-fix
+
+on:
+  push:
+    branches:
+      - causal-isomorphism-trajectory
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Patch CITG test import'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: causal-isomorphism-trajectory
+          fetch-depth: 0
+      - name: Fix private helper qualification
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('tests/test_causal_isomorphism_trajectory.py')
+          text = path.read_text()
+          marker = 'import torch\n\n'
+          if 'import attention_graph.causal_events as causal_events' not in text:
+              text = text.replace(marker, marker + 'import attention_graph.causal_events as causal_events\n\n', 1)
+          text = text.replace('selected = _stable_top_indices(', 'selected = causal_events._stable_top_indices(')
+          path.write_text(text)
+          PY
+          rm -f .github/workflows/citg-test-fix.yml
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Fix CITG stable selection test [skip ci]'
+          git push origin HEAD:causal-isomorphism-trajectory
