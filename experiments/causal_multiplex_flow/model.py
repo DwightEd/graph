@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .controls import first_rewired_candidate, source_candidates
+from .controls import first_lag_preserving_candidate, source_candidates
 from .events import CausalEventSample, RP, RR
 
 
@@ -136,11 +136,14 @@ class CausalMultiplexRouter(torch.nn.Module):
         ):
             torch.nn.init.normal_(embedding.weight, std=0.02)
 
-    def _position_features(self, token: int, count: int, device) -> torch.Tensor:
-        denominator = max(int(count) - 1, 1)
-        relative = float(token) / float(denominator)
-        log_progress = math.log1p(int(token)) / max(math.log1p(int(count)), 1.0)
-        return torch.tensor((relative, log_progress), dtype=torch.float32, device=device)
+    def _position_features(self, token: int, device) -> torch.Tensor:
+        """Causal bounded index features that never use final response length."""
+        token = int(token)
+        saturation = float(token) / float(token + 32)
+        log_position = math.log1p(token) / math.log1p(4096)
+        return torch.tensor(
+            (saturation, log_position), dtype=torch.float32, device=device
+        )
 
     def _lag_features(self, lag: torch.Tensor) -> torch.Tensor:
         lag = lag.to(dtype=torch.float32)
@@ -164,27 +167,117 @@ class CausalMultiplexRouter(torch.nn.Module):
             (self.layer_embedding(layer), self.head_embedding(head)), dim=-1
         )
 
-    def _source_scores(
+    def _source_objectives(
         self,
         *,
+        events: CausalEventSample,
+        rr_indices: torch.Tensor,
         previous_state: torch.Tensor,
         states: list[torch.Tensor],
         token: int,
-        channel: torch.Tensor,
-        candidates: torch.Tensor,
         position: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        channel_value = self._channel_embedding(channel.reshape(1)).reshape(-1)
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Vectorized source contrast, weight error, and paired rewire gate."""
+        device = previous_state.device
+        zero = torch.zeros((), dtype=torch.float32, device=device)
+        if rr_indices.numel() == 0:
+            nan = torch.full((), float("nan"), device=device)
+            return zero, zero, nan, nan
+
+        candidate_rows = [
+            source_candidates(
+                events,
+                int(edge_index),
+                negatives=self.config.negatives_per_edge,
+                seed=self.config.seed,
+            )
+            for edge_index in rr_indices.tolist()
+        ]
+        edge_count = len(candidate_rows)
+        maximum = max(len(values) for values in candidate_rows)
+        candidate_matrix = torch.zeros(
+            (edge_count, maximum), dtype=torch.long, device=device
+        )
+        candidate_mask = torch.zeros(
+            (edge_count, maximum), dtype=torch.bool, device=device
+        )
+        rewired_index = torch.full(
+            (edge_count,), -1, dtype=torch.long, device=device
+        )
+        for row, (edge_index, candidates) in enumerate(
+            zip(rr_indices.tolist(), candidate_rows, strict=True)
+        ):
+            length = len(candidates)
+            candidate_matrix[row, :length] = candidates
+            candidate_mask[row, :length] = True
+            index, available = first_lag_preserving_candidate(
+                events, int(edge_index), candidates
+            )
+            if available:
+                rewired_index[row] = int(index)
+
+        channel_value = self._channel_embedding(events.channel[rr_indices])
         query = self.query_mlp(
-            torch.cat((previous_state, channel_value, position), dim=0)
+            torch.cat(
+                (
+                    previous_state.expand(edge_count, -1),
+                    channel_value,
+                    position.expand(edge_count, -1),
+                ),
+                dim=1,
+            )
         )
-        source_state = torch.stack([states[int(value)] for value in candidates], dim=0)
-        candidate_lag = int(token) - candidates
-        source_value = self.source_mlp(
-            torch.cat((source_state, self._lag_features(candidate_lag)), dim=1)
+
+        flat_candidates = candidate_matrix[candidate_mask]
+        flat_source_state = torch.stack(
+            [states[int(source)] for source in flat_candidates.tolist()], dim=0
         )
-        logits = source_value @ query / math.sqrt(float(self.config.hidden_dim))
-        return logits, query, source_value
+        flat_lag = int(token) - flat_candidates
+        flat_source_value = self.source_mlp(
+            torch.cat(
+                (flat_source_state, self._lag_features(flat_lag)), dim=1
+            )
+        )
+        source_value = torch.zeros(
+            (edge_count, maximum, self.config.hidden_dim),
+            dtype=torch.float32,
+            device=device,
+        )
+        source_value[candidate_mask] = flat_source_value
+        logits = torch.einsum("ed,ekd->ek", query, source_value)
+        logits = logits / math.sqrt(float(self.config.hidden_dim))
+        logits = logits.masked_fill(~candidate_mask, torch.finfo(logits.dtype).min)
+        log_probability = F.log_softmax(logits, dim=1)
+
+        candidate_count = candidate_mask.sum(dim=1).to(torch.float32)
+        normalizer = torch.where(
+            candidate_count > 1,
+            candidate_count.log(),
+            torch.ones_like(candidate_count),
+        )
+        true_loss = -log_probability[:, 0] / normalizer
+        source_nll = true_loss.mean()
+
+        available = rewired_index >= 0
+        if bool(available.any()):
+            row = torch.nonzero(available, as_tuple=False).flatten()
+            rewired_loss = -log_probability[row, rewired_index[row]] / normalizer[row]
+            rewired_nll = rewired_loss.mean()
+            rewire_gap = (rewired_loss - true_loss[row]).mean()
+        else:
+            rewired_nll = torch.full((), float("nan"), device=device)
+            rewire_gap = torch.full((), float("nan"), device=device)
+
+        predicted_log_weight = self.weight_head(
+            torch.cat((query, source_value[:, 0]), dim=1)
+        ).reshape(-1)
+        target_log_weight = torch.log(events.weight[rr_indices].clamp_min(1e-12))
+        weight_error = F.smooth_l1_loss(
+            predicted_log_weight,
+            target_log_weight,
+            reduction="mean",
+        )
+        return source_nll, weight_error, rewired_nll, rewire_gap
 
     def _event_messages(
         self,
@@ -212,7 +305,7 @@ class CausalMultiplexRouter(torch.nn.Module):
         channel_value = self._channel_embedding(events.channel[current])
         relation_value = self.relation_embedding(relation)
         weight = events.weight[current].clamp_min(0.0)
-        floor = max(float(events.attention_floor), float(self.config.hidden_dim) * 0.0 + 1e-12)
+        floor = max(float(events.attention_floor), 1e-12)
         weight_feature = torch.stack(
             (weight, torch.log1p(weight / floor)), dim=1
         )
@@ -249,7 +342,7 @@ class CausalMultiplexRouter(torch.nn.Module):
         count_rows = []
 
         for token in range(events.response_count):
-            position = self._position_features(token, events.response_count, device)
+            position = self._position_features(token, device)
             presence_logit = self.presence_head(
                 torch.cat((previous_state, position), dim=0)
             ).reshape(())
@@ -263,63 +356,16 @@ class CausalMultiplexRouter(torch.nn.Module):
                 current.start, current.stop, dtype=torch.long, device=device
             )
             rr_indices = local_indices[events.relation[current] == RR]
-            edge_source_losses = []
-            edge_weight_losses = []
-            edge_rewired_losses = []
-            for edge_index_tensor in rr_indices:
-                edge_index = int(edge_index_tensor.item())
-                candidates = source_candidates(
-                    events,
-                    edge_index,
-                    negatives=self.config.negatives_per_edge,
-                    seed=self.config.seed,
-                )
-                logits, query, source_value = self._source_scores(
+            source_nll, weight_error, rewired_nll, rewire_gap = (
+                self._source_objectives(
+                    events=events,
+                    rr_indices=rr_indices,
                     previous_state=previous_state,
                     states=states,
                     token=token,
-                    channel=events.channel[edge_index],
-                    candidates=candidates,
                     position=position,
                 )
-                log_probability = F.log_softmax(logits, dim=0)
-                true_nll = -log_probability[0]
-                edge_source_losses.append(true_nll)
-                rewired_index, available = first_rewired_candidate(candidates)
-                if available:
-                    edge_rewired_losses.append(-log_probability[rewired_index])
-
-                predicted_log_weight = self.weight_head(
-                    torch.cat((query, source_value[0]), dim=0)
-                ).reshape(())
-                target_log_weight = torch.log(
-                    events.weight[edge_index].clamp_min(1e-12)
-                )
-                edge_weight_losses.append(
-                    F.smooth_l1_loss(
-                        predicted_log_weight,
-                        target_log_weight,
-                        reduction="none",
-                    )
-                )
-
-            zero = torch.zeros((), dtype=torch.float32, device=device)
-            source_nll = (
-                torch.stack(edge_source_losses).mean()
-                if edge_source_losses
-                else zero
             )
-            weight_error = (
-                torch.stack(edge_weight_losses).mean()
-                if edge_weight_losses
-                else zero
-            )
-            rewired_nll = (
-                torch.stack(edge_rewired_losses).mean()
-                if edge_rewired_losses
-                else torch.full((), float("nan"), device=device)
-            )
-            rewire_gap = rewired_nll - source_nll
             raw_surprise = presence_nll + source_nll
 
             messages = self._event_messages(events, token, states)
