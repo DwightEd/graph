@@ -6,6 +6,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
+import attention_graph.causal_events as causal_events
+
 from attention_graph.causal_events import (
     CausalMultiplexEvents,
     MultiplexEventConfig,
