@@ -1,0 +1,66 @@
+test_event_extraction_is_band_balanced_and_has_no_centroid (tests.test_causal_isomorphism_trajectory.CausalIsomorphismTrajectoryTests.test_event_extraction_is_band_balanced_and_has_no_centroid) ... ok
+test_label_free_fit_score_then_posthoc_evaluation (tests.test_causal_isomorphism_trajectory.CausalIsomorphismTrajectoryTests.test_label_free_fit_score_then_posthoc_evaluation) ... fit CITG trajectory reference:   0%|          | 0/9 [00:00<?, ?sample/s]fit CITG trajectory reference: 100%|██████████| 9/9 [00:00<00:00, 135.05sample/s]
+calibrate CITG trajectory geometry:   0%|          | 0/3 [00:00<?, ?sample/s]calibrate CITG trajectory geometry: 100%|██████████| 3/3 [00:00<00:00, 117.09sample/s]
+score CITG test trajectories:   0%|          | 0/2 [00:00<?, ?sample/s]score CITG test trajectories: 100%|██████████| 2/2 [00:00<00:00, 115.04sample/s]
+ok
+test_lag_preserving_rewire_changes_source_and_keeps_channel (tests.test_causal_isomorphism_trajectory.CausalIsomorphismTrajectoryTests.test_lag_preserving_rewire_changes_source_and_keeps_channel) ... ok
+test_rewire_changes_rooted_signature_when_available (tests.test_causal_isomorphism_trajectory.CausalIsomorphismTrajectoryTests.test_rewire_changes_rooted_signature_when_available) ... ok
+test_shifted_rooted_motifs_have_equal_topology_signature (tests.test_causal_isomorphism_trajectory.CausalIsomorphismTrajectoryTests.test_shifted_rooted_motifs_have_equal_topology_signature) ... ok
+test_production_experiments_do_not_import_raw_attention_loaders (tests.test_experiment_data_contract.ExperimentDataContractTests.test_production_experiments_do_not_import_raw_attention_loaders) ... ok
+test_censored_channel_iterator_preserves_layer_head_order (tests.test_research_views.ResearchViewTests.test_censored_channel_iterator_preserves_layer_head_order) ... ok
+test_censored_channel_restores_floor_without_fabricating_pp_rows (tests.test_research_views.ResearchViewTests.test_censored_channel_restores_floor_without_fabricating_pp_rows) ... ok
+test_dense_channel_and_mean_view_share_zero_fill_semantics (tests.test_research_views.ResearchViewTests.test_dense_channel_and_mean_view_share_zero_fill_semantics) ... ok
+test_sparse_blocks_decode_canonical_csr (tests.test_research_views.ResearchViewTests.test_sparse_blocks_decode_canonical_csr) ... ok
+test_intersection_cannot_erase_a_canonical_positive_response_label (tests.test_conditioned_benchmark.CanonicalBenchmarkFrameTests.test_intersection_cannot_erase_a_canonical_positive_response_label) ... ok
+test_owner_scopes_survive_intersection_subset_and_response_aggregation (tests.test_conditioned_benchmark.CanonicalBenchmarkFrameTests.test_owner_scopes_survive_intersection_subset_and_response_aggregation) ... ok
+test_owner_temporal_scopes_distinguish_causal_and_offline_scores (tests.test_conditioned_benchmark.CanonicalBenchmarkFrameTests.test_owner_temporal_scopes_distinguish_causal_and_offline_scores) ... ok
+test_all_artifact_bindings_are_validated_before_any_labels_open (tests.test_conditioned_benchmark.ConditionedBenchmarkTests.test_all_artifact_bindings_are_validated_before_any_labels_open) ... ok
+test_benchmark_configuration_rejects_unknown_settings (tests.test_conditioned_benchmark.ConditionedBenchmarkTests.test_benchmark_configuration_rejects_unknown_settings) ... ok
+test_benchmark_opens_a_hash_verified_dataset (tests.test_conditioned_benchmark.ConditionedBenchmarkTests.test_benchmark_opens_a_hash_verified_dataset) ... benchmark conditions:   0%|          | 0/1 [00:00<?, ?condition/s]benchmark conditions: 100%|██████████| 1/1 [00:00<00:00, 352.49condition/s]
+ok
+test_class_runs_the_sealed_workflow_with_full_response_labels (tests.test_conditioned_benchmark.ConditionedBenchmarkTests.test_class_runs_the_sealed_workflow_with_full_response_labels) ... benchmark conditions:   0%|          | 0/1 [00:00<?, ?condition/s]benchmark conditions: 100%|██████████| 1/1 [00:00<00:00, 137.06condition/s]
+ok
+test_forged_owner_groups_are_rejected_before_conditioned_labels_open (tests.test_conditioned_benchmark.ConditionedBenchmarkTests.test_forged_owner_groups_are_rejected_before_conditioned_labels_open) ... FAIL
+test_main_rejects_unknown_top_level_configuration_settings (tests.test_conditioned_benchmark.ConditionedBenchmarkTests.test_main_rejects_unknown_top_level_configuration_settings) ... ok
+test_native_subsample_is_a_single_point_without_repeat_quantiles (tests.test_conditioned_benchmark.ConditionedBenchmarkTests.test_native_subsample_is_a_single_point_without_repeat_quantiles) ... benchmark conditions:   0%|          | 0/1 [00:00<?, ?condition/s]benchmark conditions: 100%|██████████| 1/1 [00:00<00:00, 428.65condition/s]
+ok
+test_reweight_without_resamples_does_not_claim_a_confidence_interval (tests.test_conditioned_benchmark.ConditionedBenchmarkTests.test_reweight_without_resamples_does_not_claim_a_confidence_interval) ... benchmark conditions:   0%|          | 0/1 [00:00<?, ?condition/s]benchmark conditions: 100%|██████████| 1/1 [00:00<00:00, 426.16condition/s]
+ok
+test_subsample_reports_repeat_variability_without_ci_fields (tests.test_conditioned_benchmark.ConditionedBenchmarkTests.test_subsample_reports_repeat_variability_without_ci_fields) ... benchmark conditions:   0%|          | 0/1 [00:00<?, ?condition/s]benchmark conditions: 100%|██████████| 1/1 [00:00<00:00, 142.59condition/s]
+ok
+test_thin_main_runs_the_benchmark_class (tests.test_conditioned_benchmark.ConditionedBenchmarkTests.test_thin_main_runs_the_benchmark_class) ... benchmark conditions:   0%|          | 0/1 [00:00<?, ?condition/s]benchmark conditions: 100%|██████████| 1/1 [00:00<00:00, 405.56condition/s]
+ok
+test_auprc_lift_is_registered_as_prevalence_sensitive (tests.test_conditioned_benchmark.ConditionedMetricTests.test_auprc_lift_is_registered_as_prevalence_sensitive) ... ok
+test_operational_alert_metrics_remain_available (tests.test_conditioned_benchmark.ConditionedMetricTests.test_operational_alert_metrics_remain_available) ... ok
+test_position_filter_cannot_erase_a_canonical_positive_response_label (tests.test_conditioned_benchmark.ConditionedMetricTests.test_position_filter_cannot_erase_a_canonical_positive_response_label) ... ok
+test_prevalence_reweighting_hits_target (tests.test_conditioned_benchmark.ConditionedMetricTests.test_prevalence_reweighting_hits_target) ... ok
+
+======================================================================
+FAIL: test_forged_owner_groups_are_rejected_before_conditioned_labels_open (tests.test_conditioned_benchmark.ConditionedBenchmarkTests.test_forged_owner_groups_are_rejected_before_conditioned_labels_open)
+----------------------------------------------------------------------
+ValueError: CITG score calibration_group_id differs from its reference
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/home/runner/work/graph/graph/tests/test_conditioned_benchmark.py", line 530, in test_forged_owner_groups_are_rejected_before_conditioned_labels_open
+    with (
+AssertionError: "source groups differ" does not match "CITG score calibration_group_id differs from its reference"
+
+----------------------------------------------------------------------
+Ran 27 tests in 0.759s
+
+FAILED (failures=1)
+{
+  "state": "complete",
+  "aligned_token_rows": 12,
+  "aligned_samples": 4,
+  "evaluated_rows": 12,
+  "evaluated_samples": 4,
+  "evaluation_unit": "token",
+  "methods": 1,
+  "conditions": 1,
+  "results": "/tmp/tmpe98q_3ha/report/results.json",
+  "metrics": "/tmp/tmpe98q_3ha/report/metrics_long.csv",
+  "wide_metrics": "/tmp/tmpe98q_3ha/report/metrics_wide.csv"
+}
