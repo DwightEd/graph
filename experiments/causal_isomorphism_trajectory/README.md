@@ -5,6 +5,9 @@ response token with a bounded temporal-isomorphism invariant, generation-time
 changes and ordered layer-depth changes, then scores the trajectory under a
 task/causal-phase-conditioned PPCA reference.
 
+The implemented signature is a deterministic two-hop temporal-WL-style
+invariant, not a complete graph-isomorphism solver.
+
 Read:
 
 1. `METHOD.md` for the scientific design;
