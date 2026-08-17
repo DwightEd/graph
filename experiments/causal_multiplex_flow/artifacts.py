@@ -80,6 +80,9 @@ def load_score_artifact(path):
         if _scalar_text(arrays, "schema") != SCORE_SCHEMA:
             raise ValueError("unsupported CMRP score schema")
         artifact = {name: arrays[name].copy() for name in arrays.files}
+    # Only ``score`` is exposed to the automatic conditioned-benchmark adapter.
+    # Raw mechanism diagnostics deliberately avoid the ``score_`` prefix so
+    # they cannot become test-selected detectors by accident.
     row_fields = {
         "sample_id",
         "source_id",
@@ -88,12 +91,12 @@ def load_score_artifact(path):
         "data_source",
         "generator_model",
         "score",
-        "score_route_surprise",
-        "score_presence_nll",
-        "score_source_nll",
-        "score_weight_error",
-        "score_rewired_source_nll",
-        "score_rewire_gap",
+        "raw_route_surprise",
+        "presence_nll",
+        "source_nll",
+        "weight_error",
+        "rewired_source_nll",
+        "rewire_gap",
         "selected_rr_edges",
     }
     required = row_fields | {
@@ -109,6 +112,14 @@ def load_score_artifact(path):
         raise ValueError("CMRP score artifact row columns are inconsistent")
     if not bool(np.isfinite(artifact["score"]).all()):
         raise ValueError("CMRP primary score contains non-finite values")
+    finite_required = (
+        "raw_route_surprise",
+        "presence_nll",
+        "source_nll",
+        "weight_error",
+    )
+    if any(not bool(np.isfinite(artifact[name]).all()) for name in finite_required):
+        raise ValueError("CMRP required raw diagnostics contain non-finite values")
     for digest_name in ("reference_sha256", "model_sha256"):
         if len(_scalar_text(artifact, digest_name)) != 64:
             raise ValueError(f"CMRP score artifact has invalid {digest_name}")
