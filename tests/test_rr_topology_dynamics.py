@@ -23,10 +23,12 @@ from experiments.rr_topology_dynamics.artifacts import (
 )
 from experiments.rr_topology_dynamics.experiment import (
     TopologyAuditConfig,
-    evaluate_topology_artifact,
-    first_onset_effects,
     fit_topology_reference,
     score_topology_dataset,
+)
+from experiments.rr_topology_dynamics.evaluation import (
+    evaluate_topology_artifact,
+    first_onset_effects,
 )
 from experiments.rr_topology_dynamics.features import (
     TopologyDynamicsConfig,
@@ -423,6 +425,8 @@ class RRTopologyDynamicsTests(unittest.TestCase):
                 }
             changed_spectral["split_seed"] = np.asarray(999, dtype=np.int64)
             np.savez_compressed(spectral_path, **changed_spectral)
+            with self.assertRaisesRegex(ValueError, "spectral reference digest"):
+                evaluate_topology_artifact(test, feature_path, evaluation_dir)
             with self.assertRaisesRegex(ValueError, "digest"):
                 score_topology_dataset(
                     test,

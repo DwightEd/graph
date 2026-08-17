@@ -9,10 +9,10 @@ from research_dataset import open_research_dataset
 
 from .experiment import (
     TopologyAuditConfig,
-    evaluate_topology_artifact,
     fit_topology_reference,
     score_topology_dataset,
 )
+from .evaluation import evaluate_topology_artifact
 from .features import TopologyDynamicsConfig
 
 

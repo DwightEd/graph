@@ -60,9 +60,14 @@ class FrozenEvaluation:
         return cls(FrozenFile.capture(artifact_path), str(expected_split))
 
     def load_and_align(self, dataset, loader) -> tuple[object, EvaluationLabels]:
-        """Load the captured artifact, reverify it, then align test labels."""
+        """Strict-load the captured artifact, then align its evaluation labels."""
 
         rows = loader(self.artifact.path)
+        return rows, self.align_loaded(dataset, rows)
+
+    def align_loaded(self, dataset, rows) -> EvaluationLabels:
+        """Reverify one already-loaded artifact before opening aligned labels."""
+
         self.artifact.verify(self.artifact.path)
         actual_split = str(dataset.manifest.get("split"))
         if actual_split != self.expected_split:
@@ -114,7 +119,7 @@ class FrozenEvaluation:
             finally:
                 sample.release_attention()
         labels = _align_evaluation_labels(dataset, sample_ids, token_indices)
-        return rows, labels
+        return labels
 
 
 class HeldOutSourceAudit:

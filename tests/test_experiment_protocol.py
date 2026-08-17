@@ -299,6 +299,38 @@ class SourceGroupPartitionTests(unittest.TestCase):
 
 
 class FrozenEvaluationTests(unittest.TestCase):
+    def test_aligns_supplied_loaded_rows_without_reloading_artifact_rows(self):
+        dataset = _LabelLockedDataset()
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "scores.npz"
+            disk_rows = _complete_evaluation_rows(dataset)
+            np.savez_compressed(artifact, **disk_rows)
+            loaded_rows = {
+                name: values[::-1].copy() if np.asarray(values).ndim == 1 else values
+                for name, values in disk_rows.items()
+            }
+
+            labels = FrozenEvaluation.capture(artifact).align_loaded(
+                dataset, loaded_rows
+            )
+
+        np.testing.assert_array_equal(labels.token_label, [1, 0, 0, 1, 0])
+
+    def test_align_loaded_rejects_dataset_binding_before_opening_labels(self):
+        scored_dataset = _LabelLockedDataset(manifest_marker="scored")
+        evaluated_dataset = _LabelLockedDataset(manifest_marker="different")
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "scores.npz"
+            rows = _complete_evaluation_rows(scored_dataset)
+            np.savez_compressed(artifact, **rows)
+
+            with self.assertRaisesRegex(ValueError, "dataset manifest"):
+                FrozenEvaluation.capture(artifact).align_loaded(
+                    evaluated_dataset, rows
+                )
+
+        self.assertFalse(evaluated_dataset.labels_called)
+
     def test_unlocks_and_aligns_only_a_frozen_test_artifact(self):
         dataset = _LabelLockedDataset()
         with tempfile.TemporaryDirectory() as directory:
