@@ -1,0 +1,458 @@
+"""Label-free fit, calibration, scoring, and post-hoc evaluation for CMRP."""
+
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+import json
+from pathlib import Path
+
+import numpy as np
+import torch
+from sklearn.metrics import average_precision_score, roc_auc_score
+from tqdm.auto import tqdm
+
+from .artifacts import (
+    EVALUATION_SCHEMA,
+    REFERENCE_SCHEMA,
+    SCORE_SCHEMA,
+    file_sha256,
+    load_reference,
+    load_score_artifact,
+)
+from .calibration import (
+    empirical_upper_tail,
+    finite_reference,
+    split_source_groups,
+    topology_gate_summary,
+)
+from .events import EventConfig, extract_causal_events
+from .model import CausalMultiplexRouter, ModelConfig
+
+
+MODEL_SCHEMA = "cmrp-model-v1"
+
+
+@dataclass(frozen=True)
+class TrainConfig:
+    epochs: int = 2
+    learning_rate: float = 3e-4
+    weight_decay: float = 1e-5
+    gradient_clip: float = 1.0
+    calibration_fraction: float = 0.25
+    seed: int = 20260817
+
+    def validate(self) -> None:
+        if int(self.epochs) < 1:
+            raise ValueError("epochs must be positive")
+        if not np.isfinite(self.learning_rate) or self.learning_rate <= 0:
+            raise ValueError("learning_rate must be positive and finite")
+        if not np.isfinite(self.weight_decay) or self.weight_decay < 0:
+            raise ValueError("weight_decay must be finite and non-negative")
+        if not np.isfinite(self.gradient_clip) or self.gradient_clip <= 0:
+            raise ValueError("gradient_clip must be positive and finite")
+        if not 0.0 < float(self.calibration_fraction) < 1.0:
+            raise ValueError("calibration_fraction must be in (0,1)")
+        if int(self.seed) < 0:
+            raise ValueError("seed must be non-negative")
+
+
+def _json(value) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def _metadata_text(value) -> str:
+    return "" if value is None else str(value)
+
+
+def _selected_sample_ids(dataset, limit=None):
+    sample_ids = list(map(str, dataset.sample_ids))
+    if limit is not None:
+        limit = int(limit)
+        if limit < 1:
+            raise ValueError("limit must be positive")
+        sample_ids = sample_ids[:limit]
+    if not sample_ids:
+        raise ValueError("no samples selected")
+    return sample_ids
+
+
+def _save_model(
+    model: CausalMultiplexRouter,
+    path: Path,
+    *,
+    event_config: EventConfig,
+    train_config: TrainConfig,
+) -> None:
+    payload = {
+        "schema": MODEL_SCHEMA,
+        "num_layers": model.num_layers,
+        "num_heads": model.num_heads,
+        "model_config": model.config_dict,
+        "event_config": asdict(event_config),
+        "train_config": asdict(train_config),
+        "state_dict": model.state_dict(),
+    }
+    torch.save(payload, path)
+
+
+def _load_model(reference_path, *, device):
+    reference_path = Path(reference_path)
+    reference = load_reference(reference_path)
+    model_path = reference_path.parent / str(np.asarray(reference["model_file"]).item())
+    if not model_path.is_file():
+        raise FileNotFoundError(model_path)
+    if file_sha256(model_path) != str(np.asarray(reference["model_sha256"]).item()):
+        raise ValueError("CMRP model digest differs from the reference")
+    payload = torch.load(model_path, map_location=device, weights_only=False)
+    if payload.get("schema") != MODEL_SCHEMA:
+        raise ValueError("unsupported CMRP model schema")
+    model = CausalMultiplexRouter(
+        num_layers=int(payload["num_layers"]),
+        num_heads=int(payload["num_heads"]),
+        config=ModelConfig(**payload["model_config"]),
+    ).to(device)
+    model.load_state_dict(payload["state_dict"])
+    model.eval()
+    event_config = EventConfig(**payload["event_config"])
+    return model, event_config, reference, model_path
+
+
+def _score_samples(model, dataset, sample_ids, *, event_config, description):
+    rows = {
+        name: []
+        for name in (
+            "sample_id",
+            "source_id",
+            "token_index",
+            "task_type",
+            "data_source",
+            "generator_model",
+            "raw_route_surprise",
+            "presence_nll",
+            "source_nll",
+            "weight_error",
+            "rewired_source_nll",
+            "rewire_gap",
+            "selected_rr_edges",
+        )
+    }
+    with torch.no_grad():
+        for sample_id in tqdm(sample_ids, desc=description, unit="sample"):
+            sample = dataset[sample_id]
+            try:
+                events = extract_causal_events(sample, config=event_config)
+                output = model(events)
+                values = output.detached_numpy()
+                count = events.response_count
+                rows["sample_id"].extend([str(sample.sample_id)] * count)
+                rows["source_id"].extend([_metadata_text(sample.source_id)] * count)
+                rows["token_index"].extend(range(count))
+                rows["task_type"].extend([_metadata_text(sample.task_type)] * count)
+                rows["data_source"].extend([_metadata_text(sample.data_source)] * count)
+                rows["generator_model"].extend(
+                    [_metadata_text(sample.generator_model)] * count
+                )
+                for name in (
+                    "raw_route_surprise",
+                    "presence_nll",
+                    "source_nll",
+                    "weight_error",
+                    "rewired_source_nll",
+                    "rewire_gap",
+                    "selected_rr_edges",
+                ):
+                    rows[name].append(values[name])
+            finally:
+                sample.release_attention()
+    output = {
+        "sample_id": np.asarray(rows["sample_id"], dtype=str),
+        "source_id": np.asarray(rows["source_id"], dtype=str),
+        "token_index": np.asarray(rows["token_index"], dtype=np.int32),
+        "task_type": np.asarray(rows["task_type"], dtype=str),
+        "data_source": np.asarray(rows["data_source"], dtype=str),
+        "generator_model": np.asarray(rows["generator_model"], dtype=str),
+    }
+    for name in (
+        "raw_route_surprise",
+        "presence_nll",
+        "source_nll",
+        "weight_error",
+        "rewired_source_nll",
+        "rewire_gap",
+    ):
+        output[name] = np.concatenate(rows[name]).astype(np.float32, copy=False)
+    output["selected_rr_edges"] = np.concatenate(rows["selected_rr_edges"]).astype(
+        np.int32, copy=False
+    )
+    return output
+
+
+def fit_cmrp(
+    dataset,
+    output_dir,
+    *,
+    event_config: EventConfig | None = None,
+    model_config: ModelConfig | None = None,
+    train_config: TrainConfig | None = None,
+    limit=None,
+):
+    """Train on fit groups and calibrate on disjoint unlabeled source groups."""
+    event_config = EventConfig() if event_config is None else event_config
+    model_config = ModelConfig() if model_config is None else model_config
+    train_config = TrainConfig() if train_config is None else train_config
+    event_config.validate()
+    model_config.validate()
+    train_config.validate()
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    split = split_source_groups(
+        dataset,
+        calibration_fraction=train_config.calibration_fraction,
+        seed=train_config.seed,
+        limit=limit,
+    )
+    if len(split["fit_group_ids"]) < 2:
+        raise ValueError(
+            "CMRP needs at least two fit source groups; increase TRAIN_LIMIT"
+        )
+    geometry = (
+        int(dataset.manifest["num_layers"]),
+        int(dataset.manifest["num_heads"]),
+    )
+    device = getattr(dataset, "device", "cpu")
+    model = CausalMultiplexRouter(
+        num_layers=geometry[0],
+        num_heads=geometry[1],
+        config=model_config,
+    ).to(device)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=train_config.learning_rate,
+        weight_decay=train_config.weight_decay,
+    )
+    rng = np.random.default_rng(train_config.seed)
+    epoch_losses = []
+    fit_ids = list(split["fit_sample_ids"])
+    for epoch in range(train_config.epochs):
+        model.train()
+        order = rng.permutation(len(fit_ids))
+        losses = []
+        progress = tqdm(order, desc=f"fit CMRP epoch {epoch + 1}", unit="sample")
+        for index in progress:
+            sample = dataset[fit_ids[int(index)]]
+            try:
+                events = extract_causal_events(sample, config=event_config)
+                optimizer.zero_grad(set_to_none=True)
+                result = model(events)
+                if not bool(torch.isfinite(result.loss)):
+                    raise FloatingPointError("CMRP training loss is non-finite")
+                result.loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(), train_config.gradient_clip
+                )
+                optimizer.step()
+                losses.append(float(result.loss.detach().cpu()))
+                progress.set_postfix(loss=f"{losses[-1]:.4f}")
+            finally:
+                sample.release_attention()
+        epoch_losses.append(float(np.mean(losses)))
+
+    model_path = output_dir / "model.pt"
+    _save_model(
+        model,
+        model_path,
+        event_config=event_config,
+        train_config=train_config,
+    )
+    model.eval()
+    calibration_rows = _score_samples(
+        model,
+        dataset,
+        split["calibration_sample_ids"],
+        event_config=event_config,
+        description="calibrate CMRP",
+    )
+    calibration_raw = finite_reference(
+        calibration_rows["raw_route_surprise"], minimum=2
+    ).astype(np.float32)
+    gate = topology_gate_summary(calibration_rows["rewire_gap"])
+    reference_path = output_dir / "reference.npz"
+    np.savez_compressed(
+        reference_path,
+        schema=np.asarray(REFERENCE_SCHEMA),
+        model_file=np.asarray(model_path.name),
+        model_sha256=np.asarray(file_sha256(model_path)),
+        num_layers=np.asarray(geometry[0], dtype=np.int16),
+        num_heads=np.asarray(geometry[1], dtype=np.int16),
+        event_config_json=np.asarray(_json(asdict(event_config))),
+        model_config_json=np.asarray(_json(asdict(model_config))),
+        train_config_json=np.asarray(_json(asdict(train_config))),
+        fit_group_id=np.asarray(split["fit_group_ids"], dtype=str),
+        calibration_group_id=np.asarray(split["calibration_group_ids"], dtype=str),
+        calibration_raw_route_surprise=calibration_raw,
+        topology_gate_mean_gap=np.asarray(
+            np.nan if gate["mean_gap"] is None else gate["mean_gap"], dtype=np.float32
+        ),
+        topology_gate_median_gap=np.asarray(
+            np.nan if gate["median_gap"] is None else gate["median_gap"], dtype=np.float32
+        ),
+        topology_gate_positive_fraction=np.asarray(
+            np.nan
+            if gate["positive_fraction"] is None
+            else gate["positive_fraction"],
+            dtype=np.float32,
+        ),
+        topology_gate_count=np.asarray(gate["edges_or_tokens"], dtype=np.int32),
+        topology_gate_pass=np.asarray(gate["pass"]),
+        epoch_loss=np.asarray(epoch_losses, dtype=np.float32),
+        fit_samples=np.asarray(len(split["fit_sample_ids"]), dtype=np.int32),
+        calibration_samples=np.asarray(
+            len(split["calibration_sample_ids"]), dtype=np.int32
+        ),
+        calibration_tokens=np.asarray(len(calibration_raw), dtype=np.int32),
+    )
+    # Validate the completed reference before returning it to the runner.
+    load_reference(reference_path)
+    return {
+        "output_dir": str(output_dir),
+        "model": str(model_path),
+        "reference": str(reference_path),
+        "labels_read": False,
+        "fit_samples": len(split["fit_sample_ids"]),
+        "calibration_samples": len(split["calibration_sample_ids"]),
+        "calibration_tokens": int(len(calibration_raw)),
+        "epoch_loss": epoch_losses,
+        "topology_gate": gate,
+    }
+
+
+def score_cmrp(dataset, reference_path, output_path, *, limit=None):
+    """Freeze calibrated CMRP test scores without opening token labels."""
+    device = getattr(dataset, "device", "cpu")
+    model, event_config, reference, model_path = _load_model(
+        reference_path, device=device
+    )
+    if (
+        int(dataset.manifest["num_layers"]) != model.num_layers
+        or int(dataset.manifest["num_heads"]) != model.num_heads
+    ):
+        raise ValueError("test attention geometry differs from the CMRP model")
+    sample_ids = _selected_sample_ids(dataset, limit)
+    rows = _score_samples(
+        model,
+        dataset,
+        sample_ids,
+        event_config=event_config,
+        description="score CMRP test",
+    )
+    score = empirical_upper_tail(
+        reference["calibration_raw_route_surprise"],
+        rows["raw_route_surprise"],
+    ).astype(np.float32)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        output_path,
+        schema=np.asarray(SCORE_SCHEMA),
+        reference_sha256=np.asarray(file_sha256(reference_path)),
+        model_sha256=np.asarray(file_sha256(model_path)),
+        score=score,
+        **rows,
+    )
+    load_score_artifact(output_path)
+    return {
+        "output": str(output_path),
+        "labels_read": False,
+        "samples": len(sample_ids),
+        "tokens": int(len(score)),
+        "primary_detector": "calibrated_causal_route_surprise",
+    }
+
+
+def _label_store_for_evaluation(dataset):
+    try:
+        return dataset.labels()
+    except RuntimeError as error:
+        message = str(error)
+        if "every attention sample" not in message and "only after every" not in message:
+            raise
+        for sample_id in tqdm(
+            dataset.sample_ids, desc="unlock CMRP evaluation labels", unit="sample"
+        ):
+            sample = dataset[sample_id]
+            sample.attention()
+            sample.release_attention()
+        return dataset.labels()
+
+
+def _aligned_labels(dataset, artifact):
+    labels = _label_store_for_evaluation(dataset)
+    cache = {}
+    result = np.empty(len(artifact["token_index"]), dtype=np.int64)
+    for row, (sample_id, token_index) in enumerate(
+        zip(artifact["sample_id"], artifact["token_index"], strict=True)
+    ):
+        sample_id = str(sample_id)
+        if sample_id not in cache:
+            sample = dataset[sample_id]
+            cache[sample_id] = labels.response_labels(sample).cpu().numpy()
+            sample.release_attention()
+        result[row] = int(cache[sample_id][int(token_index)])
+    return result
+
+
+def _binary_metrics(labels, values):
+    labels = np.asarray(labels, dtype=np.int64)
+    values = np.asarray(values, dtype=np.float64)
+    finite = np.isfinite(values)
+    labels = labels[finite]
+    values = values[finite]
+    if len(labels) == 0 or np.unique(labels).size < 2:
+        return None
+    prevalence = float(labels.mean())
+    return {
+        "tokens": int(len(labels)),
+        "positive_tokens": int(labels.sum()),
+        "prevalence": prevalence,
+        "auprc_random_baseline": prevalence,
+        "auroc": float(roc_auc_score(labels, values)),
+        "auprc": float(average_precision_score(labels, values)),
+        "correct_median": float(np.median(values[labels == 0])),
+        "hallucination_median": float(np.median(values[labels == 1])),
+    }
+
+
+def evaluate_cmrp(dataset, score_path, output_path):
+    """Open labels only after the CMRP score artifact is frozen."""
+    artifact = load_score_artifact(score_path)
+    labels = _aligned_labels(dataset, artifact)
+    components = {
+        "calibrated_causal_route_surprise": artifact["score"],
+        "raw_route_surprise": artifact["raw_route_surprise"],
+        "presence_nll": artifact["presence_nll"],
+        "source_nll": artifact["source_nll"],
+        "weight_error": artifact["weight_error"],
+        "rewired_source_nll": artifact["rewired_source_nll"],
+        "rewire_gap": artifact["rewire_gap"],
+    }
+    metrics = {
+        name: _binary_metrics(labels, values) for name, values in components.items()
+    }
+    primary = metrics["calibrated_causal_route_surprise"]
+    report = {
+        "schema": EVALUATION_SCHEMA,
+        "labels_read": True,
+        "primary_detector": "calibrated_causal_route_surprise",
+        "metrics": primary,
+        "components": metrics,
+        "reference_sha256": str(np.asarray(artifact["reference_sha256"]).item()),
+        "model_sha256": str(np.asarray(artifact["model_sha256"]).item()),
+        "score_artifact": str(Path(score_path)),
+    }
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return report

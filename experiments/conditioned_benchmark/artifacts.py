@@ -145,6 +145,20 @@ def _automatic_methods(spec: ArtifactSpec, arrays, schema: str, row_count: int):
             )
         return methods
 
+    if schema == "cmrp-score-v1":
+        if "score" not in arrays:
+            raise ValueError("CMRP score artifact misses its frozen primary score")
+        name = f"{spec.name}.primary"
+        return {
+            name: MethodScore(
+                name=name,
+                values=_column(arrays, "score", None),
+                protocol="label_free_frozen_score",
+                source_field="score",
+                source_direction="higher",
+            )
+        }
+
     score_fields = [
         name
         for name in arrays.files
