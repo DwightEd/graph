@@ -141,3 +141,4 @@ Do not report CITG as successful unless:
 The conditioned benchmark can compare frozen artifacts after the full run.
 The CI suite checks compilation, shell syntax, data boundaries, source-group
 protocols, benchmark registration, and the synthetic fit-score-evaluate path.
+The benchmark fixture now exercises the strict CITG artifact owner contract.
