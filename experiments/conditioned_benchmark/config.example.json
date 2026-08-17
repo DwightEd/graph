@@ -1,0 +1,50 @@
+{
+  "split_root": "/absolute/path/to/attention_cache/test",
+  "output_dir": "/absolute/path/to/conditioned_benchmark",
+  "artifacts": [
+    {
+      "name": "rr_spectral",
+      "path": "/absolute/path/to/rr_spectral/test_scores.npz",
+      "adapter": "auto"
+    },
+    {
+      "name": "route_geometry",
+      "path": "/absolute/path/to/trajectory_geometry/scores_label_free.npz",
+      "adapter": "auto"
+    },
+    {
+      "name": "rr_topology",
+      "path": "/absolute/path/to/rr_topology/test_features.npz",
+      "adapter": "generic",
+      "protocol": "label_free_feature_fixed_direction",
+      "methods": [
+        {
+          "name": "prompt_groundedness_low",
+          "field": "features_z",
+          "column": "prompt_groundedness",
+          "direction": "lower"
+        }
+      ]
+    }
+  ],
+  "benchmark": {
+    "task_types": ["all", "each"],
+    "data_sources": ["all"],
+    "generator_models": ["all"],
+    "positive_rates": ["native", 0.01, 0.03, 0.05, 0.1, 0.25, 0.5],
+    "metrics": [
+      "auroc",
+      "auprc",
+      "auprc_lift",
+      "tpr_at_fpr_05",
+      "tpr_at_fpr_10",
+      "partial_auroc_fpr_10"
+    ],
+    "evaluation_unit": "token",
+    "ratio_mode": "reweight",
+    "bootstrap_replicates": 200,
+    "relative_position_min": 0.0,
+    "relative_position_max": 1.0,
+    "seed": 20260817
+  }
+}

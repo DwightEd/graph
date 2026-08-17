@@ -40,3 +40,6 @@ separate post-hoc evaluation stage after representations/scores are frozen.
 - `rr_topology_dynamics/`: label-free extraction followed by post-hoc analysis
   of route convergence, prompt-grounded versus self-reinforcing RR flow, and
   layer/head/source/lag attribution of spectral-subspace escape.
+- `conditioned_benchmark/`: a common registry for frozen detector artifacts,
+  metric implementations, `task_type` slices, token/response evaluation, and
+  controlled positive-prevalence experiments. It does not refit methods.
