@@ -1,0 +1,26 @@
+name: citg-migrate-benchmark
+
+on:
+  push:
+    branches: [causal-isomorphism-trajectory]
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.event.head_commit.message == 'Run CITG benchmark migration'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: causal-isomorphism-trajectory
+          fetch-depth: 0
+      - run: python tools/citg_migrate_benchmark_test.py
+      - run: rm -f tools/citg_migrate_benchmark_test.py .github/workflows/citg-migrate-benchmark.yml .github/workflows/citg-benchmark-test-migration.yml
+      - run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Migrate benchmark fixtures to CITG [skip ci]'
+          git push origin HEAD:causal-isomorphism-trajectory
