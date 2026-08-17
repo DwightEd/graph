@@ -8,11 +8,18 @@ from typing import Any
 
 import numpy as np
 
+from experiments.causal_multiplex_flow.artifacts import (
+    load_score_artifact as load_cmrp_v2,
+)
+from experiments.spectral_feasibility.artifacts import (
+    load_score_artifact as load_spectral_v2,
+)
+
 from .types import MethodScore, ScoreArtifact
 
 
-SPECTRAL_FIELDS = {
-    "primary": ("score", None),
+SPECTRAL_V2_FIELDS = {
+    "primary": ("score_rr_residual", None),
     "residual_tail": ("score_rr_residual", None),
     "raw_residual_energy": ("rr_residual_energy", None),
     "in_subspace_tail": ("score_rr_latent", None),
@@ -20,6 +27,7 @@ SPECTRAL_FIELDS = {
     "localized_channel_tail": ("score_rr_localized", None),
     "peak_channel": ("top_channel_score", 0),
 }
+LEGACY_SPECTRAL_FIELDS = SPECTRAL_V2_FIELDS | {"primary": ("score", None)}
 
 TRAJECTORY_SIGNATURE = {
     "score_full",
@@ -130,9 +138,14 @@ def _configured_methods(spec: ArtifactSpec, arrays) -> dict[str, MethodScore]:
 
 def _automatic_methods(spec: ArtifactSpec, arrays, schema: str, row_count: int):
     methods = {}
-    if schema == "rr-spectral-score":
+    if schema in {"rr-spectral-score", "rr-spectral-score-v2"}:
         protocol = "label_free_frozen_score"
-        for short_name, (field, column) in SPECTRAL_FIELDS.items():
+        fields = (
+            LEGACY_SPECTRAL_FIELDS
+            if schema == "rr-spectral-score"
+            else SPECTRAL_V2_FIELDS
+        )
+        for short_name, (field, column) in fields.items():
             if field not in arrays:
                 continue
             name = f"{spec.name}.{short_name}"
@@ -206,9 +219,13 @@ def load_score_artifact(spec: ArtifactSpec) -> ScoreArtifact:
     if not path.is_file():
         raise FileNotFoundError(path)
     with np.load(path, allow_pickle=False) as arrays:
+        schema = _scalar_text(arrays, "schema", "unversioned-npz")
+        if schema == "rr-spectral-score-v2":
+            arrays = load_spectral_v2(path)
+        elif schema == "cmrp-score-v2":
+            arrays = load_cmrp_v2(path)
         sample_id = _first(arrays, ("sample_id", "sample_ids"))
         token_index = _first(arrays, ("token_index", "position", "positions"))
-        schema = _scalar_text(arrays, "schema", "unversioned-npz")
         row_count = len(sample_id)
         if spec.adapter not in {"auto", "generic"}:
             raise ValueError(f"unsupported artifact adapter: {spec.adapter}")

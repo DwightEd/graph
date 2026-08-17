@@ -13,6 +13,7 @@ from cache import (
     sha256,
     write_split_index,
 )
+from experiments.spectral_feasibility.artifacts import load_score_artifact
 from experiments.spectral_feasibility.experiment import (
     _localized_channel_anomaly,
     evaluate_score_artifact,
@@ -25,7 +26,7 @@ from experiments.spectral_feasibility.subspace import (
 )
 from experiments.spectral_feasibility.representations import (
     SpectralConfig,
-    prefix_laplacian_spectrum,
+    prefix_causal_attention_spectrum,
     rr_spectral_dimension,
 )
 from research_dataset import ResearchDataset
@@ -60,12 +61,20 @@ def _sample(sample_id: str, source_id: str, multiplier: float = 1.0):
     )
 
 
-def _write_dataset(root: Path, multipliers, *, positive_sample: int | None = None):
+def _write_dataset(
+    root: Path,
+    multipliers,
+    *,
+    positive_sample: int | None = None,
+    source_prefix: str = "s",
+):
     (root / "attention").mkdir(parents=True)
     rows = []
     label_rows = []
     for index, multiplier in enumerate(multipliers):
-        sample = _sample(f"r{index}", f"s{index}", float(multiplier))
+        sample = _sample(
+            f"r{index}", f"{source_prefix}{index}", float(multiplier)
+        )
         path = root / "attention" / f"r{index}.npz"
         save_attention_sample(sample, path)
         rows.append(
@@ -105,13 +114,111 @@ def _write_dataset(root: Path, multipliers, *, positive_sample: int | None = Non
     return ResearchDataset(root)
 
 
+def _minimal_score_artifact():
+    residual_score = np.asarray([0.1, 0.2], dtype=np.float32)
+    return {
+        "schema": np.asarray("rr-spectral-score-v2"),
+        "reference_path": np.asarray("reference.npz"),
+        "reference_sha256": np.asarray("a" * 64),
+        "dataset_manifest_sha256": np.asarray("b" * 64),
+        "fit_group_id": np.asarray(["fit-source"]),
+        "calibration_group_id": np.asarray(["calibration-source"]),
+        "test_group_id": np.asarray(["test-source"]),
+        "test_sample_id": np.asarray(["sample"]),
+        "audit_scope": np.asarray("complete_split"),
+        "sample_id": np.asarray(["sample", "sample"]),
+        "source_id": np.asarray(["test-source", "test-source"]),
+        "token_index": np.asarray([0, 1], dtype=np.int32),
+        "response_length": np.asarray([2, 2], dtype=np.int32),
+        "task_type": np.asarray(["QA", "QA"]),
+        "data_source": np.asarray(["synthetic", "synthetic"]),
+        "generator_model": np.asarray(["generator", "generator"]),
+        "rr_embedding": np.zeros((2, 2), dtype=np.float32),
+        "rr_residual_energy": np.asarray([1.0, 2.0], dtype=np.float32),
+        "rr_latent_energy": np.asarray([1.0, 2.0], dtype=np.float32),
+        "rr_ppca_energy": np.asarray([1.0, 2.0], dtype=np.float32),
+        "rr_localized_residual": np.asarray([1.0, 2.0], dtype=np.float32),
+        "top_channel_index": np.asarray([[0, 1], [1, 0]], dtype=np.int32),
+        "top_channel_score": np.asarray(
+            [[1.0, 0.5], [2.0, 0.25]], dtype=np.float32
+        ),
+        "score_rr_residual": residual_score,
+        "score_rr_latent": np.asarray([0.2, 0.3], dtype=np.float32),
+        "score_rr_ppca": np.asarray([0.3, 0.4], dtype=np.float32),
+        "score_rr_localized": np.asarray([0.4, 0.5], dtype=np.float32),
+        "score": residual_score.copy(),
+    }
+
+
 class SpectralFeasibilityTests(unittest.TestCase):
-    def test_prefix_lapeigvals_keep_signed_strongest_magnitude(self):
+    def test_v2_score_loader_rejects_malformed_frozen_artifacts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            valid_path = root / "valid.npz"
+            np.savez_compressed(valid_path, **_minimal_score_artifact())
+            loaded = load_score_artifact(valid_path)
+            self.assertEqual(str(loaded["schema"].item()), "rr-spectral-score-v2")
+
+            missing = _minimal_score_artifact()
+            missing.pop("task_type")
+            short_row = _minimal_score_artifact()
+            short_row["data_source"] = np.asarray(["synthetic"])
+            bad_embedding_shape = _minimal_score_artifact()
+            bad_embedding_shape["rr_embedding"] = np.zeros(2, dtype=np.float32)
+            mismatched_attribution = _minimal_score_artifact()
+            mismatched_attribution["top_channel_score"] = np.ones(
+                (2, 1), dtype=np.float32
+            )
+            fractional_token = _minimal_score_artifact()
+            fractional_token["token_index"] = np.asarray([0.0, 1.0])
+            integer_embedding = _minimal_score_artifact()
+            integer_embedding["rr_embedding"] = np.zeros((2, 2), dtype=np.int32)
+            non_finite = _minimal_score_artifact()
+            non_finite["score_rr_latent"] = np.asarray([np.nan, 0.2])
+            different_primary = _minimal_score_artifact()
+            different_primary["score"] = np.asarray([0.1, 0.200001])
+            overlapping_audit = _minimal_score_artifact()
+            overlapping_audit["test_group_id"] = np.asarray(["fit-source"])
+            inconsistent_sample_group = _minimal_score_artifact()
+            inconsistent_sample_group["source_id"] = np.asarray(
+                ["test-source", "other-test-source"]
+            )
+            inconsistent_sample_group["test_group_id"] = np.asarray(
+                ["test-source", "other-test-source"]
+            )
+            incomplete_response = _minimal_score_artifact()
+            incomplete_response["token_index"] = np.asarray([0, 0], dtype=np.int32)
+
+            cases = (
+                ("missing", missing, "misses fields"),
+                ("row", short_row, "row columns"),
+                ("embedding", bad_embedding_shape, "matrix"),
+                ("attribution", mismatched_attribution, "geometry"),
+                ("token-dtype", fractional_token, "integer"),
+                ("embedding-dtype", integer_embedding, "floating"),
+                ("finite", non_finite, "non-finite"),
+                ("primary", different_primary, "primary score"),
+                ("audit", overlapping_audit, "source-group audit"),
+                (
+                    "sample-group",
+                    inconsistent_sample_group,
+                    "source-group audit",
+                ),
+                ("coverage", incomplete_response, "complete token rows"),
+            )
+            for name, artifact, message in cases:
+                with self.subTest(name=name):
+                    path = root / f"{name}.npz"
+                    np.savez_compressed(path, **artifact)
+                    with self.assertRaisesRegex(ValueError, message):
+                        load_score_artifact(path)
+
+    def test_prefix_causal_attention_keeps_signed_strongest_magnitude(self):
         with tempfile.TemporaryDirectory() as directory:
             dataset = _write_dataset(Path(directory), [1.0])
             sample = dataset["r0"]
             config = SpectralConfig(top_k=2)
-            spectrum = prefix_laplacian_spectrum(
+            spectrum = prefix_causal_attention_spectrum(
                 sample, positions=[1, 2], config=config
             )
             np.testing.assert_allclose(
@@ -175,9 +282,16 @@ class SpectralFeasibilityTests(unittest.TestCase):
     def test_label_free_rr_fit_score_then_posthoc_evaluation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            train = _write_dataset(root / "train", [0.8, 1.0, 1.2, 1.1])
+            train = _write_dataset(
+                root / "train",
+                [0.8, 1.0, 1.2, 1.1],
+                source_prefix="train-s",
+            )
             test = _write_dataset(
-                root / "test", [1.0, 1.1], positive_sample=1
+                root / "test",
+                [1.0, 1.1],
+                positive_sample=1,
+                source_prefix="test-s",
             )
             reference_path = root / "reference.npz"
             score_path = root / "scores.npz"
@@ -201,6 +315,9 @@ class SpectralFeasibilityTests(unittest.TestCase):
                 fit["retained_fit_tokens"], fit["fit_reference_tokens"]
             )
             with np.load(reference_path, allow_pickle=False) as arrays:
+                self.assertEqual(
+                    str(arrays["schema"].item()), "rr-spectral-reference-v2"
+                )
                 self.assertNotIn("label", arrays.files)
                 self.assertNotIn("y_token", arrays.files)
                 self.assertIn("rr_pca_components", arrays.files)
@@ -224,7 +341,13 @@ class SpectralFeasibilityTests(unittest.TestCase):
             self.assertEqual(
                 scored["primary_detector"], "rr_subspace_residual_tail"
             )
+            with np.load(reference_path, allow_pickle=False) as reference_arrays:
+                expected_fit_groups = set(reference_arrays["fit_group_id"].tolist())
+                expected_calibration_groups = set(
+                    reference_arrays["calibration_group_id"].tolist()
+                )
             with np.load(score_path, allow_pickle=False) as arrays:
+                self.assertEqual(str(arrays["schema"].item()), "rr-spectral-score-v2")
                 self.assertNotIn("label", arrays.files)
                 self.assertNotIn("y_token", arrays.files)
                 self.assertIn("score_rr_residual", arrays.files)
@@ -233,6 +356,20 @@ class SpectralFeasibilityTests(unittest.TestCase):
                 self.assertIn("score_rr_localized", arrays.files)
                 self.assertIn("top_channel_index", arrays.files)
                 self.assertIn("reference_sha256", arrays.files)
+                self.assertEqual(
+                    set(arrays["fit_group_id"].tolist()),
+                    expected_fit_groups,
+                )
+                self.assertEqual(
+                    set(arrays["calibration_group_id"].tolist()),
+                    expected_calibration_groups,
+                )
+                self.assertEqual(
+                    set(arrays["test_group_id"].tolist()),
+                    {"test-s0", "test-s1"},
+                )
+                self.assertEqual(arrays["test_sample_id"].tolist(), ["r0", "r1"])
+                self.assertEqual(str(arrays["audit_scope"].item()), "complete_split")
                 self.assertEqual(arrays["top_channel_index"].shape, (6, 2))
                 np.testing.assert_allclose(
                     arrays["score"], arrays["score_rr_residual"]
@@ -240,7 +377,19 @@ class SpectralFeasibilityTests(unittest.TestCase):
                 self.assertNotIn("score_dynamic", arrays.files)
                 self.assertNotIn("prompt_channel_volume", arrays.files)
 
+            partial_path = root / "partial_scores.npz"
+            score_spectral_dataset(test, reference_path, partial_path, limit=1)
+            with np.load(partial_path, allow_pickle=False) as arrays:
+                self.assertEqual(str(arrays["audit_scope"].item()), "selected_samples")
+                self.assertEqual(arrays["test_sample_id"].tolist(), ["r0"])
+
+            test.manifest["split"] = "train"
+            with self.assertRaisesRegex(ValueError, "split"):
+                evaluate_score_artifact(test, score_path, report_path)
+            test.manifest["split"] = "test"
+
             report = evaluate_score_artifact(test, score_path, report_path)
+            self.assertEqual(report["schema"], "rr-spectral-evaluation-v2")
             self.assertEqual(report["metrics"]["tokens"], 6)
             self.assertEqual(report["metrics"]["positive_tokens"], 1)
             self.assertEqual(
@@ -252,6 +401,39 @@ class SpectralFeasibilityTests(unittest.TestCase):
             self.assertIn("rr_localized_channel_tail", report["components"])
             self.assertEqual(len(report["reference_sha256"]), 64)
             self.assertTrue(report_path.is_file())
+
+    def test_score_rejects_a_test_source_reserved_by_the_reference(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            train = _write_dataset(
+                root / "train",
+                [0.8, 1.0, 1.2, 1.1],
+                source_prefix="shared-s",
+            )
+            test = _write_dataset(
+                root / "test",
+                [1.0],
+                positive_sample=0,
+                source_prefix="shared-s",
+            )
+            reference_path = root / "reference.npz"
+            fit_spectral_reference(
+                train,
+                reference_path,
+                config=SpectralConfig(
+                    top_k=2,
+                    position_bins=2,
+                    pca_dim=2,
+                    reference_per_sample=3,
+                ),
+            )
+
+            with self.assertRaisesRegex(ValueError, "disjoint"):
+                score_spectral_dataset(
+                    test,
+                    reference_path,
+                    root / "scores.npz",
+                )
 
     def test_tiny_train_smoke_is_rejected_before_pca_interpolation(self):
         with tempfile.TemporaryDirectory() as directory:

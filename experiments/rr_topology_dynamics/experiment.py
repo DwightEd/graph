@@ -19,8 +19,22 @@ from scipy.stats import spearmanr
 from sklearn.metrics import average_precision_score, roc_auc_score
 from tqdm.auto import tqdm
 
+from experiment_protocol import (
+    FrozenEvaluation,
+    FrozenFile,
+    HeldOutSourceAudit,
+    canonical_source_group,
+    dataset_manifest_sha256,
+)
 from experiments.spectral_feasibility.representations import reference_positions
 
+from .artifacts import (
+    EVALUATION_SCHEMA,
+    REFERENCE_SCHEMA,
+    SCORE_SCHEMA,
+    load_topology_artifact,
+    load_topology_reference,
+)
 from .features import (
     SCALAR_FEATURE_NAMES,
     TopologyDynamicsConfig,
@@ -28,9 +42,6 @@ from .features import (
     load_rr_reference,
 )
 
-
-REFERENCE_SCHEMA = "rr-topology-dynamics-reference-v1"
-SCORE_SCHEMA = "rr-topology-dynamics-features-v1"
 
 CONVERGENCE_FEATURES = (
     "route_effective_rank",
@@ -212,7 +223,9 @@ def fit_topology_reference(
     audit_config = TopologyAuditConfig() if audit_config is None else audit_config
     topology_config.validate()
     audit_config.validate()
-    spectral_reference = load_rr_reference(spectral_reference_path)
+    spectral_file = FrozenFile.capture(spectral_reference_path)
+    spectral_reference = load_rr_reference(spectral_file.path)
+    spectral_file.verify(spectral_file.path)
     sample_ids = _sample_ids(dataset, limit)
 
     feature_rows = []
@@ -220,6 +233,11 @@ def fit_topology_reference(
     task_rows = []
     sample_rows = []
     token_rows = []
+    reference_source_ids = {
+        str(group_id)
+        for field in ("fit_group_id", "calibration_group_id")
+        for group_id in np.asarray(spectral_reference[field], dtype=str).tolist()
+    }
     feature_names = None
 
     for sample_id in tqdm(
@@ -230,6 +248,7 @@ def fit_topology_reference(
             extracted = extract_sample_topology_dynamics(
                 sample, spectral_reference, config=topology_config
             )
+            reference_source_ids.add(canonical_source_group(sample))
             names = np.asarray(extracted["feature_names"], dtype=str)
             if feature_names is None:
                 feature_names = names
@@ -264,7 +283,9 @@ def fit_topology_reference(
     np.savez_compressed(
         output_path,
         schema=np.asarray(REFERENCE_SCHEMA),
-        spectral_reference_path=np.asarray(str(Path(spectral_reference_path))),
+        spectral_reference_path=np.asarray(str(spectral_file.path)),
+        spectral_reference_sha256=np.asarray(spectral_file.sha256),
+        reference_source_id=np.asarray(sorted(reference_source_ids), dtype=str),
         feature_names=np.asarray(feature_names, dtype=str),
         lag_bins=np.asarray(topology_config.lag_bins, dtype=np.int16),
         spectral_top_k=np.asarray(topology_config.spectral_top_k, dtype=np.int16),
@@ -296,6 +317,7 @@ def fit_topology_reference(
         reference_token_index=np.asarray(token_rows, dtype=np.int32),
         **fitted,
     )
+    load_topology_reference(output_path)
     return {
         "output": str(output_path),
         "labels_read": False,
@@ -304,13 +326,6 @@ def fit_topology_reference(
         "feature_dim": int(features.shape[1]),
         "tasks": int(len(fitted["task_names"])),
     }
-
-
-def load_topology_reference(path):
-    with np.load(Path(path), allow_pickle=False) as arrays:
-        if str(np.asarray(arrays["schema"]).item()) != REFERENCE_SCHEMA:
-            raise ValueError("unsupported RR topology-dynamics reference schema")
-        return {name: arrays[name].copy() for name in arrays.files}
 
 
 def _topology_config_from_reference(reference):
@@ -336,10 +351,30 @@ def score_topology_dataset(
     limit=None,
 ):
     """Freeze full-split topology features and train-standardized coordinates."""
-    spectral_reference = load_rr_reference(spectral_reference_path)
-    topology_reference = load_topology_reference(topology_reference_path)
+    topology_file = FrozenFile.capture(topology_reference_path)
+    topology_reference = load_topology_reference(topology_file.path)
+    topology_file.verify(topology_file.path)
+    spectral_path = Path(spectral_reference_path).resolve()
+    bound_spectral_path = Path(
+        str(np.asarray(topology_reference["spectral_reference_path"]).item())
+    ).resolve()
+    if spectral_path != bound_spectral_path:
+        raise ValueError("spectral reference identity differs from topology reference")
+    spectral_file = FrozenFile.capture(spectral_path)
+    if spectral_file.sha256 != str(
+        np.asarray(topology_reference["spectral_reference_sha256"]).item()
+    ):
+        raise ValueError("spectral reference digest differs from topology reference")
+    spectral_reference = load_rr_reference(spectral_file.path)
+    spectral_file.verify(spectral_file.path)
     topology_config = _topology_config_from_reference(topology_reference)
     sample_ids = _sample_ids(dataset, limit)
+    source_audit = HeldOutSourceAudit(
+        dataset,
+        selected_sample_ids=sample_ids,
+        reserved_source_ids=topology_reference["reference_source_id"].tolist(),
+        require_complete_split=limit is None,
+    )
 
     columns = {
         name: []
@@ -347,6 +382,7 @@ def score_topology_dataset(
             "sample_id",
             "source_id",
             "token_index",
+            "response_length",
             "relative_position",
             "position_bin",
             "task_type",
@@ -367,6 +403,8 @@ def score_topology_dataset(
     ):
         sample = dataset[sample_id]
         try:
+            sample.attention()
+            source_audit.observe(sample)
             extracted = extract_sample_topology_dynamics(
                 sample, spectral_reference, config=topology_config
             )
@@ -395,6 +433,9 @@ def score_topology_dataset(
             columns["sample_id"].append(text(sample.sample_id))
             columns["source_id"].append(text(sample.source_id))
             columns["token_index"].append(tokens)
+            columns["response_length"].append(
+                np.full(response_count, response_count, dtype=np.int32)
+            )
             columns["relative_position"].append(relative_position)
             columns["position_bin"].append(extracted["position_bin"])
             columns["task_type"].append(task)
@@ -421,16 +462,27 @@ def score_topology_dataset(
     output = {
         name: np.concatenate(values, axis=0) for name, values in columns.items()
     }
+    audit = source_audit.finish()
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         output_path,
         schema=np.asarray(SCORE_SCHEMA),
-        spectral_reference_path=np.asarray(str(Path(spectral_reference_path))),
-        topology_reference_path=np.asarray(str(Path(topology_reference_path))),
+        spectral_reference_path=np.asarray(str(spectral_file.path)),
+        spectral_reference_sha256=np.asarray(spectral_file.sha256),
+        topology_reference_path=np.asarray(str(topology_file.path)),
+        topology_reference_sha256=np.asarray(topology_file.sha256),
+        dataset_manifest_sha256=np.asarray(dataset_manifest_sha256(dataset)),
+        reference_source_id=np.asarray(
+            topology_reference["reference_source_id"], dtype=str
+        ),
+        test_group_id=np.asarray(audit.test_source_ids, dtype=str),
+        test_sample_id=np.asarray(audit.test_sample_ids, dtype=str),
+        audit_scope=np.asarray(audit.test_scope),
         feature_names=np.asarray(topology_reference["feature_names"], dtype=str),
         **output,
     )
+    load_topology_artifact(output_path)
     return {
         "output": str(output_path),
         "labels_read": False,
@@ -439,46 +491,6 @@ def score_topology_dataset(
         "feature_dim": int(output["features_raw"].shape[1]),
         "layers": int(output["layer_residual_energy"].shape[1]),
     }
-
-
-def load_topology_artifact(path):
-    with np.load(Path(path), allow_pickle=False) as arrays:
-        if str(np.asarray(arrays["schema"]).item()) != SCORE_SCHEMA:
-            raise ValueError("unsupported RR topology-dynamics feature schema")
-        return {name: arrays[name].copy() for name in arrays.files}
-
-
-def _label_store_for_evaluation(dataset):
-    try:
-        return dataset.labels()
-    except RuntimeError as error:
-        if "every attention sample" not in str(error):
-            raise
-        for sample_id in tqdm(
-            dataset.sample_ids,
-            desc="unlock evaluation labels",
-            unit="sample",
-        ):
-            sample = dataset[sample_id]
-            sample.attention()
-            sample.release_attention()
-        return dataset.labels()
-
-
-def _align_labels(dataset, artifact):
-    labels = _label_store_for_evaluation(dataset)
-    cache = {}
-    y = np.empty(len(artifact["token_index"]), dtype=np.int64)
-    for index, (sample_id, token_index) in enumerate(
-        zip(artifact["sample_id"], artifact["token_index"], strict=True)
-    ):
-        sample_id = str(sample_id)
-        if sample_id not in cache:
-            sample = dataset[sample_id]
-            cache[sample_id] = labels.response_labels(sample).cpu().numpy()
-            sample.release_attention()
-        y[index] = int(cache[sample_id][int(token_index)])
-    return y
 
 
 def _finite_float(value):
@@ -564,7 +576,9 @@ def _within_sample_effect(values, y, sample_id):
     return np.asarray(result, dtype=np.float64)
 
 
-def _onset_effects(values, y, sample_id, token_index, window):
+def first_onset_effects(values, y, sample_id, token_index, window):
+    """Return one standardized pre/post effect at each response's first 0->1."""
+
     values = np.asarray(values, dtype=np.float64)
     y = np.asarray(y, dtype=np.int64)
     sample_id = np.asarray(sample_id, dtype=str)
@@ -576,34 +590,31 @@ def _onset_effects(values, y, sample_id, token_index, window):
         local_y = y[order]
         local_value = values[order]
         local_token = token_index[order]
-        effects = []
-        for local in range(len(order)):
-            if local_y[local] != 1 or (local > 0 and local_y[local - 1] == 1):
-                continue
-            run_end = local
-            while run_end < len(order) and local_y[run_end] == 1:
-                run_end += 1
-            pre_start = max(0, local - int(window))
-            post_end = min(run_end, local + int(window))
-            pre = local_value[pre_start:local]
-            post = local_value[local:post_end]
-            pre_label = local_y[pre_start:local]
-            contiguous = (
-                local == 0
-                or local_token[local] - local_token[max(local - 1, 0)] == 1
-            )
-            if (
-                not contiguous
-                or len(pre) == 0
-                or len(post) == 0
-                or not bool((pre_label == 0).all())
-                or not np.isfinite(pre).all()
-                or not np.isfinite(post).all()
-            ):
-                continue
-            effects.append(float(post.mean() - pre.mean()))
-        if effects:
-            by_sample.append(float(np.mean(effects)))
+        transitions = np.flatnonzero((local_y[1:] == 1) & (local_y[:-1] == 0)) + 1
+        if not len(transitions):
+            continue
+        local = int(transitions[0])
+        run_end = local
+        while run_end < len(order) and local_y[run_end] == 1:
+            run_end += 1
+        pre_start = max(0, local - int(window))
+        post_end = min(run_end, local + int(window))
+        pre = local_value[pre_start:local]
+        post = local_value[local:post_end]
+        pre_label = local_y[pre_start:local]
+        contiguous = bool(
+            (np.diff(local_token[pre_start:post_end]) == 1).all()
+        )
+        if (
+            not contiguous
+            or len(pre) == 0
+            or len(post) == 0
+            or not bool((pre_label == 0).all())
+            or not np.isfinite(pre).all()
+            or not np.isfinite(post).all()
+        ):
+            continue
+        by_sample.append(float(post.mean() - pre.mean()))
     return np.asarray(by_sample, dtype=np.float64)
 
 
@@ -738,9 +749,38 @@ def evaluate_topology_artifact(
     seed=None,
 ):
     """Open labels post-hoc and diagnose topology differences."""
-    artifact = load_topology_artifact(artifact_path)
-    reference = load_topology_reference(str(np.asarray(artifact["topology_reference_path"]).item()))
-    y = _align_labels(dataset, artifact)
+    reference_holder = []
+
+    def load_bound_artifact(path):
+        artifact = load_topology_artifact(path)
+        topology_file = FrozenFile.capture(
+            str(np.asarray(artifact["topology_reference_path"]).item())
+        )
+        if topology_file.sha256 != str(
+            np.asarray(artifact["topology_reference_sha256"]).item()
+        ):
+            raise ValueError("topology reference digest differs from score artifact")
+        reference = load_topology_reference(topology_file.path)
+        if str(np.asarray(artifact["spectral_reference_path"]).item()) != str(
+            np.asarray(reference["spectral_reference_path"]).item()
+        ):
+            raise ValueError(
+                "spectral reference identity differs from topology reference"
+            )
+        if str(np.asarray(artifact["spectral_reference_sha256"]).item()) != str(
+            np.asarray(reference["spectral_reference_sha256"]).item()
+        ):
+            raise ValueError(
+                "spectral reference digest differs from topology reference"
+            )
+        reference_holder.append(reference)
+        topology_file.verify(topology_file.path)
+        return artifact
+
+    evaluation = FrozenEvaluation.capture(artifact_path, expected_split="test")
+    artifact, aligned = evaluation.load_and_align(dataset, load_bound_artifact)
+    reference = reference_holder[0]
+    y = aligned.token_label
     feature_names = np.asarray(artifact["feature_names"], dtype=str)
     raw = np.asarray(artifact["features_raw"], dtype=np.float32)
     z = np.asarray(artifact["features_z"], dtype=np.float32)
@@ -771,9 +811,7 @@ def evaluate_topology_artifact(
     sample_rows = []
     onset_rows = []
     for index, name in enumerate(feature_names):
-        within = _within_sample_effect(
-            raw[:, index], y, artifact["sample_id"]
-        )
+        within = _within_sample_effect(z[:, index], y, artifact["sample_id"])
         within_report = _bootstrap_mean_interval(
             within,
             replicates=bootstrap_replicates,
@@ -781,10 +819,16 @@ def evaluate_topology_artifact(
         )
         sample_effects[str(name)] = within_report
         if within_report is not None:
-            sample_rows.append({"feature": str(name), **within_report})
+            sample_rows.append(
+                {
+                    "feature": str(name),
+                    "representation": "train_standardized_features_z",
+                    **within_report,
+                }
+            )
 
-        onset = _onset_effects(
-            raw[:, index],
+        onset = first_onset_effects(
+            z[:, index],
             y,
             artifact["sample_id"],
             artifact["token_index"],
@@ -797,7 +841,14 @@ def evaluate_topology_artifact(
         )
         onset_effects[str(name)] = onset_report
         if onset_report is not None:
-            onset_rows.append({"feature": str(name), **onset_report})
+            onset_rows.append(
+                {
+                    "feature": str(name),
+                    "representation": "train_standardized_features_z",
+                    "onset_definition": "first_0_to_1_transition_per_response",
+                    **onset_report,
+                }
+            )
 
     residual = raw[:, name_to_index["spectral_residual_energy"]]
     correlations = {}
@@ -830,12 +881,12 @@ def evaluate_topology_artifact(
         "samples": int(len(np.unique(artifact["sample_id"]))),
     }
     report = {
-        "schema": "rr-topology-dynamics-evaluation-v1",
+        "schema": EVALUATION_SCHEMA,
         "overall": overall,
         "feature_metrics_raw": raw_metrics,
         "feature_metrics_train_standardized": z_metrics,
-        "within_sample_effects": sample_effects,
-        "hallucination_onset_effects": onset_effects,
+        "within_sample_effects_train_standardized": sample_effects,
+        "first_hallucination_onset_effects_train_standardized": onset_effects,
         "layer_metrics": layer_metrics,
         "spectral_rank_metrics": rank_metrics,
         "correlation_with_spectral_residual": correlations,
@@ -846,6 +897,8 @@ def evaluate_topology_artifact(
         },
         "claim_boundaries": {
             "labels_used_during": "posthoc_evaluation_only",
+            "effect_representation": "train_standardized_features_z",
+            "onset_definition": "first_0_to_1_transition_per_response",
             "offline_future_features": [
                 "offline_route_distance_to_final",
                 "offline_source_distance_to_final",

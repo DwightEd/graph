@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from experiment_protocol import dataset_manifest_sha256
 from cache import (
     AttentionSample,
     index_row,
@@ -343,6 +344,18 @@ class CausalMultiplexFlowTests(unittest.TestCase):
             self.assertEqual(scored["tokens"], 6)
             artifact = load_score_artifact(score_path)
             self.assertEqual(artifact["score"].shape, (6,))
+            self.assertEqual(
+                str(artifact["dataset_manifest_sha256"].item()),
+                dataset_manifest_sha256(test),
+            )
+            np.testing.assert_array_equal(artifact["response_length"], [3] * 6)
+            incomplete = dict(artifact)
+            incomplete["token_index"] = artifact["token_index"].copy()
+            incomplete["token_index"][1] = 0
+            incomplete_path = output_dir / "incomplete_scores.npz"
+            np.savez_compressed(incomplete_path, **incomplete)
+            with self.assertRaisesRegex(ValueError, "complete token rows"):
+                load_score_artifact(incomplete_path)
             with np.load(score_path, allow_pickle=False) as arrays:
                 self.assertNotIn("label", arrays.files)
                 self.assertNotIn("y_token", arrays.files)

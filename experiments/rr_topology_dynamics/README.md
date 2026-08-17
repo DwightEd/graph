@@ -58,16 +58,16 @@ The audit consumes the previously fitted, label-free RR spectral reference. For
 channel `c=(layer,head)`, prefix `t`, and response source `j`,
 
 ```text
-d[c,t,j]      = sum_{u=j..t} A_c[u,j] / (t-j+1)
-lambda[c,t,j] = d[c,t,j] - A_c[j,j]
+d_age[c,t,j] = sum_{u=j..t} A_c[u,j] / (t-j+1) - A_c[j,j]
 ```
 
-The causal Laplacian is triangular. Its diagonal is its spectrum, and the
-strongest-magnitude signed values are retained per channel. The new
-`prefix_laplacian_modes()` interface additionally preserves the selected source
-index and lag. This is necessary to trace a PCA residual back to actual
-response-history anchors instead of reporting only a 5120-dimensional scalar
-error.
+This is an artificial age-normalized triangular attention operator, not a
+standard graph Laplacian. Its diagonal coordinates are used directly, without
+eigendecomposition or eigenvector rotation, and the strongest-magnitude signed
+values are retained per channel. The `prefix_causal_attention_modes()`
+interface additionally preserves the selected source index and lag. This is
+necessary to trace a PCA residual back to actual response-history anchors
+instead of reporting only a 5120-dimensional scalar error.
 
 ## 4. Route convergence object
 
@@ -168,6 +168,25 @@ frozen feature artifact
     -> post-hoc correct/error and onset analysis      labels opened here only
 ```
 
+The v2 topology reference records the resolved spectral-reference path and
+SHA-256 digest. Its reserved source set is the union of the spectral fit/cal
+groups and every topology-fit group. Scoring accepts only that exact spectral
+file, verifies both frozen references, and streams each selected test sample
+through a held-out source audit before feature extraction. The v2 score
+artifact persists both reference identities/digests, the reserved and test
+groups, the selected test sample IDs, and whether the audit covered the
+complete split or only a limited selection. It also stores the exact on-disk
+test `manifest.json` digest and per-row `response_length`, with strict complete
+`0..R-1` coverage for each selected response. Evaluation verifies that manifest,
+the canonical source, and the attention-derived response length before labels
+are opened.
+
+The frozen contracts are versioned as
+`rr-topology-dynamics-reference-v2`,
+`rr-topology-dynamics-features-v2`, and
+`rr-topology-dynamics-evaluation-v2`. The reference and feature files are
+validated again at every load boundary.
+
 The evaluation writes:
 
 ```text
@@ -182,8 +201,11 @@ residual_correlations.csv
 ```
 
 Feature metrics report both signed direction and orientation-free separability.
-Within-sample and first-hallucination-onset effects use sample-cluster bootstrap.
-No feature direction or weight is fed back into representation construction.
+Within-sample and onset effects are computed from the train-standardized
+`features_z` coordinates and use sample-cluster bootstrap. Onset means the
+first observed `0 -> 1` transition in each response; later positive runs are
+not averaged into that response's effect. No feature direction or weight is
+fed back into representation construction.
 
 ## 9. Run
 
@@ -207,8 +229,8 @@ CUDA_VISIBLE_DEVICES=0 DEVICE=cuda \
 Outputs are isolated:
 
 ```text
-experiments/rr_topology_dynamics/outputs/smoke_5/
-experiments/rr_topology_dynamics/outputs/full/
+experiments/rr_topology_dynamics/outputs/v2/smoke_5/
+experiments/rr_topology_dynamics/outputs/v2/full/
 ```
 
 ## 10. Claim boundary

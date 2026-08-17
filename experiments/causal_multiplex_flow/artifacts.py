@@ -2,23 +2,16 @@
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 
 import numpy as np
+
+from experiment_protocol import validate_complete_token_rows, validate_source_audit
 
 
 REFERENCE_SCHEMA = "cmrp-reference-v2"
 SCORE_SCHEMA = "cmrp-score-v2"
 EVALUATION_SCHEMA = "cmrp-evaluation-v2"
-
-
-def file_sha256(path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for block in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _scalar_text(arrays, name: str) -> str:
@@ -114,6 +107,7 @@ def load_score_artifact(path):
         "sample_id",
         "source_id",
         "token_index",
+        "response_length",
         "task_type",
         "data_source",
         "generator_model",
@@ -130,6 +124,7 @@ def load_score_artifact(path):
         "schema",
         "reference_sha256",
         "model_sha256",
+        "dataset_manifest_sha256",
         "fit_group_id",
         "calibration_group_id",
         "test_group_id",
@@ -152,29 +147,27 @@ def load_score_artifact(path):
     )
     if any(not bool(np.isfinite(artifact[name]).all()) for name in finite_required):
         raise ValueError("CMRP required raw diagnostics contain non-finite values")
-    for digest_name in ("reference_sha256", "model_sha256"):
+    for digest_name in (
+        "reference_sha256",
+        "model_sha256",
+        "dataset_manifest_sha256",
+    ):
         if len(_scalar_text(artifact, digest_name)) != 64:
             raise ValueError(f"CMRP score artifact has invalid {digest_name}")
-    fit_groups = set(map(str, artifact["fit_group_id"].tolist()))
-    calibration_groups = set(map(str, artifact["calibration_group_id"].tolist()))
-    test_groups = set(map(str, artifact["test_group_id"].tolist()))
-    test_sample_ids = tuple(map(str, artifact["test_sample_id"].tolist()))
-    if (
-        not fit_groups
-        or not calibration_groups
-        or not test_groups
-        or fit_groups & calibration_groups
-        or fit_groups & test_groups
-        or calibration_groups & test_groups
-    ):
-        raise ValueError("CMRP score artifact has an invalid source-group audit")
-    if (
-        not test_sample_ids
-        or len(set(test_sample_ids)) != len(test_sample_ids)
-        or set(test_sample_ids) != set(map(str, artifact["sample_id"].tolist()))
-    ):
-        raise ValueError("CMRP score artifact has an invalid test sample scope")
-    audit_scope = _scalar_text(artifact, "audit_scope")
-    if audit_scope not in {"complete_split", "selected_samples"}:
-        raise ValueError("CMRP score artifact has an invalid audit scope")
+    validate_source_audit(
+        reserved_source_ids=np.concatenate(
+            (artifact["fit_group_id"], artifact["calibration_group_id"])
+        ),
+        test_source_ids=artifact["test_group_id"],
+        test_sample_ids=artifact["test_sample_id"],
+        row_sample_ids=artifact["sample_id"],
+        row_source_ids=artifact["source_id"],
+        audit_scope=_scalar_text(artifact, "audit_scope"),
+    )
+    validate_complete_token_rows(
+        artifact["sample_id"],
+        artifact["source_id"],
+        artifact["token_index"],
+        artifact["response_length"],
+    )
     return artifact

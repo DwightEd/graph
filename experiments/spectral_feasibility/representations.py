@@ -1,10 +1,11 @@
-"""Causal response-history spectral states for sparse attention graphs.
+"""Causal response-history coordinates for sparse attention graphs.
 
 The active detector in this package is deliberately RR-only. For every
 layer/head channel and response prefix we treat retained response-to-response
-attention as a causal directed adjacency operator. The corresponding
-Laplacian is triangular, so its diagonal is its spectrum. Strongest-magnitude
-spectral coordinates are kept per channel without averaging layer/head axes.
+attention as an artificial age-normalized triangular operator. Its signed
+diagonal coordinates are used directly, without a standard graph Laplacian,
+eigendecomposition, or eigenvector rotation. Strongest-magnitude coordinates
+are kept per channel without averaging layer/head axes.
 
 Prompt routing belongs to the separate topology-dynamics audit. Missing CSR
 entries are cache-censored (<= ``attention_floor``); they are never
@@ -59,8 +60,8 @@ class SpectralConfig:
 
 
 @dataclass(frozen=True)
-class PrefixLaplacianModes:
-    """Selected causal RR-Laplacian coordinates and their source identities.
+class PrefixCausalAttentionModes:
+    """Selected causal-attention coordinates and their source identities.
 
     Arrays have shape ``[requested_token, layer_head_channel, top_k]``.
     ``source_index`` is response-relative and uses ``-1`` for padding when the
@@ -147,26 +148,25 @@ def _retained_response_edges(sample, *, block_rows: int):
     )
 
 
-def prefix_laplacian_modes(
+def prefix_causal_attention_modes(
     sample,
     *,
     positions=None,
     config: SpectralConfig | None = None,
-) -> PrefixLaplacianModes:
-    """Return selected RR spectral values together with their causal sources.
+) -> PrefixCausalAttentionModes:
+    """Return age-normalized RR coordinates with their causal sources.
 
     For channel ``c=(layer, head)``, response prefix ``t`` and response source
     node ``j <= t``::
 
-        d[c,t,j]      = sum_{u=j..t} A_c[u,j] / (t-j+1)
-        lambda[c,t,j] = d[c,t,j] - A_c[j,j]
+        d_age[c,t,j] = sum_{u=j..t} A_c[u,j] / (t-j+1) - A_c[j,j]
 
-    The causal Laplacian is triangular, therefore its diagonal is its spectrum.
-    ``top_k`` entries with largest absolute magnitude are selected independently
-    for every layer/head. Unlike :func:`prefix_laplacian_spectrum`, this method
-    retains the response-relative source index and lag of each selected mode so
-    downstream topology audits can identify what the reconstruction residual is
-    actually attached to.
+    This is an artificial age-normalized triangular attention operator, not a
+    standard graph Laplacian. The diagonal coordinates above are used directly;
+    no eigendecomposition or eigenvector rotation is performed. ``top_k``
+    entries with largest absolute magnitude are selected independently for every
+    layer/head. Unlike :func:`prefix_causal_attention_spectrum`, this method
+    retains the response-relative source index and lag of each selected mode.
     """
     config = SpectralConfig() if config is None else config
     config.validate()
@@ -175,7 +175,7 @@ def prefix_laplacian_modes(
     requested = _requested_positions(response_count, positions)
     shape = (len(requested), int(attention.num_channels), int(config.top_k))
     if response_count < 1 or len(requested) == 0:
-        return PrefixLaplacianModes(
+        return PrefixCausalAttentionModes(
             positions=requested,
             values=np.zeros(shape, dtype=np.float32),
             source_index=np.full(shape, -1, dtype=np.int32),
@@ -210,20 +210,20 @@ def prefix_laplacian_modes(
         active = prefix + 1
         source = torch.arange(active, dtype=torch.float32, device=device)
         denominator = (float(prefix) - source + 1.0).clamp_min(1.0)
-        eigenvalues = (
+        coordinates = (
             received[:, :active] / denominator.unsqueeze(0)
             - diagonal[:, :active]
         )
         keep = min(config.top_k, active)
         indices = torch.topk(
-            eigenvalues.abs(), k=keep, dim=1, largest=True, sorted=True
+            coordinates.abs(), k=keep, dim=1, largest=True, sorted=True
         ).indices
-        output[output_index, :, :keep] = torch.gather(eigenvalues, 1, indices)
+        output[output_index, :, :keep] = torch.gather(coordinates, 1, indices)
         output_source[output_index, :, :keep] = indices
         output_lag[output_index, :, :keep] = int(prefix) - indices
         previous_prefix = prefix
 
-    return PrefixLaplacianModes(
+    return PrefixCausalAttentionModes(
         positions=requested,
         values=output.detach().cpu().numpy().astype(np.float32, copy=False),
         source_index=output_source.detach().cpu().numpy().astype(np.int32, copy=False),
@@ -231,14 +231,16 @@ def prefix_laplacian_modes(
     )
 
 
-def prefix_laplacian_spectrum(
+def prefix_causal_attention_spectrum(
     sample,
     *,
     positions=None,
     config: SpectralConfig | None = None,
 ) -> np.ndarray:
-    """Signed strongest-magnitude causal RR-Laplacian spectrum per channel."""
-    modes = prefix_laplacian_modes(sample, positions=positions, config=config)
+    """Signed strongest-magnitude age-normalized RR coordinates per channel."""
+    modes = prefix_causal_attention_modes(
+        sample, positions=positions, config=config
+    )
     return modes.values.reshape(len(modes.positions), -1)
 
 

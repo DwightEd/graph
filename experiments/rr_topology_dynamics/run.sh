@@ -6,7 +6,7 @@ PROJECT_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 cd "$PROJECT_ROOT"
 
 ROOT=${ROOT:-/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876}
-SPECTRAL_REFERENCE=${SPECTRAL_REFERENCE:-experiments/spectral_feasibility/outputs/rr_spectral_subspace/full/reference.npz}
+SPECTRAL_REFERENCE=${SPECTRAL_REFERENCE:-experiments/spectral_feasibility/outputs/rr_spectral_subspace_v2/full/reference.npz}
 DEVICE=${DEVICE:-cuda}
 PYTHON=${PYTHON:-python}
 
@@ -19,7 +19,7 @@ else
   EXTRA=()
   BOOTSTRAP_DEFAULT=1000
 fi
-OUT=${OUT:-experiments/rr_topology_dynamics/outputs/$RUN_NAME}
+OUT=${OUT:-experiments/rr_topology_dynamics/outputs/v2/$RUN_NAME}
 
 if [[ ! -f "$SPECTRAL_REFERENCE" ]]; then
   cat >&2 <<EOF

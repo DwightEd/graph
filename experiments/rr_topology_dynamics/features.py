@@ -24,7 +24,7 @@ import torch
 from experiments.spectral_feasibility.experiment import load_spectral_reference
 from experiments.spectral_feasibility.representations import (
     SpectralConfig,
-    prefix_laplacian_modes,
+    prefix_causal_attention_modes,
     response_position_bin,
 )
 
@@ -486,7 +486,7 @@ def extract_sample_topology_dynamics(
         top_k=config.spectral_top_k,
         block_rows=config.block_rows,
     )
-    modes = prefix_laplacian_modes(sample, config=spectral_config)
+    modes = prefix_causal_attention_modes(sample, config=spectral_config)
     values = modes.values.reshape(response_count, -1)
     position_bins = int(spectral_reference["position_bins"])
     bins = np.asarray(

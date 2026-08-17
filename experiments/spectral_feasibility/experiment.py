@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -11,17 +10,24 @@ import numpy as np
 from sklearn.metrics import average_precision_score, roc_auc_score
 from tqdm.auto import tqdm
 
+from experiment_protocol import (
+    FrozenEvaluation,
+    HeldOutSourceAudit,
+    dataset_manifest_sha256,
+    file_sha256,
+    partition_source_groups,
+)
+
 from .artifacts import (
     EVALUATION_SCHEMA,
     REFERENCE_SCHEMA,
     SCORE_SCHEMA,
-    file_sha256,
     load_score_artifact,
     load_spectral_reference,
 )
 from .representations import (
     SpectralConfig,
-    prefix_laplacian_spectrum,
+    prefix_causal_attention_spectrum,
     reference_positions,
     response_position_bin,
     rr_spectral_dimension,
@@ -57,44 +63,6 @@ def _bins_for_positions(positions, response_count, position_bins):
         ],
         dtype=np.int16,
     )
-
-
-def _group_key(sample) -> str:
-    source_id = sample.source_id
-    return (
-        str(source_id)
-        if source_id not in (None, "", "None", "null")
-        else str(sample.sample_id)
-    )
-
-
-def _partition_sample_groups(dataset, sample_ids, *, fraction: float, seed: int):
-    """Assign complete source groups to disjoint fit and calibration streams."""
-    groups: dict[str, list[str]] = {}
-    for sample_id in sample_ids:
-        sample = dataset[sample_id]
-        groups.setdefault(_group_key(sample), []).append(sample_id)
-        sample.release_attention()
-    if len(groups) < 2:
-        raise ValueError(
-            "RR reference fitting needs at least two independent source/sample groups"
-        )
-
-    def order_key(group: str):
-        return hashlib.sha256(f"{int(seed)}:{group}".encode()).digest()
-
-    ordered = sorted(groups, key=order_key)
-    calibration_count = min(
-        len(ordered) - 1,
-        max(1, int(round(len(ordered) * float(fraction)))),
-    )
-    calibration_groups = set(ordered[:calibration_count])
-    role = {
-        sample_id: ("calibration" if group in calibration_groups else "fit")
-        for group, members in groups.items()
-        for sample_id in members
-    }
-    return role, sorted(set(groups) - calibration_groups), sorted(calibration_groups)
 
 
 def _channel_energy(residual_vector, *, num_channels: int, top_k: int):
@@ -158,7 +126,7 @@ def _collect_reference_rows(dataset, sample_ids, role, config):
             )
             current = rows[role[sample_id]]
             current["value"].append(
-                prefix_laplacian_spectrum(
+                prefix_causal_attention_spectrum(
                     sample,
                     positions=positions,
                     config=config,
@@ -198,12 +166,22 @@ def fit_spectral_reference(
     config = SpectralConfig() if config is None else config
     config.validate()
     sample_ids = _sample_ids(dataset, limit)
-    role, fit_groups, calibration_groups = _partition_sample_groups(
+    split = partition_source_groups(
         dataset,
         sample_ids,
-        fraction=config.calibration_fraction,
+        calibration_fraction=config.calibration_fraction,
         seed=config.split_seed,
     )
+    role = {
+        sample_id: stream
+        for stream, field in (
+            ("fit", "fit_sample_ids"),
+            ("calibration", "calibration_sample_ids"),
+        )
+        for sample_id in split[field]
+    }
+    fit_groups = split["fit_group_ids"]
+    calibration_groups = split["calibration_group_ids"]
     rows, geometry = _collect_reference_rows(dataset, sample_ids, role, config)
     fit_rows = rows["fit"]
     calibration_rows = rows["calibration"]
@@ -356,12 +334,22 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
     reference = load_spectral_reference(reference_path)
     config = _config_from_reference(reference)
     sample_ids = _sample_ids(dataset, limit)
+    source_audit = HeldOutSourceAudit(
+        dataset,
+        selected_sample_ids=sample_ids,
+        reserved_source_ids=(
+            reference["fit_group_id"].tolist()
+            + reference["calibration_group_id"].tolist()
+        ),
+        require_complete_split=limit is None,
+    )
     columns = {
         name: []
         for name in (
             "sample_id",
             "source_id",
             "token_index",
+            "response_length",
             "task_type",
             "data_source",
             "generator_model",
@@ -384,6 +372,7 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
         sample = dataset[sample_id]
         try:
             attention = sample.attention()
+            source_audit.observe(sample)
             if (
                 int(attention.num_layers) != int(reference["num_layers"])
                 or int(attention.num_heads) != int(reference["num_heads"])
@@ -398,7 +387,7 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
                 response_count,
                 config.position_bins,
             )
-            raw = prefix_laplacian_spectrum(
+            raw = prefix_causal_attention_spectrum(
                 sample,
                 positions=positions,
                 config=config,
@@ -451,6 +440,9 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
             columns["sample_id"].append(text(sample.sample_id))
             columns["source_id"].append(text(sample.source_id))
             columns["token_index"].append(positions.astype(np.int32))
+            columns["response_length"].append(
+                np.full(response_count, response_count, dtype=np.int32)
+            )
             columns["task_type"].append(text(sample.task_type))
             columns["data_source"].append(text(sample.data_source))
             columns["generator_model"].append(text(sample.generator_model))
@@ -489,6 +481,7 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
     )
     if any(not bool(np.isfinite(output[name]).all()) for name in numeric):
         raise FloatingPointError("RR spectral scoring produced non-finite values")
+    audit = source_audit.finish()
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
@@ -496,8 +489,17 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
         schema=np.asarray(SCORE_SCHEMA),
         reference_path=np.asarray(str(Path(reference_path))),
         reference_sha256=np.asarray(file_sha256(reference_path)),
+        dataset_manifest_sha256=np.asarray(dataset_manifest_sha256(dataset)),
+        fit_group_id=np.asarray(reference["fit_group_id"], dtype=str),
+        calibration_group_id=np.asarray(
+            reference["calibration_group_id"], dtype=str
+        ),
+        test_group_id=np.asarray(audit.test_source_ids, dtype=str),
+        test_sample_id=np.asarray(audit.test_sample_ids, dtype=str),
+        audit_scope=np.asarray(audit.test_scope),
         **output,
     )
+    load_score_artifact(output_path)
     return {
         "output": str(output_path),
         "labels_read": False,
@@ -506,23 +508,6 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
         "embedding_dim": int(output["rr_embedding"].shape[1]),
         "primary_detector": "rr_subspace_residual_tail",
     }
-
-
-def _label_store_for_evaluation(dataset):
-    try:
-        return dataset.labels()
-    except RuntimeError as error:
-        if "every attention sample" not in str(error):
-            raise
-        for sample_id in tqdm(
-            dataset.sample_ids,
-            desc="unlock evaluation labels",
-            unit="sample",
-        ):
-            sample = dataset[sample_id]
-            sample.attention()
-            sample.release_attention()
-        return dataset.labels()
 
 
 def _metrics(y, score):
@@ -545,19 +530,9 @@ def _metrics(y, score):
 
 def evaluate_score_artifact(dataset, score_path, output_path):
     """Open labels only after every representation and score is frozen."""
-    artifact = load_score_artifact(score_path)
-    labels = _label_store_for_evaluation(dataset)
-    cache = {}
-    y = np.empty(len(artifact["score"]), dtype=np.int64)
-    for index, (sample_id, token_index) in enumerate(
-        zip(artifact["sample_id"], artifact["token_index"], strict=True)
-    ):
-        sample_id = str(sample_id)
-        if sample_id not in cache:
-            sample = dataset[sample_id]
-            cache[sample_id] = labels.response_labels(sample).cpu().numpy()
-            sample.release_attention()
-        y[index] = int(cache[sample_id][int(token_index)])
+    evaluation = FrozenEvaluation.capture(score_path, expected_split="test")
+    artifact, aligned = evaluation.load_and_align(dataset, load_score_artifact)
+    y = aligned.token_label
 
     metrics = _metrics(y, artifact["score"])
     if metrics is None:
@@ -578,13 +553,15 @@ def evaluate_score_artifact(dataset, score_path, output_path):
         "primary_detector": "rr_subspace_residual_tail",
         "reference_sha256": str(np.asarray(artifact["reference_sha256"]).item()),
         "method": (
-            "signed per-layer/head RR causal-Laplacian diagonal modes; "
+            "signed per-layer/head artificial age-normalized triangular RR "
+            "attention coordinates; "
             "fit-only position robust scaling; two-pass robust PCA; independent "
             "source-group calibration; global empirical residual tail"
         ),
         "claim_boundary": (
-            "The coordinates are accumulated causal in-degree/diagonal modes, "
-            "not eigenvector embeddings and not a learned message-passing model."
+            "The operator is not a standard graph Laplacian; its diagonal "
+            "coordinates are used directly without eigendecomposition or "
+            "eigenvector rotation, and it is not a learned message-passing model."
         ),
     }
     output_path = Path(output_path)

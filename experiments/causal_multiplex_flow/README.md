@@ -142,6 +142,7 @@ Contains one row per response token:
 sample_id
 source_id
 token_index
+response_length
 task_type
 data_source
 generator_model
@@ -158,7 +159,9 @@ selected_rr_edges
 The v2 score schema also stores the complete fit/calibration/test source-group
 audit and the exact selected test-sample scope. Scoring rejects an overlapping
 test source while each loaded sample is streamed into the scorer; a partial test
-run is explicitly recorded.
+run is explicitly recorded. It also stores the SHA-256 of the exact on-disk
+test `manifest.json`; every selected response must contain exactly token rows
+`0..response_length-1` with one canonical source and response length.
 
 Only `score` uses the automatic score-field convention. Raw diagnostics avoid a
 `score_` prefix so the conditioned benchmark cannot silently treat them as
@@ -166,9 +169,11 @@ independently selected detectors.
 
 ### `evaluation.json`
 
-Labels are opened only here after the score artifact digest is reverified and
-the canonical dataset manifest is confirmed as the `test` split. It reports
-AUROC/AUPRC for the frozen primary score and post-hoc diagnostic components.
+Labels are opened only after the score artifact digest and exact on-disk dataset
+manifest digest are reverified. Before label access, evaluation also checks the
+`test` split, complete token coverage, canonical source, and attention-derived
+response length. It reports AUROC/AUPRC for the frozen primary score and
+post-hoc diagnostic components.
 
 ## Common conditioned benchmark
 
@@ -179,7 +184,7 @@ bash experiments/conditioned_benchmark/run.sh \
   /share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876/test \
   experiments/conditioned_benchmark/outputs/cmrp_vs_rr \
   cmrp=experiments/causal_multiplex_flow/outputs/full/test_scores.npz \
-  rr_spectral=experiments/spectral_feasibility/outputs/rr_spectral_subspace/full/test_scores.npz
+  rr_spectral=experiments/spectral_feasibility/outputs/rr_spectral_subspace_v2/full/test_scores.npz
 ```
 
 The benchmark intersects methods on identical `(sample_id, token_index)` rows

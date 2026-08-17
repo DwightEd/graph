@@ -8,7 +8,7 @@ ROOT=${ROOT:-/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-
 DEVICE=${DEVICE:-cuda}
 PYTHON=${PYTHON:-python}
 export PYTHONUNBUFFERED=1
-BASE_OUT=experiments/spectral_feasibility/outputs/rr_spectral_subspace
+BASE_OUT=experiments/spectral_feasibility/outputs/rr_spectral_subspace_v2
 if [[ -n "${OUT:-}" ]]; then
   OUT=$OUT
 elif [[ -n "${TRAIN_LIMIT:-}" || -n "${TEST_LIMIT:-}" ]]; then

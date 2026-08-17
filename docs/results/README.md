@@ -75,7 +75,7 @@ attention_graph/token_representation.py
 Current runner output:
 
 ```text
-experiments/spectral_feasibility/outputs/rr_spectral_subspace/full/
+experiments/spectral_feasibility/outputs/rr_spectral_subspace_v2/full/
   reference.npz
   test_scores.npz
   evaluation.json
@@ -91,7 +91,7 @@ current code must use a fresh output directory and must be reported separately.
 After a full run:
 
 ```text
-experiments/rr_topology_dynamics/outputs/full/evaluation/
+experiments/rr_topology_dynamics/outputs/v2/full/evaluation/
   report.json
   feature_metrics.csv
   within_sample_effects.csv

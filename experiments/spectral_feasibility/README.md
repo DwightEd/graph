@@ -12,26 +12,26 @@ the final evaluation command.
 ## Representation
 
 For layer/head channel `c`, current response prefix `t`, and response source
-`j <= t`, define
+`j <= t`, define the artificial age-normalized coordinate
 
 ```text
-d[c,t,j]      = sum_{u=j..t} A[c,u,j] / (t-j+1)
-lambda[c,t,j] = d[c,t,j] - A[c,j,j]
+d_age[c,t,j] = sum_{u=j..t} A[c,u,j] / (t-j+1) - A[c,j,j]
 ```
 
 `A[c,u,j]` is the retained response-to-response attention from query `u` to
-source `j`. The causal `D-A` operator is triangular, so its eigenvalues are its
-diagonal. The code keeps the signed `top_k` values with largest magnitude in
-every layer/head independently:
+source `j`. This defines an artificial age-normalized triangular attention
+operator, not a standard graph Laplacian. The code uses its diagonal
+coordinates directly; there is no eigendecomposition or eigenvector rotation.
+It keeps the signed `top_k` values with largest magnitude in every layer/head
+independently:
 
 ```text
-x(t) = concat_{layer,head} StrongestAbsK(lambda[c,t,:])
+x(t) = concat_{layer,head} StrongestAbsK(d_age[c,t,:])
 ```
 
 For 32 layers, 32 heads, and `top_k=5`, `x(t)` has 5120 coordinates. This is a
-dynamic prefix descriptor assigned to the newly generated token `t`; it is not
-an eigenvector embedding and it does not claim to model hidden-state message
-passing.
+dynamic prefix descriptor assigned to the newly generated token `t`; it does
+not claim to model hidden-state message passing.
 
 All attention is read through `research_dataset.py`. Missing cache entries stay
 censored below `attention_floor`; PP edges are neither needed nor invented.
@@ -44,7 +44,7 @@ streams:
 ```text
 fit groups          -> position median/MAD -> two-pass robust PCA
 calibration groups  -> frozen transform    -> empirical score distributions
-test groups         -> frozen transform    -> scores
+test groups         -> source-overlap audit -> frozen transform -> scores
 ```
 
 No token from a calibration source is used to fit the scaler or PCA. Position
@@ -110,12 +110,18 @@ CUDA_VISIBLE_DEVICES=0 DEVICE=cuda \
 Default full output:
 
 ```text
-experiments/spectral_feasibility/outputs/rr_spectral_subspace/full/
+experiments/spectral_feasibility/outputs/rr_spectral_subspace_v2/full/
   reference.npz
   test_scores.npz
   evaluation.json
 ```
 
-The new reference schema is intentionally incompatible with earlier same-stream
-calibration artifacts. Delete or move an old output directory before rerunning,
-or set `OUT=/new/path`.
+The v2 reference and score schemas are intentionally incompatible with earlier
+artifacts. Score files persist the fit/calibration/test source audit and whether
+the tested sample scope is complete or limited. They also bind the exact
+on-disk test `manifest.json` digest and store `response_length` on every complete
+`0..R-1` response row. Evaluation reloads the captured score path and verifies
+its digest, manifest identity, test split, canonical source, response length,
+and complete token coverage before it unlocks labels.
+The versioned default output directory prevents new runs from mixing with old
+artifacts; `OUT=/new/path` can still select another fresh directory.

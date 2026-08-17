@@ -1,3 +1,4 @@
+import json
 import unittest
 from types import SimpleNamespace
 from pathlib import Path
@@ -9,6 +10,11 @@ from experiment_protocol import (
     FrozenFile,
     FrozenEvaluation,
     HeldOutSourceAudit,
+    dataset_manifest_sha256,
+    file_sha256,
+    partition_source_groups,
+    validate_complete_token_rows,
+    validate_source_audit,
 )
 
 
@@ -38,10 +44,16 @@ class _Labels:
 
 
 class _LabelLockedDataset:
-    def __init__(self):
+    def __init__(self, *, manifest_marker="primary"):
+        self._directory = tempfile.TemporaryDirectory()
+        self.root = Path(self._directory.name)
         self.sample_ids = ["a", "b"]
-        self.manifest = {"split": "test"}
+        self.manifest = {"split": "test", "marker": manifest_marker}
+        (self.root / "manifest.json").write_text(
+            json.dumps(self.manifest), encoding="utf-8"
+        )
         self.opened = set()
+        self.labels_called = False
         self.samples = {
             "a": _Sample(self, "a", "source-a", [0, 1, 1]),
             "b": _Sample(self, "b", np.nan, [0, 0]),
@@ -51,12 +63,27 @@ class _LabelLockedDataset:
         return self.samples[str(sample_id)]
 
     def labels(self):
+        self.labels_called = True
         if self.opened != set(self.sample_ids):
             raise RuntimeError(
                 "formal labels become available only after every attention sample "
                 "has been processed"
             )
         return _Labels()
+
+
+def _complete_evaluation_rows(dataset):
+    return {
+        "dataset_manifest_sha256": np.asarray(
+            dataset_manifest_sha256(dataset)
+        ),
+        "sample_id": np.asarray(["b", "a", "a", "b", "a"]),
+        "source_id": np.asarray(
+            ["nan", "source-a", "source-a", "nan", "source-a"]
+        ),
+        "token_index": np.asarray([1, 2, 0, 0, 1], dtype=np.int32),
+        "response_length": np.asarray([2, 3, 3, 2, 3], dtype=np.int32),
+    }
 
 
 class SourceGroupAuditTests(unittest.TestCase):
@@ -66,8 +93,7 @@ class SourceGroupAuditTests(unittest.TestCase):
         audit = HeldOutSourceAudit(
             dataset,
             selected_sample_ids=["b"],
-            fit_source_ids=["source-a"],
-            calibration_source_ids=["source-c"],
+            reserved_source_ids=["source-a", "source-c"],
             require_complete_split=False,
         )
         sample = dataset["b"]
@@ -75,8 +101,6 @@ class SourceGroupAuditTests(unittest.TestCase):
         audit.observe(sample)
         result = audit.finish()
 
-        self.assertEqual(result.fit_source_ids, ("source-a",))
-        self.assertEqual(result.calibration_source_ids, ("source-c",))
         self.assertEqual(result.test_source_ids, ("b",))
         self.assertEqual(result.test_sample_ids, ("b",))
         self.assertEqual(result.test_scope, "selected_samples")
@@ -86,8 +110,7 @@ class SourceGroupAuditTests(unittest.TestCase):
             HeldOutSourceAudit(
                 _LabelLockedDataset(),
                 selected_sample_ids=["a"],
-                fit_source_ids=["fit"],
-                calibration_source_ids=["calibration"],
+                reserved_source_ids=["fit", "calibration"],
             )
 
     def test_audit_rejects_a_missing_frozen_reference_group(self):
@@ -95,8 +118,7 @@ class SourceGroupAuditTests(unittest.TestCase):
             HeldOutSourceAudit(
                 _LabelLockedDataset(),
                 selected_sample_ids=["a", "b"],
-                fit_source_ids=[np.nan],
-                calibration_source_ids=["calibration"],
+                reserved_source_ids=[np.nan],
             )
 
     def test_audit_rejects_an_overlapping_or_duplicate_observation(self):
@@ -104,8 +126,7 @@ class SourceGroupAuditTests(unittest.TestCase):
         overlap = HeldOutSourceAudit(
             dataset,
             selected_sample_ids=["a"],
-            fit_source_ids=["source-a"],
-            calibration_source_ids=["calibration"],
+            reserved_source_ids=["source-a", "calibration"],
             require_complete_split=False,
         )
         sample = dataset["a"]
@@ -116,8 +137,7 @@ class SourceGroupAuditTests(unittest.TestCase):
         audit = HeldOutSourceAudit(
             dataset,
             selected_sample_ids=["b"],
-            fit_source_ids=["fit"],
-            calibration_source_ids=["calibration"],
+            reserved_source_ids=["fit", "calibration"],
             require_complete_split=False,
         )
         sample = dataset["b"]
@@ -131,8 +151,7 @@ class SourceGroupAuditTests(unittest.TestCase):
         audit = HeldOutSourceAudit(
             dataset,
             selected_sample_ids=["a", "b"],
-            fit_source_ids=["fit"],
-            calibration_source_ids=["calibration"],
+            reserved_source_ids=["fit", "calibration"],
         )
         sample = dataset["a"]
         sample.attention()
@@ -142,16 +161,149 @@ class SourceGroupAuditTests(unittest.TestCase):
             audit.finish()
 
 
+class FrozenSourceAuditTests(unittest.TestCase):
+    def test_validates_declared_groups_against_frozen_rows(self):
+        validate_source_audit(
+            reserved_source_ids=["fit-a", "cal-b"],
+            test_source_ids=["held-c", "sample-b"],
+            test_sample_ids=["sample-a", "sample-b"],
+            row_sample_ids=["sample-a", "sample-a", "sample-b"],
+            row_source_ids=["held-c", "held-c", "nan"],
+            audit_scope="complete_split",
+        )
+
+    def test_rejects_corrupt_frozen_source_audits(self):
+        valid = {
+            "reserved_source_ids": ["fit-a", "cal-b"],
+            "test_source_ids": ["held-c", "sample-b"],
+            "test_sample_ids": ["sample-a", "sample-b"],
+            "row_sample_ids": ["sample-a", "sample-a", "sample-b"],
+            "row_source_ids": ["held-c", "held-c", "nan"],
+            "audit_scope": "selected_samples",
+        }
+        corruptions = {
+            "overlap": {"test_source_ids": ["fit-a", "sample-b"]},
+            "duplicate": {"test_sample_ids": ["sample-a", "sample-a"]},
+            "omitted sample": {"test_sample_ids": ["sample-a"]},
+            "inconsistent mapping": {
+                "row_source_ids": ["held-c", "changed", "nan"]
+            },
+            "undeclared group": {
+                "test_source_ids": ["held-c", "different"]
+            },
+            "non-text row source": {
+                "test_source_ids": ["1", "2"],
+                "row_source_ids": np.asarray([1, 1, 2]),
+            },
+            "scope": {"audit_scope": "unknown"},
+        }
+        for reason, change in corruptions.items():
+            with self.subTest(reason=reason), self.assertRaisesRegex(
+                ValueError, "source-group audit"
+            ):
+                validate_source_audit(**(valid | change))
+
+
+class CompleteTokenRowsTests(unittest.TestCase):
+    def test_validates_complete_per_response_rows(self):
+        validate_complete_token_rows(
+            sample_id=["a", "b", "a", "b", "a"],
+            source_id=["source-a", "nan", "source-a", "nan", "source-a"],
+            token_index=np.asarray([2, 1, 0, 0, 1], dtype=np.int32),
+            response_length=np.asarray([3, 2, 3, 2, 3], dtype=np.int32),
+        )
+
+    def test_rejects_inconsistent_or_incomplete_response_rows(self):
+        valid = {
+            "sample_id": ["a", "a", "a"],
+            "source_id": ["source-a", "source-a", "source-a"],
+            "token_index": np.asarray([0, 1, 2], dtype=np.int32),
+            "response_length": np.asarray([3, 3, 3], dtype=np.int32),
+        }
+        corruptions = {
+            "source": {"source_id": ["source-a", "changed", "source-a"]},
+            "length": {
+                "response_length": np.asarray([3, 2, 3], dtype=np.int32)
+            },
+            "missing": {
+                "token_index": np.asarray([0, 2], dtype=np.int32),
+                "sample_id": ["a", "a"],
+                "source_id": ["source-a", "source-a"],
+                "response_length": np.asarray([3, 3], dtype=np.int32),
+            },
+            "duplicate": {"token_index": np.asarray([0, 1, 1], dtype=np.int32)},
+        }
+        for reason, change in corruptions.items():
+            with self.subTest(reason=reason), self.assertRaisesRegex(
+                ValueError, "complete token rows"
+            ):
+                validate_complete_token_rows(**(valid | change))
+
+
+class SourceGroupPartitionTests(unittest.TestCase):
+    def test_partitions_exact_group_count_deterministically(self):
+        dataset = _LabelLockedDataset()
+        dataset.sample_ids = ["a", "b", "c", "d", "e"]
+        dataset.samples.update(
+            {
+                "c": _Sample(dataset, "c", "source-c", [0]),
+                "d": _Sample(dataset, "d", "source-d", [0]),
+                "e": _Sample(dataset, "e", "source-d", [0]),
+            }
+        )
+
+        first = partition_source_groups(
+            dataset,
+            dataset.sample_ids,
+            calibration_fraction=0.5,
+            seed=17,
+        )
+        second = partition_source_groups(
+            dataset,
+            list(reversed(dataset.sample_ids)),
+            calibration_fraction=0.5,
+            seed=17,
+        )
+
+        self.assertEqual(first["fit_group_ids"], second["fit_group_ids"])
+        self.assertEqual(
+            first["calibration_group_ids"], second["calibration_group_ids"]
+        )
+        self.assertEqual(len(first["calibration_group_ids"]), 2)
+        self.assertTrue(first["fit_group_ids"])
+        self.assertFalse(
+            set(first["fit_group_ids"]) & set(first["calibration_group_ids"])
+        )
+        self.assertEqual(
+            set(first["fit_sample_ids"]) | set(first["calibration_sample_ids"]),
+            set(dataset.sample_ids),
+        )
+
+    def test_rejects_an_invalid_fraction_or_single_group(self):
+        dataset = _LabelLockedDataset()
+        with self.assertRaisesRegex(ValueError, "calibration_fraction"):
+            partition_source_groups(
+                dataset,
+                dataset.sample_ids,
+                calibration_fraction=1.0,
+                seed=0,
+            )
+        dataset.samples["b"].source_id = "source-a"
+        with self.assertRaisesRegex(ValueError, "two.*source groups"):
+            partition_source_groups(
+                dataset,
+                dataset.sample_ids,
+                calibration_fraction=0.5,
+                seed=0,
+            )
+
+
 class FrozenEvaluationTests(unittest.TestCase):
     def test_unlocks_and_aligns_only_a_frozen_test_artifact(self):
         dataset = _LabelLockedDataset()
         with tempfile.TemporaryDirectory() as directory:
             artifact = Path(directory) / "scores.npz"
-            np.savez_compressed(
-                artifact,
-                sample_id=np.asarray(["b", "a", "a"]),
-                token_index=np.asarray([1, 2, 1]),
-            )
+            np.savez_compressed(artifact, **_complete_evaluation_rows(dataset))
             evaluation = FrozenEvaluation.capture(artifact, expected_split="test")
             loaded_paths = []
 
@@ -162,13 +314,68 @@ class FrozenEvaluationTests(unittest.TestCase):
             rows, labels = evaluation.load_and_align(dataset, load_captured)
 
         self.assertEqual(loaded_paths, [artifact.resolve()])
-        np.testing.assert_array_equal(rows["sample_id"], ["b", "a", "a"])
-        np.testing.assert_array_equal(labels.token_label, [0, 1, 1])
-        np.testing.assert_array_equal(labels.response_positive, [0, 1, 1])
         np.testing.assert_array_equal(
-            labels.source_id, ["b", "source-a", "source-a"]
+            rows["sample_id"], ["b", "a", "a", "b", "a"]
         )
-        np.testing.assert_array_equal(labels.response_length, [2, 3, 3])
+        np.testing.assert_array_equal(labels.token_label, [0, 1, 0, 0, 1])
+        np.testing.assert_array_equal(labels.response_positive, [0, 1, 1, 0, 1])
+        np.testing.assert_array_equal(
+            labels.source_id, ["b", "source-a", "source-a", "b", "source-a"]
+        )
+        np.testing.assert_array_equal(
+            labels.response_length, [2, 3, 3, 2, 3]
+        )
+
+    def test_rejects_another_manifest_before_opening_labels(self):
+        scored_dataset = _LabelLockedDataset(manifest_marker="scored")
+        evaluated_dataset = _LabelLockedDataset(manifest_marker="different")
+        evaluated_dataset.samples["a"].source_id = "other-source"
+        evaluated_dataset.samples["a"]._labels = np.asarray([1, 1, 1])
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "scores.npz"
+            np.savez_compressed(
+                artifact, **_complete_evaluation_rows(scored_dataset)
+            )
+            with self.assertRaisesRegex(ValueError, "dataset manifest"):
+                FrozenEvaluation.capture(artifact).load_and_align(
+                    evaluated_dataset, _load_npz
+                )
+        self.assertFalse(evaluated_dataset.labels_called)
+
+    def test_rejects_source_mismatch_before_opening_labels(self):
+        dataset = _LabelLockedDataset()
+        rows = _complete_evaluation_rows(dataset)
+        rows["source_id"] = np.asarray(
+            ["nan", "wrong-source", "wrong-source", "nan", "wrong-source"]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "scores.npz"
+            np.savez_compressed(artifact, **rows)
+            with self.assertRaisesRegex(ValueError, "canonical source"):
+                FrozenEvaluation.capture(artifact).load_and_align(
+                    dataset, _load_npz
+                )
+        self.assertFalse(dataset.labels_called)
+
+    def test_rejects_response_length_mismatch_before_opening_labels(self):
+        dataset = _LabelLockedDataset()
+        rows = {
+            "dataset_manifest_sha256": np.asarray(
+                dataset_manifest_sha256(dataset)
+            ),
+            "sample_id": np.asarray(["a", "a"]),
+            "source_id": np.asarray(["source-a", "source-a"]),
+            "token_index": np.asarray([0, 1], dtype=np.int32),
+            "response_length": np.asarray([2, 2], dtype=np.int32),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "scores.npz"
+            np.savez_compressed(artifact, **rows)
+            with self.assertRaisesRegex(ValueError, "response length"):
+                FrozenEvaluation.capture(artifact).load_and_align(
+                    dataset, _load_npz
+                )
+        self.assertFalse(dataset.labels_called)
 
     def test_does_not_accept_rows_from_another_artifact(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -194,30 +401,35 @@ class FrozenEvaluationTests(unittest.TestCase):
                 )
             self.assertFalse(hasattr(evaluation, "align_labels"))
 
-    def test_rejects_a_token_index_outside_the_canonical_response(self):
+    def test_rejects_token_rows_outside_the_declared_response(self):
+        dataset = _LabelLockedDataset()
         with tempfile.TemporaryDirectory() as directory:
             artifact = Path(directory) / "scores.npz"
             np.savez_compressed(
                 artifact,
-                sample_id=np.asarray(["a"]),
-                token_index=np.asarray([3]),
+                dataset_manifest_sha256=np.asarray(
+                    dataset_manifest_sha256(dataset)
+                ),
+                sample_id=np.asarray(["a", "a", "a"]),
+                source_id=np.asarray(["source-a"] * 3),
+                token_index=np.asarray([0, 1, 3]),
+                response_length=np.asarray([3, 3, 3]),
             )
-            with self.assertRaisesRegex(ValueError, "outside canonical response"):
+            with self.assertRaisesRegex(ValueError, "full response"):
                 FrozenEvaluation.capture(artifact).load_and_align(
-                    _LabelLockedDataset(), _load_npz
+                    dataset, _load_npz
                 )
 
     def test_rejects_a_non_integral_external_token_index(self):
+        dataset = _LabelLockedDataset()
         with tempfile.TemporaryDirectory() as directory:
             artifact = Path(directory) / "scores.npz"
-            np.savez_compressed(
-                artifact,
-                sample_id=np.asarray(["a"]),
-                token_index=np.asarray([1.5]),
-            )
+            rows = _complete_evaluation_rows(dataset)
+            rows["token_index"] = rows["token_index"].astype(np.float32)
+            np.savez_compressed(artifact, **rows)
             with self.assertRaisesRegex(ValueError, "integer"):
                 FrozenEvaluation.capture(artifact).load_and_align(
-                    _LabelLockedDataset(), _load_npz
+                    dataset, _load_npz
                 )
 
     def test_rejects_a_digest_change_or_unexpected_dataset_split(self):
@@ -250,6 +462,16 @@ class FrozenEvaluationTests(unittest.TestCase):
 
 
 class FrozenFileTests(unittest.TestCase):
+    def test_shared_file_digest_matches_sha256(self):
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "artifact.bin"
+            artifact.write_bytes(b"abc")
+
+            self.assertEqual(
+                file_sha256(artifact),
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            )
+
     def test_frozen_file_rejects_a_changed_digest_or_different_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             artifact = Path(directory) / "scores.npz"

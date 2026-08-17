@@ -11,13 +11,17 @@ import torch
 from sklearn.metrics import average_precision_score, roc_auc_score
 from tqdm.auto import tqdm
 
-from experiment_protocol import FrozenEvaluation, HeldOutSourceAudit
+from experiment_protocol import (
+    FrozenEvaluation,
+    HeldOutSourceAudit,
+    dataset_manifest_sha256,
+    file_sha256,
+)
 
 from .artifacts import (
     EVALUATION_SCHEMA,
     REFERENCE_SCHEMA,
     SCORE_SCHEMA,
-    file_sha256,
     load_reference,
     load_score_artifact,
 )
@@ -134,6 +138,7 @@ def _score_samples(
             "sample_id",
             "source_id",
             "token_index",
+            "response_length",
             "task_type",
             "data_source",
             "generator_model",
@@ -162,6 +167,7 @@ def _score_samples(
                 rows["sample_id"].extend([str(sample.sample_id)] * count)
                 rows["source_id"].extend([_metadata_text(sample.source_id)] * count)
                 rows["token_index"].extend(range(count))
+                rows["response_length"].extend([count] * count)
                 rows["task_type"].extend([_metadata_text(sample.task_type)] * count)
                 rows["data_source"].extend([_metadata_text(sample.data_source)] * count)
                 rows["generator_model"].extend(
@@ -183,6 +189,7 @@ def _score_samples(
         "sample_id": np.asarray(rows["sample_id"], dtype=str),
         "source_id": np.asarray(rows["source_id"], dtype=str),
         "token_index": np.asarray(rows["token_index"], dtype=np.int32),
+        "response_length": np.asarray(rows["response_length"], dtype=np.int32),
         "task_type": np.asarray(rows["task_type"], dtype=str),
         "data_source": np.asarray(rows["data_source"], dtype=str),
         "generator_model": np.asarray(rows["generator_model"], dtype=str),
@@ -370,8 +377,10 @@ def score_cmrp(dataset, reference_path, output_path, *, limit=None):
     source_audit = HeldOutSourceAudit(
         dataset,
         selected_sample_ids=sample_ids,
-        fit_source_ids=reference["fit_group_id"].tolist(),
-        calibration_source_ids=reference["calibration_group_id"].tolist(),
+        reserved_source_ids=(
+            reference["fit_group_id"].tolist()
+            + reference["calibration_group_id"].tolist()
+        ),
         require_complete_split=limit is None,
     )
     rows, _ = _score_samples(
@@ -394,8 +403,11 @@ def score_cmrp(dataset, reference_path, output_path, *, limit=None):
         schema=np.asarray(SCORE_SCHEMA),
         reference_sha256=np.asarray(file_sha256(reference_path)),
         model_sha256=np.asarray(file_sha256(model_path)),
-        fit_group_id=np.asarray(audit.fit_source_ids, dtype=str),
-        calibration_group_id=np.asarray(audit.calibration_source_ids, dtype=str),
+        dataset_manifest_sha256=np.asarray(dataset_manifest_sha256(dataset)),
+        fit_group_id=np.asarray(reference["fit_group_id"], dtype=str),
+        calibration_group_id=np.asarray(
+            reference["calibration_group_id"], dtype=str
+        ),
         test_group_id=np.asarray(audit.test_source_ids, dtype=str),
         test_sample_id=np.asarray(audit.test_sample_ids, dtype=str),
         audit_scope=np.asarray(audit.test_scope),

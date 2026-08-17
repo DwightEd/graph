@@ -198,6 +198,7 @@ Score files store:
 - calibrated primary `score`;
 - all raw diagnostic score arrays;
 - reference/model digests;
+- the on-disk test dataset-manifest digest and per-row `response_length`;
 - the frozen source audit: `fit_group_id`, `calibration_group_id`,
   `test_group_id`, `test_sample_id`, and `audit_scope`;
 - no hallucination labels.
@@ -232,11 +233,14 @@ Strict loaders fail on schema, dimensional, digest, or finite-value mismatch.
 
 1. capture the score artifact path and SHA-256;
 2. load the artifact only through that captured path;
-3. reverify the digest and expected test split;
-4. open the evaluation label store only now and align by
+3. reverify the artifact digest, exact dataset-manifest digest, and expected
+   test split;
+4. verify canonical source, attention-derived response length, and complete
+   `0..R-1` token coverage for every scored response;
+5. open the evaluation label store only now and align by
    `(sample_id, token_index)`;
-5. report AUROC/AUPRC for the primary and diagnostics;
-6. write `evaluation.json`.
+6. report AUROC/AUPRC for the primary and diagnostics;
+7. write `evaluation.json`.
 
 The score artifact follows the generic `score*` convention so it can be used by
 `experiments/conditioned_benchmark/` without a method-specific evaluator.

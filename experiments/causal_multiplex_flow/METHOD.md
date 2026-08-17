@@ -31,8 +31,9 @@ The repository currently contains evidence that the response-to-response (RR)
 causal attention prefix carries a useful unsupervised signal.  The strongest
 historical RR spectral result is the reconstruction energy outside a dominant
 cross-layer/head subspace.  This suggests that attention organization matters,
-but the current triangular-Laplacian representation is still close to a
-source-usage summary and does not preserve complete source-target paths.
+but the current artificial age-normalized triangular attention coordinates
+are still close to a source-usage summary and do not preserve complete
+source-target paths.
 
 The previous causal-topology baseline also showed that simply appending a menu
 of one-hop/two-hop statistics and applying a one-class detector is not enough to
@@ -432,11 +433,14 @@ frozen score artifact
     -> AUROC/AUPRC and conditioned benchmark labels opened here only
 ```
 
-The test score artifact contains `sample_id`, `token_index`, metadata, frozen
-fit/calibration/test source-group audit fields, and `score*` fields so that
+The test score artifact contains `sample_id`, `token_index`, `response_length`,
+metadata, the on-disk dataset-manifest SHA-256, frozen fit/calibration/test
+source-group audit fields, and `score*` fields so that
 `experiments/conditioned_benchmark/` can align CMRP with RR spectral and other
 frozen methods on identical token rows. Evaluation rechecks that artifact's
-digest and only accepts the canonical `test` split before labels unlock.
+digest and only accepts the exact recorded dataset manifest, canonical source,
+attention-derived response length, complete `0..R-1` token rows, and canonical
+`test` split before labels unlock.
 
 Primary comparisons:
 
