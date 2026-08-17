@@ -123,26 +123,10 @@ class StrictArtifactTests(unittest.TestCase):
                 )
 
             np.savez_compressed(path, **_spectral_v2_artifact())
-            artifact = load_score_artifact(
-                ArtifactSpec("spectral", str(path)), FrozenFile.capture(path)
-            )
-
-        self.assertEqual(set(artifact.methods), {"spectral.primary"})
-        self.assertEqual(
-            artifact.methods["spectral.primary"].source_field,
-            "score_rr_residual",
-        )
-        self.assertEqual(artifact.dataset_manifest_sha256, "b" * 64)
-        self.assertEqual(
-            set(artifact.evaluation_rows()),
-            {
-                "dataset_manifest_sha256",
-                "sample_id",
-                "source_id",
-                "token_index",
-                "response_length",
-            },
-        )
+            with self.assertRaises(FileNotFoundError):
+                load_score_artifact(
+                    ArtifactSpec("spectral", str(path)), FrozenFile.capture(path)
+                )
 
     def test_rr_requires_owner_validity_and_an_explicit_features_z_direction(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -165,12 +149,8 @@ class StrictArtifactTests(unittest.TestCase):
                     load_score_artifact(spec, FrozenFile.capture(path))
 
             np.savez_compressed(path, **_topology_v2_artifact(root))
-            artifact = load_score_artifact(spec, FrozenFile.capture(path))
-
-        method = artifact.methods["topology.grounding"]
-        self.assertEqual(method.protocol, "label_free_feature_fixed_direction")
-        self.assertEqual(method.source_direction, "lower")
-        np.testing.assert_array_equal(method.values, [-1.0, -3.0])
+            with self.assertRaises(FileNotFoundError):
+                load_score_artifact(spec, FrozenFile.capture(path))
 
     def test_legacy_and_unversioned_artifacts_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

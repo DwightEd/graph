@@ -7,12 +7,12 @@ import json
 
 from research_dataset import open_research_dataset
 
+from .evaluation import evaluate_topology_artifact
 from .experiment import (
     TopologyAuditConfig,
     fit_topology_reference,
     score_topology_dataset,
 )
-from .evaluation import evaluate_topology_artifact
 from .features import TopologyDynamicsConfig
 
 
@@ -87,7 +87,9 @@ def _topology_config(args):
 def main(argv=None):
     args = parse_args(argv)
     if args.command == "fit":
-        dataset = open_research_dataset(args.train_split, device=args.device)
+        dataset = open_research_dataset(
+            args.train_split, device=args.device, verify_hashes=True
+        )
         result = fit_topology_reference(
             dataset,
             args.spectral_reference,
@@ -104,7 +106,9 @@ def main(argv=None):
             limit=args.limit,
         )
     elif args.command == "score":
-        dataset = open_research_dataset(args.split_root, device=args.device)
+        dataset = open_research_dataset(
+            args.split_root, device=args.device, verify_hashes=True
+        )
         result = score_topology_dataset(
             dataset,
             args.spectral_reference,
@@ -116,6 +120,7 @@ def main(argv=None):
         dataset = open_research_dataset(
             args.split_root,
             device=args.device,
+            verify_hashes=True,
             retain_embedded_labels=True,
         )
         report = evaluate_topology_artifact(

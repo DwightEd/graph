@@ -8,15 +8,33 @@ from typing import Any
 
 import numpy as np
 
-from experiment_protocol import FrozenFile
+from experiment_protocol import FrozenFile, scalar_text, sha256_text
 from experiments.causal_multiplex_flow.artifacts import (
     load_score_artifact as load_cmrp_score,
+)
+from experiments.causal_multiplex_flow.artifacts import (
+    score_temporal_scope as cmrp_temporal_scope,
+)
+from experiments.causal_multiplex_flow.artifacts import (
+    verify_score_provenance as verify_cmrp_score_provenance,
 )
 from experiments.rr_topology_dynamics.artifacts import (
     load_topology_artifact,
 )
+from experiments.rr_topology_dynamics.artifacts import (
+    score_temporal_scope as topology_temporal_scope,
+)
+from experiments.rr_topology_dynamics.artifacts import (
+    verify_score_provenance as verify_topology_score_provenance,
+)
 from experiments.spectral_feasibility.artifacts import (
     load_score_artifact as load_spectral_score,
+)
+from experiments.spectral_feasibility.artifacts import (
+    score_temporal_scope as spectral_temporal_scope,
+)
+from experiments.spectral_feasibility.artifacts import (
+    verify_score_provenance as verify_spectral_score_provenance,
 )
 
 from .types import MethodScore, ScoreArtifact
@@ -49,21 +67,14 @@ class ArtifactSpec:
         )
 
 
-def _scalar_text(arrays, name: str) -> str:
-    if name not in arrays:
-        raise ValueError(f"artifact misses field {name!r}")
-    value = np.asarray(arrays[name])
-    if value.ndim != 0 or value.dtype.kind not in {"U", "S"}:
-        raise ValueError(f"artifact field {name!r} must be scalar text")
-    return str(value.item())
-
-
 def _schema(path: Path) -> str:
     with np.load(path, allow_pickle=False) as arrays:
-        return _scalar_text(arrays, "schema")
+        return scalar_text(arrays, "schema")
 
 
-def _primary_method(spec: ArtifactSpec, arrays, field: str) -> dict[str, MethodScore]:
+def _primary_method(
+    spec: ArtifactSpec, arrays, field: str, temporal_scope
+) -> dict[str, MethodScore]:
     if spec.column is not None or spec.direction is not None:
         raise ValueError(
             "column and direction are only valid for RR topology artifacts"
@@ -76,6 +87,7 @@ def _primary_method(spec: ArtifactSpec, arrays, field: str) -> dict[str, MethodS
             protocol="label_free_frozen_score",
             source_field=field,
             source_direction="higher",
+            temporal_scope=temporal_scope,
         )
     }
 
@@ -105,6 +117,7 @@ def _topology_methods(spec: ArtifactSpec, arrays) -> dict[str, MethodScore]:
             protocol="label_free_feature_fixed_direction",
             source_field="features_z",
             source_direction=spec.direction,
+            temporal_scope=topology_temporal_scope(spec.column),
         )
     }
 
@@ -116,12 +129,17 @@ def load_score_artifact(spec: ArtifactSpec, frozen: FrozenFile) -> ScoreArtifact
     schema = _schema(frozen.path)
     if schema == "cmrp-score-v2":
         arrays = load_cmrp_score(frozen.path)
-        methods = _primary_method(spec, arrays, "score")
+        verify_cmrp_score_provenance(arrays)
+        methods = _primary_method(spec, arrays, "score", cmrp_temporal_scope())
     elif schema == "rr-spectral-score-v2":
         arrays = load_spectral_score(frozen.path)
-        methods = _primary_method(spec, arrays, "score_rr_residual")
+        verify_spectral_score_provenance(arrays)
+        methods = _primary_method(
+            spec, arrays, "score_rr_residual", spectral_temporal_scope()
+        )
     elif schema == "rr-topology-dynamics-features-v2":
         arrays = load_topology_artifact(frozen.path)
+        verify_topology_score_provenance(arrays)
         methods = _topology_methods(spec, arrays)
     else:
         raise ValueError(f"unsupported conditioned benchmark artifact schema: {schema}")
@@ -135,7 +153,8 @@ def load_score_artifact(spec: ArtifactSpec, frozen: FrozenFile) -> ScoreArtifact
         source_id=np.asarray(arrays["source_id"]).copy(),
         token_index=np.asarray(arrays["token_index"]).copy(),
         response_length=np.asarray(arrays["response_length"]).copy(),
-        dataset_manifest_sha256=_scalar_text(arrays, "dataset_manifest_sha256"),
+        audit_scope=scalar_text(arrays, "audit_scope"),
+        dataset_manifest_sha256=sha256_text(arrays, "dataset_manifest_sha256"),
         methods=methods,
     )
     return artifact.validate()

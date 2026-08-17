@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import json
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -13,9 +13,8 @@ from tqdm.auto import tqdm
 
 from experiment_protocol import (
     FrozenEvaluation,
+    FrozenFile,
     HeldOutSourceAudit,
-    dataset_manifest_sha256,
-    file_sha256,
 )
 
 from .artifacts import (
@@ -24,6 +23,8 @@ from .artifacts import (
     SCORE_SCHEMA,
     load_reference,
     load_score_artifact,
+    score_temporal_scope,
+    verify_score_provenance,
 )
 from .calibration import (
     empirical_upper_tail,
@@ -33,7 +34,6 @@ from .calibration import (
 )
 from .events import EventConfig, extract_causal_events
 from .model import CausalMultiplexRouter, ModelConfig
-
 
 MODEL_SCHEMA = "cmrp-model-v1"
 
@@ -101,15 +101,20 @@ def _save_model(
     torch.save(payload, path)
 
 
-def _load_model(reference_path, *, device):
-    reference_path = Path(reference_path)
-    reference = load_reference(reference_path)
-    model_path = reference_path.parent / str(np.asarray(reference["model_file"]).item())
+def _load_model(reference_file: FrozenFile, *, device):
+    reference_file.verify(reference_file.path)
+    reference = load_reference(reference_file.path)
+    reference_file.verify(reference_file.path)
+    model_path = reference_file.path.parent / str(
+        np.asarray(reference["model_file"]).item()
+    )
     if not model_path.is_file():
         raise FileNotFoundError(model_path)
-    if file_sha256(model_path) != str(np.asarray(reference["model_sha256"]).item()):
+    model_file = FrozenFile.capture(model_path)
+    if model_file.sha256 != str(np.asarray(reference["model_sha256"]).item()):
         raise ValueError("CMRP model digest differs from the reference")
-    payload = torch.load(model_path, map_location=device, weights_only=False)
+    payload = torch.load(model_file.path, map_location=device, weights_only=False)
+    model_file.verify(model_file.path)
     if payload.get("schema") != MODEL_SCHEMA:
         raise ValueError("unsupported CMRP model schema")
     model = CausalMultiplexRouter(
@@ -120,7 +125,7 @@ def _load_model(reference_path, *, device):
     model.load_state_dict(payload["state_dict"])
     model.eval()
     event_config = EventConfig(**payload["event_config"])
-    return model, event_config, reference, model_path
+    return model, event_config, reference, model_file
 
 
 def _score_samples(
@@ -227,6 +232,7 @@ def fit_cmrp(
     train_config.validate()
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    train_manifest = FrozenFile.capture(Path(dataset.root) / "manifest.json")
 
     torch.manual_seed(train_config.seed)
     if torch.cuda.is_available():
@@ -291,6 +297,7 @@ def fit_cmrp(
         event_config=event_config,
         train_config=train_config,
     )
+    model_file = FrozenFile.capture(model_path)
     model.eval()
     calibration_rows, calibration_edge_gaps = _score_samples(
         model,
@@ -306,12 +313,15 @@ def fit_cmrp(
         calibration_edge_gaps,
         selected_edge_count=int(calibration_rows["selected_rr_edges"].sum()),
     )
+    train_manifest.verify(train_manifest.path)
+    model_file.verify(model_file.path)
     reference_path = output_dir / "reference.npz"
     np.savez_compressed(
         reference_path,
         schema=np.asarray(REFERENCE_SCHEMA),
         model_file=np.asarray(model_path.name),
-        model_sha256=np.asarray(file_sha256(model_path)),
+        model_sha256=np.asarray(model_file.sha256),
+        train_dataset_manifest_sha256=np.asarray(train_manifest.sha256),
         num_layers=np.asarray(geometry[0], dtype=np.int16),
         num_heads=np.asarray(geometry[1], dtype=np.int16),
         event_config_json=np.asarray(_json(asdict(event_config))),
@@ -356,7 +366,7 @@ def fit_cmrp(
         "labels_read": False,
         "fit_samples": len(split["fit_sample_ids"]),
         "calibration_samples": len(split["calibration_sample_ids"]),
-        "calibration_tokens": int(len(calibration_raw)),
+        "calibration_tokens": len(calibration_raw),
         "epoch_loss": epoch_losses,
         "topology_gate": gate,
     }
@@ -365,9 +375,11 @@ def fit_cmrp(
 def score_cmrp(dataset, reference_path, output_path, *, limit=None):
     """Freeze calibrated CMRP test scores without opening token labels."""
     device = getattr(dataset, "device", "cpu")
-    model, event_config, reference, model_path = _load_model(
-        reference_path, device=device
+    reference_file = FrozenFile.capture(reference_path)
+    model, event_config, reference, model_file = _load_model(
+        reference_file, device=device
     )
+    dataset_manifest = FrozenFile.capture(Path(dataset.root) / "manifest.json")
     if (
         int(dataset.manifest["num_layers"]) != model.num_layers
         or int(dataset.manifest["num_heads"]) != model.num_heads
@@ -396,14 +408,19 @@ def score_cmrp(dataset, reference_path, output_path, *, limit=None):
         reference["calibration_raw_route_surprise"],
         rows["raw_route_surprise"],
     ).astype(np.float32)
+    reference_file.verify(reference_file.path)
+    model_file.verify(model_file.path)
+    dataset_manifest.verify(dataset_manifest.path)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         output_path,
         schema=np.asarray(SCORE_SCHEMA),
-        reference_sha256=np.asarray(file_sha256(reference_path)),
-        model_sha256=np.asarray(file_sha256(model_path)),
-        dataset_manifest_sha256=np.asarray(dataset_manifest_sha256(dataset)),
+        reference_path=np.asarray(str(reference_file.path)),
+        reference_sha256=np.asarray(reference_file.sha256),
+        model_path=np.asarray(str(model_file.path)),
+        model_sha256=np.asarray(model_file.sha256),
+        dataset_manifest_sha256=np.asarray(dataset_manifest.sha256),
         fit_group_id=np.asarray(reference["fit_group_id"], dtype=str),
         calibration_group_id=np.asarray(
             reference["calibration_group_id"], dtype=str
@@ -419,7 +436,7 @@ def score_cmrp(dataset, reference_path, output_path, *, limit=None):
         "output": str(output_path),
         "labels_read": False,
         "samples": len(sample_ids),
-        "tokens": int(len(score)),
+        "tokens": len(score),
         "primary_detector": "calibrated_causal_route_surprise",
     }
 
@@ -434,7 +451,7 @@ def _binary_metrics(labels, values):
         return None
     prevalence = float(labels.mean())
     return {
-        "tokens": int(len(labels)),
+        "tokens": len(labels),
         "positive_tokens": int(labels.sum()),
         "prevalence": prevalence,
         "auprc_random_baseline": prevalence,
@@ -448,7 +465,9 @@ def _binary_metrics(labels, values):
 def evaluate_cmrp(dataset, score_path, output_path):
     """Open labels only after the CMRP score artifact is frozen."""
     evaluation = FrozenEvaluation.capture(score_path, expected_split="test")
-    artifact, aligned = evaluation.load_and_align(dataset, load_score_artifact)
+    artifact = load_score_artifact(evaluation.artifact.path)
+    verify_score_provenance(artifact)
+    aligned = evaluation.align_loaded(dataset, artifact)
     labels = aligned.token_label
     components = {
         "calibrated_causal_route_surprise": artifact["score"],
@@ -472,6 +491,7 @@ def evaluate_cmrp(dataset, score_path, output_path):
         "reference_sha256": str(np.asarray(artifact["reference_sha256"]).item()),
         "model_sha256": str(np.asarray(artifact["model_sha256"]).item()),
         "score_artifact": str(Path(score_path)),
+        **score_temporal_scope().as_dict(),
     }
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)

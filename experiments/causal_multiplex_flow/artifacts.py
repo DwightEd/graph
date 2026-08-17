@@ -6,31 +6,37 @@ from pathlib import Path
 
 import numpy as np
 
-from experiment_protocol import validate_complete_token_rows, validate_source_audit
-
+from experiment_protocol import (
+    FrozenFile,
+    TemporalScope,
+    scalar_text,
+    sha256_text,
+    validate_complete_token_rows,
+    validate_source_audit,
+)
 
 REFERENCE_SCHEMA = "cmrp-reference-v2"
 SCORE_SCHEMA = "cmrp-score-v2"
 EVALUATION_SCHEMA = "cmrp-evaluation-v2"
 
 
-def _scalar_text(arrays, name: str) -> str:
-    value = np.asarray(arrays[name])
-    if value.ndim != 0:
-        raise ValueError(f"artifact field {name} must be scalar text")
-    return str(value.item())
+def score_temporal_scope() -> TemporalScope:
+    """CMRP scores use only the current causal response prefix."""
+
+    return TemporalScope(online_causal_score=True)
 
 
 def load_reference(path):
     path = Path(path)
     with np.load(path, allow_pickle=False) as arrays:
-        if _scalar_text(arrays, "schema") != REFERENCE_SCHEMA:
+        if scalar_text(arrays, "schema") != REFERENCE_SCHEMA:
             raise ValueError("unsupported CMRP reference schema")
         reference = {name: arrays[name].copy() for name in arrays.files}
     required = {
         "schema",
         "model_file",
         "model_sha256",
+        "train_dataset_manifest_sha256",
         "num_layers",
         "num_heads",
         "event_config_json",
@@ -50,9 +56,8 @@ def load_reference(path):
     missing = required.difference(reference)
     if missing:
         raise ValueError(f"CMRP reference misses fields: {sorted(missing)}")
-    model_sha = _scalar_text(reference, "model_sha256")
-    if len(model_sha) != 64:
-        raise ValueError("CMRP reference has an invalid model digest")
+    sha256_text(reference, "model_sha256")
+    sha256_text(reference, "train_dataset_manifest_sha256")
     if int(reference["num_layers"]) < 1 or int(reference["num_heads"]) < 1:
         raise ValueError("CMRP reference has invalid attention geometry")
     fit_groups = set(map(str, reference["fit_group_id"].tolist()))
@@ -97,7 +102,7 @@ def load_reference(path):
 def load_score_artifact(path):
     path = Path(path)
     with np.load(path, allow_pickle=False) as arrays:
-        if _scalar_text(arrays, "schema") != SCORE_SCHEMA:
+        if scalar_text(arrays, "schema") != SCORE_SCHEMA:
             raise ValueError("unsupported CMRP score schema")
         artifact = {name: arrays[name].copy() for name in arrays.files}
     # Only ``score`` is exposed to the automatic conditioned-benchmark adapter.
@@ -122,7 +127,9 @@ def load_score_artifact(path):
     }
     required = row_fields | {
         "schema",
+        "reference_path",
         "reference_sha256",
+        "model_path",
         "model_sha256",
         "dataset_manifest_sha256",
         "fit_group_id",
@@ -152,8 +159,12 @@ def load_score_artifact(path):
         "model_sha256",
         "dataset_manifest_sha256",
     ):
-        if len(_scalar_text(artifact, digest_name)) != 64:
-            raise ValueError(f"CMRP score artifact has invalid {digest_name}")
+        sha256_text(artifact, digest_name)
+    for path_name in ("reference_path", "model_path"):
+        if not scalar_text(artifact, path_name):
+            raise ValueError(
+                f"CMRP score artifact field {path_name} must be scalar non-empty text"
+            )
     validate_source_audit(
         reserved_source_ids=np.concatenate(
             (artifact["fit_group_id"], artifact["calibration_group_id"])
@@ -162,7 +173,7 @@ def load_score_artifact(path):
         test_sample_ids=artifact["test_sample_id"],
         row_sample_ids=artifact["sample_id"],
         row_source_ids=artifact["source_id"],
-        audit_scope=_scalar_text(artifact, "audit_scope"),
+        audit_scope=scalar_text(artifact, "audit_scope"),
     )
     validate_complete_token_rows(
         artifact["sample_id"],
@@ -171,3 +182,35 @@ def load_score_artifact(path):
         artifact["response_length"],
     )
     return artifact
+
+
+def verify_score_provenance(artifact):
+    """Verify the exact CMRP reference, model, and held-out group binding."""
+
+    reference_file = FrozenFile.capture(scalar_text(artifact, "reference_path"))
+    if reference_file.sha256 != sha256_text(artifact, "reference_sha256"):
+        raise ValueError("CMRP score reference digest differs from its artifact")
+    reference = load_reference(reference_file.path)
+    reference_file.verify(reference_file.path)
+
+    if not np.array_equal(
+        np.asarray(artifact["fit_group_id"], dtype=str),
+        np.asarray(reference["fit_group_id"], dtype=str),
+    ) or not np.array_equal(
+        np.asarray(artifact["calibration_group_id"], dtype=str),
+        np.asarray(reference["calibration_group_id"], dtype=str),
+    ):
+        raise ValueError("CMRP score source groups differ from its reference")
+
+    model_file = FrozenFile.capture(scalar_text(artifact, "model_path"))
+    expected_model_path = (reference_file.path.parent / scalar_text(reference, "model_file")).resolve()
+    if model_file.path != expected_model_path:
+        raise ValueError("CMRP score model identity differs from its reference")
+    expected_model_sha256 = sha256_text(reference, "model_sha256")
+    if (
+        model_file.sha256 != sha256_text(artifact, "model_sha256")
+        or model_file.sha256 != expected_model_sha256
+    ):
+        raise ValueError("CMRP score model digest differs from its reference")
+    model_file.verify(model_file.path)
+    return reference

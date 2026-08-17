@@ -61,7 +61,7 @@ def main(argv=None):
         dataset = open_research_dataset(
             args.train_split,
             device=args.device,
-            verify_hashes=False,
+            verify_hashes=True,
             retain_embedded_labels=False,
         )
         result = fit_cmrp(
@@ -96,7 +96,7 @@ def main(argv=None):
         dataset = open_research_dataset(
             args.split_root,
             device=args.device,
-            verify_hashes=False,
+            verify_hashes=True,
             retain_embedded_labels=False,
         )
         result = score_cmrp(
@@ -109,7 +109,7 @@ def main(argv=None):
         dataset = open_research_dataset(
             args.split_root,
             device=args.device,
-            verify_hashes=False,
+            verify_hashes=True,
             retain_embedded_labels=True,
         )
         report = evaluate_cmrp(dataset, args.scores, args.output)

@@ -10,15 +10,14 @@ import numpy as np
 from scipy.stats import spearmanr
 from sklearn.metrics import average_precision_score, roc_auc_score
 
-from experiment_protocol import FrozenEvaluation, FrozenFile
+from experiment_protocol import FrozenEvaluation
 
 from .artifacts import (
     EVALUATION_SCHEMA,
     load_topology_artifact,
-    load_topology_reference,
+    score_temporal_scope,
+    verify_score_provenance,
 )
-from .features import load_rr_reference
-
 
 CONVERGENCE_FEATURES = (
     "route_effective_rank",
@@ -82,7 +81,7 @@ def _binary_metrics(y, score):
     normal_mad = 1.4826 * float(np.median(np.abs(normal - normal_median)))
     robust_effect = (positive_median - normal_median) / max(normal_mad, 1e-8)
     return {
-        "tokens": int(len(y)),
+        "tokens": len(y),
         "positive_tokens": int(y.sum()),
         "prevalence": float(y.mean()),
         "auroc_higher": auc,
@@ -106,7 +105,7 @@ def _bootstrap_mean_interval(values, *, replicates: int, seed: int):
     values = values[np.isfinite(values)]
     if len(values) == 0:
         return None
-    result = {"groups": int(len(values)), "mean": float(values.mean())}
+    result = {"groups": len(values), "mean": float(values.mean())}
     if replicates < 1 or len(values) < 2:
         result.update({"ci_low": None, "ci_high": None})
         return result
@@ -299,34 +298,6 @@ def _write_csv(path: Path, rows):
         writer.writerows(rows)
 
 
-def _load_bound_references(artifact):
-    topology_file = FrozenFile.capture(
-        str(np.asarray(artifact["topology_reference_path"]).item())
-    )
-    if topology_file.sha256 != str(
-        np.asarray(artifact["topology_reference_sha256"]).item()
-    ):
-        raise ValueError("topology reference digest differs from score artifact")
-    reference = load_topology_reference(topology_file.path)
-    topology_file.verify(topology_file.path)
-
-    spectral_path = str(np.asarray(reference["spectral_reference_path"]).item())
-    spectral_sha256 = str(
-        np.asarray(reference["spectral_reference_sha256"]).item()
-    )
-    if str(np.asarray(artifact["spectral_reference_path"]).item()) != spectral_path:
-        raise ValueError("spectral reference identity differs from topology reference")
-    if str(np.asarray(artifact["spectral_reference_sha256"]).item()) != spectral_sha256:
-        raise ValueError("spectral reference digest differs from topology reference")
-
-    spectral_file = FrozenFile.capture(spectral_path)
-    if spectral_file.sha256 != spectral_sha256:
-        raise ValueError("spectral reference digest differs from topology reference")
-    load_rr_reference(spectral_file.path)
-    spectral_file.verify(spectral_file.path)
-    return reference
-
-
 def evaluate_topology_artifact(
     dataset,
     artifact_path,
@@ -341,7 +312,7 @@ def evaluate_topology_artifact(
 
     evaluation = FrozenEvaluation.capture(artifact_path, expected_split="test")
     artifact = load_topology_artifact(evaluation.artifact.path)
-    reference = _load_bound_references(artifact)
+    reference = verify_score_provenance(artifact)
     aligned = evaluation.align_loaded(dataset, artifact)
     y = aligned.token_label
     feature_names = np.asarray(artifact["feature_names"], dtype=str)
@@ -438,10 +409,10 @@ def evaluate_topology_artifact(
     )
 
     overall = {
-        "tokens": int(len(y)),
+        "tokens": len(y),
         "positive_tokens": int(y.sum()),
         "prevalence": float(y.mean()),
-        "samples": int(len(np.unique(artifact["sample_id"]))),
+        "samples": len(np.unique(artifact["sample_id"])),
     }
     report = {
         "schema": EVALUATION_SCHEMA,
@@ -462,10 +433,7 @@ def evaluate_topology_artifact(
             "labels_used_during": "posthoc_evaluation_only",
             "effect_representation": "train_standardized_features_z",
             "onset_definition": "first_0_to_1_transition_per_response",
-            "offline_future_features": [
-                "offline_route_distance_to_final",
-                "offline_source_distance_to_final",
-            ],
+            **score_temporal_scope().as_dict(),
             "confidence_available": False,
             "confidence_reason": (
                 "the canonical attention cache contains attention/metadata but no "

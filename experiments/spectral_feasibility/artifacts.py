@@ -6,19 +6,34 @@ from pathlib import Path
 
 import numpy as np
 
-from experiment_protocol import validate_complete_token_rows, validate_source_audit
+from experiment_protocol import (
+    FrozenFile,
+    TemporalScope,
+    scalar_text,
+    sha256_text,
+    validate_complete_token_rows,
+    validate_source_audit,
+)
 
 from .representations import rr_spectral_dimension
-
 
 REFERENCE_SCHEMA = "rr-spectral-reference-v2"
 SCORE_SCHEMA = "rr-spectral-score-v2"
 EVALUATION_SCHEMA = "rr-spectral-evaluation-v2"
 
 
+def score_temporal_scope() -> TemporalScope:
+    """Position normalization conditions spectral scores on final response length."""
+
+    return TemporalScope(
+        online_causal_score=False,
+        future_length_conditioned_fields=("relative_position", "position_bin"),
+    )
+
+
 def load_spectral_reference(path):
     with np.load(Path(path), allow_pickle=False) as arrays:
-        if str(np.asarray(arrays["schema"]).item()) != REFERENCE_SCHEMA:
+        if scalar_text(arrays, "schema") != REFERENCE_SCHEMA:
             raise ValueError(
                 "unsupported RR spectral reference; rerun the current fit command"
             )
@@ -49,12 +64,14 @@ def load_spectral_reference(path):
         "calibration_rr_latent",
         "calibration_rr_ppca",
         "calibration_rr_localized",
+        "train_dataset_manifest_sha256",
         "fit_group_id",
         "calibration_group_id",
     }
     missing = required.difference(reference)
     if missing:
         raise ValueError(f"RR spectral reference misses fields: {sorted(missing)}")
+    sha256_text(reference, "train_dataset_manifest_sha256")
 
     layers = int(reference["num_layers"])
     heads = int(reference["num_heads"])
@@ -121,11 +138,7 @@ def load_spectral_reference(path):
 
 def load_score_artifact(path):
     with np.load(Path(path), allow_pickle=False) as arrays:
-        if (
-            "schema" not in arrays
-            or np.asarray(arrays["schema"]).ndim != 0
-            or str(np.asarray(arrays["schema"]).item()) != SCORE_SCHEMA
-        ):
+        if scalar_text(arrays, "schema") != SCORE_SCHEMA:
             raise ValueError("unsupported RR spectral score artifact")
         artifact = {name: arrays[name].copy() for name in arrays.files}
 
@@ -229,19 +242,11 @@ def load_score_artifact(path):
     ):
         raise ValueError("RR primary score must exactly equal score_rr_residual")
 
-    reference_path = _scalar_artifact_text(artifact, "reference_path")
+    reference_path = scalar_text(artifact, "reference_path")
     if not reference_path:
         raise ValueError("RR score artifact has an empty reference path")
-    reference_sha256 = _scalar_artifact_text(artifact, "reference_sha256")
-    if len(reference_sha256) != 64 or any(
-        character not in "0123456789abcdef" for character in reference_sha256.lower()
-    ):
-        raise ValueError("RR score artifact has an invalid reference digest")
-    dataset_sha256 = _scalar_artifact_text(artifact, "dataset_manifest_sha256")
-    if len(dataset_sha256) != 64 or any(
-        character not in "0123456789abcdef" for character in dataset_sha256.lower()
-    ):
-        raise ValueError("RR score artifact has an invalid dataset manifest digest")
+    sha256_text(artifact, "reference_sha256")
+    sha256_text(artifact, "dataset_manifest_sha256")
     _validate_source_audit(artifact)
     validate_complete_token_rows(
         artifact["sample_id"],
@@ -250,13 +255,6 @@ def load_score_artifact(path):
         artifact["response_length"],
     )
     return artifact
-
-
-def _scalar_artifact_text(artifact, name: str) -> str:
-    value = np.asarray(artifact[name])
-    if value.ndim != 0 or value.dtype.kind not in {"U", "S"}:
-        raise ValueError(f"RR score artifact field {name} must be scalar text")
-    return str(value.item())
 
 
 def _source_group_values(artifact, name: str) -> tuple[str, ...]:
@@ -287,5 +285,24 @@ def _validate_source_audit(artifact) -> None:
         test_sample_ids=artifact["test_sample_id"],
         row_sample_ids=artifact["sample_id"],
         row_source_ids=artifact["source_id"],
-        audit_scope=_scalar_artifact_text(artifact, "audit_scope"),
+        audit_scope=scalar_text(artifact, "audit_scope"),
     )
+
+
+def verify_score_provenance(artifact):
+    """Verify the fitted spectral reference and its held-out group binding."""
+
+    reference_file = FrozenFile.capture(scalar_text(artifact, "reference_path"))
+    if reference_file.sha256 != sha256_text(artifact, "reference_sha256"):
+        raise ValueError("RR score reference digest differs from its artifact")
+    reference = load_spectral_reference(reference_file.path)
+    reference_file.verify(reference_file.path)
+    if not np.array_equal(
+        np.asarray(artifact["fit_group_id"], dtype=str),
+        np.asarray(reference["fit_group_id"], dtype=str),
+    ) or not np.array_equal(
+        np.asarray(artifact["calibration_group_id"], dtype=str),
+        np.asarray(reference["calibration_group_id"], dtype=str),
+    ):
+        raise ValueError("RR score source groups differ from its reference")
+    return reference

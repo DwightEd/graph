@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -13,21 +14,26 @@ from cache import (
     sha256,
     write_split_index,
 )
-from experiments.spectral_feasibility.artifacts import load_score_artifact
+from experiment_protocol import dataset_manifest_sha256
+from experiments.spectral_feasibility import experiment as spectral_experiment
+from experiments.spectral_feasibility.artifacts import (
+    load_score_artifact,
+    load_spectral_reference,
+)
 from experiments.spectral_feasibility.experiment import (
     _localized_channel_anomaly,
     evaluate_score_artifact,
     fit_spectral_reference,
     score_spectral_dataset,
 )
-from experiments.spectral_feasibility.subspace import (
-    empirical_upper_tail,
-    project_subspace,
-)
 from experiments.spectral_feasibility.representations import (
     SpectralConfig,
     prefix_causal_attention_spectrum,
     rr_spectral_dimension,
+)
+from experiments.spectral_feasibility.subspace import (
+    empirical_upper_tail,
+    project_subspace,
 )
 from research_dataset import ResearchDataset
 
@@ -279,6 +285,48 @@ class SpectralFeasibilityTests(unittest.TestCase):
             float(projected.ppca_energy[0]),
         )
 
+    def test_score_and_evaluation_reject_a_reference_changed_after_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            train = _write_dataset(
+                root / "train", [0.8, 1.0, 1.2, 1.1], source_prefix="train"
+            )
+            test = _write_dataset(
+                root / "test", [1.0], positive_sample=0, source_prefix="test"
+            )
+            reference_path = root / "reference.npz"
+            score_path = root / "scores.npz"
+            config = SpectralConfig(
+                top_k=2,
+                position_bins=2,
+                pca_dim=2,
+                reference_per_sample=3,
+                trim_fraction=0.9,
+                channel_tail_fraction=0.5,
+                attribution_topk=2,
+            )
+            fit_spectral_reference(train, reference_path, config=config)
+            original_reference = reference_path.read_bytes()
+            original_spectrum = spectral_experiment.prefix_causal_attention_spectrum
+
+            def score_then_mutate(*args, **kwargs):
+                result = original_spectrum(*args, **kwargs)
+                reference_path.write_bytes(reference_path.read_bytes() + b"changed")
+                return result
+
+            with patch.object(
+                spectral_experiment,
+                "prefix_causal_attention_spectrum",
+                side_effect=score_then_mutate,
+            ), self.assertRaisesRegex(ValueError, "frozen file digest"):
+                score_spectral_dataset(test, reference_path, score_path)
+
+            reference_path.write_bytes(original_reference)
+            score_spectral_dataset(test, reference_path, score_path)
+            reference_path.write_bytes(original_reference + b"changed")
+            with self.assertRaisesRegex(ValueError, "reference digest"):
+                evaluate_score_artifact(test, score_path, root / "report.json")
+
     def test_label_free_rr_fit_score_then_posthoc_evaluation(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -326,6 +374,10 @@ class SpectralFeasibilityTests(unittest.TestCase):
                 self.assertIn("channel_center", arrays.files)
                 self.assertIn("calibration_rr_residual", arrays.files)
                 self.assertIn("calibration_rr_ppca", arrays.files)
+                self.assertEqual(
+                    str(arrays["train_dataset_manifest_sha256"].item()),
+                    dataset_manifest_sha256(train),
+                )
                 self.assertTrue(
                     set(arrays["fit_group_id"].tolist()).isdisjoint(
                         arrays["calibration_group_id"].tolist()
@@ -383,6 +435,23 @@ class SpectralFeasibilityTests(unittest.TestCase):
                 self.assertEqual(str(arrays["audit_scope"].item()), "selected_samples")
                 self.assertEqual(arrays["test_sample_id"].tolist(), ["r0"])
 
+            with np.load(reference_path, allow_pickle=False) as arrays:
+                reference_artifact = {name: arrays[name].copy() for name in arrays.files}
+            missing_manifest = dict(reference_artifact)
+            missing_manifest.pop("train_dataset_manifest_sha256")
+            missing_manifest_path = root / "missing_reference.npz"
+            np.savez_compressed(missing_manifest_path, **missing_manifest)
+            with self.assertRaisesRegex(ValueError, "misses fields"):
+                load_spectral_reference(missing_manifest_path)
+            malformed_manifest = dict(reference_artifact)
+            malformed_manifest["train_dataset_manifest_sha256"] = np.asarray(
+                "not-a-digest"
+            )
+            malformed_manifest_path = root / "malformed_reference.npz"
+            np.savez_compressed(malformed_manifest_path, **malformed_manifest)
+            with self.assertRaisesRegex(ValueError, "SHA-256"):
+                load_spectral_reference(malformed_manifest_path)
+
             test.manifest["split"] = "train"
             with self.assertRaisesRegex(ValueError, "split"):
                 evaluate_score_artifact(test, score_path, report_path)
@@ -394,6 +463,11 @@ class SpectralFeasibilityTests(unittest.TestCase):
             self.assertEqual(report["metrics"]["positive_tokens"], 1)
             self.assertEqual(
                 report["primary_detector"], "rr_subspace_residual_tail"
+            )
+            self.assertFalse(report["online_causal_score"])
+            self.assertEqual(
+                report["future_length_conditioned_fields"],
+                ["relative_position", "position_bin"],
             )
             self.assertIn("rr_subspace_residual_tail", report["components"])
             self.assertIn("rr_in_subspace_tail", report["components"])

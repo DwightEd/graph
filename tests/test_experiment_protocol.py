@@ -10,9 +10,12 @@ from experiment_protocol import (
     FrozenEvaluation,
     FrozenFile,
     HeldOutSourceAudit,
+    TemporalScope,
     dataset_manifest_sha256,
     file_sha256,
     partition_source_groups,
+    scalar_text,
+    sha256_text,
     validate_complete_token_rows,
     validate_source_audit,
 )
@@ -33,6 +36,10 @@ class _Sample:
     def attention(self):
         self.dataset.opened.add(self.sample_id)
         self.dataset.attention_calls[self.sample_id] += 1
+        if self.dataset.after_attention is not None:
+            callback = self.dataset.after_attention
+            self.dataset.after_attention = None
+            callback()
         return SimpleNamespace(num_response_tokens=len(self._labels))
 
     def release_attention(self):
@@ -55,6 +62,7 @@ class _LabelLockedDataset:
         )
         self.opened = set()
         self.attention_calls = {sample_id: 0 for sample_id in self.sample_ids}
+        self.after_attention = None
         self.labels_called = False
         self.samples = {
             "a": _Sample(self, "a", "source-a", [0, 1, 1]),
@@ -65,12 +73,15 @@ class _LabelLockedDataset:
         return self.samples[str(sample_id)]
 
     def labels(self):
+        raise AssertionError("evaluation must use prepare_evaluation_labels")
+
+    def prepare_evaluation_labels(self):
         self.labels_called = True
-        if self.opened != set(self.sample_ids):
-            raise RuntimeError(
-                "formal labels become available only after every attention sample "
-                "has been processed"
-            )
+        for sample_id in self.sample_ids:
+            if sample_id not in self.opened:
+                sample = self[sample_id]
+                sample.attention()
+                sample.release_attention()
         return _Labels()
 
 
@@ -79,6 +90,7 @@ def _complete_evaluation_rows(dataset):
         "dataset_manifest_sha256": np.asarray(
             dataset_manifest_sha256(dataset)
         ),
+        "audit_scope": np.asarray("complete_split"),
         "sample_id": np.asarray(["b", "a", "a", "b", "a"]),
         "source_id": np.asarray(
             ["nan", "source-a", "source-a", "nan", "source-a"]
@@ -206,6 +218,27 @@ class FrozenSourceAuditTests(unittest.TestCase):
                 validate_source_audit(**(valid | change))
 
 
+class ArtifactScalarTests(unittest.TestCase):
+    def test_reads_strict_scalar_text_and_sha256_fields(self):
+        artifact = {
+            "schema": np.asarray("score-v2"),
+            "digest": np.asarray("A" * 64),
+        }
+
+        self.assertEqual(scalar_text(artifact, "schema"), "score-v2")
+        self.assertEqual(sha256_text(artifact, "digest"), "A" * 64)
+
+    def test_rejects_missing_nonscalar_or_nonhex_text_fields(self):
+        with self.assertRaisesRegex(ValueError, "missing"):
+            scalar_text({}, "schema")
+        with self.assertRaisesRegex(ValueError, "scalar text"):
+            scalar_text({"schema": np.asarray(["score-v2"])}, "schema")
+        with self.assertRaisesRegex(ValueError, "scalar text"):
+            scalar_text({"schema": np.asarray(1)}, "schema")
+        with self.assertRaisesRegex(ValueError, "SHA-256"):
+            sha256_text({"digest": np.asarray("g" * 64)}, "digest")
+
+
 class CompleteTokenRowsTests(unittest.TestCase):
     def test_validates_complete_per_response_rows(self):
         validate_complete_token_rows(
@@ -301,7 +334,129 @@ class SourceGroupPartitionTests(unittest.TestCase):
 
 
 class FrozenEvaluationTests(unittest.TestCase):
-    def test_align_all_validates_each_artifact_once_before_unlocking_labels(self):
+    def test_align_all_rejects_an_empty_artifact_set_before_opening_labels(self):
+        dataset = _LabelLockedDataset()
+
+        with self.assertRaisesRegex(ValueError, "at least one"):
+            FrozenEvaluation.align_all(dataset, [])
+
+        self.assertFalse(dataset.labels_called)
+        self.assertEqual(dataset.attention_calls, {"a": 0, "b": 0})
+
+    def test_align_all_rechecks_an_artifact_tampered_during_canonical_scan(self):
+        dataset = _LabelLockedDataset()
+        rows = _complete_evaluation_rows(dataset)
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "scores.npz"
+            np.savez_compressed(artifact, **rows)
+            evaluation = FrozenEvaluation.capture(artifact)
+            dataset.after_attention = lambda: artifact.write_bytes(b"tampered")
+
+            with self.assertRaisesRegex(ValueError, "frozen file digest"):
+                FrozenEvaluation.align_all(dataset, [(evaluation, rows)])
+
+        self.assertFalse(dataset.labels_called)
+        self.assertEqual(dataset.attention_calls, {"a": 1, "b": 1})
+
+    def test_align_all_rechecks_a_manifest_tampered_during_canonical_scan(self):
+        dataset = _LabelLockedDataset()
+        rows = _complete_evaluation_rows(dataset)
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "scores.npz"
+            np.savez_compressed(artifact, **rows)
+            evaluation = FrozenEvaluation.capture(artifact)
+            dataset.after_attention = lambda: (
+                dataset.root / "manifest.json"
+            ).write_text(
+                json.dumps({"split": "test", "marker": "tampered"}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "dataset manifest"):
+                FrozenEvaluation.align_all(dataset, [(evaluation, rows)])
+
+        self.assertFalse(dataset.labels_called)
+        self.assertEqual(dataset.attention_calls, {"a": 1, "b": 1})
+
+    def test_align_all_reads_each_canonical_sample_once_for_three_artifacts(self):
+        dataset = _LabelLockedDataset()
+        rows = _complete_evaluation_rows(dataset)
+        with tempfile.TemporaryDirectory() as directory:
+            loaded_artifacts = []
+            for index in range(3):
+                artifact = Path(directory) / f"scores-{index}.npz"
+                np.savez_compressed(artifact, **rows)
+                loaded_artifacts.append(
+                    (FrozenEvaluation.capture(artifact), rows)
+                )
+
+            labels = FrozenEvaluation.align_all(dataset, loaded_artifacts)
+
+        self.assertEqual(dataset.attention_calls, {"a": 1, "b": 1})
+        self.assertEqual(len(labels), 3)
+
+    def test_align_all_rejects_a_bad_third_binding_before_labels(self):
+        dataset = _LabelLockedDataset()
+        good_rows = _complete_evaluation_rows(dataset)
+        bad_rows = {name: np.asarray(value).copy() for name, value in good_rows.items()}
+        bad_rows["dataset_manifest_sha256"] = np.asarray("f" * 64)
+        with tempfile.TemporaryDirectory() as directory:
+            loaded_artifacts = []
+            for index, rows in enumerate((good_rows, good_rows, bad_rows)):
+                artifact = Path(directory) / f"scores-{index}.npz"
+                np.savez_compressed(artifact, **rows)
+                loaded_artifacts.append(
+                    (FrozenEvaluation.capture(artifact), rows)
+                )
+
+            with self.assertRaisesRegex(ValueError, "dataset manifest"):
+                FrozenEvaluation.align_all(dataset, loaded_artifacts)
+
+        self.assertFalse(dataset.labels_called)
+        self.assertEqual(dataset.attention_calls, {"a": 0, "b": 0})
+
+    def test_complete_split_rejects_partial_sample_rows_before_labels(self):
+        dataset = _LabelLockedDataset()
+        rows = {
+            "dataset_manifest_sha256": np.asarray(
+                dataset_manifest_sha256(dataset)
+            ),
+            "audit_scope": np.asarray("complete_split"),
+            "sample_id": np.asarray(["a", "a", "a"]),
+            "source_id": np.asarray(["source-a"] * 3),
+            "token_index": np.asarray([0, 1, 2], dtype=np.int32),
+            "response_length": np.asarray([3, 3, 3], dtype=np.int32),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "scores.npz"
+            np.savez_compressed(artifact, **rows)
+
+            with self.assertRaisesRegex(ValueError, "complete_split"):
+                FrozenEvaluation.capture(artifact).align_loaded(dataset, rows)
+
+        self.assertFalse(dataset.labels_called)
+
+    def test_selected_samples_allows_a_complete_response_subset(self):
+        dataset = _LabelLockedDataset()
+        rows = {
+            "dataset_manifest_sha256": np.asarray(
+                dataset_manifest_sha256(dataset)
+            ),
+            "audit_scope": np.asarray("selected_samples"),
+            "sample_id": np.asarray(["a", "a", "a"]),
+            "source_id": np.asarray(["source-a"] * 3),
+            "token_index": np.asarray([0, 1, 2], dtype=np.int32),
+            "response_length": np.asarray([3, 3, 3], dtype=np.int32),
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "scores.npz"
+            np.savez_compressed(artifact, **rows)
+
+            labels = FrozenEvaluation.capture(artifact).align_loaded(dataset, rows)
+
+        np.testing.assert_array_equal(labels.token_label, [0, 1, 1])
+
+    def test_align_all_scans_each_canonical_sample_once_before_unlocking_labels(self):
         dataset = _LabelLockedDataset()
         with tempfile.TemporaryDirectory() as directory:
             artifact = Path(directory) / "scores.npz"
@@ -423,6 +578,7 @@ class FrozenEvaluationTests(unittest.TestCase):
             "dataset_manifest_sha256": np.asarray(
                 dataset_manifest_sha256(dataset)
             ),
+            "audit_scope": np.asarray("selected_samples"),
             "sample_id": np.asarray(["a", "a"]),
             "source_id": np.asarray(["source-a", "source-a"]),
             "token_index": np.asarray([0, 1], dtype=np.int32),
@@ -470,6 +626,7 @@ class FrozenEvaluationTests(unittest.TestCase):
                 dataset_manifest_sha256=np.asarray(
                     dataset_manifest_sha256(dataset)
                 ),
+                audit_scope=np.asarray("selected_samples"),
                 sample_id=np.asarray(["a", "a", "a"]),
                 source_id=np.asarray(["source-a"] * 3),
                 token_index=np.asarray([0, 1, 3]),
@@ -547,6 +704,27 @@ class FrozenFileTests(unittest.TestCase):
             artifact.write_bytes(b"changed-score")
             with self.assertRaisesRegex(ValueError, "digest"):
                 frozen.verify(artifact)
+
+
+class TemporalScopeTests(unittest.TestCase):
+    def test_serializes_immutable_temporal_claims_for_reports(self):
+        scope = TemporalScope(
+            online_causal_score=False,
+            future_length_conditioned_fields=("relative_position", "position_bin"),
+            offline_future_features=("offline_route_distance_to_final",),
+        )
+
+        self.assertEqual(
+            scope.as_dict(),
+            {
+                "online_causal_score": False,
+                "future_length_conditioned_fields": [
+                    "relative_position",
+                    "position_bin",
+                ],
+                "offline_future_features": ["offline_route_distance_to_final"],
+            },
+        )
 
 
 if __name__ == "__main__":

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 
 from .types import BenchmarkFrame, EvaluatedArtifact, MethodScore
@@ -73,13 +75,10 @@ def build_benchmark_frame(
         for name, method in artifact.score.methods.items():
             if name in methods:
                 raise ValueError(f"duplicate method name: {name}")
-            methods[name] = MethodScore(
-                name=name,
+            methods[name] = replace(
+                method,
                 values=method.values[selected],
                 direction="higher",
-                protocol=method.protocol,
-                source_field=method.source_field,
-                source_direction=method.source_direction,
             )
 
     metadata = {

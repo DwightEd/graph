@@ -6,24 +6,35 @@ from pathlib import Path
 
 import numpy as np
 
-from experiment_protocol import validate_complete_token_rows, validate_source_audit
-
+from experiment_protocol import (
+    FrozenFile,
+    TemporalScope,
+    scalar_text,
+    sha256_text,
+    validate_complete_token_rows,
+    validate_source_audit,
+)
+from experiments.spectral_feasibility.artifacts import load_spectral_reference
 
 REFERENCE_SCHEMA = "rr-topology-dynamics-reference-v2"
 SCORE_SCHEMA = "rr-topology-dynamics-features-v2"
 EVALUATION_SCHEMA = "rr-topology-dynamics-evaluation-v2"
 
 
-def _scalar_text(artifact, name: str) -> str:
-    value = np.asarray(artifact[name])
-    if value.ndim != 0 or value.dtype.kind not in {"U", "S"}:
-        raise ValueError(f"RR topology field {name} must be scalar text")
-    return str(value.item())
+def score_temporal_scope(feature_column: str | None = None) -> TemporalScope:
+    """Describe one topology feature or the complete direct-audit artifact."""
 
-
-def _valid_digest(value: str) -> bool:
-    return len(value) == 64 and all(
-        character in "0123456789abcdef" for character in value.lower()
+    final_distance_features = (
+        "offline_route_distance_to_final",
+        "offline_source_distance_to_final",
+    )
+    offline = final_distance_features if feature_column is None else ()
+    if feature_column in final_distance_features:
+        offline = (feature_column,)
+    return TemporalScope(
+        online_causal_score=False,
+        future_length_conditioned_fields=("relative_position", "position_bin"),
+        offline_future_features=offline,
     )
 
 
@@ -51,9 +62,7 @@ def load_topology_reference(path):
 
     with np.load(Path(path), allow_pickle=False) as arrays:
         if (
-            "schema" not in arrays
-            or np.asarray(arrays["schema"]).ndim != 0
-            or str(np.asarray(arrays["schema"]).item()) != REFERENCE_SCHEMA
+            scalar_text(arrays, "schema") != REFERENCE_SCHEMA
         ):
             raise ValueError("unsupported RR topology-dynamics reference schema")
         reference = {name: arrays[name].copy() for name in arrays.files}
@@ -62,6 +71,7 @@ def load_topology_reference(path):
         "schema",
         "spectral_reference_path",
         "spectral_reference_sha256",
+        "train_dataset_manifest_sha256",
         "reference_source_id",
         "feature_names",
         "lag_bins",
@@ -97,11 +107,11 @@ def load_topology_reference(path):
     if missing:
         raise ValueError(f"RR topology reference misses fields: {sorted(missing)}")
 
-    spectral_path = Path(_scalar_text(reference, "spectral_reference_path"))
+    spectral_path = Path(scalar_text(reference, "spectral_reference_path"))
     if not spectral_path.is_absolute():
         raise ValueError("RR topology spectral reference path must be absolute")
-    if not _valid_digest(_scalar_text(reference, "spectral_reference_sha256")):
-        raise ValueError("RR topology reference has an invalid spectral digest")
+    sha256_text(reference, "spectral_reference_sha256")
+    sha256_text(reference, "train_dataset_manifest_sha256")
     _source_groups(reference, "reference_source_id")
 
     feature_names = np.asarray(reference["feature_names"])
@@ -181,9 +191,7 @@ def load_topology_artifact(path):
 
     with np.load(Path(path), allow_pickle=False) as arrays:
         if (
-            "schema" not in arrays
-            or np.asarray(arrays["schema"]).ndim != 0
-            or str(np.asarray(arrays["schema"]).item()) != SCORE_SCHEMA
+            scalar_text(arrays, "schema") != SCORE_SCHEMA
         ):
             raise ValueError("unsupported RR topology-dynamics feature schema")
         artifact = {name: arrays[name].copy() for name in arrays.files}
@@ -225,13 +233,11 @@ def load_topology_artifact(path):
         raise ValueError(f"RR topology artifact misses fields: {sorted(missing)}")
 
     for name in ("spectral_reference_path", "topology_reference_path"):
-        if not Path(_scalar_text(artifact, name)).is_absolute():
+        if not Path(scalar_text(artifact, name)).is_absolute():
             raise ValueError(f"RR topology artifact field {name} must be absolute")
     for name in ("spectral_reference_sha256", "topology_reference_sha256"):
-        if not _valid_digest(_scalar_text(artifact, name)):
-            raise ValueError(f"RR topology artifact field {name} is not a digest")
-    if not _valid_digest(_scalar_text(artifact, "dataset_manifest_sha256")):
-        raise ValueError("RR topology artifact dataset manifest is not a digest")
+        sha256_text(artifact, name)
+    sha256_text(artifact, "dataset_manifest_sha256")
 
     feature_names = np.asarray(artifact["feature_names"])
     if (
@@ -292,7 +298,7 @@ def load_topology_artifact(path):
         test_sample_ids=artifact["test_sample_id"],
         row_sample_ids=artifact["sample_id"],
         row_source_ids=artifact["source_id"],
-        audit_scope=_scalar_text(artifact, "audit_scope"),
+        audit_scope=scalar_text(artifact, "audit_scope"),
     )
     validate_complete_token_rows(
         artifact["sample_id"],
@@ -301,3 +307,44 @@ def load_topology_artifact(path):
         artifact["response_length"],
     )
     return artifact
+
+
+def verify_score_provenance(artifact):
+    """Verify the topology reference, bound spectral reference, and groups."""
+
+    topology_file = FrozenFile.capture(scalar_text(artifact, "topology_reference_path"))
+    if topology_file.sha256 != sha256_text(artifact, "topology_reference_sha256"):
+        raise ValueError("topology reference digest differs from score artifact")
+    topology_reference = load_topology_reference(topology_file.path)
+    topology_file.verify(topology_file.path)
+
+    if not np.array_equal(
+        np.asarray(artifact["reference_source_id"], dtype=str),
+        np.asarray(topology_reference["reference_source_id"], dtype=str),
+    ):
+        raise ValueError("topology score source groups differ from its reference")
+
+    spectral_path = scalar_text(topology_reference, "spectral_reference_path")
+    spectral_sha256 = sha256_text(topology_reference, "spectral_reference_sha256")
+    if scalar_text(artifact, "spectral_reference_path") != spectral_path:
+        raise ValueError("spectral reference identity differs from topology reference")
+    if sha256_text(artifact, "spectral_reference_sha256") != spectral_sha256:
+        raise ValueError("spectral reference digest differs from topology reference")
+    spectral_file = FrozenFile.capture(spectral_path)
+    if spectral_file.sha256 != spectral_sha256:
+        raise ValueError("spectral reference digest differs from topology reference")
+    spectral_reference = load_spectral_reference(spectral_file.path)
+    spectral_file.verify(spectral_file.path)
+    spectral_source_groups = {
+        str(group)
+        for name in ("fit_group_id", "calibration_group_id")
+        for group in spectral_reference[name].tolist()
+    }
+    topology_source_groups = set(
+        _source_groups(topology_reference, "reference_source_id")
+    )
+    if not spectral_source_groups.issubset(topology_source_groups):
+        raise ValueError(
+            "topology reference does not reserve all spectral source groups"
+        )
+    return topology_reference

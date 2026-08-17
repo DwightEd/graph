@@ -365,6 +365,7 @@ def _evaluate_and_write(
                 "protocol": method.protocol,
                 "source_field": method.source_field,
                 "source_direction": method.source_direction or "higher",
+                "temporal_scope": method.temporal_scope.as_dict(),
                 "metrics": metrics,
             }
         condition_reports.append(
@@ -394,8 +395,27 @@ def _evaluate_and_write(
                 "protocol": method.protocol,
                 "source_field": method.source_field,
                 "source_direction": method.source_direction or "higher",
+                "temporal_scope": method.temporal_scope.as_dict(),
             }
             for name, method in frame.methods.items()
+        },
+        "evaluation_transforms": {
+            "relative_position_filter": {
+                "bounds": [config.relative_position_min, config.relative_position_max],
+                "uses_final_response_length": (
+                    config.relative_position_min != 0.0
+                    or config.relative_position_max != 1.0
+                ),
+            },
+            "response_aggregation": {
+                "evaluation_unit": config.evaluation_unit,
+                "aggregation": (
+                    config.response_aggregation
+                    if config.evaluation_unit == "response"
+                    else None
+                ),
+                "uses_full_response": config.evaluation_unit == "response",
+            },
         },
         "metric_registry": {
             name: {
@@ -518,6 +538,7 @@ class ConditionedBenchmark:
         dataset = open_research_dataset(
             split_root,
             device=device,
+            verify_hashes=True,
             retain_embedded_labels=True,
         )
         evaluations = [

@@ -20,7 +20,12 @@ from cache import (
 from experiment_protocol import (
     EvaluationLabels,
     FrozenFile,
+    TemporalScope,
     dataset_manifest_sha256,
+    file_sha256,
+)
+from experiments.causal_multiplex_flow.artifacts import (
+    score_temporal_scope as cmrp_scope,
 )
 from experiments.conditioned_benchmark.artifacts import ArtifactSpec
 from experiments.conditioned_benchmark.conditions import (
@@ -39,7 +44,13 @@ from experiments.conditioned_benchmark.types import (
     MethodScore,
     ScoreArtifact,
 )
-from research_dataset import ResearchDataset
+from experiments.rr_topology_dynamics.artifacts import (
+    score_temporal_scope as topology_scope,
+)
+from experiments.spectral_feasibility.artifacts import (
+    score_temporal_scope as spectral_scope,
+)
+from research_dataset import ResearchDataset, open_research_dataset
 
 
 class _Sample:
@@ -61,9 +72,9 @@ class _TrackingResearchDataset(ResearchDataset):
         super().__init__(root)
         self.labels_called = False
 
-    def labels(self):
+    def prepare_evaluation_labels(self):
         self.labels_called = True
-        return super().labels()
+        return super().prepare_evaluation_labels()
 
 
 def _attention_sample(sample_id: str, source_id: str):
@@ -125,6 +136,31 @@ def _write_dataset(root: Path):
 
 
 def _write_cmrp_scores(path: Path, dataset: ResearchDataset):
+    model_path = path.parent / "model.pt"
+    model_path.write_bytes(b"CMRP test model")
+    reference_path = path.parent / "reference.npz"
+    np.savez_compressed(
+        reference_path,
+        schema=np.asarray("cmrp-reference-v2"),
+        model_file=np.asarray(model_path.name),
+        model_sha256=np.asarray(file_sha256(model_path)),
+        train_dataset_manifest_sha256=np.asarray("a" * 64),
+        num_layers=np.asarray(1, dtype=np.int16),
+        num_heads=np.asarray(1, dtype=np.int16),
+        event_config_json=np.asarray("{}"),
+        model_config_json=np.asarray("{}"),
+        train_config_json=np.asarray("{}"),
+        fit_group_id=np.asarray(["fit-source"]),
+        calibration_group_id=np.asarray(["calibration-source"]),
+        calibration_raw_route_surprise=np.asarray([0.1, 0.2], dtype=np.float32),
+        topology_gate_mean_gap=np.asarray(0.1, dtype=np.float32),
+        topology_gate_median_gap=np.asarray(0.1, dtype=np.float32),
+        topology_gate_evaluated_edge_count=np.asarray(1, dtype=np.int32),
+        topology_gate_selected_edge_count=np.asarray(1, dtype=np.int32),
+        topology_gate_coverage=np.asarray(1.0, dtype=np.float32),
+        topology_gate_positive_fraction=np.asarray(1.0, dtype=np.float32),
+        topology_gate_pass=np.asarray(True),
+    )
     sample_id = np.repeat(np.asarray(dataset.sample_ids, dtype=str), 3)
     token_index = np.tile(np.arange(3, dtype=np.int32), len(dataset.sample_ids))
     source_by_sample = {
@@ -137,8 +173,10 @@ def _write_cmrp_scores(path: Path, dataset: ResearchDataset):
     np.savez_compressed(
         path,
         schema=np.asarray("cmrp-score-v2"),
-        reference_sha256=np.asarray("a" * 64),
-        model_sha256=np.asarray("b" * 64),
+        reference_path=np.asarray(str(reference_path.resolve())),
+        reference_sha256=np.asarray(file_sha256(reference_path)),
+        model_path=np.asarray(str(model_path.resolve())),
+        model_sha256=np.asarray(file_sha256(model_path)),
         dataset_manifest_sha256=np.asarray(dataset_manifest_sha256(dataset)),
         fit_group_id=np.asarray(["fit-source"]),
         calibration_group_id=np.asarray(["calibration-source"]),
@@ -174,6 +212,7 @@ def _evaluated(name, token_index, token_label, response_positive):
         source_id=np.asarray(["test-source"] * rows),
         token_index=token_index,
         response_length=np.asarray([3] * rows, dtype=np.int32),
+        audit_scope="selected_samples",
         dataset_manifest_sha256="a" * 64,
         methods={
             f"{name}.primary": MethodScore(
@@ -196,6 +235,35 @@ def _evaluated(name, token_index, token_label, response_positive):
 
 
 class CanonicalBenchmarkFrameTests(unittest.TestCase):
+    def test_owner_scopes_survive_intersection_subset_and_response_aggregation(self):
+        scope = TemporalScope(
+            online_causal_score=False,
+            future_length_conditioned_fields=("relative_position", "position_bin"),
+        )
+        complete = _evaluated("complete", [0, 1, 2], [0, 0, 1], [1, 1, 1])
+        method = next(iter(complete.score.methods.values()))
+        complete.score.methods = {
+            method.name: MethodScore(
+                method.name, method.values, temporal_scope=scope
+            )
+        }
+
+        frame = build_benchmark_frame([complete], _Dataset())
+        aggregated = aggregate_responses(frame.subset(frame.token_index < 2))
+
+        self.assertEqual(next(iter(aggregated.methods.values())).temporal_scope, scope)
+
+    def test_owner_temporal_scopes_distinguish_causal_and_offline_scores(self):
+        self.assertTrue(cmrp_scope().online_causal_score)
+        self.assertFalse(spectral_scope().online_causal_score)
+        self.assertEqual(
+            spectral_scope().future_length_conditioned_fields,
+            ("relative_position", "position_bin"),
+        )
+        self.assertEqual(
+            topology_scope("offline_source_distance_to_final").offline_future_features,
+            ("offline_source_distance_to_final",),
+        )
     def test_intersection_cannot_erase_a_canonical_positive_response_label(self):
         complete = _evaluated(
             "complete",
@@ -417,6 +485,64 @@ class ConditionedBenchmarkTests(unittest.TestCase):
 
         self.assertFalse(tracked.labels_called)
 
+    def test_forged_owner_groups_are_rejected_before_conditioned_labels_open(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dataset = _write_dataset(root / "test")
+            score_path = root / "cmrp.npz"
+            _write_cmrp_scores(score_path, dataset)
+            with np.load(score_path, allow_pickle=False) as arrays:
+                forged = {name: arrays[name].copy() for name in arrays.files}
+            forged["calibration_group_id"] = np.asarray(["forged-calibration"])
+            np.savez_compressed(score_path, **forged)
+            tracked = _TrackingResearchDataset(dataset.root)
+
+            with (
+                patch(
+                    "experiments.conditioned_benchmark.runner.open_research_dataset",
+                    return_value=tracked,
+                ),
+                self.assertRaisesRegex(ValueError, "source groups differ"),
+            ):
+                ConditionedBenchmark(
+                    BenchmarkConfig(
+                        task_types=("all",),
+                        positive_rates=("native",),
+                        metrics=("auroc",),
+                    )
+                ).run(
+                    dataset.root,
+                    root / "report",
+                    [ArtifactSpec("cmrp", str(score_path))],
+                )
+
+        self.assertFalse(tracked.labels_called)
+
+    def test_benchmark_opens_a_hash_verified_dataset(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dataset = _write_dataset(root / "test")
+            score_path = root / "cmrp.npz"
+            _write_cmrp_scores(score_path, dataset)
+            with patch(
+                "experiments.conditioned_benchmark.runner.open_research_dataset",
+                wraps=open_research_dataset,
+            ) as open_dataset:
+                ConditionedBenchmark(
+                    BenchmarkConfig(
+                        task_types=("all",),
+                        positive_rates=("native",),
+                        metrics=("auroc",),
+                        bootstrap_replicates=0,
+                    )
+                ).run(
+                    dataset.root,
+                    root / "report",
+                    [ArtifactSpec("cmrp", str(score_path))],
+                )
+
+        self.assertTrue(open_dataset.call_args.kwargs["verify_hashes"])
+
     def test_class_runs_the_sealed_workflow_with_full_response_labels(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -470,6 +596,18 @@ class ConditionedBenchmarkTests(unittest.TestCase):
             expected_manifest,
         )
         self.assertEqual(report["artifacts"][0]["evaluation_rows"], 12)
+        self.assertEqual(
+            report["methods"]["cmrp.primary"]["temporal_scope"],
+            TemporalScope(online_causal_score=True).as_dict(),
+        )
+        self.assertTrue(
+            report["evaluation_transforms"]["relative_position_filter"]
+            ["uses_final_response_length"]
+        )
+        self.assertTrue(
+            report["evaluation_transforms"]["response_aggregation"]
+            ["uses_full_response"]
+        )
 
     def test_subsample_reports_repeat_variability_without_ci_fields(self):
         with tempfile.TemporaryDirectory() as directory:

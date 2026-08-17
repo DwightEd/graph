@@ -2,11 +2,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import torch
 
-from experiment_protocol import dataset_manifest_sha256, file_sha256
 from cache import (
     AttentionSample,
     index_row,
@@ -14,6 +14,8 @@ from cache import (
     sha256,
     write_split_index,
 )
+from experiment_protocol import dataset_manifest_sha256, file_sha256
+from experiments.rr_topology_dynamics import experiment as topology_experiment
 from experiments.rr_topology_dynamics.artifacts import (
     EVALUATION_SCHEMA,
     REFERENCE_SCHEMA,
@@ -21,14 +23,14 @@ from experiments.rr_topology_dynamics.artifacts import (
     load_topology_artifact,
     load_topology_reference,
 )
+from experiments.rr_topology_dynamics.evaluation import (
+    evaluate_topology_artifact,
+    first_onset_effects,
+)
 from experiments.rr_topology_dynamics.experiment import (
     TopologyAuditConfig,
     fit_topology_reference,
     score_topology_dataset,
-)
-from experiments.rr_topology_dynamics.evaluation import (
-    evaluate_topology_artifact,
-    first_onset_effects,
 )
 from experiments.rr_topology_dynamics.features import (
     TopologyDynamicsConfig,
@@ -273,8 +275,30 @@ class RRTopologyDynamicsTests(unittest.TestCase):
                     set(arrays["reference_source_id"].tolist()),
                     {"train-s0", "train-s1", "train-s2", "train-s3"},
                 )
+                self.assertEqual(
+                    str(arrays["train_dataset_manifest_sha256"].item()),
+                    dataset_manifest_sha256(train),
+                )
 
             topology_reference = load_topology_reference(topology_path)
+            missing_train_manifest = dict(topology_reference)
+            missing_train_manifest.pop("train_dataset_manifest_sha256")
+            missing_train_manifest_path = root / "missing_topology_reference.npz"
+            np.savez_compressed(
+                missing_train_manifest_path, **missing_train_manifest
+            )
+            with self.assertRaisesRegex(ValueError, "misses fields"):
+                load_topology_reference(missing_train_manifest_path)
+            malformed_train_manifest = dict(topology_reference)
+            malformed_train_manifest["train_dataset_manifest_sha256"] = np.asarray(
+                "not-a-digest"
+            )
+            malformed_train_manifest_path = root / "malformed_topology_reference.npz"
+            np.savez_compressed(
+                malformed_train_manifest_path, **malformed_train_manifest
+            )
+            with self.assertRaisesRegex(ValueError, "SHA-256"):
+                load_topology_reference(malformed_train_manifest_path)
             broken_reference = dict(topology_reference)
             broken_reference.pop("feature_names")
             broken_reference_path = root / "broken_topology_reference.npz"
@@ -342,6 +366,43 @@ class RRTopologyDynamicsTests(unittest.TestCase):
                 )
 
             artifact = load_topology_artifact(feature_path)
+            valid_topology_bytes = topology_path.read_bytes()
+            spectral_reference = load_rr_reference(spectral_path)
+            reserved_groups = {
+                str(group)
+                for name in ("fit_group_id", "calibration_group_id")
+                for group in spectral_reference[name].tolist()
+            }
+            omitted_group = min(reserved_groups)
+            forged_reference = dict(topology_reference)
+            forged_groups = np.asarray(
+                [
+                    group
+                    for group in forged_reference["reference_source_id"].tolist()
+                    if str(group) != omitted_group
+                ],
+                dtype=str,
+            )
+            forged_reference["reference_source_id"] = forged_groups
+            np.savez_compressed(topology_path, **forged_reference)
+            forged_artifact = dict(artifact)
+            forged_artifact["reference_source_id"] = forged_groups
+            forged_artifact["topology_reference_sha256"] = np.asarray(
+                file_sha256(topology_path)
+            )
+            forged_path = root / "missing_spectral_group_features.npz"
+            np.savez_compressed(forged_path, **forged_artifact)
+            with (
+                patch.object(
+                    test,
+                    "prepare_evaluation_labels",
+                    side_effect=AssertionError("labels must remain sealed"),
+                ),
+                self.assertRaisesRegex(ValueError, "spectral source groups"),
+            ):
+                evaluate_topology_artifact(test, forged_path, evaluation_dir)
+            topology_path.write_bytes(valid_topology_bytes)
+
             incomplete_artifact = dict(artifact)
             incomplete_artifact["token_index"] = artifact["token_index"].copy()
             incomplete_artifact["token_index"][1] = 0
@@ -496,12 +557,79 @@ class RRTopologyDynamicsTests(unittest.TestCase):
                 report["claim_boundaries"]["onset_definition"],
                 "first_0_to_1_transition_per_response",
             )
+            self.assertFalse(report["claim_boundaries"]["online_causal_score"])
+            self.assertEqual(
+                report["claim_boundaries"]["future_length_conditioned_fields"],
+                ["relative_position", "position_bin"],
+            )
+            self.assertEqual(
+                report["claim_boundaries"]["offline_future_features"],
+                [
+                    "offline_route_distance_to_final",
+                    "offline_source_distance_to_final",
+                ],
+            )
             self.assertTrue((evaluation_dir / "report.json").is_file())
             self.assertTrue((evaluation_dir / "onset_effects.csv").is_file())
             self.assertIn(
                 "first_0_to_1_transition_per_response",
                 (evaluation_dir / "onset_effects.csv").read_text(encoding="utf-8"),
             )
+
+    def test_score_rejects_a_manifest_changed_after_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            train = _write_dataset(
+                root / "train", [0.8, 1.0, 1.2, 1.1], source_prefix="train-s"
+            )
+            test = _write_dataset(
+                root / "test", [1.0], positive_sample=0, source_prefix="test-s"
+            )
+            spectral_path = root / "spectral_reference.npz"
+            topology_path = root / "topology_reference.npz"
+            fit_spectral_reference(
+                train,
+                spectral_path,
+                config=SpectralConfig(
+                    top_k=2,
+                    position_bins=2,
+                    pca_dim=2,
+                    reference_per_sample=3,
+                ),
+            )
+            fit_topology_reference(
+                train,
+                spectral_path,
+                topology_path,
+                topology_config=TopologyDynamicsConfig(
+                    lag_bins=3,
+                    spectral_top_k=2,
+                    position_bins=2,
+                    top_source_count=2,
+                ),
+                audit_config=TopologyAuditConfig(
+                    reference_per_sample=3, min_task_bin_rows=2
+                ),
+            )
+            manifest_path = test.root / "manifest.json"
+            original_extract = topology_experiment.extract_sample_topology_dynamics
+
+            def extract_then_mutate(*args, **kwargs):
+                result = original_extract(*args, **kwargs)
+                manifest_path.write_bytes(manifest_path.read_bytes() + b"changed")
+                return result
+
+            with patch.object(
+                topology_experiment,
+                "extract_sample_topology_dynamics",
+                side_effect=extract_then_mutate,
+            ), self.assertRaisesRegex(ValueError, "frozen file digest"):
+                score_topology_dataset(
+                    test,
+                    spectral_path,
+                    topology_path,
+                    root / "scores.npz",
+                )
 
     def test_score_rejects_a_source_used_by_the_topology_reference(self):
         with tempfile.TemporaryDirectory() as directory:

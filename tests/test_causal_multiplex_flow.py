@@ -2,11 +2,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import torch
 
-from experiment_protocol import dataset_manifest_sha256
 from cache import (
     AttentionSample,
     index_row,
@@ -14,20 +14,22 @@ from cache import (
     sha256,
     write_split_index,
 )
+from experiment_protocol import dataset_manifest_sha256
+from experiments.causal_multiplex_flow import experiment as cmrp_experiment
 from experiments.causal_multiplex_flow.artifacts import (
     load_reference,
     load_score_artifact,
 )
+from experiments.causal_multiplex_flow.calibration import topology_gate_summary
 from experiments.causal_multiplex_flow.controls import (
     lag_preserving_rewired_source,
     source_candidates,
 )
-from experiments.causal_multiplex_flow.calibration import topology_gate_summary
 from experiments.causal_multiplex_flow.events import (
-    CausalEventSample,
-    EventConfig,
     RP,
     RR,
+    CausalEventSample,
+    EventConfig,
     extract_causal_events,
     log_lag_bin,
 )
@@ -312,6 +314,10 @@ class CausalMultiplexFlowTests(unittest.TestCase):
             )
             self.assertFalse(fit["labels_read"])
             reference = load_reference(output_dir / "reference.npz")
+            self.assertEqual(
+                str(reference["train_dataset_manifest_sha256"].item()),
+                dataset_manifest_sha256(train),
+            )
             self.assertTrue(
                 set(reference["fit_group_id"].tolist()).isdisjoint(
                     reference["calibration_group_id"].tolist()
@@ -345,6 +351,14 @@ class CausalMultiplexFlowTests(unittest.TestCase):
             artifact = load_score_artifact(score_path)
             self.assertEqual(artifact["score"].shape, (6,))
             self.assertEqual(
+                str(artifact["reference_path"].item()),
+                str((output_dir / "reference.npz").resolve()),
+            )
+            self.assertEqual(
+                str(artifact["model_path"].item()),
+                str((output_dir / "model.pt").resolve()),
+            )
+            self.assertEqual(
                 str(artifact["dataset_manifest_sha256"].item()),
                 dataset_manifest_sha256(test),
             )
@@ -356,6 +370,40 @@ class CausalMultiplexFlowTests(unittest.TestCase):
             np.savez_compressed(incomplete_path, **incomplete)
             with self.assertRaisesRegex(ValueError, "complete token rows"):
                 load_score_artifact(incomplete_path)
+            missing_provenance = dict(artifact)
+            missing_provenance.pop("reference_path")
+            missing_provenance_path = output_dir / "missing_provenance.npz"
+            np.savez_compressed(missing_provenance_path, **missing_provenance)
+            with self.assertRaisesRegex(ValueError, "misses fields"):
+                load_score_artifact(missing_provenance_path)
+            malformed_provenance = dict(artifact)
+            malformed_provenance["model_path"] = np.asarray("")
+            malformed_provenance_path = output_dir / "malformed_provenance.npz"
+            np.savez_compressed(malformed_provenance_path, **malformed_provenance)
+            with self.assertRaisesRegex(ValueError, "scalar non-empty"):
+                load_score_artifact(malformed_provenance_path)
+            malformed_digest = dict(artifact)
+            malformed_digest["reference_sha256"] = np.asarray("not-a-digest")
+            malformed_digest_path = output_dir / "malformed_digest.npz"
+            np.savez_compressed(malformed_digest_path, **malformed_digest)
+            with self.assertRaisesRegex(ValueError, "SHA-256"):
+                load_score_artifact(malformed_digest_path)
+            missing_train_manifest = dict(reference)
+            missing_train_manifest.pop("train_dataset_manifest_sha256")
+            missing_train_manifest_path = output_dir / "missing_reference.npz"
+            np.savez_compressed(missing_train_manifest_path, **missing_train_manifest)
+            with self.assertRaisesRegex(ValueError, "misses fields"):
+                load_reference(missing_train_manifest_path)
+            malformed_train_manifest = dict(reference)
+            malformed_train_manifest["train_dataset_manifest_sha256"] = np.asarray(
+                "not-a-digest"
+            )
+            malformed_train_manifest_path = output_dir / "malformed_reference.npz"
+            np.savez_compressed(
+                malformed_train_manifest_path, **malformed_train_manifest
+            )
+            with self.assertRaisesRegex(ValueError, "SHA-256"):
+                load_reference(malformed_train_manifest_path)
             with np.load(score_path, allow_pickle=False) as arrays:
                 self.assertNotIn("label", arrays.files)
                 self.assertNotIn("y_token", arrays.files)
@@ -371,6 +419,63 @@ class CausalMultiplexFlowTests(unittest.TestCase):
             self.assertEqual(report["metrics"]["positive_tokens"], 1)
             self.assertIn("source_nll", report["components"])
             self.assertTrue(report_path.is_file())
+
+            tampered = dict(artifact)
+            tampered["fit_group_id"] = np.asarray(["forged-fit-group"])
+            tampered_path = output_dir / "forged_groups.npz"
+            np.savez_compressed(tampered_path, **tampered)
+            with (
+                patch.object(
+                    test,
+                    "prepare_evaluation_labels",
+                    side_effect=AssertionError("labels must remain sealed"),
+                ),
+                self.assertRaisesRegex(ValueError, "source groups differ"),
+            ):
+                evaluate_cmrp(test, tampered_path, output_dir / "forged.json")
+
+    def test_score_and_evaluation_reject_a_reference_changed_after_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            train = _write_dataset(root / "train", [0.8, 0.9, 1.0, 1.1])
+            test = _write_dataset(
+                root / "test", [1.0], positive_sample=0, source_prefix="test"
+            )
+            output_dir = root / "cmrp"
+            reference_path = output_dir / "reference.npz"
+            score_path = output_dir / "scores.npz"
+            fit_cmrp(
+                train,
+                output_dir,
+                model_config=ModelConfig(
+                    hidden_dim=8,
+                    channel_embedding_dim=3,
+                    relation_embedding_dim=2,
+                    lag_frequencies=2,
+                    negatives_per_edge=1,
+                    dropout=0.0,
+                    seed=4,
+                ),
+                train_config=TrainConfig(epochs=1, calibration_fraction=0.25, seed=4),
+            )
+            original_reference = reference_path.read_bytes()
+            original_score_samples = cmrp_experiment._score_samples
+
+            def score_then_mutate(*args, **kwargs):
+                result = original_score_samples(*args, **kwargs)
+                reference_path.write_bytes(reference_path.read_bytes() + b"changed")
+                return result
+
+            with patch.object(
+                cmrp_experiment, "_score_samples", side_effect=score_then_mutate
+            ), self.assertRaisesRegex(ValueError, "frozen file digest"):
+                score_cmrp(test, reference_path, score_path)
+
+            reference_path.write_bytes(original_reference)
+            score_cmrp(test, reference_path, score_path)
+            reference_path.write_bytes(original_reference + b"changed")
+            with self.assertRaisesRegex(ValueError, "reference digest"):
+                evaluate_cmrp(test, score_path, output_dir / "report.json")
 
     def test_fit_reproduces_model_initialization_and_dropout_sequence(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import product
 
 import numpy as np
 
-from .types import BenchmarkFrame, MethodScore
+from .types import BenchmarkFrame
 
 
 @dataclass(frozen=True)
@@ -163,15 +163,12 @@ def aggregate_responses(
 
     rows_by_group = {name: np.flatnonzero(frame.sample_id == name) for name in groups}
     methods = {
-        name: MethodScore(
-            name=name,
+        name: replace(
+            method,
             values=np.asarray(
                 [reduce(method.values, rows_by_group[group]) for group in groups]
             ),
             direction="higher",
-            protocol=method.protocol,
-            source_field=method.source_field,
-            source_direction=method.source_direction,
         )
         for name, method in frame.methods.items()
     }

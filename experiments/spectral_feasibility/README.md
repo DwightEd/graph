@@ -35,6 +35,12 @@ not claim to model hidden-state message passing.
 
 All attention is read through `research_dataset.py`. Missing cache entries stay
 censored below `attention_floor`; PP edges are neither needed nor invented.
+For one sample, retained RR edges are still materialized as sparse vectors.
+They are stably sorted by query once, then each edge is added at the first
+requested causal prefix that admits it; the prefix-update scan is therefore
+`O(E log E + E)` rather than a full `O(R E)` re-mask. Coordinate construction
+and top-`k` selection still run at every requested prefix, so this is not a
+streaming or bounded-memory implementation for arbitrarily long responses.
 
 ## Fit and calibration protocol
 
@@ -49,6 +55,10 @@ test groups         -> source-overlap audit -> frozen transform -> scores
 
 No token from a calibration source is used to fit the scaler or PCA. Position
 is controlled once, using fit-only median/MAD in four relative-position bins.
+Those bins are computed with the completed response length. Consequently this
+is an **offline post-generation detector**, not a strictly online causal score:
+the routing descriptor itself uses only the causal prefix, but its
+relative-position conditioning uses future response length.
 A provisional PCA then removes the fixed upper 10% fit-residual tail as an
 unlabeled contamination guard, and one final PCA is fitted. Channel scales are
 also fitted on this retained fit stream. Calibration rows are never filtered

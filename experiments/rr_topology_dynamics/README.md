@@ -93,6 +93,12 @@ smaller family of lag-routing patterns. It does **not** establish correctness.
 The final-state distance is explicitly offline/future-using and is never a
 causal detector feature.
 
+The audit also standardizes every trajectory using relative-position bins that
+are computed from the completed response length. Thus its per-prefix attention
+features are causally constructed, but the reported `features_z` trajectories
+and all post-hoc effects are **offline post-generation** analyses, not strictly
+online causal scores.
+
 ## 5. Exact-source convergence
 
 Lag-bin rank can hide source identity. Therefore all retained RR weights are

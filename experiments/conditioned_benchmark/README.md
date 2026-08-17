@@ -65,6 +65,13 @@ Every artifact is first evaluated on its own complete frozen rows. Canonical
 `response_length` facts are then intersected on `(sample_id, token_index)` and
 must agree across artifacts.
 
+Each evaluation binding also carries `audit_scope`. A `complete_split` artifact
+must cover exactly the dataset sample IDs, while `selected_samples` may bind a
+subset of complete responses. Batch sealing validates every artifact first,
+reads canonical source/response-length facts once per dataset sample across all
+artifacts, and only then prepares one canonical label snapshot for projection
+back to each artifact's original row order.
+
 A relative-position window limits only the token scores being evaluated or
 aggregated. A response label always comes from canonical `response_positive`
 over the complete answer. Therefore an intersection or position window cannot

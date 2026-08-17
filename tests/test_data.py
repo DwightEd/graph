@@ -1,12 +1,19 @@
 import json
 import tempfile
 import unittest
-from unittest.mock import patch
 from pathlib import Path
+from unittest.mock import patch
 
 import torch
 
-from cache import AttentionSample, index_row, save_attention_sample, sha256, verify_split, write_split_index
+from cache import (
+    AttentionSample,
+    index_row,
+    save_attention_sample,
+    sha256,
+    verify_split,
+    write_split_index,
+)
 from formal_cache import FORMAL_CACHE_SCHEMA, formal_fingerprint
 from research_dataset import ResearchDataset, open_research_dataset
 
@@ -66,7 +73,12 @@ class DataTests(unittest.TestCase):
             dataset = ResearchDataset(root, verify_hashes=True)
             restored = dataset["r1"]
             self.assertEqual(restored.attention().num_response_tokens, 2)
-            self.assertEqual(dataset.labels().response_labels(restored).tolist(), [0, 1])
+            self.assertEqual(
+                dataset.prepare_evaluation_labels()
+                .response_labels(restored)
+                .tolist(),
+                [0, 1],
+            )
 
     def test_formal_sparse_pt_is_read_directly_without_npz_conversion(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -121,15 +133,20 @@ class DataTests(unittest.TestCase):
                 json.dumps(manifest), encoding="utf-8"
             )
 
+            unsealed = open_research_dataset(root, retain_embedded_labels=False)
+            with self.assertRaisesRegex(RuntimeError, "not retained"):
+                unsealed.prepare_evaluation_labels()
+
             with patch("formal_cache.sha256") as file_hash:
                 dataset = open_research_dataset(
                     root, verify_hashes=False, retain_embedded_labels=True
                 )
+                labels = dataset.prepare_evaluation_labels()
                 sample = dataset["r1"]
                 self.assertEqual(sample.attention().num_response_tokens, 2)
                 self.assertEqual(sample.task_type, "QA")
                 self.assertEqual(
-                    dataset.labels().response_labels(sample).tolist(), [0, 1]
+                    labels.response_labels(sample).tolist(), [0, 1]
                 )
                 file_hash.assert_not_called()
             self.assertEqual(list(root.glob("*.npz")), [])

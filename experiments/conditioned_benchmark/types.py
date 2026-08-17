@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
-from experiment_protocol import EvaluationLabels
+from experiment_protocol import EvaluationLabels, TemporalScope
 
 
 def _one_dimensional(name: str, value, length: int | None = None) -> np.ndarray:
@@ -28,6 +28,9 @@ class MethodScore:
     protocol: str = "unknown"
     source_field: str = ""
     source_direction: str = ""
+    temporal_scope: TemporalScope = field(
+        default_factory=lambda: TemporalScope(online_causal_score=False)
+    )
 
     def oriented(self, length: int) -> np.ndarray:
         values = _one_dimensional(self.name, self.values, length).astype(
@@ -53,6 +56,7 @@ class ScoreArtifact:
     source_id: np.ndarray
     token_index: np.ndarray
     response_length: np.ndarray
+    audit_scope: str
     dataset_manifest_sha256: str
     methods: dict[str, MethodScore]
 
@@ -72,18 +76,18 @@ class ScoreArtifact:
             raise ValueError(f"artifact {self.name} has no rows")
         if bool((self.token_index < 0).any()):
             raise ValueError(f"artifact {self.name} has negative token indices")
+        if self.audit_scope not in {"complete_split", "selected_samples"}:
+            raise ValueError(f"artifact {self.name} has an invalid audit scope")
         keys = list(zip(self.sample_id.tolist(), self.token_index.tolist()))
         if len(set(keys)) != length:
             raise ValueError(f"artifact {self.name} has duplicate token rows")
         if not self.methods:
             raise ValueError(f"artifact {self.name} exposes no detector scores")
         self.methods = {
-            name: MethodScore(
-                name=method.name,
+            name: replace(
+                method,
                 values=method.oriented(length),
                 direction="higher",
-                protocol=method.protocol,
-                source_field=method.source_field,
                 source_direction=method.source_direction or method.direction,
             )
             for name, method in self.methods.items()
@@ -94,6 +98,7 @@ class ScoreArtifact:
         """Return the complete dataset-binding rows used to unlock labels."""
 
         return {
+            "audit_scope": np.asarray(self.audit_scope),
             "dataset_manifest_sha256": np.asarray(self.dataset_manifest_sha256),
             "sample_id": self.sample_id,
             "source_id": self.source_id,
@@ -166,12 +171,10 @@ class BenchmarkFrame:
             sample_id=self.sample_id[selected],
             token_index=self.token_index[selected],
             methods={
-                name: MethodScore(
-                    name=name,
+                name: replace(
+                    method,
                     values=method.values[selected],
                     direction="higher",
-                    protocol=method.protocol,
-                    source_field=method.source_field,
                     source_direction=method.source_direction or method.direction,
                 )
                 for name, method in self.methods.items()

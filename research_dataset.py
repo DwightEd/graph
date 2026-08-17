@@ -11,8 +11,8 @@ visualization belong outside this module.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
@@ -482,6 +482,11 @@ class ResearchDataset:
         ]
 
     def labels(self):
+        return self.prepare_evaluation_labels()
+
+    def prepare_evaluation_labels(self):
+        """Open the canonical sidecar label store for post-hoc evaluation."""
+
         return LabelStore(self)
 
 
@@ -658,7 +663,7 @@ class FormalResearchDataset:
         self.rows = {}
         for path, digest in files:
             stem = path.stem
-            sample_id = stem[len("attention_"):] if stem.startswith("attention_") else stem
+            sample_id = stem.removeprefix("attention_")
             if not sample_id or sample_id in self.rows:
                 raise ValueError("formal cache file names do not identify unique samples")
             self.rows[sample_id] = {
@@ -686,6 +691,21 @@ class FormalResearchDataset:
     @property
     def sample_ids(self):
         return list(self.rows)
+
+    def prepare_evaluation_labels(self):
+        """Finish embedded-label capture and return the evaluation label store."""
+
+        if not self.retain_labels:
+            raise RuntimeError("embedded labels were not retained for this dataset")
+        for sample_id in self.sample_ids:
+            if sample_id in self._label_cache:
+                continue
+            sample = self[sample_id]
+            try:
+                sample.attention()
+            finally:
+                sample.release_attention()
+        return FormalLabelStore(self)
 
     def labels(self):
         if not self.retain_labels:

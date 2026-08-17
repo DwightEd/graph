@@ -148,6 +148,41 @@ def _retained_response_edges(sample, *, block_rows: int):
     )
 
 
+def causal_prefix_edge_batches(
+    edge_query: torch.Tensor,
+    positions: np.ndarray,
+):
+    """Yield each retained edge once, at its first requested causal prefix.
+
+    The returned edge indices are stably ordered by query position. This lets a
+    prefix scan increment ``received`` with only the rows newly admitted since
+    the preceding requested token, instead of repeatedly masking every stored
+    RR edge. Edges after the final requested prefix are intentionally omitted.
+    """
+    if edge_query.ndim != 1:
+        raise ValueError("edge_query must be one-dimensional")
+    requested = torch.as_tensor(
+        positions,
+        dtype=edge_query.dtype,
+        device=edge_query.device,
+    )
+    if requested.ndim != 1:
+        raise ValueError("positions must be one-dimensional")
+    if edge_query.numel() == 0:
+        empty = torch.empty(0, dtype=torch.long, device=edge_query.device)
+        for prefix in requested.tolist():
+            yield int(prefix), empty
+        return
+
+    edge_order = torch.argsort(edge_query, stable=True)
+    sorted_query = edge_query[edge_order]
+    stops = torch.searchsorted(sorted_query, requested, right=True)
+    start = 0
+    for prefix, stop in zip(requested.tolist(), stops.tolist()):
+        yield int(prefix), edge_order[start:stop]
+        start = stop
+
+
 def prefix_causal_attention_modes(
     sample,
     *,
@@ -196,16 +231,15 @@ def prefix_causal_attention_modes(
     output = torch.zeros(shape, dtype=torch.float32, device=device)
     output_source = torch.full(shape, -1, dtype=torch.long, device=device)
     output_lag = torch.full(shape, -1, dtype=torch.long, device=device)
-    previous_prefix = -1
-    for output_index, prefix in enumerate(requested.tolist()):
-        if edge_query.numel():
-            new_edge = (edge_query > previous_prefix) & (edge_query <= prefix)
-            if bool(new_edge.any()):
-                received.index_put_(
-                    (edge_channel[new_edge], edge_source[new_edge]),
-                    edge_weight[new_edge],
-                    accumulate=True,
-                )
+    for output_index, (prefix, new_edge) in enumerate(
+        causal_prefix_edge_batches(edge_query, requested)
+    ):
+        if new_edge.numel():
+            received.index_put_(
+                (edge_channel[new_edge], edge_source[new_edge]),
+                edge_weight[new_edge],
+                accumulate=True,
+            )
 
         active = prefix + 1
         source = torch.arange(active, dtype=torch.float32, device=device)
@@ -221,7 +255,6 @@ def prefix_causal_attention_modes(
         output[output_index, :, :keep] = torch.gather(coordinates, 1, indices)
         output_source[output_index, :, :keep] = indices
         output_lag[output_index, :, :keep] = int(prefix) - indices
-        previous_prefix = prefix
 
     return PrefixCausalAttentionModes(
         positions=requested,

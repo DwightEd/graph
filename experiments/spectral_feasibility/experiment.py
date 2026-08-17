@@ -12,9 +12,8 @@ from tqdm.auto import tqdm
 
 from experiment_protocol import (
     FrozenEvaluation,
+    FrozenFile,
     HeldOutSourceAudit,
-    dataset_manifest_sha256,
-    file_sha256,
     partition_source_groups,
 )
 
@@ -24,6 +23,8 @@ from .artifacts import (
     SCORE_SCHEMA,
     load_score_artifact,
     load_spectral_reference,
+    score_temporal_scope,
+    verify_score_provenance,
 )
 from .representations import (
     SpectralConfig,
@@ -55,6 +56,10 @@ def _sample_ids(dataset, limit=None):
     return sample_ids
 
 
+def _repeat_text(value, count: int) -> np.ndarray:
+    return np.asarray(["" if value is None else str(value)] * count, dtype=str)
+
+
 def _bins_for_positions(positions, response_count, position_bins):
     return np.asarray(
         [
@@ -84,7 +89,7 @@ def _localized_channel_anomaly(channel_energy, center, scale, *, tail_fraction):
     channels = normalized.shape[1]
     tail_count = min(
         channels,
-        max(1, int(math.ceil(channels * float(tail_fraction)))),
+        max(1, math.ceil(channels * float(tail_fraction))),
     )
     strongest = np.partition(normalized, channels - tail_count, axis=1)[
         :, channels - tail_count :
@@ -165,6 +170,7 @@ def fit_spectral_reference(
     """Fit on one unlabeled group stream and calibrate on a disjoint stream."""
     config = SpectralConfig() if config is None else config
     config.validate()
+    train_manifest = FrozenFile.capture(Path(dataset.root) / "manifest.json")
     sample_ids = _sample_ids(dataset, limit)
     split = partition_source_groups(
         dataset,
@@ -297,6 +303,8 @@ def fit_spectral_reference(
     }
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    train_manifest.verify(train_manifest.path)
+    artifact["train_dataset_manifest_sha256"] = np.asarray(train_manifest.sha256)
     np.savez_compressed(output_path, **artifact)
     return {
         "output": str(output_path),
@@ -304,9 +312,9 @@ def fit_spectral_reference(
         "samples": len(sample_ids),
         "fit_groups": len(fit_groups),
         "calibration_groups": len(calibration_groups),
-        "fit_reference_tokens": int(len(fit_rows["value"])),
+        "fit_reference_tokens": len(fit_rows["value"]),
         "retained_fit_tokens": int(keep.sum()),
-        "calibration_tokens": int(len(calibration_rows["value"])),
+        "calibration_tokens": len(calibration_rows["value"]),
         "rr_spectral_dim": int(expected_dim),
         "embedding_dim": int(model.n_components_),
         "channel_tail_count": int(channel_tail_count),
@@ -331,7 +339,10 @@ def _config_from_reference(reference):
 
 def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
     """Freeze token geometry and scores without opening labels."""
-    reference = load_spectral_reference(reference_path)
+    reference_file = FrozenFile.capture(reference_path)
+    reference = load_spectral_reference(reference_file.path)
+    reference_file.verify(reference_file.path)
+    dataset_manifest = FrozenFile.capture(Path(dataset.root) / "manifest.json")
     config = _config_from_reference(reference)
     sample_ids = _sample_ids(dataset, limit)
     source_audit = HeldOutSourceAudit(
@@ -431,21 +442,21 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
                 localized,
             )
 
-            def text(value):
-                return np.asarray(
-                    ["" if value is None else str(value)] * response_count,
-                    dtype=str,
-                )
+            sample_id = _repeat_text(sample.sample_id, response_count)
+            source_id = _repeat_text(sample.source_id, response_count)
+            task_type = _repeat_text(sample.task_type, response_count)
+            data_source = _repeat_text(sample.data_source, response_count)
+            generator_model = _repeat_text(sample.generator_model, response_count)
 
-            columns["sample_id"].append(text(sample.sample_id))
-            columns["source_id"].append(text(sample.source_id))
+            columns["sample_id"].append(sample_id)
+            columns["source_id"].append(source_id)
             columns["token_index"].append(positions.astype(np.int32))
             columns["response_length"].append(
                 np.full(response_count, response_count, dtype=np.int32)
             )
-            columns["task_type"].append(text(sample.task_type))
-            columns["data_source"].append(text(sample.data_source))
-            columns["generator_model"].append(text(sample.generator_model))
+            columns["task_type"].append(task_type)
+            columns["data_source"].append(data_source)
+            columns["generator_model"].append(generator_model)
             columns["rr_embedding"].append(projection.embedding)
             columns["rr_residual_energy"].append(projection.residual_energy)
             columns["rr_latent_energy"].append(projection.latent_energy)
@@ -482,14 +493,16 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
     if any(not bool(np.isfinite(output[name]).all()) for name in numeric):
         raise FloatingPointError("RR spectral scoring produced non-finite values")
     audit = source_audit.finish()
+    reference_file.verify(reference_file.path)
+    dataset_manifest.verify(dataset_manifest.path)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         output_path,
         schema=np.asarray(SCORE_SCHEMA),
-        reference_path=np.asarray(str(Path(reference_path))),
-        reference_sha256=np.asarray(file_sha256(reference_path)),
-        dataset_manifest_sha256=np.asarray(dataset_manifest_sha256(dataset)),
+        reference_path=np.asarray(str(reference_file.path)),
+        reference_sha256=np.asarray(reference_file.sha256),
+        dataset_manifest_sha256=np.asarray(dataset_manifest.sha256),
         fit_group_id=np.asarray(reference["fit_group_id"], dtype=str),
         calibration_group_id=np.asarray(
             reference["calibration_group_id"], dtype=str
@@ -504,7 +517,7 @@ def score_spectral_dataset(dataset, reference_path, output_path, *, limit=None):
         "output": str(output_path),
         "labels_read": False,
         "samples": len(sample_ids),
-        "tokens": int(len(output["score"])),
+        "tokens": len(output["score"]),
         "embedding_dim": int(output["rr_embedding"].shape[1]),
         "primary_detector": "rr_subspace_residual_tail",
     }
@@ -519,7 +532,7 @@ def _metrics(y, score):
     if len(y) == 0 or np.unique(y).size < 2:
         return None
     return {
-        "tokens": int(len(y)),
+        "tokens": len(y),
         "positive_tokens": int(y.sum()),
         "prevalence": float(y.mean()),
         "auroc": float(roc_auc_score(y, score)),
@@ -531,7 +544,9 @@ def _metrics(y, score):
 def evaluate_score_artifact(dataset, score_path, output_path):
     """Open labels only after every representation and score is frozen."""
     evaluation = FrozenEvaluation.capture(score_path, expected_split="test")
-    artifact, aligned = evaluation.load_and_align(dataset, load_score_artifact)
+    artifact = load_score_artifact(evaluation.artifact.path)
+    verify_score_provenance(artifact)
+    aligned = evaluation.align_loaded(dataset, artifact)
     y = aligned.token_label
 
     metrics = _metrics(y, artifact["score"])
@@ -551,6 +566,7 @@ def evaluate_score_artifact(dataset, score_path, output_path):
         "components": components,
         "labels_used_during": "posthoc_evaluation_only",
         "primary_detector": "rr_subspace_residual_tail",
+        **score_temporal_scope().as_dict(),
         "reference_sha256": str(np.asarray(artifact["reference_sha256"]).item()),
         "method": (
             "signed per-layer/head artificial age-normalized triangular RR "

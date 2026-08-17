@@ -59,7 +59,9 @@ def parse_args(argv=None):
 def main(argv=None):
     args = parse_args(argv)
     if args.command == "fit":
-        dataset = open_research_dataset(args.train_split, device=args.device)
+        dataset = open_research_dataset(
+            args.train_split, device=args.device, verify_hashes=True
+        )
         config = SpectralConfig(
             top_k=args.top_k,
             block_rows=args.block_rows,
@@ -79,7 +81,9 @@ def main(argv=None):
             limit=args.limit,
         )
     elif args.command == "score":
-        dataset = open_research_dataset(args.split_root, device=args.device)
+        dataset = open_research_dataset(
+            args.split_root, device=args.device, verify_hashes=True
+        )
         result = score_spectral_dataset(
             dataset,
             args.reference,
@@ -90,6 +94,7 @@ def main(argv=None):
         dataset = open_research_dataset(
             args.split_root,
             device=args.device,
+            verify_hashes=True,
             retain_embedded_labels=True,
         )
         report = evaluate_score_artifact(dataset, args.scores, args.output)

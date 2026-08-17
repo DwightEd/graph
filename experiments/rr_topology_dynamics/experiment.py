@@ -17,7 +17,6 @@ from experiment_protocol import (
     FrozenFile,
     HeldOutSourceAudit,
     canonical_source_group,
-    dataset_manifest_sha256,
 )
 from experiments.spectral_feasibility.representations import reference_positions
 
@@ -28,11 +27,11 @@ from .artifacts import (
     load_topology_reference,
 )
 from .features import (
-    SCALAR_FEATURE_NAMES,
     TopologyDynamicsConfig,
     extract_sample_topology_dynamics,
     load_rr_reference,
 )
+
 
 @dataclass(frozen=True)
 class TopologyAuditConfig:
@@ -57,6 +56,10 @@ class TopologyAuditConfig:
 
 def _metadata_text(value) -> str:
     return "" if value is None else str(value)
+
+
+def _repeat_metadata(value, count: int) -> np.ndarray:
+    return np.asarray([_metadata_text(value)] * count, dtype=str)
 
 
 def _sample_ids(dataset, limit=None):
@@ -176,6 +179,7 @@ def fit_topology_reference(
     audit_config = TopologyAuditConfig() if audit_config is None else audit_config
     topology_config.validate()
     audit_config.validate()
+    train_manifest = FrozenFile.capture(Path(dataset.root) / "manifest.json")
     spectral_file = FrozenFile.capture(spectral_reference_path)
     spectral_reference = load_rr_reference(spectral_file.path)
     spectral_file.verify(spectral_file.path)
@@ -233,11 +237,14 @@ def fit_topology_reference(
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    train_manifest.verify(train_manifest.path)
+    spectral_file.verify(spectral_file.path)
     np.savez_compressed(
         output_path,
         schema=np.asarray(REFERENCE_SCHEMA),
         spectral_reference_path=np.asarray(str(spectral_file.path)),
         spectral_reference_sha256=np.asarray(spectral_file.sha256),
+        train_dataset_manifest_sha256=np.asarray(train_manifest.sha256),
         reference_source_id=np.asarray(sorted(reference_source_ids), dtype=str),
         feature_names=np.asarray(feature_names, dtype=str),
         lag_bins=np.asarray(topology_config.lag_bins, dtype=np.int16),
@@ -275,9 +282,9 @@ def fit_topology_reference(
         "output": str(output_path),
         "labels_read": False,
         "samples": len(sample_ids),
-        "reference_tokens": int(len(features)),
+        "reference_tokens": len(features),
         "feature_dim": int(features.shape[1]),
-        "tasks": int(len(fitted["task_names"])),
+        "tasks": len(fitted["task_names"]),
     }
 
 
@@ -304,6 +311,7 @@ def score_topology_dataset(
     limit=None,
 ):
     """Freeze full-split topology features and train-standardized coordinates."""
+    dataset_manifest = FrozenFile.capture(Path(dataset.root) / "manifest.json")
     topology_file = FrozenFile.capture(topology_reference_path)
     topology_reference = load_topology_reference(topology_file.path)
     topology_file.verify(topology_file.path)
@@ -380,11 +388,12 @@ def score_topology_dataset(
             relative_position = tokens.astype(np.float32) / float(
                 max(response_count - 1, 1)
             )
-            text = lambda value: np.asarray(
-                [_metadata_text(value)] * response_count, dtype=str
+            columns["sample_id"].append(
+                _repeat_metadata(sample.sample_id, response_count)
             )
-            columns["sample_id"].append(text(sample.sample_id))
-            columns["source_id"].append(text(sample.source_id))
+            columns["source_id"].append(
+                _repeat_metadata(sample.source_id, response_count)
+            )
             columns["token_index"].append(tokens)
             columns["response_length"].append(
                 np.full(response_count, response_count, dtype=np.int32)
@@ -392,8 +401,12 @@ def score_topology_dataset(
             columns["relative_position"].append(relative_position)
             columns["position_bin"].append(extracted["position_bin"])
             columns["task_type"].append(task)
-            columns["data_source"].append(text(sample.data_source))
-            columns["generator_model"].append(text(sample.generator_model))
+            columns["data_source"].append(
+                _repeat_metadata(sample.data_source, response_count)
+            )
+            columns["generator_model"].append(
+                _repeat_metadata(sample.generator_model, response_count)
+            )
             columns["features_raw"].append(raw)
             columns["features_z"].append(z)
             columns["layer_route_effective_rank"].append(
@@ -416,6 +429,9 @@ def score_topology_dataset(
         name: np.concatenate(values, axis=0) for name, values in columns.items()
     }
     audit = source_audit.finish()
+    dataset_manifest.verify(dataset_manifest.path)
+    topology_file.verify(topology_file.path)
+    spectral_file.verify(spectral_file.path)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
@@ -425,7 +441,7 @@ def score_topology_dataset(
         spectral_reference_sha256=np.asarray(spectral_file.sha256),
         topology_reference_path=np.asarray(str(topology_file.path)),
         topology_reference_sha256=np.asarray(topology_file.sha256),
-        dataset_manifest_sha256=np.asarray(dataset_manifest_sha256(dataset)),
+        dataset_manifest_sha256=np.asarray(dataset_manifest.sha256),
         reference_source_id=np.asarray(
             topology_reference["reference_source_id"], dtype=str
         ),
@@ -440,7 +456,7 @@ def score_topology_dataset(
         "output": str(output_path),
         "labels_read": False,
         "samples": len(sample_ids),
-        "tokens": int(len(output["token_index"])),
+        "tokens": len(output["token_index"]),
         "feature_dim": int(output["features_raw"].shape[1]),
         "layers": int(output["layer_residual_energy"].shape[1]),
     }

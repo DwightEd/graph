@@ -9,6 +9,29 @@ from pathlib import Path
 import numpy as np
 
 
+def scalar_text(mapping, name: str) -> str:
+    """Read one required scalar Unicode or byte-string artifact field."""
+
+    if name not in mapping:
+        raise ValueError(f"artifact is missing field {name!r}")
+    value = np.asarray(mapping[name])
+    if value.ndim != 0 or value.dtype.kind not in {"U", "S"}:
+        raise ValueError(f"artifact field {name!r} must be scalar text")
+    item = value.item()
+    return item.decode("utf-8") if isinstance(item, bytes) else str(item)
+
+
+def sha256_text(mapping, name: str) -> str:
+    """Read one required scalar 64-character hexadecimal SHA-256 field."""
+
+    value = scalar_text(mapping, name)
+    if len(value) != 64 or any(
+        character not in "0123456789abcdefABCDEF" for character in value
+    ):
+        raise ValueError(f"artifact field {name!r} must be a SHA-256 digest")
+    return value
+
+
 @dataclass(frozen=True)
 class SourceGroupAudit:
     """The canonical held-out groups and sample scope observed during scoring."""
@@ -26,6 +49,24 @@ class EvaluationLabels:
     response_positive: np.ndarray
     source_id: np.ndarray
     response_length: np.ndarray
+
+
+@dataclass(frozen=True)
+class TemporalScope:
+    """Whether one score can be computed from its causal generation prefix."""
+
+    online_causal_score: bool
+    future_length_conditioned_fields: tuple[str, ...] = ()
+    offline_future_features: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict:
+        return {
+            "online_causal_score": self.online_causal_score,
+            "future_length_conditioned_fields": list(
+                self.future_length_conditioned_fields
+            ),
+            "offline_future_features": list(self.offline_future_features),
+        }
 
 
 @dataclass(frozen=True)
@@ -75,14 +116,70 @@ class FrozenEvaluation:
         """Validate every frozen binding before opening any aligned labels."""
 
         loaded_artifacts = list(loaded_artifacts)
+        if not loaded_artifacts:
+            raise ValueError("evaluation requires at least one frozen artifact")
+        artifact_facts = [
+            evaluation.validate_loaded(dataset, rows)
+            for evaluation, rows in loaded_artifacts
+        ]
+        sample_ids = list(
+            dict.fromkeys(
+                sample_id
+                for facts in artifact_facts
+                for sample_id in facts
+            )
+        )
+        canonical_facts = {}
+        for sample_id in sample_ids:
+            sample = dataset[sample_id]
+            try:
+                response_length = int(sample.attention().num_response_tokens)
+                canonical_facts[sample_id] = (
+                    canonical_source_group(sample),
+                    response_length,
+                )
+            finally:
+                sample.release_attention()
+        for facts in artifact_facts:
+            for sample_id, recorded in facts.items():
+                canonical_source, canonical_length = canonical_facts[sample_id]
+                recorded_source, recorded_length = recorded
+                if canonical_source != recorded_source:
+                    raise ValueError(
+                        "evaluation canonical source differs from score artifact"
+                    )
+                if canonical_length != recorded_length:
+                    raise ValueError(
+                        "evaluation response length differs from score artifact"
+                    )
+
         for evaluation, rows in loaded_artifacts:
             evaluation.validate_loaded(dataset, rows)
+        labels = dataset.prepare_evaluation_labels()
+        canonical_labels = {}
+        for sample_id in sample_ids:
+            sample = dataset[sample_id]
+            try:
+                token_labels = _as_numpy_labels(labels.response_labels(sample))
+                source_id, response_length = canonical_facts[sample_id]
+                if len(token_labels) != response_length:
+                    raise ValueError(
+                        "canonical labels differ from evaluation response length"
+                    )
+                canonical_labels[sample_id] = (
+                    token_labels,
+                    source_id,
+                    response_length,
+                    int(token_labels.any()),
+                )
+            finally:
+                sample.release_attention()
         return [
-            _align_evaluation_labels(dataset, rows["sample_id"], rows["token_index"])
+            _project_evaluation_labels(rows, canonical_labels)
             for _, rows in loaded_artifacts
         ]
 
-    def validate_loaded(self, dataset, rows) -> None:
+    def validate_loaded(self, dataset, rows) -> dict[str, tuple[str, int]]:
         """Validate a loaded artifact's frozen dataset binding without labels."""
 
         self.artifact.verify(self.artifact.path)
@@ -93,6 +190,7 @@ class FrozenEvaluation:
                 f"expected split {self.expected_split!r}"
             )
         required = {
+            "audit_scope",
             "dataset_manifest_sha256",
             "sample_id",
             "source_id",
@@ -104,13 +202,8 @@ class FrozenEvaluation:
             raise ValueError(
                 f"evaluation artifact misses dataset binding fields: {sorted(missing)}"
             )
-        recorded_manifest = np.asarray(rows["dataset_manifest_sha256"])
-        if recorded_manifest.ndim != 0 or recorded_manifest.dtype.kind not in {
-            "U",
-            "S",
-        }:
-            raise ValueError("evaluation artifact has an invalid dataset manifest digest")
-        if str(recorded_manifest.item()) != dataset_manifest_sha256(dataset):
+        recorded_manifest = sha256_text(rows, "dataset_manifest_sha256")
+        if recorded_manifest != dataset_manifest_sha256(dataset):
             raise ValueError("evaluation dataset manifest differs from score artifact")
 
         sample_ids = rows["sample_id"]
@@ -121,20 +214,21 @@ class FrozenEvaluation:
             token_indices,
             rows["response_length"],
         )
-        for sample_id, (recorded_source, recorded_length) in facts.items():
-            sample = dataset[sample_id]
-            try:
-                response_length = int(sample.attention().num_response_tokens)
-                if canonical_source_group(sample) != recorded_source:
-                    raise ValueError(
-                        "evaluation canonical source differs from score artifact"
-                    )
-                if response_length != recorded_length:
-                    raise ValueError(
-                        "evaluation response length differs from score artifact"
-                    )
-            finally:
-                sample.release_attention()
+        audit_scope = scalar_text(rows, "audit_scope")
+        if audit_scope not in {"complete_split", "selected_samples"}:
+            raise ValueError("evaluation artifact has an invalid audit_scope")
+        dataset_sample_ids = set(map(str, dataset.sample_ids))
+        artifact_sample_ids = set(facts)
+        if not artifact_sample_ids.issubset(dataset_sample_ids):
+            raise ValueError("evaluation artifact contains samples outside the dataset")
+        if (
+            audit_scope == "complete_split"
+            and artifact_sample_ids != dataset_sample_ids
+        ):
+            raise ValueError(
+                "evaluation artifact complete_split rows do not cover the dataset"
+            )
+        return facts
 
 
 class HeldOutSourceAudit:
@@ -441,55 +535,15 @@ def dataset_manifest_sha256(dataset) -> str:
     return file_sha256(Path(dataset.root) / "manifest.json")
 
 
-def _labels_for_evaluation(dataset):
-    try:
-        return dataset.labels()
-    except RuntimeError as error:
-        if "every attention sample" not in str(error):
-            raise
-    for sample_id in dataset.sample_ids:
-        sample = dataset[sample_id]
-        sample.attention()
-        sample.release_attention()
-    return dataset.labels()
-
-
 def _as_numpy_labels(values) -> np.ndarray:
     if hasattr(values, "cpu"):
         values = values.cpu().numpy()
     return np.asarray(values, dtype=np.int8)
 
 
-def _align_evaluation_labels(dataset, sample_ids, token_indices) -> EvaluationLabels:
-    """Unlock labels at evaluation and align complete canonical response facts."""
-
-    sample_ids = np.asarray(sample_ids, dtype=str)
-    raw_token_indices = np.asarray(token_indices)
-    if sample_ids.ndim != 1 or raw_token_indices.ndim != 1:
-        raise ValueError("sample_ids and token_indices must be one-dimensional")
-    if len(sample_ids) != len(raw_token_indices):
-        raise ValueError("sample_ids and token_indices must have the same length")
-    if not np.issubdtype(raw_token_indices.dtype, np.integer):
-        raise ValueError("token_indices must use an integer dtype")
-    token_indices = raw_token_indices.astype(np.int64, copy=False)
-    if bool((token_indices < 0).any()):
-        raise ValueError("token_indices must be non-negative")
-
-    labels = _labels_for_evaluation(dataset)
-    canonical = {}
-    for sample_id in dict.fromkeys(sample_ids.tolist()):
-        sample = dataset[sample_id]
-        try:
-            token_label = _as_numpy_labels(labels.response_labels(sample))
-            canonical[sample_id] = (
-                token_label,
-                canonical_source_group(sample),
-                len(token_label),
-                int(token_label.any()),
-            )
-        finally:
-            sample.release_attention()
-
+def _project_evaluation_labels(rows, canonical) -> EvaluationLabels:
+    sample_ids = np.asarray(rows["sample_id"]).astype(str, copy=False)
+    token_indices = np.asarray(rows["token_index"]).astype(np.int64, copy=False)
     token_label = np.empty(len(sample_ids), dtype=np.int8)
     response_positive = np.empty(len(sample_ids), dtype=np.int8)
     response_length = np.empty(len(sample_ids), dtype=np.int32)
