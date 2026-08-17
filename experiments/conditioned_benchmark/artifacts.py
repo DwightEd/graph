@@ -9,14 +9,14 @@ from typing import Any
 import numpy as np
 
 from experiment_protocol import FrozenFile, scalar_text, sha256_text
-from experiments.causal_multiplex_flow.artifacts import (
-    load_score_artifact as load_cmrp_score,
+from experiments.causal_isomorphism_trajectory.artifacts import (
+    load_score_artifact as load_citg_score,
 )
-from experiments.causal_multiplex_flow.artifacts import (
-    score_temporal_scope as cmrp_temporal_scope,
+from experiments.causal_isomorphism_trajectory.artifacts import (
+    score_temporal_scope as citg_temporal_scope,
 )
-from experiments.causal_multiplex_flow.artifacts import (
-    verify_score_provenance as verify_cmrp_score_provenance,
+from experiments.causal_isomorphism_trajectory.artifacts import (
+    verify_score_provenance as verify_citg_score_provenance,
 )
 from experiments.rr_topology_dynamics.artifacts import (
     load_topology_artifact,
@@ -42,7 +42,7 @@ from .types import MethodScore, ScoreArtifact
 
 @dataclass(frozen=True)
 class ArtifactSpec:
-    """One current v2 artifact and any explicitly oriented RR features."""
+    """One current frozen artifact and any explicitly oriented RR features."""
 
     name: str
     path: str
@@ -50,7 +50,7 @@ class ArtifactSpec:
     direction: str | None = None
 
     @classmethod
-    def from_mapping(cls, value: dict[str, Any]) -> ArtifactSpec:
+    def from_mapping(cls, value: dict[str, Any]) -> "ArtifactSpec":
         allowed = {"name", "path", "column", "direction"}
         unknown = set(value).difference(allowed)
         if unknown:
@@ -73,7 +73,10 @@ def _schema(path: Path) -> str:
 
 
 def _primary_method(
-    spec: ArtifactSpec, arrays, field: str, temporal_scope
+    spec: ArtifactSpec,
+    arrays,
+    field: str,
+    temporal_scope,
 ) -> dict[str, MethodScore]:
     if spec.column is not None or spec.direction is not None:
         raise ValueError(
@@ -123,14 +126,14 @@ def _topology_methods(spec: ArtifactSpec, arrays) -> dict[str, MethodScore]:
 
 
 def load_score_artifact(spec: ArtifactSpec, frozen: FrozenFile) -> ScoreArtifact:
-    """Strict-load one captured current-v2 artifact through its owner contract."""
+    """Strict-load one captured artifact through its owner contract."""
 
     frozen.verify(spec.path)
     schema = _schema(frozen.path)
-    if schema == "cmrp-score-v2":
-        arrays = load_cmrp_score(frozen.path)
-        verify_cmrp_score_provenance(arrays)
-        methods = _primary_method(spec, arrays, "score", cmrp_temporal_scope())
+    if schema == "citg-score-v1":
+        arrays = load_citg_score(frozen.path)
+        verify_citg_score_provenance(arrays)
+        methods = _primary_method(spec, arrays, "score", citg_temporal_scope())
     elif schema == "rr-spectral-score-v2":
         arrays = load_spectral_score(frozen.path)
         verify_spectral_score_provenance(arrays)
@@ -142,7 +145,9 @@ def load_score_artifact(spec: ArtifactSpec, frozen: FrozenFile) -> ScoreArtifact
         verify_topology_score_provenance(arrays)
         methods = _topology_methods(spec, arrays)
     else:
-        raise ValueError(f"unsupported conditioned benchmark artifact schema: {schema}")
+        raise ValueError(
+            f"unsupported conditioned benchmark artifact schema: {schema}"
+        )
     frozen.verify(frozen.path)
 
     artifact = ScoreArtifact(
@@ -154,7 +159,9 @@ def load_score_artifact(spec: ArtifactSpec, frozen: FrozenFile) -> ScoreArtifact
         token_index=np.asarray(arrays["token_index"]).copy(),
         response_length=np.asarray(arrays["response_length"]).copy(),
         audit_scope=scalar_text(arrays, "audit_scope"),
-        dataset_manifest_sha256=sha256_text(arrays, "dataset_manifest_sha256"),
+        dataset_manifest_sha256=sha256_text(
+            arrays, "dataset_manifest_sha256"
+        ),
         methods=methods,
     )
     return artifact.validate()
