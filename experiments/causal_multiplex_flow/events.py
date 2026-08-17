@@ -117,7 +117,8 @@ class CausalEventSample:
             current = self.target_slice(token)
             if current.start == current.stop:
                 continue
-            if bool((self.source[current][self.relation[current] == RR] >= token).any()):
+            rr_source = self.source[current][self.relation[current] == RR]
+            if bool((rr_source >= token).any()):
                 raise ValueError("RR event is not strictly causal")
         if not bool(torch.isfinite(self.weight).all()) or bool((self.weight < 0).any()):
             raise ValueError("event weights must be finite and non-negative")
@@ -136,39 +137,21 @@ def log_lag_bin(lag: int) -> int:
 def _stable_top_indices(
     indices: torch.Tensor,
     weight: torch.Tensor,
-    channel: torch.Tensor,
-    source: torch.Tensor,
     limit: int,
 ) -> torch.Tensor:
-    """Select deterministic strongest events with stable structural tie breaks."""
+    """Select strongest events without per-token CPU transfers.
+
+    Canonical CSR order is deterministic. A stable descending weight sort keeps
+    that canonical order as the tie break, so repeated extraction is identical
+    while remaining on the attention device.
+    """
     limit = int(limit)
     if limit <= 0 or indices.numel() == 0:
         return torch.empty(0, dtype=torch.long, device=indices.device)
-    if indices.numel() <= limit:
-        chosen = indices
-    else:
-        selected = indices.detach().cpu().numpy()
-        order = np.lexsort(
-            (
-                source[indices].detach().cpu().numpy(),
-                channel[indices].detach().cpu().numpy(),
-                -weight[indices].detach().cpu().numpy(),
-            )
-        )
-        chosen = torch.as_tensor(
-            selected[order[:limit]], dtype=torch.long, device=indices.device
-        )
-    # The caller groups by target, so structural ordering makes the artifact
-    # deterministic without changing the selected set.
-    selected = chosen.detach().cpu().numpy()
-    order = np.lexsort(
-        (
-            source[chosen].detach().cpu().numpy(),
-            channel[chosen].detach().cpu().numpy(),
-            -weight[chosen].detach().cpu().numpy(),
-        )
+    order = torch.argsort(
+        weight[indices], descending=True, stable=True
     )
-    return torch.as_tensor(selected[order], dtype=torch.long, device=indices.device)
+    return indices[order[:limit]]
 
 
 def extract_causal_events(
@@ -245,6 +228,12 @@ def extract_causal_events(
         channel_all = torch.cat(channel_parts)
         weight_all = torch.cat(weight_parts)
         lag_all = torch.cat(lag_parts)
+        target_order = torch.argsort(target_all, stable=True)
+        grouped_count = torch.bincount(target_all, minlength=response_count)
+        grouped_ptr = torch.zeros(
+            response_count + 1, dtype=torch.long, device=device
+        )
+        grouped_ptr[1:] = torch.cumsum(grouped_count, dim=0)
     else:
         target_all = torch.empty(0, dtype=torch.long, device=device)
         relation_all = torch.empty_like(target_all)
@@ -252,11 +241,17 @@ def extract_causal_events(
         channel_all = torch.empty_like(target_all)
         weight_all = torch.empty(0, dtype=torch.float32, device=device)
         lag_all = torch.empty_like(target_all)
+        target_order = torch.empty_like(target_all)
+        grouped_ptr = torch.zeros(
+            response_count + 1, dtype=torch.long, device=device
+        )
 
     selected_parts: list[torch.Tensor] = []
     counts = torch.zeros(response_count, dtype=torch.long, device=device)
     for token in range(response_count):
-        current = torch.nonzero(target_all == token, as_tuple=False).flatten()
+        current = target_order[
+            int(grouped_ptr[token].item()) : int(grouped_ptr[token + 1].item())
+        ]
         prompt_indices = current[relation_all[current] == RP]
         rr_indices = current[relation_all[current] == RR]
         selected = torch.cat(
@@ -264,15 +259,11 @@ def extract_causal_events(
                 _stable_top_indices(
                     prompt_indices,
                     weight_all,
-                    channel_all,
-                    source_all,
                     config.max_prompt_events_per_token,
                 ),
                 _stable_top_indices(
                     rr_indices,
                     weight_all,
-                    channel_all,
-                    source_all,
                     config.max_rr_events_per_token,
                 ),
             )
