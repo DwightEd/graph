@@ -101,7 +101,9 @@ A useful topology representation should give:
 rewired PPCA energy - true PPCA energy > 0
 ```
 
-with a positive source-bootstrap lower confidence bound.
+with a positive source-bootstrap lower confidence bound. Synthetic contract
+tests verify that the gate is recorded; they do not force an arbitrary tiny
+fixture to pass it.
 
 ## Score outputs
 
