@@ -24,7 +24,7 @@ from experiment_protocol import (
     dataset_manifest_sha256,
     file_sha256,
 )
-from experiments.causal_multiplex_flow.artifacts import (
+from experiments.causal_isomorphism_trajectory.artifacts import (
     score_temporal_scope as cmrp_scope,
 )
 from experiments.conditioned_benchmark.artifacts import ArtifactSpec
@@ -136,35 +136,64 @@ def _write_dataset(root: Path):
 
 
 def _write_cmrp_scores(path: Path, dataset: ResearchDataset):
-    model_path = path.parent / "model.pt"
-    model_path.write_bytes(b"CMRP test model")
+    """Write a strict CITG artifact while preserving the legacy helper name."""
     reference_path = path.parent / "reference.npz"
-    np.savez_compressed(
-        reference_path,
-        schema=np.asarray("cmrp-reference-v2"),
-        model_file=np.asarray(model_path.name),
-        model_sha256=np.asarray(file_sha256(model_path)),
-        train_dataset_manifest_sha256=np.asarray("a" * 64),
-        num_layers=np.asarray(1, dtype=np.int16),
-        num_heads=np.asarray(1, dtype=np.int16),
-        event_config_json=np.asarray("{}"),
-        model_config_json=np.asarray("{}"),
-        train_config_json=np.asarray("{}"),
-        fit_group_id=np.asarray(["fit-source"]),
-        calibration_group_id=np.asarray(["calibration-source"]),
-        calibration_raw_route_surprise=np.asarray([0.1, 0.2], dtype=np.float32),
-        topology_gate_mean_gap=np.asarray(0.1, dtype=np.float32),
-        topology_gate_median_gap=np.asarray(0.1, dtype=np.float32),
-        topology_gate_evaluated_edge_count=np.asarray(1, dtype=np.int32),
-        topology_gate_selected_edge_count=np.asarray(1, dtype=np.int32),
-        topology_gate_coverage=np.asarray(1.0, dtype=np.float32),
-        topology_gate_positive_fraction=np.asarray(1.0, dtype=np.float32),
-        topology_gate_pass=np.asarray(True),
-    )
+    reference_fields = {
+        "schema": np.asarray("citg-reference-v1"),
+        "train_dataset_manifest_sha256": np.asarray("a" * 64),
+        "event_config_json": np.asarray("{}"),
+        "signature_config_json": np.asarray("{}"),
+        "geometry_config_json": np.asarray("{}"),
+        "fit_group_id": np.asarray(["fit-source"]),
+        "calibration_group_id": np.asarray(["calibration-source"]),
+        "topology_gate_token_count": np.asarray(4, dtype=np.int32),
+        "topology_gate_evaluated_tokens": np.asarray(4, dtype=np.int32),
+        "topology_gate_coverage": np.asarray(1.0, dtype=np.float32),
+        "topology_gate_source_groups": np.asarray(2, dtype=np.int32),
+        "topology_gate_mean_gap": np.asarray(0.1, dtype=np.float32),
+        "topology_gate_median_gap": np.asarray(0.1, dtype=np.float32),
+        "topology_gate_positive_group_fraction": np.asarray(1.0, dtype=np.float32),
+        "topology_gate_ci_low": np.asarray(0.05, dtype=np.float32),
+        "topology_gate_ci_high": np.asarray(0.15, dtype=np.float32),
+        "topology_gate_pass": np.asarray(True),
+    }
+    for variant in ("full", "static", "topology", "mass"):
+        prefix = f"{variant}_"
+        reference_fields.update(
+            {
+                f"calibration_energy_{variant}": np.asarray(
+                    [0.1, 0.2], dtype=np.float32
+                ),
+                prefix + "condition_names": np.asarray(["QA\x1f0"]),
+                prefix + "condition_center": np.zeros((1, 2), dtype=np.float32),
+                prefix + "condition_scale": np.ones((1, 2), dtype=np.float32),
+                prefix + "condition_count": np.asarray([4], dtype=np.int32),
+                prefix + "global_center": np.zeros(2, dtype=np.float32),
+                prefix + "global_scale": np.ones(2, dtype=np.float32),
+                prefix + "rr_pca_mean": np.zeros(2, dtype=np.float32),
+                prefix + "rr_pca_components": np.asarray(
+                    [[1.0, 0.0]], dtype=np.float32
+                ),
+                prefix + "rr_pca_explained_variance": np.ones(
+                    1, dtype=np.float32
+                ),
+                prefix + "rr_pca_noise_variance": np.asarray(
+                    1.0, dtype=np.float32
+                ),
+                prefix + "feature_names": np.asarray(["f0", "f1"]),
+                prefix + "fit_rows": np.asarray(4, dtype=np.int32),
+                prefix + "retained_fit_rows": np.asarray(4, dtype=np.int32),
+                prefix + "provisional_residual_median": np.asarray(
+                    0.0, dtype=np.float32
+                ),
+            }
+        )
+    np.savez_compressed(reference_path, **reference_fields)
+
     sample_id = np.repeat(np.asarray(dataset.sample_ids, dtype=str), 3)
     token_index = np.tile(np.arange(3, dtype=np.int32), len(dataset.sample_ids))
     source_by_sample = {
-        sample_id: dataset[sample_id].source_id for sample_id in dataset.sample_ids
+        sample: dataset[sample].source_id for sample in dataset.sample_ids
     }
     source_id = np.asarray([source_by_sample[value] for value in sample_id])
     positive_sample = np.isin(sample_id, ["r0", "r2"])
@@ -172,11 +201,9 @@ def _write_cmrp_scores(path: Path, dataset: ResearchDataset):
     score = np.where(positive_sample, 0.9, 0.1).astype(np.float32)
     np.savez_compressed(
         path,
-        schema=np.asarray("cmrp-score-v2"),
+        schema=np.asarray("citg-score-v1"),
         reference_path=np.asarray(str(reference_path.resolve())),
         reference_sha256=np.asarray(file_sha256(reference_path)),
-        model_path=np.asarray(str(model_path.resolve())),
-        model_sha256=np.asarray(file_sha256(model_path)),
         dataset_manifest_sha256=np.asarray(dataset_manifest_sha256(dataset)),
         fit_group_id=np.asarray(["fit-source"]),
         calibration_group_id=np.asarray(["calibration-source"]),
@@ -191,13 +218,16 @@ def _write_cmrp_scores(path: Path, dataset: ResearchDataset):
         data_source=np.asarray(["synthetic"] * rows),
         generator_model=np.asarray(["generator"] * rows),
         score=score,
-        raw_route_surprise=score.copy(),
-        presence_nll=score.copy(),
-        source_nll=score.copy(),
-        weight_error=score.copy(),
-        rewired_source_nll=score.copy(),
-        rewire_gap=np.zeros(rows, dtype=np.float32),
-        selected_rr_edges=np.ones(rows, dtype=np.int32),
+        score_static=score.copy(),
+        score_topology=score.copy(),
+        score_mass=score.copy(),
+        energy_full=score.copy(),
+        energy_static=score.copy(),
+        energy_topology=score.copy(),
+        energy_mass=score.copy(),
+        rewired_energy_full=score.copy(),
+        rewire_energy_gap=np.zeros(rows, dtype=np.float32),
+        rewire_valid=np.ones(rows, dtype=bool),
     )
 
 
