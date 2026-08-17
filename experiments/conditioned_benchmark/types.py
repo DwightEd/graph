@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
+
+from experiment_protocol import EvaluationLabels
 
 
 def _one_dimensional(name: str, value, length: int | None = None) -> np.ndarray:
@@ -48,15 +50,23 @@ class ScoreArtifact:
     path: str
     schema: str
     sample_id: np.ndarray
+    source_id: np.ndarray
     token_index: np.ndarray
+    response_length: np.ndarray
+    dataset_manifest_sha256: str
     methods: dict[str, MethodScore]
-    metadata: dict[str, np.ndarray] = field(default_factory=dict)
 
-    def validate(self) -> "ScoreArtifact":
+    def validate(self) -> ScoreArtifact:
         self.sample_id = _one_dimensional("sample_id", self.sample_id).astype(str)
         length = len(self.sample_id)
         self.token_index = _one_dimensional(
             "token_index", self.token_index, length
+        ).astype(np.int64)
+        self.source_id = _one_dimensional("source_id", self.source_id, length).astype(
+            str
+        )
+        self.response_length = _one_dimensional(
+            "response_length", self.response_length, length
         ).astype(np.int64)
         if length == 0:
             raise ValueError(f"artifact {self.name} has no rows")
@@ -78,11 +88,26 @@ class ScoreArtifact:
             )
             for name, method in self.methods.items()
         }
-        self.metadata = {
-            name: _one_dimensional(name, value, length).astype(str)
-            for name, value in self.metadata.items()
-        }
         return self
+
+    def evaluation_rows(self) -> dict[str, np.ndarray]:
+        """Return the complete dataset-binding rows used to unlock labels."""
+
+        return {
+            "dataset_manifest_sha256": np.asarray(self.dataset_manifest_sha256),
+            "sample_id": self.sample_id,
+            "source_id": self.source_id,
+            "token_index": self.token_index,
+            "response_length": self.response_length,
+        }
+
+
+@dataclass(frozen=True)
+class EvaluatedArtifact:
+    """A strict score artifact bound to canonical evaluation facts."""
+
+    score: ScoreArtifact
+    labels: EvaluationLabels
 
 
 @dataclass
@@ -99,8 +124,10 @@ class BenchmarkFrame:
     response_length: np.ndarray
     relative_position: np.ndarray
     labels: np.ndarray
+    response_positive: np.ndarray
 
-    def validate(self) -> "BenchmarkFrame":
+    def validate(self) -> BenchmarkFrame:
+        self.sample_id = _one_dimensional("sample_id", self.sample_id).astype(str)
         length = len(self.sample_id)
         for name in (
             "token_index",
@@ -111,18 +138,29 @@ class BenchmarkFrame:
             "response_length",
             "relative_position",
             "labels",
+            "response_positive",
         ):
             value = _one_dimensional(name, getattr(self, name), length)
             setattr(self, name, value)
         if not bool(np.isin(self.labels, (0, 1)).all()):
             raise ValueError("labels must be binary")
+        if not bool(np.isin(self.response_positive, (0, 1)).all()):
+            raise ValueError("response_positive must be binary")
         if not bool(np.isfinite(self.relative_position).all()):
             raise ValueError("relative positions contain non-finite values")
         for method in self.methods.values():
             method.oriented(length)
+        for sample_id in np.unique(self.sample_id):
+            selected = self.sample_id == sample_id
+            if (
+                len(np.unique(self.source_id[selected])) != 1
+                or len(np.unique(self.response_length[selected])) != 1
+                or len(np.unique(self.response_positive[selected])) != 1
+            ):
+                raise ValueError("canonical response facts vary within a sample")
         return self
 
-    def subset(self, selected) -> "BenchmarkFrame":
+    def subset(self, selected) -> BenchmarkFrame:
         selected = np.asarray(selected)
         return BenchmarkFrame(
             sample_id=self.sample_id[selected],
@@ -145,4 +183,5 @@ class BenchmarkFrame:
             response_length=self.response_length[selected],
             relative_position=self.relative_position[selected],
             labels=self.labels[selected],
+            response_positive=self.response_positive[selected],
         ).validate()

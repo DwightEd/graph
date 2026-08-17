@@ -19,6 +19,7 @@ arguments=(
   --device "${DEVICE:-cpu}"
   --evaluation-unit "${EVALUATION_UNIT:-token}"
   --ratio-mode "${RATIO_MODE:-reweight}"
+  --ratio-repeats "${RATIO_REPEATS:-20}"
   --bootstrap "${BOOTSTRAP:-200}"
   --seed "${SEED:-20260817}"
 )

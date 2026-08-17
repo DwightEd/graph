@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -36,7 +36,7 @@ class FrozenFile:
     sha256: str
 
     @classmethod
-    def capture(cls, path) -> "FrozenFile":
+    def capture(cls, path) -> FrozenFile:
         path = Path(path).resolve()
         return cls(path=path, sha256=file_sha256(path))
 
@@ -56,7 +56,7 @@ class FrozenEvaluation:
     expected_split: str = "test"
 
     @classmethod
-    def capture(cls, artifact_path, *, expected_split="test") -> "FrozenEvaluation":
+    def capture(cls, artifact_path, *, expected_split="test") -> FrozenEvaluation:
         return cls(FrozenFile.capture(artifact_path), str(expected_split))
 
     def load_and_align(self, dataset, loader) -> tuple[object, EvaluationLabels]:
@@ -67,6 +67,23 @@ class FrozenEvaluation:
 
     def align_loaded(self, dataset, rows) -> EvaluationLabels:
         """Reverify one already-loaded artifact before opening aligned labels."""
+
+        return self.align_all(dataset, [(self, rows)])[0]
+
+    @staticmethod
+    def align_all(dataset, loaded_artifacts) -> list[EvaluationLabels]:
+        """Validate every frozen binding before opening any aligned labels."""
+
+        loaded_artifacts = list(loaded_artifacts)
+        for evaluation, rows in loaded_artifacts:
+            evaluation.validate_loaded(dataset, rows)
+        return [
+            _align_evaluation_labels(dataset, rows["sample_id"], rows["token_index"])
+            for _, rows in loaded_artifacts
+        ]
+
+    def validate_loaded(self, dataset, rows) -> None:
+        """Validate a loaded artifact's frozen dataset binding without labels."""
 
         self.artifact.verify(self.artifact.path)
         actual_split = str(dataset.manifest.get("split"))
@@ -118,8 +135,6 @@ class FrozenEvaluation:
                     )
             finally:
                 sample.release_attention()
-        labels = _align_evaluation_labels(dataset, sample_ids, token_indices)
-        return labels
 
 
 class HeldOutSourceAudit:
@@ -333,13 +348,13 @@ def partition_source_groups(
 
     def group_order(group_id: str) -> bytes:
         return hashlib.sha256(
-            f"source-group-split-v1\0{int(seed)}\0{group_id}".encode("utf-8")
+            f"source-group-split-v1\0{int(seed)}\0{group_id}".encode()
         ).digest()
 
     ordered = sorted(groups, key=group_order)
     calibration_count = min(
         len(ordered) - 1,
-        max(1, int(round(len(ordered) * calibration_fraction))),
+        max(1, round(len(ordered) * calibration_fraction)),
     )
     calibration_groups = set(ordered[:calibration_count])
     fit_groups = set(ordered).difference(calibration_groups)
@@ -469,7 +484,7 @@ def _align_evaluation_labels(dataset, sample_ids, token_indices) -> EvaluationLa
             canonical[sample_id] = (
                 token_label,
                 canonical_source_group(sample),
-                int(len(token_label)),
+                len(token_label),
                 int(token_label.any()),
             )
         finally:

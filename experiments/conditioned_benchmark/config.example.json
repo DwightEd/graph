@@ -4,27 +4,17 @@
   "artifacts": [
     {
       "name": "rr_spectral",
-      "path": "/absolute/path/to/rr_spectral/test_scores.npz",
-      "adapter": "auto"
+      "path": "/absolute/path/to/rr_spectral/test_scores.npz"
     },
     {
-      "name": "route_geometry",
-      "path": "/absolute/path/to/trajectory_geometry/scores_label_free.npz",
-      "adapter": "auto"
+      "name": "cmrp",
+      "path": "/absolute/path/to/cmrp/test_scores.npz"
     },
     {
       "name": "rr_topology",
       "path": "/absolute/path/to/rr_topology/test_features.npz",
-      "adapter": "generic",
-      "protocol": "label_free_feature_fixed_direction",
-      "methods": [
-        {
-          "name": "prompt_groundedness_low",
-          "field": "features_z",
-          "column": "prompt_groundedness",
-          "direction": "lower"
-        }
-      ]
+      "column": "prompt_groundedness",
+      "direction": "lower"
     }
   ],
   "benchmark": {
@@ -42,6 +32,7 @@
     ],
     "evaluation_unit": "token",
     "ratio_mode": "reweight",
+    "ratio_repeats": 20,
     "bootstrap_replicates": 200,
     "relative_position_min": 0.0,
     "relative_position_max": 1.0,

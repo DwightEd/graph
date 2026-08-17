@@ -43,6 +43,6 @@ separate post-hoc evaluation stage after representations/scores are frozen.
 - `causal_multiplex_flow/`: source-aware, channel-preserving dynamic routing
   prediction with disjoint unlabeled fit/calibration groups and a
   lag-preserving source-rewiring topology gate.
-- `conditioned_benchmark/`: a common registry for frozen detector artifacts,
-  metric implementations, `task_type` slices, token/response evaluation, and
-  controlled positive-prevalence experiments. It does not refit methods.
+- `conditioned_benchmark/`: a strict current-v2 workflow for frozen detector
+  artifacts, `task_type` slices, token/response evaluation, and controlled
+  positive-prevalence experiments. It does not refit methods.

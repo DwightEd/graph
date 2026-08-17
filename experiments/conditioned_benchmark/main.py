@@ -6,9 +6,8 @@ import argparse
 import json
 from pathlib import Path
 
-from .artifacts import ArtifactSpec, load_score_artifact
-from .dataset import align_artifacts, attach_dataset_evaluation
-from .runner import BenchmarkConfig, run_benchmark
+from .artifacts import ArtifactSpec
+from .runner import BenchmarkConfig, ConditionedBenchmark
 
 
 def _artifact_argument(value: str):
@@ -17,7 +16,7 @@ def _artifact_argument(value: str):
     name, path = value.split("=", 1)
     if not name or not path:
         raise argparse.ArgumentTypeError("artifact name and path must be non-empty")
-    return {"name": name, "path": path, "adapter": "auto"}
+    return {"name": name, "path": path}
 
 
 def parse_args(argv=None):
@@ -37,9 +36,7 @@ def parse_args(argv=None):
     parser.add_argument("--positive-rate", action="append")
     parser.add_argument("--metric", action="append")
     parser.add_argument("--evaluation-unit", choices=("token", "response"))
-    parser.add_argument(
-        "--response-aggregation", choices=("max", "mean", "topk_mean")
-    )
+    parser.add_argument("--response-aggregation", choices=("max", "mean", "topk_mean"))
     parser.add_argument("--response-top-fraction", type=float)
     parser.add_argument("--ratio-mode", choices=("reweight", "subsample"))
     parser.add_argument("--ratio-repeats", type=int)
@@ -57,11 +54,22 @@ def _load_configuration(args):
         value = json.loads(Path(args.config).read_text(encoding="utf-8"))
         if not isinstance(value, dict):
             raise ValueError("configuration root must be a JSON object")
+        unknown = sorted(
+            set(value).difference(
+                {"split_root", "output_dir", "artifacts", "benchmark"}
+            )
+        )
+        if unknown:
+            raise ValueError(
+                f"unsupported top-level configuration settings: {unknown}"
+            )
     split_root = args.split_root or value.get("split_root")
     output_dir = args.output_dir or value.get("output_dir")
     artifacts = args.artifact or value.get("artifacts")
     if not split_root or not output_dir or not artifacts:
-        raise ValueError("split_root, output_dir, and at least one artifact are required")
+        raise ValueError(
+            "split_root, output_dir, and at least one artifact are required"
+        )
 
     benchmark = dict(value.get("benchmark", {}))
     overrides = {
@@ -80,44 +88,36 @@ def _load_configuration(args):
         "relative_position_max": args.relative_position_max,
         "seed": args.seed,
     }
-    benchmark.update({name: item for name, item in overrides.items() if item is not None})
+    benchmark.update(
+        {name: item for name, item in overrides.items() if item is not None}
+    )
     specs = [ArtifactSpec.from_mapping(item) for item in artifacts]
-    return str(split_root), str(output_dir), specs, BenchmarkConfig.from_mapping(benchmark)
+    return (
+        str(split_root),
+        str(output_dir),
+        specs,
+        BenchmarkConfig.from_mapping(benchmark),
+    )
 
 
 def main(argv=None):
     args = parse_args(argv)
     split_root, output_dir, specs, config = _load_configuration(args)
-    artifacts = [load_score_artifact(spec) for spec in specs]
-    sample_id, token_index, methods, metadata = align_artifacts(artifacts)
-    frame = attach_dataset_evaluation(
-        sample_id,
-        token_index,
-        methods,
-        metadata,
+    report = ConditionedBenchmark(config).run(
         split_root,
-        device=args.device,
-    )
-    report = run_benchmark(
-        frame,
         output_dir,
-        config=config,
-        artifacts=[
-            {
-                "name": artifact.name,
-                "path": artifact.path,
-                "schema": artifact.schema,
-                "original_rows": int(len(artifact.sample_id)),
-            }
-            for artifact in artifacts
-        ],
+        specs,
+        device=args.device,
     )
     print(
         json.dumps(
             {
                 "state": report["state"],
-                "aligned_rows": report["aligned_rows"],
+                "aligned_token_rows": report["aligned_token_rows"],
                 "aligned_samples": report["aligned_samples"],
+                "evaluated_rows": report["evaluated_rows"],
+                "evaluated_samples": report["evaluated_samples"],
+                "evaluation_unit": report["evaluation_unit"],
                 "methods": len(report["methods"]),
                 "conditions": sum(
                     row["state"] == "complete" for row in report["conditions"]

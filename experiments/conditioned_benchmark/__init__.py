@@ -1,14 +1,13 @@
-"""Conditioned, post-hoc evaluation of frozen token anomaly scores."""
+"""Conditioned, post-hoc evaluation of current frozen detector artifacts."""
 
-from .artifacts import ArtifactSpec, load_score_artifact
+from .artifacts import ArtifactSpec
 from .metrics import DEFAULT_METRICS, METRICS
-from .runner import BenchmarkConfig, run_benchmark
+from .runner import BenchmarkConfig, ConditionedBenchmark
 
 __all__ = [
-    "ArtifactSpec",
-    "BenchmarkConfig",
     "DEFAULT_METRICS",
     "METRICS",
-    "load_score_artifact",
-    "run_benchmark",
+    "ArtifactSpec",
+    "BenchmarkConfig",
+    "ConditionedBenchmark",
 ]

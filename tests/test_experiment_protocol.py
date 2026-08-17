@@ -1,14 +1,14 @@
 import json
-import unittest
-from types import SimpleNamespace
-from pathlib import Path
 import tempfile
+import unittest
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
 from experiment_protocol import (
-    FrozenFile,
     FrozenEvaluation,
+    FrozenFile,
     HeldOutSourceAudit,
     dataset_manifest_sha256,
     file_sha256,
@@ -32,6 +32,7 @@ class _Sample:
 
     def attention(self):
         self.dataset.opened.add(self.sample_id)
+        self.dataset.attention_calls[self.sample_id] += 1
         return SimpleNamespace(num_response_tokens=len(self._labels))
 
     def release_attention(self):
@@ -53,6 +54,7 @@ class _LabelLockedDataset:
             json.dumps(self.manifest), encoding="utf-8"
         )
         self.opened = set()
+        self.attention_calls = {sample_id: 0 for sample_id in self.sample_ids}
         self.labels_called = False
         self.samples = {
             "a": _Sample(self, "a", "source-a", [0, 1, 1]),
@@ -299,6 +301,32 @@ class SourceGroupPartitionTests(unittest.TestCase):
 
 
 class FrozenEvaluationTests(unittest.TestCase):
+    def test_align_all_validates_each_artifact_once_before_unlocking_labels(self):
+        dataset = _LabelLockedDataset()
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "scores.npz"
+            rows = _complete_evaluation_rows(dataset)
+            np.savez_compressed(artifact, **rows)
+
+            labels = FrozenEvaluation.align_all(
+                dataset,
+                [(FrozenEvaluation.capture(artifact), rows)],
+            )
+
+        self.assertEqual(dataset.attention_calls, {"a": 1, "b": 1})
+        np.testing.assert_array_equal(labels[0].token_label, [0, 1, 0, 0, 1])
+
+    def test_validate_loaded_checks_binding_without_opening_labels(self):
+        dataset = _LabelLockedDataset()
+        with tempfile.TemporaryDirectory() as directory:
+            artifact = Path(directory) / "scores.npz"
+            rows = _complete_evaluation_rows(dataset)
+            np.savez_compressed(artifact, **rows)
+
+            FrozenEvaluation.capture(artifact).validate_loaded(dataset, rows)
+
+        self.assertFalse(dataset.labels_called)
+
     def test_aligns_supplied_loaded_rows_without_reloading_artifact_rows(self):
         dataset = _LabelLockedDataset()
         with tempfile.TemporaryDirectory() as directory:

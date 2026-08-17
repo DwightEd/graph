@@ -186,8 +186,6 @@ def aggregate_responses(
         generator_model=frame.generator_model[first],
         response_length=frame.response_length[first],
         relative_position=np.ones(len(groups), dtype=np.float64),
-        labels=np.asarray(
-            [int(frame.labels[rows_by_group[group]].max()) for group in groups],
-            dtype=np.int8,
-        ),
+        labels=frame.response_positive[first].astype(np.int8),
+        response_positive=frame.response_positive[first].astype(np.int8),
     ).validate()

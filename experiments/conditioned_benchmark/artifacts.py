@@ -1,256 +1,141 @@
-"""Adapters from existing score artifacts to a common method registry."""
+"""Strict owner-dispatched score artifacts for the conditioned benchmark."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from experiment_protocol import FrozenFile
 from experiments.causal_multiplex_flow.artifacts import (
-    load_score_artifact as load_cmrp_v2,
+    load_score_artifact as load_cmrp_score,
+)
+from experiments.rr_topology_dynamics.artifacts import (
+    load_topology_artifact,
 )
 from experiments.spectral_feasibility.artifacts import (
-    load_score_artifact as load_spectral_v2,
+    load_score_artifact as load_spectral_score,
 )
 
 from .types import MethodScore, ScoreArtifact
 
 
-SPECTRAL_V2_FIELDS = {
-    "primary": ("score_rr_residual", None),
-    "residual_tail": ("score_rr_residual", None),
-    "raw_residual_energy": ("rr_residual_energy", None),
-    "in_subspace_tail": ("score_rr_latent", None),
-    "ppca_tail": ("score_rr_ppca", None),
-    "localized_channel_tail": ("score_rr_localized", None),
-    "peak_channel": ("top_channel_score", 0),
-}
-LEGACY_SPECTRAL_FIELDS = SPECTRAL_V2_FIELDS | {"primary": ("score", None)}
-
-TRAJECTORY_SIGNATURE = {
-    "score_full",
-    "score_mass_only",
-    "score_dynamics_only",
-    "score_route_embedding",
-    "score_prompt_mass_low",
-}
-
-IDENTIFIER_FIELDS = {
-    "schema",
-    "sample_id",
-    "sample_ids",
-    "token_index",
-    "position",
-    "positions",
-    "source_id",
-    "source_ids",
-    "task_type",
-    "data_source",
-    "generator_model",
-    "labels",
-    "reference_path",
-    "reference_sha256",
-    "topology_reference_path",
-    "spectral_reference_path",
-    "feature_names",
-}
-
-
 @dataclass(frozen=True)
 class ArtifactSpec:
+    """One current v2 artifact and any explicitly oriented RR features."""
+
     name: str
     path: str
-    adapter: str = "auto"
-    protocol: str = "unknown"
-    methods: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    column: str | None = None
+    direction: str | None = None
 
     @classmethod
-    def from_mapping(cls, value: dict[str, Any]) -> "ArtifactSpec":
+    def from_mapping(cls, value: dict[str, Any]) -> ArtifactSpec:
+        allowed = {"name", "path", "column", "direction"}
+        unknown = set(value).difference(allowed)
+        if unknown:
+            raise ValueError(f"unsupported artifact settings: {sorted(unknown)}")
         if "name" not in value or "path" not in value:
             raise ValueError("each artifact requires name and path")
         return cls(
             name=str(value["name"]),
             path=str(value["path"]),
-            adapter=str(value.get("adapter", "auto")),
-            protocol=str(value.get("protocol", "unknown")),
-            methods=tuple(value.get("methods", ())),
+            column=(None if value.get("column") is None else str(value["column"])),
+            direction=(
+                None if value.get("direction") is None else str(value["direction"])
+            ),
         )
 
 
-def _scalar_text(arrays, name, default="") -> str:
+def _scalar_text(arrays, name: str) -> str:
     if name not in arrays:
-        return default
+        raise ValueError(f"artifact misses field {name!r}")
     value = np.asarray(arrays[name])
-    return str(value.item()) if value.ndim == 0 else default
+    if value.ndim != 0 or value.dtype.kind not in {"U", "S"}:
+        raise ValueError(f"artifact field {name!r} must be scalar text")
+    return str(value.item())
 
 
-def _first(arrays, names, *, required=True):
-    for name in names:
-        if name in arrays:
-            return np.asarray(arrays[name])
-    if required:
-        raise ValueError(f"artifact misses every row field in {tuple(names)}")
-    return None
+def _schema(path: Path) -> str:
+    with np.load(path, allow_pickle=False) as arrays:
+        return _scalar_text(arrays, "schema")
 
 
-def _column(arrays, field: str, column) -> np.ndarray:
-    if field not in arrays:
-        raise ValueError(f"configured score field {field!r} is missing")
-    values = np.asarray(arrays[field])
-    if column is None:
-        if values.ndim != 1:
-            raise ValueError(
-                f"score field {field!r} needs a column, shape={values.shape}"
-            )
-        return values
-    if values.ndim != 2:
-        raise ValueError(f"column requested from non-matrix field {field!r}")
-    if isinstance(column, str) and not column.lstrip("-").isdigit():
-        if "feature_names" not in arrays:
-            raise ValueError(f"named column {column!r} requires feature_names")
-        names = np.asarray(arrays["feature_names"]).astype(str)
-        matches = np.flatnonzero(names == column)
-        if len(matches) != 1:
-            raise ValueError(f"feature column {column!r} is missing or ambiguous")
-        column = int(matches[0])
-    return values[:, int(column)]
-
-
-def _configured_methods(spec: ArtifactSpec, arrays) -> dict[str, MethodScore]:
-    methods = {}
-    for item in spec.methods:
-        if "name" not in item or "field" not in item:
-            raise ValueError("configured methods require name and field")
-        short_name = str(item["name"])
-        name = f"{spec.name}.{short_name}"
-        methods[name] = MethodScore(
-            name=name,
-            values=_column(arrays, str(item["field"]), item.get("column")),
-            direction=str(item.get("direction", "higher")),
-            protocol=str(item.get("protocol", spec.protocol)),
-            source_field=str(item["field"]),
-            source_direction=str(item.get("direction", "higher")),
+def _primary_method(spec: ArtifactSpec, arrays, field: str) -> dict[str, MethodScore]:
+    if spec.column is not None or spec.direction is not None:
+        raise ValueError(
+            "column and direction are only valid for RR topology artifacts"
         )
-    return methods
-
-
-def _automatic_methods(spec: ArtifactSpec, arrays, schema: str, row_count: int):
-    methods = {}
-    if schema in {"rr-spectral-score", "rr-spectral-score-v2"}:
-        protocol = "label_free_frozen_score"
-        fields = (
-            LEGACY_SPECTRAL_FIELDS
-            if schema == "rr-spectral-score"
-            else SPECTRAL_V2_FIELDS
-        )
-        for short_name, (field, column) in fields.items():
-            if field not in arrays:
-                continue
-            name = f"{spec.name}.{short_name}"
-            methods[name] = MethodScore(
-                name=name,
-                values=_column(arrays, field, column),
-                protocol=protocol,
-                source_field=field,
-                source_direction="higher",
-            )
-        return methods
-
-    if schema in {"cmrp-score-v1", "cmrp-score-v2"}:
-        if "score" not in arrays:
-            raise ValueError("CMRP score artifact misses its frozen primary score")
-        name = f"{spec.name}.primary"
-        return {
-            name: MethodScore(
-                name=name,
-                values=_column(arrays, "score", None),
-                protocol="label_free_frozen_score",
-                source_field="score",
-                source_direction="higher",
-            )
-        }
-
-    score_fields = [
-        name
-        for name in arrays.files
-        if (name == "score" or name.startswith("score_"))
-        and np.asarray(arrays[name]).ndim == 1
-        and len(arrays[name]) == row_count
-    ]
-    if not score_fields and {"labels", "sample_ids", "positions"}.issubset(
-        arrays.files
-    ):
-        score_fields = [
-            name
-            for name in arrays.files
-            if name not in IDENTIFIER_FIELDS
-            and np.asarray(arrays[name]).ndim == 1
-            and len(arrays[name]) == row_count
-            and np.issubdtype(np.asarray(arrays[name]).dtype, np.number)
-        ]
-
-    inferred_protocol = spec.protocol
-    if (
-        inferred_protocol == "unknown"
-        and TRAJECTORY_SIGNATURE.issubset(arrays.files)
-    ):
-        inferred_protocol = "label_free_frozen_score"
-    if any(name.startswith("probe_") for name in score_fields):
-        inferred_protocol = "supervised_diagnostic"
-    for field in score_fields:
-        short_name = field[6:] if field.startswith("score_") else field
-        name = f"{spec.name}.{short_name}"
-        methods[name] = MethodScore(
+    name = f"{spec.name}.primary"
+    return {
+        name: MethodScore(
             name=name,
             values=np.asarray(arrays[field]),
-            protocol=inferred_protocol,
+            protocol="label_free_frozen_score",
             source_field=field,
             source_direction="higher",
         )
-    return methods
+    }
 
 
-def load_score_artifact(spec: ArtifactSpec) -> ScoreArtifact:
-    """Load detector outputs only; labels in input files are never consumed."""
+def _feature_column(arrays, column: str):
+    values = np.asarray(arrays["features_z"])
+    names = np.asarray(arrays["feature_names"]).astype(str)
+    matches = np.flatnonzero(names == column)
+    if len(matches) != 1:
+        raise ValueError(f"features_z column {column!r} is missing or ambiguous")
+    return values[:, int(matches[0])]
 
-    path = Path(spec.path)
-    if not path.is_file():
-        raise FileNotFoundError(path)
-    with np.load(path, allow_pickle=False) as arrays:
-        schema = _scalar_text(arrays, "schema", "unversioned-npz")
-        if schema == "rr-spectral-score-v2":
-            arrays = load_spectral_v2(path)
-        elif schema == "cmrp-score-v2":
-            arrays = load_cmrp_v2(path)
-        sample_id = _first(arrays, ("sample_id", "sample_ids"))
-        token_index = _first(arrays, ("token_index", "position", "positions"))
-        row_count = len(sample_id)
-        if spec.adapter not in {"auto", "generic"}:
-            raise ValueError(f"unsupported artifact adapter: {spec.adapter}")
-        methods = (
-            _configured_methods(spec, arrays)
-            if spec.methods
-            else _automatic_methods(spec, arrays, schema, row_count)
+
+def _topology_methods(spec: ArtifactSpec, arrays) -> dict[str, MethodScore]:
+    if spec.column is None or spec.direction is None:
+        raise ValueError(
+            "RR topology artifacts require a features_z column and direction"
         )
-        metadata = {}
-        for output_name, candidates in {
-            "source_id": ("source_id", "source_ids"),
-            "task_type": ("task_type",),
-            "data_source": ("data_source",),
-            "generator_model": ("generator_model",),
-        }.items():
-            value = _first(arrays, candidates, required=False)
-            if value is not None:
-                metadata[output_name] = value
-        artifact = ScoreArtifact(
-            name=spec.name,
-            path=str(path),
-            schema=schema,
-            sample_id=sample_id.copy(),
-            token_index=token_index.copy(),
-            methods=methods,
-            metadata={name: value.copy() for name, value in metadata.items()},
+    if spec.direction not in {"higher", "lower"}:
+        raise ValueError("RR topology direction must be higher or lower")
+    name = f"{spec.name}.{spec.column}"
+    return {
+        name: MethodScore(
+            name=name,
+            values=_feature_column(arrays, spec.column),
+            direction=spec.direction,
+            protocol="label_free_feature_fixed_direction",
+            source_field="features_z",
+            source_direction=spec.direction,
         )
+    }
+
+
+def load_score_artifact(spec: ArtifactSpec, frozen: FrozenFile) -> ScoreArtifact:
+    """Strict-load one captured current-v2 artifact through its owner contract."""
+
+    frozen.verify(spec.path)
+    schema = _schema(frozen.path)
+    if schema == "cmrp-score-v2":
+        arrays = load_cmrp_score(frozen.path)
+        methods = _primary_method(spec, arrays, "score")
+    elif schema == "rr-spectral-score-v2":
+        arrays = load_spectral_score(frozen.path)
+        methods = _primary_method(spec, arrays, "score_rr_residual")
+    elif schema == "rr-topology-dynamics-features-v2":
+        arrays = load_topology_artifact(frozen.path)
+        methods = _topology_methods(spec, arrays)
+    else:
+        raise ValueError(f"unsupported conditioned benchmark artifact schema: {schema}")
+    frozen.verify(frozen.path)
+
+    artifact = ScoreArtifact(
+        name=spec.name,
+        path=str(frozen.path),
+        schema=schema,
+        sample_id=np.asarray(arrays["sample_id"]).copy(),
+        source_id=np.asarray(arrays["source_id"]).copy(),
+        token_index=np.asarray(arrays["token_index"]).copy(),
+        response_length=np.asarray(arrays["response_length"]).copy(),
+        dataset_manifest_sha256=_scalar_text(arrays, "dataset_manifest_sha256"),
+        methods=methods,
+    )
     return artifact.validate()

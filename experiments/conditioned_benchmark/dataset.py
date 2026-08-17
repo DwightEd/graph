@@ -1,63 +1,76 @@
-"""Alignment and evaluation-only label access through ResearchDataset."""
+"""Build one canonical benchmark frame from fully evaluated artifacts."""
 
 from __future__ import annotations
 
-from collections import defaultdict
-
 import numpy as np
 
-try:
-    from tqdm.auto import tqdm
-except ImportError:  # pragma: no cover - exercised only in minimal environments
-    def tqdm(iterable, **_):
-        return iterable
-
-from .types import BenchmarkFrame, MethodScore, ScoreArtifact
+from .types import BenchmarkFrame, EvaluatedArtifact, MethodScore
 
 
-METADATA_NAMES = ("source_id", "task_type", "data_source", "generator_model")
-
-
-def _row_map(artifact: ScoreArtifact):
+def _row_map(artifact: EvaluatedArtifact):
+    score = artifact.score
     return {
         (str(sample_id), int(token_index)): index
         for index, (sample_id, token_index) in enumerate(
-            zip(artifact.sample_id, artifact.token_index, strict=True)
+            zip(score.sample_id, score.token_index, strict=True)
         )
     }
 
 
-def align_artifacts(artifacts: list[ScoreArtifact]):
-    """Align all methods on the exact same token rows for fair comparison."""
+def _aligned_facts(artifact: EvaluatedArtifact, selected):
+    labels = artifact.labels
+    length = len(artifact.score.sample_id)
+    facts = {
+        "labels": np.asarray(labels.token_label),
+        "response_positive": np.asarray(labels.response_positive),
+        "source_id": np.asarray(labels.source_id).astype(str),
+        "response_length": np.asarray(labels.response_length),
+    }
+    for name, values in facts.items():
+        if values.ndim != 1 or len(values) != length:
+            raise ValueError(f"evaluated artifact has invalid {name} rows")
+    return {name: values[selected] for name, values in facts.items()}
 
-    if not artifacts:
-        raise ValueError("at least one artifact is required")
-    maps = [_row_map(artifact) for artifact in artifacts]
+
+def build_benchmark_frame(
+    evaluated_artifacts: list[EvaluatedArtifact], dataset
+) -> BenchmarkFrame:
+    """Intersect scores after canonical full-artifact facts have been obtained."""
+
+    if not evaluated_artifacts:
+        raise ValueError("at least one evaluated artifact is required")
+    maps = [_row_map(artifact) for artifact in evaluated_artifacts]
     common = set(maps[0])
     for mapping in maps[1:]:
         common.intersection_update(mapping)
     if not common:
         raise ValueError("score artifacts have no common token rows")
-    ordered = [
-        key
-        for key in zip(
-            artifacts[0].sample_id.tolist(),
-            artifacts[0].token_index.tolist(),
-            strict=True,
-        )
-        if (str(key[0]), int(key[1])) in common
-    ]
-    sample_id = np.asarray([str(key[0]) for key in ordered], dtype=str)
-    token_index = np.asarray([int(key[1]) for key in ordered], dtype=np.int64)
-    methods: dict[str, MethodScore] = {}
-    metadata: dict[str, np.ndarray] = {}
 
-    for artifact, mapping in zip(artifacts, maps, strict=True):
-        selected = np.asarray(
-            [mapping[(str(sample), int(token))] for sample, token in ordered],
-            dtype=np.int64,
+    first_score = evaluated_artifacts[0].score
+    ordered = [
+        (str(sample_id), int(token_index))
+        for sample_id, token_index in zip(
+            first_score.sample_id, first_score.token_index, strict=True
         )
-        for name, method in artifact.methods.items():
+        if (str(sample_id), int(token_index)) in common
+    ]
+    sample_id = np.asarray([sample for sample, _ in ordered], dtype=str)
+    token_index = np.asarray([token for _, token in ordered], dtype=np.int64)
+    methods: dict[str, MethodScore] = {}
+    canonical = None
+
+    for artifact, mapping in zip(evaluated_artifacts, maps, strict=True):
+        selected = np.asarray([mapping[key] for key in ordered], dtype=np.int64)
+        facts = _aligned_facts(artifact, selected)
+        if canonical is None:
+            canonical = facts
+        else:
+            for name in canonical:
+                if not np.array_equal(canonical[name], facts[name]):
+                    raise ValueError(
+                        f"canonical {name} disagrees across common artifact rows"
+                    )
+        for name, method in artifact.score.methods.items():
             if name in methods:
                 raise ValueError(f"duplicate method name: {name}")
             methods[name] = MethodScore(
@@ -68,112 +81,33 @@ def align_artifacts(artifacts: list[ScoreArtifact]):
                 source_field=method.source_field,
                 source_direction=method.source_direction,
             )
-        for name, values in artifact.metadata.items():
-            candidate = values[selected].astype(str)
-            if name not in metadata:
-                metadata[name] = candidate
-                continue
-            left, right = metadata[name], candidate
-            conflict = (left != "") & (right != "") & (left != right)
-            if bool(conflict.any()):
-                raise ValueError(
-                    f"artifact metadata conflict for {name} on aligned rows"
-                )
-            metadata[name] = np.where(left != "", left, right)
 
-    return sample_id, token_index, methods, metadata
-
-
-def _unlock_labels(dataset):
-    try:
-        return dataset.labels()
-    except RuntimeError as error:
-        if "every attention sample" not in str(error):
-            raise
-    for sample_id in tqdm(
-        dataset.sample_ids,
-        desc="unlock evaluation labels",
-        unit="sample",
-    ):
-        sample = dataset[sample_id]
-        sample.attention()
-        sample.release_attention()
-    return dataset.labels()
-
-
-def attach_dataset_evaluation(
-    sample_id,
-    token_index,
-    methods,
-    artifact_metadata,
-    split_root,
-    *,
-    device="cpu",
-) -> BenchmarkFrame:
-    """Read labels only after all frozen score artifacts are loaded and aligned."""
-
-    from research_dataset import open_research_dataset
-
-    dataset = open_research_dataset(
-        split_root,
-        device=device,
-        retain_embedded_labels=True,
-    )
-    labels = _unlock_labels(dataset)
-    row_groups = defaultdict(list)
-    for row, value in enumerate(sample_id):
-        row_groups[str(value)].append(row)
-
-    length = len(sample_id)
-    y = np.empty(length, dtype=np.int8)
-    response_length = np.empty(length, dtype=np.int32)
-    canonical = {
-        name: np.full(length, "", dtype=object) for name in METADATA_NAMES
+    metadata = {
+        "task_type": np.empty(len(sample_id), dtype=object),
+        "data_source": np.empty(len(sample_id), dtype=object),
+        "generator_model": np.empty(len(sample_id), dtype=object),
     }
-    for current_id, rows_list in tqdm(
-        row_groups.items(), desc="align evaluation labels", unit="sample"
-    ):
-        if current_id not in dataset:
-            raise ValueError(f"score sample {current_id!r} is absent from split")
-        rows = np.asarray(rows_list, dtype=np.int64)
-        sample = dataset[current_id]
-        current_labels = labels.response_labels(sample).detach().cpu().numpy()
-        positions = token_index[rows]
-        if bool((positions >= len(current_labels)).any()):
-            raise ValueError(f"token index exceeds response length for {current_id}")
-        y[rows] = current_labels[positions].astype(np.int8)
-        response_length[rows] = len(current_labels)
-        values = {
-            "source_id": sample.source_id,
-            "task_type": sample.task_type,
-            "data_source": sample.data_source,
-            "generator_model": sample.generator_model,
-        }
-        for name, value in values.items():
-            canonical[name][rows] = "" if value is None else str(value)
-        sample.release_attention()
+    for current in np.unique(sample_id):
+        sample = dataset[current]
+        selected = sample_id == current
+        for name, values in metadata.items():
+            value = getattr(sample, name)
+            values[selected] = "" if value is None else str(value)
 
-    for name in METADATA_NAMES:
-        if name not in artifact_metadata:
-            continue
-        observed = np.asarray(artifact_metadata[name]).astype(str)
-        expected = np.asarray(canonical[name]).astype(str)
-        conflict = (observed != "") & (expected != "") & (observed != expected)
-        if bool(conflict.any()):
-            raise ValueError(f"artifact {name} disagrees with ResearchDataset")
-
+    response_length = canonical["response_length"].astype(np.int64)
     relative_position = token_index.astype(np.float64) / np.maximum(
         response_length - 1, 1
     )
     return BenchmarkFrame(
-        sample_id=np.asarray(sample_id).astype(str),
-        token_index=np.asarray(token_index).astype(np.int64),
+        sample_id=sample_id,
+        token_index=token_index,
         methods=methods,
-        source_id=np.asarray(canonical["source_id"]).astype(str),
-        task_type=np.asarray(canonical["task_type"]).astype(str),
-        data_source=np.asarray(canonical["data_source"]).astype(str),
-        generator_model=np.asarray(canonical["generator_model"]).astype(str),
+        source_id=canonical["source_id"].astype(str),
+        task_type=metadata["task_type"].astype(str),
+        data_source=metadata["data_source"].astype(str),
+        generator_model=metadata["generator_model"].astype(str),
         response_length=response_length,
         relative_position=relative_position,
-        labels=y,
+        labels=canonical["labels"].astype(np.int8),
+        response_positive=canonical["response_positive"].astype(np.int8),
     ).validate()

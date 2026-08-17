@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import numpy as np
 from sklearn.metrics import average_precision_score, roc_auc_score, roc_curve
-
 
 MetricFunction = Callable[[np.ndarray, np.ndarray, np.ndarray], float]
 
@@ -115,7 +114,7 @@ METRICS = {
         Metric(
             "auprc_lift",
             _lift,
-            False,
+            True,
             "AUPRC divided by the evaluated positive prevalence",
         ),
         Metric(

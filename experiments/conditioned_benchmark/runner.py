@@ -4,17 +4,23 @@ from __future__ import annotations
 
 import csv
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
 
+from experiment_protocol import FrozenEvaluation, FrozenFile
+from research_dataset import open_research_dataset
+
 try:
     from tqdm.auto import tqdm
 except ImportError:  # pragma: no cover - exercised only in minimal environments
+
     def tqdm(iterable, **_):
         return iterable
 
+
+from .artifacts import ArtifactSpec, load_score_artifact
 from .conditions import (
     aggregate_responses,
     condition_grid,
@@ -22,16 +28,16 @@ from .conditions import (
     prevalence_weights,
     stratified_subsample,
 )
+from .dataset import build_benchmark_frame
 from .metrics import (
     DEFAULT_METRICS,
     METRICS,
     cluster_bootstrap_indices,
     evaluate_metrics,
 )
-from .types import BenchmarkFrame
+from .types import BenchmarkFrame, EvaluatedArtifact
 
-
-REPORT_SCHEMA = "conditioned-detector-benchmark-v1"
+REPORT_SCHEMA = "conditioned-detector-benchmark-v2"
 
 
 @dataclass(frozen=True)
@@ -61,19 +67,34 @@ class BenchmarkConfig:
 
     @classmethod
     def from_mapping(cls, value):
+        allowed = {
+            "task_types",
+            "data_sources",
+            "generator_models",
+            "positive_rates",
+            "metrics",
+            "evaluation_unit",
+            "response_aggregation",
+            "response_top_fraction",
+            "ratio_mode",
+            "ratio_repeats",
+            "bootstrap_replicates",
+            "relative_position_min",
+            "relative_position_max",
+            "seed",
+        }
+        unknown = sorted(set(value).difference(allowed))
+        if unknown:
+            raise ValueError(f"unsupported benchmark settings: {unknown}")
         fields = {
             "task_types": tuple(value.get("task_types", cls.task_types)),
             "data_sources": tuple(value.get("data_sources", cls.data_sources)),
             "generator_models": tuple(
                 value.get("generator_models", cls.generator_models)
             ),
-            "positive_rates": tuple(
-                value.get("positive_rates", cls.positive_rates)
-            ),
+            "positive_rates": tuple(value.get("positive_rates", cls.positive_rates)),
             "metrics": tuple(value.get("metrics", cls.metrics)),
-            "evaluation_unit": str(
-                value.get("evaluation_unit", cls.evaluation_unit)
-            ),
+            "evaluation_unit": str(value.get("evaluation_unit", cls.evaluation_unit)),
             "response_aggregation": str(
                 value.get("response_aggregation", cls.response_aggregation)
             ),
@@ -101,7 +122,9 @@ class BenchmarkConfig:
         if self.ratio_mode not in {"reweight", "subsample"}:
             raise ValueError("ratio_mode must be reweight or subsample")
         if not 0.0 <= self.relative_position_min <= self.relative_position_max <= 1.0:
-            raise ValueError("relative position bounds must satisfy 0 <= min <= max <= 1")
+            raise ValueError(
+                "relative position bounds must satisfy 0 <= min <= max <= 1"
+            )
         if self.ratio_repeats < 1 or self.bootstrap_replicates < 0:
             raise ValueError("repeat counts are invalid")
         unknown = set(self.metrics).difference(METRICS)
@@ -137,6 +160,8 @@ def _condition_rows_reweighted(frame, selected, condition, config, condition_see
 
 
 def _condition_rows_subsampled(frame, selected, condition, config, condition_seed):
+    if condition.target_positive_rate is None:
+        return [(selected, np.ones(len(selected), dtype=np.float64))], []
     repetitions = []
     for repeat in range(config.ratio_repeats):
         local = stratified_subsample(
@@ -149,17 +174,17 @@ def _condition_rows_subsampled(frame, selected, condition, config, condition_see
     return repetitions, []
 
 
-def run_benchmark(
+def _evaluate_and_write(
     frame: BenchmarkFrame,
     output_dir,
     *,
-    config: BenchmarkConfig | None = None,
-    artifacts: list[dict] | None = None,
+    config: BenchmarkConfig,
+    artifacts: list[dict],
 ):
-    config = (BenchmarkConfig() if config is None else config).validate()
-    position = (
-        (frame.relative_position >= config.relative_position_min)
-        & (frame.relative_position <= config.relative_position_max)
+    aligned_token_rows = len(frame.labels)
+    aligned_samples = len(np.unique(frame.sample_id))
+    position = (frame.relative_position >= config.relative_position_min) & (
+        frame.relative_position <= config.relative_position_max
     )
     frame = frame.subset(position)
     if config.evaluation_unit == "response":
@@ -168,6 +193,8 @@ def run_benchmark(
             aggregation=config.response_aggregation,
             top_fraction=config.response_top_fraction,
         )
+    evaluated_rows = len(frame.labels)
+    evaluated_samples = len(np.unique(frame.sample_id))
     conditions = condition_grid(
         frame,
         tasks=config.task_types,
@@ -188,7 +215,7 @@ def run_benchmark(
                     "condition": asdict(condition),
                     "state": "skipped",
                     "reason": "condition has fewer than two label classes",
-                    "rows": int(len(selected)),
+                    "rows": len(selected),
                 }
             )
             continue
@@ -217,10 +244,7 @@ def run_benchmark(
                 name: float(np.mean([value[name] for value in repeat_metrics]))
                 for name in config.metrics
             }
-            distributions = {
-                name: [value[name] for value in repeat_metrics]
-                for name in config.metrics
-            }
+            bootstrap_distributions = {name: [] for name in config.metrics}
             if bootstraps:
                 for local_rows in bootstraps:
                     rows = selected[local_rows]
@@ -236,18 +260,54 @@ def run_benchmark(
                         config.metrics,
                     )
                     for name in config.metrics:
-                        distributions[name].append(values[name])
+                        bootstrap_distributions[name].append(values[name])
             metrics = {}
             for name in config.metrics:
-                interval_values = (
-                    distributions[name][1:] if bootstraps else distributions[name]
-                )
-                ci_low, ci_high = _interval(interval_values)
-                metrics[name] = {
-                    "value": point[name],
-                    "ci_low": ci_low,
-                    "ci_high": ci_high,
-                }
+                if config.ratio_mode == "reweight":
+                    valid_resamples = np.asarray(
+                        bootstrap_distributions[name], dtype=np.float64
+                    )
+                    valid_resamples = valid_resamples[np.isfinite(valid_resamples)]
+                    if len(valid_resamples) < 2:
+                        uncertainty = {
+                            "uncertainty_scope": (
+                                "not_estimated_insufficient_resamples"
+                            )
+                        }
+                    else:
+                        ci_low, ci_high = _interval(valid_resamples)
+                        uncertainty = {
+                            "uncertainty_scope": (
+                                "source_cluster_bootstrap_percentile_95"
+                            ),
+                            "ci_low": ci_low,
+                            "ci_high": ci_high,
+                        }
+                else:
+                    valid_repeats = np.asarray(
+                        [value[name] for value in repeat_metrics], dtype=np.float64
+                    )
+                    valid_repeats = valid_repeats[np.isfinite(valid_repeats)]
+                    if condition.target_positive_rate is None:
+                        uncertainty = {
+                            "uncertainty_scope": "not_estimated_native_prevalence"
+                        }
+                    elif len(valid_repeats) < 2:
+                        uncertainty = {
+                            "uncertainty_scope": (
+                                "not_estimated_insufficient_resamples"
+                            )
+                        }
+                    else:
+                        repeat_q025, repeat_q975 = _interval(valid_repeats)
+                        uncertainty = {
+                            "uncertainty_scope": (
+                                "repeated_row_subsample_variability"
+                            ),
+                            "repeat_q025": repeat_q025,
+                            "repeat_q975": repeat_q975,
+                        }
+                metrics[name] = {"value": point[name], **uncertainty}
                 metric_rows.append(
                     {
                         "condition_id": condition.identifier,
@@ -266,9 +326,8 @@ def run_benchmark(
                         "metric": name,
                         "prevalence_sensitive": METRICS[name].prevalence_sensitive,
                         "value": point[name],
-                        "ci_low": ci_low,
-                        "ci_high": ci_high,
-                        "rows": int(len(repetitions[0][0])),
+                        **uncertainty,
+                        "rows": len(repetitions[0][0]),
                         "positives": int(frame.labels[repetitions[0][0]].sum()),
                         "native_prevalence": float(frame.labels[selected].mean()),
                     }
@@ -288,14 +347,19 @@ def run_benchmark(
                 "method": method_name,
                 "protocol": method.protocol,
                 "source_direction": method.source_direction or "higher",
-                "rows": int(len(repetitions[0][0])),
+                "rows": len(repetitions[0][0]),
                 "positives": int(frame.labels[repetitions[0][0]].sum()),
                 "native_prevalence": float(frame.labels[selected].mean()),
             }
             for name, values in metrics.items():
                 wide_row[name] = values["value"]
-                wide_row[f"{name}_ci_low"] = values["ci_low"]
-                wide_row[f"{name}_ci_high"] = values["ci_high"]
+                wide_row["uncertainty_scope"] = values["uncertainty_scope"]
+                if config.ratio_mode == "reweight":
+                    wide_row[f"{name}_ci_low"] = values.get("ci_low")
+                    wide_row[f"{name}_ci_high"] = values.get("ci_high")
+                else:
+                    wide_row[f"{name}_repeat_q025"] = values.get("repeat_q025")
+                    wide_row[f"{name}_repeat_q975"] = values.get("repeat_q975")
             wide_rows.append(wide_row)
             method_reports[method_name] = {
                 "protocol": method.protocol,
@@ -307,10 +371,10 @@ def run_benchmark(
             {
                 "condition": asdict(condition),
                 "state": "complete",
-                "native_rows": int(len(selected)),
+                "native_rows": len(selected),
                 "native_positives": int(frame.labels[selected].sum()),
                 "native_prevalence": float(frame.labels[selected].mean()),
-                "evaluated_rows": int(len(repetitions[0][0])),
+                "evaluated_rows": len(repetitions[0][0]),
                 "methods": method_reports,
             }
         )
@@ -324,7 +388,7 @@ def run_benchmark(
         "score_fitting_repeated_per_condition": False,
         "alignment": "intersection_of_all_artifact_token_rows",
         "config": asdict(config),
-        "artifacts": artifacts or [],
+        "artifacts": artifacts,
         "methods": {
             name: {
                 "protocol": method.protocol,
@@ -340,8 +404,11 @@ def run_benchmark(
             }
             for name in config.metrics
         },
-        "aligned_rows": int(len(frame.labels)),
-        "aligned_samples": int(len(np.unique(frame.sample_id))),
+        "aligned_token_rows": aligned_token_rows,
+        "aligned_samples": aligned_samples,
+        "evaluated_rows": evaluated_rows,
+        "evaluated_samples": evaluated_samples,
+        "evaluation_unit": config.evaluation_unit,
         "conditions": condition_reports,
     }
     report_path = output_dir / "results.json"
@@ -361,12 +428,18 @@ def run_benchmark(
         "metric",
         "prevalence_sensitive",
         "value",
-        "ci_low",
-        "ci_high",
+        "uncertainty_scope",
         "rows",
         "positives",
         "native_prevalence",
     ]
+    if config.ratio_mode == "reweight":
+        fields[fields.index("rows") : fields.index("rows")] = ["ci_low", "ci_high"]
+    else:
+        fields[fields.index("rows") : fields.index("rows")] = [
+            "repeat_q025",
+            "repeat_q975",
+        ]
     _write_csv(output_dir / "metrics_long.csv", metric_rows, fields)
     wide_fields = [
         "condition_id",
@@ -379,18 +452,26 @@ def run_benchmark(
         "method",
         "protocol",
         "source_direction",
+        "uncertainty_scope",
         "rows",
         "positives",
         "native_prevalence",
     ]
     for name in config.metrics:
-        wide_fields.extend((name, f"{name}_ci_low", f"{name}_ci_high"))
+        if config.ratio_mode == "reweight":
+            wide_fields.extend((name, f"{name}_ci_low", f"{name}_ci_high"))
+        else:
+            wide_fields.extend((name, f"{name}_repeat_q025", f"{name}_repeat_q975"))
     _write_csv(output_dir / "metrics_wide.csv", wide_rows, wide_fields)
     summary = [
         f"schema={REPORT_SCHEMA}",
         (
-            f"aligned_rows={len(frame.labels)} "
-            f"aligned_samples={len(np.unique(frame.sample_id))}"
+            f"aligned_token_rows={aligned_token_rows} "
+            f"aligned_samples={aligned_samples}"
+        ),
+        (
+            f"evaluated_rows={evaluated_rows} "
+            f"evaluated_samples={evaluated_samples}"
         ),
         (
             f"methods={len(frame.methods)} conditions_complete="
@@ -398,8 +479,8 @@ def run_benchmark(
         ),
         f"ratio_mode={config.ratio_mode} evaluation_unit={config.evaluation_unit}",
         (
-            "AUPRC changes with positive prevalence; AUROC and AUPRC lift "
-            "are the cross-ratio controls."
+            "AUPRC and AUPRC lift change with positive prevalence; AUROC "
+            "is the cross-ratio ranking control."
         ),
         f"results={report_path}",
         f"tidy_metrics={output_dir / 'metrics_long.csv'}",
@@ -407,3 +488,68 @@ def run_benchmark(
     ]
     (output_dir / "summary.txt").write_text("\n".join(summary) + "\n", encoding="utf-8")
     return report
+
+
+class ConditionedBenchmark:
+    """Run the complete sealed conditioned-evaluation workflow."""
+
+    def __init__(self, config: BenchmarkConfig | None = None):
+        self.config = (BenchmarkConfig() if config is None else config).validate()
+
+    def run(
+        self,
+        split_root,
+        output_dir,
+        artifact_specs: list[ArtifactSpec],
+        device="cpu",
+    ):
+        specs = list(artifact_specs)
+        if not specs:
+            raise ValueError("at least one artifact is required")
+
+        frozen_files = [FrozenFile.capture(spec.path) for spec in specs]
+        scores = [
+            load_score_artifact(spec, frozen)
+            for spec, frozen in zip(specs, frozen_files, strict=True)
+        ]
+        for frozen in frozen_files:
+            frozen.verify(frozen.path)
+
+        dataset = open_research_dataset(
+            split_root,
+            device=device,
+            retain_embedded_labels=True,
+        )
+        evaluations = [
+            FrozenEvaluation(frozen, expected_split="test") for frozen in frozen_files
+        ]
+        evaluation_rows = [score.evaluation_rows() for score in scores]
+        aligned_labels = FrozenEvaluation.align_all(
+            dataset,
+            zip(evaluations, evaluation_rows, strict=True),
+        )
+        evaluated = [
+            EvaluatedArtifact(
+                score=score,
+                labels=labels,
+            )
+            for score, labels in zip(scores, aligned_labels, strict=True)
+        ]
+        frame = build_benchmark_frame(evaluated, dataset)
+        manifests = [
+            {
+                "name": score.name,
+                "path": str(frozen.path),
+                "sha256": frozen.sha256,
+                "schema": score.schema,
+                "dataset_manifest_sha256": score.dataset_manifest_sha256,
+                "evaluation_rows": len(score.sample_id),
+            }
+            for score, frozen in zip(scores, frozen_files, strict=True)
+        ]
+        return _evaluate_and_write(
+            frame,
+            output_dir,
+            config=self.config,
+            artifacts=manifests,
+        )
