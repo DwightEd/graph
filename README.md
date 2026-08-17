@@ -14,6 +14,16 @@ Its mechanism audit is in `experiments/rr_topology_dynamics/`. The earlier
 causal-topology encoder remains a research baseline; the reported true-graph
 versus rewired/token-only comparisons do not establish a useful topology gain.
 
+Frozen scores from these and other experiments can be compared under the same
+`task_type`, token/response unit, response-position range, and positive
+prevalence with `experiments/conditioned_benchmark/`. The benchmark aligns all
+methods on identical token rows and never refits a detector after labels open:
+
+```bash
+bash experiments/conditioned_benchmark/run.sh \
+  TEST_SPLIT OUTPUT_DIR rr_spectral=TEST_SCORES.npz
+```
+
 ## Attention-only dynamic multiplex construction
 
 `attention_multiplex/` 只研究压缩 attention 本身，将
