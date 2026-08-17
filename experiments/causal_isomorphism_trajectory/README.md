@@ -139,3 +139,5 @@ Do not report CITG as successful unless:
 4. no score direction is inverted from test labels.
 
 The conditioned benchmark can compare frozen artifacts after the full run.
+The CI suite checks compilation, shell syntax, data boundaries, source-group
+protocols, benchmark registration, and the synthetic fit-score-evaluate path.
