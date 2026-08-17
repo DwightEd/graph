@@ -1,0 +1,35 @@
+name: citg-bootstrap
+
+on:
+  push:
+    branches:
+      - causal-isomorphism-trajectory
+
+permissions:
+  contents: write
+
+jobs:
+  expand:
+    if: github.event.head_commit.message == 'Run CITG replacement bootstrap'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: causal-isomorphism-trajectory
+          fetch-depth: 0
+      - name: Expand replacement and remove failed CMRP
+        run: |
+          base64 -d .citg_payload.b64 > /tmp/citg_payload.tar.gz
+          tar -xzf /tmp/citg_payload.tar.gz -C .
+          rm -rf experiments/causal_multiplex_flow
+          rm -f tests/test_causal_multiplex_flow.py
+          rm -f .citg_payload.b64
+          rm -f .github/workflows/citg-bootstrap.yml
+          chmod +x experiments/causal_isomorphism_trajectory/run.sh
+      - name: Commit replacement
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Replace CMRP with causal isomorphism trajectory geometry [skip ci]'
+          git push origin HEAD:causal-isomorphism-trajectory
