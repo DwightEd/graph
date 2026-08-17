@@ -20,13 +20,14 @@ from attention_graph.topology_controls import (
     event_target,
     rewire_causal_sources,
 )
-from cache import (
-    AttentionSample,
-    index_row,
-    save_attention_sample,
-    sha256,
-    write_split_index,
-)
+import importlib
+
+_cache = importlib.import_module("cache")
+AttentionSample = _cache.AttentionSample
+index_row = _cache.index_row
+save_attention_sample = _cache.save_attention_sample
+sha256 = _cache.sha256
+write_split_index = _cache.write_split_index
 from experiments.causal_isomorphism_trajectory.artifacts import (
     load_reference,
     load_score_artifact,
