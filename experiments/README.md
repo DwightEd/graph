@@ -17,32 +17,33 @@ attention = sample.attention()
 
 Experiments must **not** import raw loaders from `cache.py` or
 `formal_cache.py`, scan `attention_*.pt` / `attention/*.npz` themselves, or
-reimplement canonical CSR parsing. Shared sparse/dense views belong in
-`research_dataset.py` and should be added there when an experiment needs a new
-format-independent data view.
+reimplement canonical CSR parsing. Shared format-independent views belong in
+`research_dataset.py`; reusable graph/event construction belongs in
+`attention_graph/`.
 
-Allowed experiment-local I/O is limited to artifacts produced by the
-experiment itself, such as derived embeddings, scores, figures, and JSON/NPZ
-reports.
+Allowed experiment-local I/O is limited to artifacts produced by the experiment
+itself, such as derived embeddings, scores, figures and reports.
 
 ## Label discipline
 
-Representation construction, parameter fitting, clustering, density fitting,
+Representation construction, parameter fitting, clustering, density fitting
 and anomaly scoring must remain label-blind unless a directory explicitly
-describes a supervised diagnostic. `dataset.labels()` is reserved for a
-separate post-hoc evaluation stage after representations/scores are frozen.
+describes a supervised diagnostic. Evaluation labels open only after frozen
+score artifacts exist.
 
 ## Current experiments
 
 - `mechanism_validation/`: attention mechanism and graph-ablation diagnostics.
-- `spectral_feasibility/`: the active RR causal spectral representation and
-  independently calibrated robust-subspace detector.
-- `rr_topology_dynamics/`: label-free extraction followed by post-hoc analysis
-  of route convergence, prompt-grounded versus self-reinforcing RR flow, and
-  layer/head/source/lag attribution of spectral-subspace escape.
-- `causal_multiplex_flow/`: source-aware, channel-preserving dynamic routing
-  prediction with disjoint unlabeled fit/calibration groups and a
-  lag-preserving source-rewiring topology gate.
-- `conditioned_benchmark/`: a strict current-v2 workflow for frozen detector
-  artifacts, `task_type` slices, token/response evaluation, and controlled
-  positive-prevalence experiments. It does not refit methods.
+- `spectral_feasibility/`: RR causal spectral representation and independently
+  calibrated robust-subspace detector.
+- `rr_topology_dynamics/`: post-hoc mechanism audit of route convergence,
+  source/lag dynamics and spectral residual attribution.
+- `causal_isomorphism_trajectory/`: non-neural, condition-aware PPCA geometry
+  over temporal-WL-inspired causal event signatures, generation transitions
+  and ordered layer-depth transitions.
+- `conditioned_benchmark/`: strict comparison of frozen detector artifacts under
+  aligned task, token/response and prevalence conditions.
+
+The retired `causal_multiplex_flow/` neural source-prediction detector is
+preserved only as a strict historical artifact reader. Its negative result is
+documented in `docs/results/cmrp_negative_result.md`.
