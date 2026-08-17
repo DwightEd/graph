@@ -1,0 +1,51 @@
+name: causal-isomorphism-trajectory-validation
+
+on:
+  pull_request:
+    paths:
+      - "attention_graph/causal_events.py"
+      - "attention_graph/topology_controls.py"
+      - "experiments/causal_isomorphism_trajectory/**"
+      - "experiments/causal_multiplex_flow/**"
+      - "experiments/conditioned_benchmark/artifacts.py"
+      - "experiments/conditioned_benchmark/config.example.json"
+      - "experiments/README.md"
+      - "docs/results/cmrp_negative_result.md"
+      - "tests/test_causal_isomorphism_trajectory.py"
+      - "tests/test_causal_multiplex_flow.py"
+      - ".github/workflows/causal-isomorphism-trajectory-validation.yml"
+
+jobs:
+  citg-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Compile modules and validate shell
+        run: |
+          python -m py_compile \
+            attention_graph/causal_events.py \
+            attention_graph/topology_controls.py \
+            experiments/causal_isomorphism_trajectory/signatures.py \
+            experiments/causal_isomorphism_trajectory/geometry.py \
+            experiments/causal_isomorphism_trajectory/artifacts.py \
+            experiments/causal_isomorphism_trajectory/experiment.py \
+            experiments/causal_isomorphism_trajectory/main.py \
+            experiments/conditioned_benchmark/artifacts.py \
+            tests/test_causal_isomorphism_trajectory.py
+          bash -n experiments/causal_isomorphism_trajectory/run.sh
+      - name: Run CITG and repository contract tests
+        run: |
+          python -m unittest \
+            tests.test_causal_isomorphism_trajectory \
+            tests.test_conditioned_benchmark_artifacts \
+            tests.test_conditioned_benchmark \
+            tests.test_experiment_data_contract \
+            tests.test_experiment_protocol \
+            tests.test_research_views -v
