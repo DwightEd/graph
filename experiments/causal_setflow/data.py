@@ -1,8 +1,14 @@
-"""Sparse RR attention to route and received-support source sets.
+"""Sparse RR attention to exact route and received-support source sets.
 
-The canonical data interface remains the only source. One graph stores sparse
-RR events by Transformer layer and materializes a bounded layer at a time,
-avoiding a persistent ``[layer, head, token, source]`` tensor.
+The canonical data interface remains the only source.  One graph stores sparse
+RR events by Transformer layer.  A layer is materialized in bounded query
+chunks, so the implementation never creates persistent ``[head, token, token]``
+current/cumulative/received tensors for the complete response.
+
+Chunking is an execution detail only.  For every token/head, the returned route
+set, received-support memory set, mass coverage, and received-support delta are
+the same quantities as the dense definition up to floating-point summation
+roundoff.
 """
 
 from __future__ import annotations
@@ -34,8 +40,12 @@ class SparseRRLayer:
                 raise ValueError("RR query is outside the response")
             if bool((self.source < 0).any()) or bool((self.source >= self.query).any()):
                 raise ValueError("causal RR events require source < query")
-            if bool((self.weight <= 0).any()) or not bool(torch.isfinite(self.weight).all()):
+            if bool((self.weight <= 0).any()) or not bool(
+                torch.isfinite(self.weight).all()
+            ):
                 raise ValueError("retained RR weights must be positive and finite")
+            if len(self.query) > 1 and bool((self.query[1:] < self.query[:-1]).any()):
+                raise ValueError("sparse RR events must be sorted by query")
         return self
 
 
@@ -69,7 +79,9 @@ class LayerSourceSets:
         if self.total_mass.ndim != 2:
             raise ValueError("row summaries must have shape [token, head]")
         row_shape = self.total_mass.shape
-        if any(value.shape != row_shape for value in (self.tail_mass, self.edge_count)):
+        if any(
+            value.shape != row_shape for value in (self.tail_mass, self.edge_count)
+        ):
             raise ValueError("row summaries are not aligned")
         route_shape = self.route_source.shape
         memory_shape = self.memory_source.shape
@@ -107,10 +119,35 @@ class LayerSourceSets:
             self.edge_count,
         )
         if any(not bool(torch.isfinite(value).all()) for value in numeric):
-            raise FloatingPointError("source-set materialization produced non-finite values")
+            raise FloatingPointError(
+                "source-set materialization produced non-finite values"
+            )
         if bool((self.tail_mass < -1e-6).any()):
             raise ValueError("selected route mass exceeds the retained row mass")
         return self
+
+    def tensor_tuple(self) -> tuple[torch.Tensor, ...]:
+        return (
+            self.route_source,
+            self.route_weight,
+            self.route_received,
+            self.route_received_delta,
+            self.route_mask,
+            self.memory_source,
+            self.memory_received,
+            self.memory_received_delta,
+            self.memory_current_weight,
+            self.memory_mask,
+            self.total_mass,
+            self.tail_mass,
+            self.edge_count,
+        )
+
+    @classmethod
+    def from_tensor_tuple(cls, values: tuple[torch.Tensor, ...]) -> "LayerSourceSets":
+        if len(values) != 13:
+            raise ValueError("LayerSourceSets tensor tuple has the wrong length")
+        return cls(*values)
 
 
 @dataclass(frozen=True)
@@ -130,9 +167,12 @@ class CausalSourceSetGraph:
         if not 0.0 < float(self.attention_floor) < 1.0:
             raise ValueError("attention_floor must be in (0,1)")
         for layer in self.layers:
-            layer.validate(num_heads=self.num_heads, response_count=self.response_count)
+            layer.validate(
+                num_heads=self.num_heads, response_count=self.response_count
+            )
         return self
 
+    @torch.no_grad()
     def materialize_layer(
         self,
         layer_index: int,
@@ -140,7 +180,18 @@ class CausalSourceSetGraph:
         *,
         device: str | torch.device,
     ) -> LayerSourceSets:
-        """Build one layer's route and persistence-memory sets."""
+        """Build one layer's exact bounded source sets in query chunks.
+
+        The dense reference definition is
+
+        ``received[h,t,j] = sum_{u<=t} A[h,u,j] / (t-j+1)`` for ``j<t``.
+
+        This implementation evaluates the same definition with a running
+        ``[head, source]`` cumulative state and a temporary
+        ``[head, query_chunk, source]`` block.  Peak materialization memory is
+        therefore ``O(H * C * T)`` instead of ``O(H * T^2)``, where ``C`` is
+        ``materialize_query_chunk_size``.
+        """
 
         config.validate()
         layer_index = int(layer_index)
@@ -150,71 +201,160 @@ class CausalSourceSetGraph:
         layer = self.layers[layer_index]
         heads, tokens = self.num_heads, self.response_count
         dtype = torch.float32
+        route_count = int(config.max_route_sources)
+        memory_count = int(config.max_memory_sources)
+        chunk_size = min(int(config.materialize_query_chunk_size), tokens)
 
-        current = torch.zeros((heads, tokens, tokens), dtype=dtype, device=device)
-        if len(layer.weight):
-            current.index_put_(
-                (
-                    layer.head.to(device=device, dtype=torch.long),
-                    layer.query.to(device=device, dtype=torch.long),
-                    layer.source.to(device=device, dtype=torch.long),
-                ),
-                layer.weight.to(device=device, dtype=dtype),
-                accumulate=True,
+        route_source_out = torch.zeros(
+            (tokens, heads, route_count), dtype=torch.int32, device=device
+        )
+        route_weight_out = torch.zeros(
+            (tokens, heads, route_count), dtype=dtype, device=device
+        )
+        route_received_out = torch.zeros_like(route_weight_out)
+        route_delta_out = torch.zeros_like(route_weight_out)
+        route_mask_out = torch.zeros(
+            (tokens, heads, route_count), dtype=torch.bool, device=device
+        )
+        memory_source_out = torch.zeros(
+            (tokens, heads, memory_count), dtype=torch.int32, device=device
+        )
+        memory_received_out = torch.zeros(
+            (tokens, heads, memory_count), dtype=dtype, device=device
+        )
+        memory_delta_out = torch.zeros_like(memory_received_out)
+        memory_current_out = torch.zeros_like(memory_received_out)
+        memory_mask_out = torch.zeros(
+            (tokens, heads, memory_count), dtype=torch.bool, device=device
+        )
+        total_mass_out = torch.zeros((tokens, heads), dtype=dtype, device=device)
+        tail_mass_out = torch.zeros_like(total_mass_out)
+        edge_count_out = torch.zeros_like(total_mass_out)
+
+        running = torch.zeros((heads, tokens), dtype=dtype, device=device)
+        source_axis = torch.arange(tokens, device=device, dtype=torch.long)
+        query_cpu = layer.query
+
+        for start in range(0, tokens, chunk_size):
+            end = min(tokens, start + chunk_size)
+            width = end - start
+            current = torch.zeros(
+                (heads, width, tokens), dtype=dtype, device=device
             )
+            if len(query_cpu):
+                left = int(
+                    torch.searchsorted(
+                        query_cpu,
+                        torch.tensor(start, dtype=query_cpu.dtype),
+                        right=False,
+                    ).item()
+                )
+                right = int(
+                    torch.searchsorted(
+                        query_cpu,
+                        torch.tensor(end, dtype=query_cpu.dtype),
+                        right=False,
+                    ).item()
+                )
+                if right > left:
+                    edge_head = layer.head[left:right].to(
+                        device=device, dtype=torch.long, non_blocking=True
+                    )
+                    edge_query = (
+                        layer.query[left:right].to(
+                            device=device, dtype=torch.long, non_blocking=True
+                        )
+                        - start
+                    )
+                    edge_source = layer.source[left:right].to(
+                        device=device, dtype=torch.long, non_blocking=True
+                    )
+                    edge_weight = layer.weight[left:right].to(
+                        device=device, dtype=dtype, non_blocking=True
+                    )
+                    current.index_put_(
+                        (edge_head, edge_query, edge_source),
+                        edge_weight,
+                        accumulate=True,
+                    )
 
-        cumulative = current.cumsum(dim=1)
-        target = torch.arange(tokens, device=device, dtype=dtype)[:, None]
-        source = torch.arange(tokens, device=device, dtype=dtype)[None, :]
-        age = (target - source + 1.0).clamp_min(1.0)
-        causal = source < target
-        received = torch.where(
-            causal[None, :, :],
-            cumulative / age[None, :, :],
-            torch.zeros_like(cumulative),
-        )
-        previous = torch.zeros_like(received)
-        if tokens > 1:
-            previous[:, 1:] = received[:, :-1]
-        received_delta = received - previous
+            cumulative = running[:, None, :] + current.cumsum(dim=1)
+            query_axis = torch.arange(
+                start, end, device=device, dtype=torch.long
+            )[:, None]
+            causal = source_axis[None, :] < query_axis
+            age = (query_axis - source_axis[None, :] + 1).clamp_min(1).to(dtype)
+            received = cumulative / age[None, :, :]
+            received.masked_fill_(~causal[None, :, :], 0.0)
+            cumulative_before = cumulative - current
 
-        total_mass = current.sum(dim=2)
-        edge_count = (current > 0).sum(dim=2).float()
+            route_weight, route_source = _topk_padded(current, route_count)
+            route_received = torch.gather(received, 2, route_source)
+            route_previous_age = (
+                query_axis.T.unsqueeze(0) - route_source
+            ).clamp_min(1).to(dtype)
+            route_previous = torch.gather(
+                cumulative_before, 2, route_source
+            ) / route_previous_age
+            route_delta = route_received - route_previous
 
-        route_weight, route_source = _topk_padded(current, config.max_route_sources)
-        route_received = torch.gather(received, 2, route_source)
-        route_delta = torch.gather(received_delta, 2, route_source)
-        before = route_weight.cumsum(dim=2) - route_weight
-        route_keep = (route_weight > 0) & (
-            before
-            < float(config.route_mass_coverage)
-            * total_mass[:, :, None].clamp_min(config.epsilon)
-        )
-        selected_mass = (route_weight * route_keep).sum(dim=2)
-        tail_mass = (total_mass - selected_mass).clamp_min(0.0)
+            total_mass = current.sum(dim=2)
+            edge_count = (current > 0).sum(dim=2).to(dtype)
+            before = route_weight.cumsum(dim=2) - route_weight
+            route_keep = (route_weight > 0) & (
+                before
+                < float(config.route_mass_coverage)
+                * total_mass[:, :, None].clamp_min(config.epsilon)
+            )
+            selected_mass = (route_weight * route_keep).sum(dim=2)
+            tail_mass = (total_mass - selected_mass).clamp_min(0.0)
 
-        memory_received, memory_source = _topk_padded(
-            received, config.max_memory_sources
-        )
-        memory_delta = torch.gather(received_delta, 2, memory_source)
-        memory_current = torch.gather(current, 2, memory_source)
-        memory_keep = memory_received > 0
+            memory_received, memory_source = _topk_padded(
+                received, memory_count
+            )
+            memory_previous_age = (
+                query_axis.T.unsqueeze(0) - memory_source
+            ).clamp_min(1).to(dtype)
+            memory_previous = torch.gather(
+                cumulative_before, 2, memory_source
+            ) / memory_previous_age
+            memory_delta = memory_received - memory_previous
+            memory_current = torch.gather(current, 2, memory_source)
+            memory_keep = memory_received > 0
 
-        transpose = lambda value: value.permute(1, 0, 2).contiguous()
+            route_source_out[start:end] = route_source.permute(1, 0, 2).to(
+                torch.int32
+            )
+            route_weight_out[start:end] = route_weight.permute(1, 0, 2)
+            route_received_out[start:end] = route_received.permute(1, 0, 2)
+            route_delta_out[start:end] = route_delta.permute(1, 0, 2)
+            route_mask_out[start:end] = route_keep.permute(1, 0, 2)
+            memory_source_out[start:end] = memory_source.permute(1, 0, 2).to(
+                torch.int32
+            )
+            memory_received_out[start:end] = memory_received.permute(1, 0, 2)
+            memory_delta_out[start:end] = memory_delta.permute(1, 0, 2)
+            memory_current_out[start:end] = memory_current.permute(1, 0, 2)
+            memory_mask_out[start:end] = memory_keep.permute(1, 0, 2)
+            total_mass_out[start:end] = total_mass.transpose(0, 1)
+            tail_mass_out[start:end] = tail_mass.transpose(0, 1)
+            edge_count_out[start:end] = edge_count.transpose(0, 1)
+            running = cumulative[:, -1].detach()
+
         return LayerSourceSets(
-            route_source=transpose(route_source),
-            route_weight=transpose(route_weight),
-            route_received=transpose(route_received),
-            route_received_delta=transpose(route_delta),
-            route_mask=transpose(route_keep),
-            memory_source=transpose(memory_source),
-            memory_received=transpose(memory_received),
-            memory_received_delta=transpose(memory_delta),
-            memory_current_weight=transpose(memory_current),
-            memory_mask=transpose(memory_keep),
-            total_mass=total_mass.transpose(0, 1).contiguous(),
-            tail_mass=tail_mass.transpose(0, 1).contiguous(),
-            edge_count=edge_count.transpose(0, 1).contiguous(),
+            route_source=route_source_out,
+            route_weight=route_weight_out,
+            route_received=route_received_out,
+            route_received_delta=route_delta_out,
+            route_mask=route_mask_out,
+            memory_source=memory_source_out,
+            memory_received=memory_received_out,
+            memory_received_delta=memory_delta_out,
+            memory_current_weight=memory_current_out,
+            memory_mask=memory_mask_out,
+            total_mass=total_mass_out,
+            tail_mass=tail_mass_out,
+            edge_count=edge_count_out,
         ).validate()
 
 
@@ -260,11 +400,21 @@ def extract_causal_source_set_graph(
     result: list[SparseRRLayer] = []
     for head_parts, query_parts, source_parts, weight_parts in storage:
         if weight_parts:
+            head = torch.cat(head_parts).long()
+            query = torch.cat(query_parts).long()
+            source = torch.cat(source_parts).long()
+            weight = torch.cat(weight_parts).float()
+            key = (
+                query * (heads * response_count)
+                + head * response_count
+                + source
+            )
+            order = torch.argsort(key, stable=True)
             layer = SparseRRLayer(
-                head=torch.cat(head_parts).long(),
-                query=torch.cat(query_parts).long(),
-                source=torch.cat(source_parts).long(),
-                weight=torch.cat(weight_parts).float(),
+                head=head[order],
+                query=query[order],
+                source=source[order],
+                weight=weight[order],
             )
         else:
             layer = SparseRRLayer(
@@ -283,7 +433,9 @@ def extract_causal_source_set_graph(
     ).validate()
 
 
-def _topk_padded(values: torch.Tensor, count: int) -> tuple[torch.Tensor, torch.Tensor]:
+def _topk_padded(
+    values: torch.Tensor, count: int
+) -> tuple[torch.Tensor, torch.Tensor]:
     count = int(count)
     keep = min(count, int(values.shape[-1]))
     top_value, top_index = torch.topk(
@@ -296,14 +448,18 @@ def _topk_padded(values: torch.Tensor, count: int) -> tuple[torch.Tensor, torch.
         torch.cat(
             (
                 top_value,
-                torch.zeros(pad_shape, device=values.device, dtype=values.dtype),
+                torch.zeros(
+                    pad_shape, device=values.device, dtype=values.dtype
+                ),
             ),
             dim=-1,
         ),
         torch.cat(
             (
                 top_index,
-                torch.zeros(pad_shape, device=values.device, dtype=torch.long),
+                torch.zeros(
+                    pad_shape, device=values.device, dtype=torch.long
+                ),
             ),
             dim=-1,
         ),
