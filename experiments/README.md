@@ -35,14 +35,20 @@ separate post-hoc evaluation stage after representations/scores are frozen.
 ## Current experiments
 
 - `mechanism_validation/`: attention mechanism and graph-ablation diagnostics.
-- `spectral_feasibility/`: the active RR causal spectral representation and
-  independently calibrated robust-subspace detector.
+- `spectral_feasibility/`: the active RR causal source-persistence
+  representation and independently calibrated robust-subspace detector.
+- `rr_signal_audit/`: RR-only decomposition of the historical mixed coordinate
+  into future received support, diagonal contribution, persistence ratio, and
+  current-token collapse variables. It compares independent and joint
+  one-class geometry and includes a conditional channel-shuffle control.
 - `rr_topology_dynamics/`: label-free extraction followed by post-hoc analysis
   of route convergence, prompt-grounded versus self-reinforcing RR flow, and
   layer/head/source/lag attribution of spectral-subspace escape.
-- `causal_multiplex_flow/`: source-aware, channel-preserving dynamic routing
-  prediction with disjoint unlabeled fit/calibration groups and a
-  lag-preserving source-rewiring topology gate.
-- `conditioned_benchmark/`: a strict current-v2 workflow for frozen detector
-  artifacts, `task_type` slices, token/response evaluation, and controlled
-  positive-prevalence experiments. It does not refit methods.
+- `causal_attention_setwalk/`: an independent fixed SetWalk-style attention
+  hypergraph representation with no-walk, pairwise, and layer-order controls.
+- `causal_multiplex_flow/`: source-aware dynamic routing prediction retained as
+  a research baseline; its source-prediction surprise did not establish useful
+  hallucination separation.
+- `conditioned_benchmark/`: a strict frozen-artifact workflow for task slices,
+  token/response evaluation, uncertainty, and controlled positive prevalence.
+  It never refits a detector after labels open.
