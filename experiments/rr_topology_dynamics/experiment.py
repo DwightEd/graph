@@ -27,6 +27,7 @@ from .artifacts import (
     load_topology_reference,
 )
 from .features import (
+    LAYER_PROFILE_NAMES,
     TopologyDynamicsConfig,
     extract_sample_topology_dynamics,
     load_rr_reference,
@@ -351,9 +352,7 @@ def score_topology_dataset(
             "generator_model",
             "features_raw",
             "features_z",
-            "layer_route_effective_rank",
-            "layer_route_consensus",
-            "layer_residual_energy",
+            *LAYER_PROFILE_NAMES,
             "spectral_rank_residual_energy",
             "rr_embedding",
         )
@@ -409,15 +408,8 @@ def score_topology_dataset(
             )
             columns["features_raw"].append(raw)
             columns["features_z"].append(z)
-            columns["layer_route_effective_rank"].append(
-                extracted["layer_route_effective_rank"]
-            )
-            columns["layer_route_consensus"].append(
-                extracted["layer_route_consensus"]
-            )
-            columns["layer_residual_energy"].append(
-                extracted["layer_residual_energy"]
-            )
+            for name in LAYER_PROFILE_NAMES:
+                columns[name].append(extracted[name])
             columns["spectral_rank_residual_energy"].append(
                 extracted["spectral_rank_residual_energy"]
             )

@@ -42,7 +42,7 @@ from .types import MethodScore, ScoreArtifact
 
 @dataclass(frozen=True)
 class ArtifactSpec:
-    """One current v2 artifact and any explicitly oriented RR features."""
+    """One current owner artifact and any explicitly oriented RR features."""
 
     name: str
     path: str
@@ -123,7 +123,7 @@ def _topology_methods(spec: ArtifactSpec, arrays) -> dict[str, MethodScore]:
 
 
 def load_score_artifact(spec: ArtifactSpec, frozen: FrozenFile) -> ScoreArtifact:
-    """Strict-load one captured current-v2 artifact through its owner contract."""
+    """Strict-load one captured current artifact through its owner contract."""
 
     frozen.verify(spec.path)
     schema = _schema(frozen.path)
@@ -137,7 +137,7 @@ def load_score_artifact(spec: ArtifactSpec, frozen: FrozenFile) -> ScoreArtifact
         methods = _primary_method(
             spec, arrays, "score_rr_residual", spectral_temporal_scope()
         )
-    elif schema == "rr-topology-dynamics-features-v2":
+    elif schema == "rr-topology-dynamics-features-v3":
         arrays = load_topology_artifact(frozen.path)
         verify_topology_score_provenance(arrays)
         methods = _topology_methods(spec, arrays)

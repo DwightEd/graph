@@ -259,7 +259,7 @@ class RRTopologyDynamicsTests(unittest.TestCase):
                 audit_config=audit_config,
             )
             self.assertFalse(fitted["labels_read"])
-            self.assertEqual(fitted["feature_dim"], 37)
+            self.assertEqual(fitted["feature_dim"], 48)
             with np.load(topology_path, allow_pickle=False) as arrays:
                 self.assertEqual(str(arrays["schema"].item()), REFERENCE_SCHEMA)
                 self.assertNotIn("label", arrays.files)
@@ -359,7 +359,7 @@ class RRTopologyDynamicsTests(unittest.TestCase):
                     dataset_manifest_sha256(test),
                 )
                 np.testing.assert_array_equal(arrays["response_length"], [3] * 6)
-                self.assertEqual(arrays["features_raw"].shape, (6, 37))
+                self.assertEqual(arrays["features_raw"].shape, (6, 48))
                 self.assertEqual(arrays["layer_residual_energy"].shape, (6, 1))
                 self.assertEqual(
                     arrays["spectral_rank_residual_energy"].shape, (6, 2)
@@ -502,7 +502,7 @@ class RRTopologyDynamicsTests(unittest.TestCase):
             extracted = extract_sample_topology_dynamics(
                 sample, spectral_reference, config=topology_config
             )
-            self.assertEqual(extracted["features"].shape, (3, 37))
+            self.assertEqual(extracted["features"].shape, (3, 48))
             sample.release_attention()
 
             original_topology = topology_path.read_bytes()

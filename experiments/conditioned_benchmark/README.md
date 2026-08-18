@@ -15,13 +15,13 @@ become available.
 
 ## Supported artifacts
 
-Only current v2 owner contracts are accepted:
+Only current owner contracts are accepted:
 
 | Schema | Benchmark score |
 |---|---|
 | `cmrp-score-v2` | frozen `score` primary |
 | `rr-spectral-score-v2` | frozen `score_rr_residual` primary |
-| `rr-topology-dynamics-features-v2` | explicitly named `features_z` column and fixed `higher`/`lower` direction |
+| `rr-topology-dynamics-features-v3` | explicitly named `features_z` column and fixed `higher`/`lower` direction |
 
 Legacy, unversioned, generic numeric, probe, and trajectory artifacts are
 rejected. RR topology features are mechanism measurements rather than frozen

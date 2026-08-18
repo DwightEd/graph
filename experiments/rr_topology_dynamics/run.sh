@@ -19,7 +19,7 @@ else
   EXTRA=()
   BOOTSTRAP_DEFAULT=1000
 fi
-OUT=${OUT:-experiments/rr_topology_dynamics/outputs/v2/$RUN_NAME}
+OUT=${OUT:-experiments/rr_topology_dynamics/outputs/setwalk_coordination/$RUN_NAME}
 
 if [[ ! -f "$SPECTRAL_REFERENCE" ]]; then
   cat >&2 <<EOF

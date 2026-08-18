@@ -132,9 +132,14 @@ def main(argv=None):
             phase_bins=args.phase_bins,
             seed=args.seed,
         )
+        hypothesis_names = report["hypotheses"]["setwalk_rp_rr_coordination"]
         result = {
             "output": f"{args.output_dir}/report.json",
             "labels_read": True,
+            "setwalk_coordination_metrics": {
+                name: report["feature_metrics_raw"][name]
+                for name in hypothesis_names
+            },
             **report["overall"],
         }
     print(json.dumps(result, indent=2, sort_keys=True))

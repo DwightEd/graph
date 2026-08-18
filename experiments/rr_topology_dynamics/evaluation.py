@@ -18,6 +18,7 @@ from .artifacts import (
     score_temporal_scope,
     verify_score_provenance,
 )
+from .features import LAYER_PROFILE_NAMES
 
 CONVERGENCE_FEATURES = (
     "route_effective_rank",
@@ -54,6 +55,20 @@ RESIDUAL_FEATURES = (
     "residual_far_lag_share",
     "residual_source_effective_number",
     "residual_source_top1_share",
+)
+
+SETWALK_COORDINATION_FEATURES = (
+    "local_rr_collapse_strength",
+    "early_local_rr_collapse",
+    "late_local_rr_collapse",
+    "early_minus_late_local_rr_collapse",
+    "local_rr_collapse_depth",
+    "rp_rr_relation_effective_rank_mean",
+    "rp_rr_head_consensus_mean",
+    "rp_rr_head_specialization_mean",
+    "cross_layer_relation_shift_mean",
+    "cross_layer_relation_shift_max",
+    "cross_layer_adjacency_gap_vs_all_pairs",
 )
 
 
@@ -214,11 +229,7 @@ def _feature_metric_rows(feature_names, matrix, y, *, representation):
 def _layer_metric_rows(y, artifact):
     rows = []
     report = {}
-    for family in (
-        "layer_route_effective_rank",
-        "layer_route_consensus",
-        "layer_residual_energy",
-    ):
+    for family in LAYER_PROFILE_NAMES:
         matrix = np.asarray(artifact[family], dtype=np.float32)
         current = []
         for layer in range(matrix.shape[1]):
@@ -248,6 +259,7 @@ def _phase_curve_rows(feature_names, raw, y, relative_position, phase_bins):
         for name in (
             *CONVERGENCE_FEATURES,
             *GROUNDING_FEATURES,
+            *SETWALK_COORDINATION_FEATURES,
             "spectral_residual_energy",
             "residual_effective_channels",
             "residual_weighted_lag",
@@ -427,6 +439,7 @@ def evaluate_topology_artifact(
         "hypotheses": {
             "route_convergence": list(CONVERGENCE_FEATURES),
             "grounding_vs_feedback": list(GROUNDING_FEATURES),
+            "setwalk_rp_rr_coordination": list(SETWALK_COORDINATION_FEATURES),
             "spectral_escape_localization": list(RESIDUAL_FEATURES),
         },
         "claim_boundaries": {

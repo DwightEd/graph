@@ -15,10 +15,11 @@ from experiment_protocol import (
     validate_source_audit,
 )
 from experiments.spectral_feasibility.artifacts import load_spectral_reference
+from .features import LAYER_PROFILE_NAMES
 
-REFERENCE_SCHEMA = "rr-topology-dynamics-reference-v2"
-SCORE_SCHEMA = "rr-topology-dynamics-features-v2"
-EVALUATION_SCHEMA = "rr-topology-dynamics-evaluation-v2"
+REFERENCE_SCHEMA = "rr-topology-dynamics-reference-v3"
+SCORE_SCHEMA = "rr-topology-dynamics-features-v3"
+EVALUATION_SCHEMA = "rr-topology-dynamics-evaluation-v3"
 
 
 def score_temporal_scope(feature_column: str | None = None) -> TemporalScope:
@@ -208,9 +209,7 @@ def load_topology_artifact(path):
     matrix_rows = {
         "features_raw",
         "features_z",
-        "layer_route_effective_rank",
-        "layer_route_consensus",
-        "layer_residual_energy",
+        *LAYER_PROFILE_NAMES,
         "spectral_rank_residual_energy",
         "rr_embedding",
     }
@@ -283,10 +282,10 @@ def load_topology_artifact(path):
         feature_names
     ):
         raise ValueError("RR topology raw/z feature geometry is inconsistent")
-    layer_shape = np.asarray(artifact["layer_route_effective_rank"]).shape
+    layer_shape = np.asarray(artifact[LAYER_PROFILE_NAMES[0]]).shape
     if any(
         np.asarray(artifact[name]).shape != layer_shape
-        for name in ("layer_route_consensus", "layer_residual_energy")
+        for name in LAYER_PROFILE_NAMES[1:]
     ):
         raise ValueError("RR topology layer feature geometry is inconsistent")
     numeric = float_rows | matrix_rows

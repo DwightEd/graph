@@ -45,6 +45,17 @@ SCALAR_FEATURE_NAMES = (
     "source_mean_lag",
     "source_lag_std",
     "source_far_mass_fraction",
+    "local_rr_collapse_strength",
+    "early_local_rr_collapse",
+    "late_local_rr_collapse",
+    "early_minus_late_local_rr_collapse",
+    "local_rr_collapse_depth",
+    "rp_rr_relation_effective_rank_mean",
+    "rp_rr_head_consensus_mean",
+    "rp_rr_head_specialization_mean",
+    "cross_layer_relation_shift_mean",
+    "cross_layer_relation_shift_max",
+    "cross_layer_adjacency_gap_vs_all_pairs",
     "channel_route_velocity",
     "source_route_velocity",
     "anchor_turnover",
@@ -67,6 +78,21 @@ SCALAR_FEATURE_NAMES = (
     "residual_grounded_source_share",
     "residual_source_effective_number",
     "residual_source_top1_share",
+)
+
+LAYER_PROFILE_NAMES = (
+    "layer_route_effective_rank",
+    "layer_route_consensus",
+    "layer_relation_effective_rank",
+    "layer_relation_consensus",
+    "layer_relation_head_specialization",
+    "layer_relation_transition",
+    "layer_rp_fraction",
+    "layer_recent_rr_fraction",
+    "layer_source_effective_number",
+    "layer_source_top1_share",
+    "layer_local_rr_collapse",
+    "layer_residual_energy",
 )
 
 
@@ -173,6 +199,239 @@ def _mean_pairwise_cosine(route_probability: torch.Tensor, active: torch.Tensor,
     denominator = count * (count - 1.0)
     consensus = numerator / denominator.clamp_min(1.0)
     return torch.where(count >= 2, consensus.clamp(-1.0, 1.0), torch.zeros_like(consensus))
+
+
+def _masked_mean(values: torch.Tensor, valid: torch.Tensor, dimension: int):
+    """Mean with an explicit validity mask and zero for an empty slice."""
+
+    weight = valid.to(values.dtype)
+    count = weight.sum(dim=dimension)
+    total = (values * weight).sum(dim=dimension)
+    return torch.where(count > 0, total / count.clamp_min(1), torch.zeros_like(total))
+
+
+def _layer_source_profiles(
+    row_index: torch.Tensor,
+    source_index: torch.Tensor,
+    weight: torch.Tensor,
+    *,
+    response_count: int,
+    layers: int,
+    epsilon: float,
+):
+    """Exact-source concentration after pooling RR hyperedges over heads.
+
+    ``row_index`` identifies ``query * layers + layer``. Repeated source
+    coordinates from different heads must already have been coalesced. Keeping
+    this object sparse avoids allocating ``[response, layer, response]``.
+    """
+
+    rows = int(response_count) * int(layers)
+    if row_index.shape != source_index.shape or source_index.shape != weight.shape:
+        raise ValueError("sparse layer-source coordinates must have matching shapes")
+    if bool((row_index < 0).any()) or bool((row_index >= rows).any()):
+        raise ValueError("sparse layer-source row is out of range")
+    if bool((source_index < 0).any()) or bool(
+        (source_index >= response_count).any()
+    ):
+        raise ValueError("sparse layer-source column is out of range")
+    query_index = torch.div(row_index, layers, rounding_mode="floor")
+    if bool((source_index >= query_index).any()):
+        raise ValueError("sparse layer-source coordinate is not causal RR")
+    total = torch.zeros(rows, dtype=weight.dtype, device=weight.device)
+    entropy = torch.zeros_like(total)
+    top1 = torch.zeros_like(total)
+    if weight.numel():
+        total.index_add_(0, row_index, weight)
+        probability = weight / total[row_index].clamp_min(epsilon)
+        entropy.index_add_(
+            0,
+            row_index,
+            -(probability * probability.clamp_min(epsilon).log()),
+        )
+        top1.scatter_reduce_(
+            0, row_index, probability, reduce="amax", include_self=True
+        )
+    valid = total > epsilon
+    effective = torch.where(valid, entropy.exp(), torch.zeros_like(entropy))
+    return {
+        "mass": total.reshape(response_count, layers),
+        "effective_number": effective.reshape(response_count, layers),
+        "top1_share": top1.reshape(response_count, layers),
+        "valid": valid.reshape(response_count, layers),
+    }
+
+
+def _relation_coordination_profiles(
+    prompt_mass: torch.Tensor,
+    rr_mass: torch.Tensor,
+    recent_rr_mass: torch.Tensor,
+    source_effective_number: torch.Tensor,
+    source_top1_share: torch.Tensor,
+    *,
+    epsilon: float,
+):
+    """Set-valued RP/RR coordination and local-collapse profiles.
+
+    Inputs are ``[token, layer, head]`` except the exact-source summaries,
+    which are ``[token, layer]``. Every head is represented by the anonymous
+    three-role vector ``[RP, recent RR, non-recent RR]``. First and second
+    moments over the head set are permutation invariant, so a head ordering is
+    not mistaken for cross-layer identity. Consecutive-layer moment distance
+    measures whether the *set* of head roles changes abruptly.
+    """
+
+    if prompt_mass.shape != rr_mass.shape or rr_mass.shape != recent_rr_mass.shape:
+        raise ValueError("RP/RR channel mass tensors must have identical shapes")
+    if prompt_mass.ndim != 3:
+        raise ValueError("RP/RR channel masses must be [token, layer, head]")
+    response_count, layers, heads = prompt_mass.shape
+    if source_effective_number.shape != (response_count, layers) or (
+        source_top1_share.shape != (response_count, layers)
+    ):
+        raise ValueError("exact-source profiles must be [token, layer]")
+
+    recent_rr_mass = torch.minimum(recent_rr_mass, rr_mass)
+    relation = torch.stack(
+        (prompt_mass, recent_rr_mass, (rr_mass - recent_rr_mass).clamp_min(0)),
+        dim=3,
+    )
+    relation_total = relation.sum(dim=3)
+    active = relation_total > epsilon
+    probability = relation / relation_total[:, :, :, None].clamp_min(epsilon)
+    probability = torch.where(
+        active[:, :, :, None], probability, torch.zeros_like(probability)
+    )
+
+    flat_probability = probability.reshape(response_count * layers, heads, 3)
+    flat_active = active.reshape(response_count * layers, heads)
+    relation_rank = _batched_route_spectrum(flat_probability, epsilon)[0].reshape(
+        response_count, layers
+    )
+    relation_consensus = _mean_pairwise_cosine(
+        flat_probability, flat_active, epsilon
+    ).reshape(response_count, layers)
+
+    active_float = active.to(probability.dtype)
+    head_count = active_float.sum(dim=2)
+    mean = probability.sum(dim=2) / head_count[:, :, None].clamp_min(1)
+    centered = probability - mean[:, :, None, :]
+    centered = torch.where(
+        active[:, :, :, None], centered, torch.zeros_like(centered)
+    )
+    covariance = torch.einsum("tlhi,tlhj->tlij", centered, centered)
+    covariance = covariance / head_count[:, :, None, None].clamp_min(1)
+    layer_valid = head_count > 0
+
+    rp_share = prompt_mass / (prompt_mass + rr_mass).clamp_min(epsilon)
+    rp_mean = _masked_mean(rp_share, active, dimension=2)
+    rp_variance = _masked_mean(
+        (rp_share - rp_mean[:, :, None]).square(), active, dimension=2
+    )
+    head_specialization = rp_variance.sqrt()
+
+    transition = torch.zeros(
+        (response_count, layers), dtype=probability.dtype, device=probability.device
+    )
+    transition_valid = torch.zeros(
+        (response_count, layers), dtype=torch.bool, device=probability.device
+    )
+    if layers > 1:
+        mean_delta = (mean[:, 1:] - mean[:, :-1]).square().sum(dim=2)
+        covariance_delta = (
+            covariance[:, 1:] - covariance[:, :-1]
+        ).square().sum(dim=(2, 3))
+        transition[:, 1:] = (mean_delta + covariance_delta).sqrt()
+        transition_valid[:, 1:] = layer_valid[:, 1:] & layer_valid[:, :-1]
+        transition = torch.where(
+            transition_valid, transition, torch.zeros_like(transition)
+        )
+
+    prompt_layer = prompt_mass.sum(dim=2)
+    rr_layer = rr_mass.sum(dim=2)
+    recent_layer = recent_rr_mass.sum(dim=2)
+    observed_layer = prompt_layer + rr_layer
+    rr_fraction = rr_layer / observed_layer.clamp_min(epsilon)
+    recent_rr_fraction = recent_layer / rr_layer.clamp_min(epsilon)
+    layer_local_collapse = rr_fraction * recent_rr_fraction * source_top1_share
+    layer_local_collapse = torch.where(
+        rr_layer > epsilon, layer_local_collapse, torch.zeros_like(layer_local_collapse)
+    )
+
+    early_layers = max(1, int(np.ceil(layers / 3)))
+    late_start = max(0, layers - early_layers)
+    depth = torch.linspace(
+        0.0, 1.0, layers, dtype=probability.dtype, device=probability.device
+    )
+    collapse_total = layer_local_collapse.sum(dim=1)
+    collapse_depth = (
+        layer_local_collapse * depth[None, :]
+    ).sum(dim=1) / collapse_total.clamp_min(epsilon)
+    collapse_depth = torch.where(
+        collapse_total > epsilon, collapse_depth, torch.zeros_like(collapse_depth)
+    )
+
+    transition_mean = _masked_mean(transition, transition_valid, dimension=1)
+    transition_for_max = torch.where(
+        transition_valid, transition, torch.full_like(transition, -torch.inf)
+    )
+    transition_max = transition_for_max.max(dim=1).values
+    transition_max = torch.where(
+        transition_valid.any(dim=1), transition_max, torch.zeros_like(transition_max)
+    )
+    pair_mean_delta = mean[:, :, None, :] - mean[:, None, :, :]
+    pair_covariance_delta = covariance[:, :, None] - covariance[:, None, :, :]
+    pair_distance = (
+        pair_mean_delta.square().sum(dim=3)
+        + pair_covariance_delta.square().sum(dim=(3, 4))
+    ).sqrt()
+    pair_valid = layer_valid[:, :, None] & layer_valid[:, None, :]
+    pair_mask = torch.triu(
+        torch.ones((layers, layers), dtype=torch.bool, device=probability.device),
+        diagonal=1,
+    )
+    pair_valid = pair_valid & pair_mask[None, :, :]
+    all_pair_mean = _masked_mean(
+        pair_distance.reshape(response_count, -1),
+        pair_valid.reshape(response_count, -1),
+        dimension=1,
+    )
+    layer_weight = layer_valid.to(probability.dtype)
+    valid_layer_count = layer_weight.sum(dim=1)
+
+    early_collapse = layer_local_collapse[:, :early_layers].mean(dim=1)
+    late_collapse = layer_local_collapse[:, late_start:].mean(dim=1)
+    return {
+        "local_rr_collapse_strength": layer_local_collapse.mean(dim=1),
+        "early_local_rr_collapse": early_collapse,
+        "late_local_rr_collapse": late_collapse,
+        "early_minus_late_local_rr_collapse": early_collapse - late_collapse,
+        "local_rr_collapse_depth": collapse_depth,
+        "rp_rr_relation_effective_rank_mean": (
+            (relation_rank * layer_weight).sum(dim=1)
+            / valid_layer_count.clamp_min(1)
+        ),
+        "rp_rr_head_consensus_mean": (
+            (relation_consensus * layer_weight).sum(dim=1)
+            / valid_layer_count.clamp_min(1)
+        ),
+        "rp_rr_head_specialization_mean": (
+            (head_specialization * layer_weight).sum(dim=1)
+            / valid_layer_count.clamp_min(1)
+        ),
+        "cross_layer_relation_shift_mean": transition_mean,
+        "cross_layer_relation_shift_max": transition_max,
+        "cross_layer_adjacency_gap_vs_all_pairs": transition_mean - all_pair_mean,
+        "layer_relation_effective_rank": relation_rank,
+        "layer_relation_consensus": relation_consensus,
+        "layer_relation_head_specialization": head_specialization,
+        "layer_relation_transition": transition,
+        "layer_rp_fraction": prompt_layer / observed_layer.clamp_min(epsilon),
+        "layer_recent_rr_fraction": recent_rr_fraction,
+        "layer_source_effective_number": source_effective_number,
+        "layer_source_top1_share": source_top1_share,
+        "layer_local_rr_collapse": layer_local_collapse,
+    }
 
 
 def _consecutive_cosine_distance(values: np.ndarray, epsilon: float) -> np.ndarray:
@@ -391,9 +650,13 @@ def extract_sample_topology_dynamics(
     )
     channel_edges = torch.zeros_like(channel_mass)
     prompt_channel_mass = torch.zeros_like(channel_mass)
+    recent_channel_mass = torch.zeros_like(channel_mass)
     source_mass = torch.zeros(
         (response_count, response_count), dtype=torch.float32, device=device
     )
+    layer_source_rows = []
+    layer_source_columns = []
+    layer_source_weights = []
 
     for block in sample.iter_sparse_attention_blocks(block_rows=config.block_rows):
         channel = (block.layer * heads + block.head).long()
@@ -418,6 +681,7 @@ def extract_sample_topology_dynamics(
         lag_bin = torch.floor(torch.log2(lag.float())).long().clamp_max(
             config.lag_bins - 1
         )
+        recent = lag <= config.recent_lag_max
         route.index_put_(
             (history_query, history_channel, lag_bin),
             history_weight,
@@ -426,6 +690,12 @@ def extract_sample_topology_dynamics(
         channel_mass.index_put_(
             (history_query, history_channel), history_weight, accumulate=True
         )
+        if bool(recent.any()):
+            recent_channel_mass.index_put_(
+                (history_query[recent], history_channel[recent]),
+                history_weight[recent],
+                accumulate=True,
+            )
         channel_edges.index_put_(
             (history_query, history_channel),
             torch.ones_like(history_weight),
@@ -434,6 +704,11 @@ def extract_sample_topology_dynamics(
         source_mass.index_put_(
             (history_query, history_source), history_weight, accumulate=True
         )
+        layer_source_rows.append(
+            history_query * layers + block.layer[history].long()
+        )
+        layer_source_columns.append(history_source)
+        layer_source_weights.append(history_weight)
 
     active = channel_mass > config.epsilon
     route_probability = route / channel_mass[:, :, None].clamp_min(config.epsilon)
@@ -472,6 +747,48 @@ def extract_sample_topology_dynamics(
         layer_active.reshape(response_count * layers, heads),
         config.epsilon,
     ).reshape(response_count, layers)
+
+    if layer_source_weights:
+        sparse_layer_source = torch.sparse_coo_tensor(
+            torch.stack(
+                (
+                    torch.cat(layer_source_rows),
+                    torch.cat(layer_source_columns),
+                )
+            ),
+            torch.cat(layer_source_weights),
+            size=(response_count * layers, response_count),
+            dtype=torch.float32,
+            device=device,
+        ).coalesce()
+        sparse_index = sparse_layer_source.indices()
+        source_profiles = _layer_source_profiles(
+            sparse_index[0],
+            sparse_index[1],
+            sparse_layer_source.values(),
+            response_count=response_count,
+            layers=layers,
+            epsilon=config.epsilon,
+        )
+    else:
+        zero_layer = torch.zeros(
+            (response_count, layers), dtype=torch.float32, device=device
+        )
+        source_profiles = {
+            "mass": zero_layer,
+            "effective_number": zero_layer,
+            "top1_share": zero_layer,
+            "valid": zero_layer.bool(),
+        }
+
+    coordination = _relation_coordination_profiles(
+        prompt_channel_mass.reshape(response_count, layers, heads),
+        channel_mass.reshape(response_count, layers, heads),
+        recent_channel_mass.reshape(response_count, layers, heads),
+        source_profiles["effective_number"],
+        source_profiles["top1_share"],
+        epsilon=config.epsilon,
+    )
 
     route_numpy = route_probability.detach().cpu().numpy().astype(np.float32)
     route_flat = route_numpy.reshape(response_count, -1)
@@ -562,6 +879,22 @@ def extract_sample_topology_dynamics(
             "source_lag_std",
             "source_far_mass_fraction",
         )},
+        **{
+            name: coordination[name].detach().cpu().numpy()
+            for name in (
+                "local_rr_collapse_strength",
+                "early_local_rr_collapse",
+                "late_local_rr_collapse",
+                "early_minus_late_local_rr_collapse",
+                "local_rr_collapse_depth",
+                "rp_rr_relation_effective_rank_mean",
+                "rp_rr_head_consensus_mean",
+                "rp_rr_head_specialization_mean",
+                "cross_layer_relation_shift_mean",
+                "cross_layer_relation_shift_max",
+                "cross_layer_adjacency_gap_vs_all_pairs",
+            )
+        },
         "channel_route_velocity": _consecutive_cosine_distance(
             route_flat, config.epsilon
         ),
@@ -606,6 +939,20 @@ def extract_sample_topology_dynamics(
         ),
         "layer_route_effective_rank": layer_effective_rank.detach().cpu().numpy().astype(np.float32),
         "layer_route_consensus": layer_consensus.detach().cpu().numpy().astype(np.float32),
+        **{
+            name: coordination[name].detach().cpu().numpy().astype(np.float32)
+            for name in (
+                "layer_relation_effective_rank",
+                "layer_relation_consensus",
+                "layer_relation_head_specialization",
+                "layer_relation_transition",
+                "layer_rp_fraction",
+                "layer_recent_rr_fraction",
+                "layer_source_effective_number",
+                "layer_source_top1_share",
+                "layer_local_rr_collapse",
+            )
+        },
         "layer_residual_energy": layer_residual.astype(np.float32),
         "spectral_rank_residual_energy": rank_residual.astype(np.float32),
         "rr_embedding": embedding.astype(np.float32),

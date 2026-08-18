@@ -91,7 +91,7 @@ current code must use a fresh output directory and must be reported separately.
 After a full run:
 
 ```text
-experiments/rr_topology_dynamics/outputs/v2/full/evaluation/
+experiments/rr_topology_dynamics/outputs/setwalk_coordination/full/evaluation/
   report.json
   feature_metrics.csv
   within_sample_effects.csv

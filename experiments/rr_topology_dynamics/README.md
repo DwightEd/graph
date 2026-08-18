@@ -113,7 +113,51 @@ also pooled by exact response source. The audit reports:
 
 These features separate `many lag modes` from `many exact source anchors`.
 
-## 6. Prompt-grounded versus self-reinforcing convergence
+## 6. CAT-Walk-inspired RP/RR hyperedge coordination
+
+The official CAT-Walk encoder is not copied here: it trains SetMixer and an
+MLP-Mixer for future-hyperedge prediction. We reuse only its higher-order idea
+that one walk step should retain the whole source set. For every token, layer,
+and head, the retained attention hyperedge is represented by three anonymous
+roles:
+
+```text
+[RP mass, recent-RR mass, non-recent-RR mass].
+```
+
+Here RP is response-query to prompt-source attention; in the direction of
+information flow this is prompt-to-response (PR). The 32 vectors in one layer
+form an unordered head set. Their mean and covariance are permutation invariant,
+and consecutive-layer distance is
+
+```text
+sqrt(||mean_l - mean_(l-1)||^2 + ||cov_l - cov_(l-1)||_F^2).
+```
+
+This avoids pretending that head index `h` in two different layers has the same
+semantic role. The audit retains per-layer relation effective rank, consensus,
+RP/RR specialization, RP fraction, recent-RR fraction, exact-source effective
+number, exact-source top-1 share, and relation-set transition distance.
+
+The proposed premature local-history collapse is deliberately factored rather
+than treated as a label-derived score:
+
+```text
+collapse_l = RR_fraction_l
+           * recent_RR_fraction_l
+           * exact_RR_source_top1_share_l.
+```
+
+The artifact saves the complete layer trajectory plus its early-third,
+late-third, early-minus-late, mean-strength, and layer-center summaries. For a
+layer-order control, the mean distance of true consecutive layers is also
+compared with the mean distance over every unordered layer pair. A negative
+`cross_layer_adjacency_gap_vs_all_pairs` means true neighbors are smoother than
+the layer-shuffled expectation. Thus the evaluation can separately ask whether
+hallucination is stronger, earlier in Transformer depth, or disrupts genuine
+layer order. No direction is selected from test labels.
+
+## 7. Prompt-grounded versus self-reinforcing convergence
 
 Prompt support is propagated causally through response history. For token `t`,
 
@@ -134,7 +178,7 @@ low route rank + high grounded relay      (potentially supported convergence)
 low route rank + high ungrounded feedback (potential self-reinforcing attractor)
 ```
 
-## 7. Where spectral-subspace reconstruction fails
+## 8. Where spectral-subspace reconstruction fails
 
 The frozen PCA residual is reshaped back to
 
@@ -159,7 +203,7 @@ This separates three explanations:
 2. a distributed set of heads drifts;
 3. the same spectral magnitude moves to different source/lag/grounding roles.
 
-## 8. Label discipline and evaluation
+## 9. Label discipline and evaluation
 
 The runner has three stages:
 
@@ -174,11 +218,11 @@ frozen feature artifact
     -> post-hoc correct/error and onset analysis      labels opened here only
 ```
 
-The v2 topology reference records the resolved spectral-reference path and
+The topology reference records the resolved spectral-reference path and
 SHA-256 digest. Its reserved source set is the union of the spectral fit/cal
 groups and every topology-fit group. Scoring accepts only that exact spectral
 file, verifies both frozen references, and streams each selected test sample
-through a held-out source audit before feature extraction. The v2 score
+through a held-out source audit before feature extraction. The score
 artifact persists both reference identities/digests, the reserved and test
 groups, the selected test sample IDs, and whether the audit covered the
 complete split or only a limited selection. It also stores the exact on-disk
@@ -188,9 +232,9 @@ the canonical source, and the attention-derived response length before labels
 are opened.
 
 The frozen contracts are versioned as
-`rr-topology-dynamics-reference-v2`,
-`rr-topology-dynamics-features-v2`, and
-`rr-topology-dynamics-evaluation-v2`. The reference and feature files are
+`rr-topology-dynamics-reference-v3`,
+`rr-topology-dynamics-features-v3`, and
+`rr-topology-dynamics-evaluation-v3`. The reference and feature files are
 validated again at every load boundary.
 
 The evaluation writes:
@@ -213,7 +257,7 @@ first observed `0 -> 1` transition in each response; later positive runs are
 not averaged into that response's effect. No feature direction or weight is
 fed back into representation construction.
 
-## 9. Run
+## 10. Run
 
 The full RR spectral reference must already exist at the default location, or
 `SPECTRAL_REFERENCE` must point to another frozen `reference.npz`.
@@ -235,11 +279,11 @@ CUDA_VISIBLE_DEVICES=0 DEVICE=cuda \
 Outputs are isolated:
 
 ```text
-experiments/rr_topology_dynamics/outputs/v2/smoke_5/
-experiments/rr_topology_dynamics/outputs/v2/full/
+experiments/rr_topology_dynamics/outputs/setwalk_coordination/smoke_5/
+experiments/rr_topology_dynamics/outputs/setwalk_coordination/full/
 ```
 
-## 10. Claim boundary
+## 11. Claim boundary
 
 A lower route rank, higher head consensus, or smaller distance to a final route
 state is only evidence of routing convergence. The scientifically stronger
