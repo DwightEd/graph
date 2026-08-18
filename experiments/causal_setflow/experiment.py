@@ -121,6 +121,7 @@ def fit_setflow(
         deterministic_masks=training_config.deterministic_masks,
         seed=training_config.seed + 300_000,
         device=device,
+        precision=training_config.precision,
     )
     selected = select_reference_rows(
         fit_rows, training_config.reference_per_sample
@@ -139,6 +140,7 @@ def fit_setflow(
         deterministic_masks=training_config.deterministic_masks,
         seed=training_config.seed + 600_000,
         device=device,
+        precision=training_config.precision,
     )
     calibration_matrix = component_matrix(
         _raw_components(calibration_rows, latent_reference)
@@ -190,6 +192,8 @@ def fit_setflow(
         "num_layers": num_layers,
         "num_heads": num_heads,
         "hidden_dim": model_config.hidden_dim,
+        "precision": training_config.precision,
+        "activation_checkpointing": model_config.activation_checkpointing,
     }
 
 
@@ -245,6 +249,7 @@ def score_setflow(
         deterministic_masks=training_config.deterministic_masks,
         seed=training_config.seed + 900_000,
         device=device,
+        precision=training_config.precision,
     )
     audit_result = audit.finish()
     raw = component_matrix(_raw_components(rows, reference))
@@ -298,6 +303,7 @@ def score_setflow(
         "samples": len(sample_ids),
         "tokens": int(len(score)),
         "primary_detector": "empirically_recalibrated_fisher_setflow",
+        "precision": training_config.precision,
     }
 
 
