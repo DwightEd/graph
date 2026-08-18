@@ -7,16 +7,28 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class SourceSetConfig:
-    """Sparse RR source-set extraction controls."""
+    """Sparse RR source-set extraction controls.
+
+    ``materialize_query_chunk_size`` only changes how the exact received-support
+    tensor is evaluated.  It does not truncate response tokens or source
+    candidates beyond the explicitly modelled route/memory source-set bounds.
+    """
 
     max_route_sources: int = 32
     max_memory_sources: int = 16
     route_mass_coverage: float = 0.98
     block_rows: int = 8192
+    materialize_query_chunk_size: int = 64
     epsilon: float = 1e-8
 
     def validate(self) -> None:
-        if min(self.max_route_sources, self.max_memory_sources, self.block_rows) < 1:
+        integers = (
+            self.max_route_sources,
+            self.max_memory_sources,
+            self.block_rows,
+            self.materialize_query_chunk_size,
+        )
+        if min(integers) < 1:
             raise ValueError("source-set integer controls must be positive")
         if not 0.5 <= float(self.route_mass_coverage) <= 1.0:
             raise ValueError("route_mass_coverage must be in [0.5, 1]")
@@ -26,7 +38,12 @@ class SourceSetConfig:
 
 @dataclass(frozen=True)
 class SetFlowModelConfig:
-    """Hierarchical model and self-supervised objective controls."""
+    """Hierarchical model and self-supervised objective controls.
+
+    Chunking and activation checkpointing preserve the mathematical model. They
+    change only the execution schedule and the set of forward activations kept
+    for backward.
+    """
 
     hidden_dim: int = 64
     scalar_fourier_dim: int = 16
@@ -35,6 +52,9 @@ class SetFlowModelConfig:
     set_blocks: int = 2
     head_mixer_layers: int = 2
     depth_mixer_layers: int = 2
+    set_row_chunk_size: int = 4096
+    mixer_token_chunk_size: int = 512
+    activation_checkpointing: bool = True
     dropout: float = 0.10
     element_mask_probability: float = 0.20
     head_mask_probability: float = 0.20
@@ -55,6 +75,8 @@ class SetFlowModelConfig:
             self.set_blocks,
             self.head_mixer_layers,
             self.depth_mixer_layers,
+            self.set_row_chunk_size,
+            self.mixer_token_chunk_size,
         )
         if min(integers) < 1:
             raise ValueError("model integer controls must be positive")
@@ -94,6 +116,8 @@ class TrainingConfig:
     reference_per_sample: int = 8
     latent_trim_fraction: float = 0.90
     deterministic_masks: int = 4
+    precision: str = "auto"
+    profile_cuda_memory: bool = True
     seed: int = 20260818
 
     def validate(self) -> None:
@@ -115,5 +139,7 @@ class TrainingConfig:
             raise ValueError("calibration_fraction must be in (0,1)")
         if not 0.5 <= float(self.latent_trim_fraction) <= 1.0:
             raise ValueError("latent_trim_fraction must be in [0.5,1]")
+        if str(self.precision) not in {"auto", "bf16", "fp16", "fp32"}:
+            raise ValueError("precision must be auto, bf16, fp16, or fp32")
         if int(self.seed) < 0:
             raise ValueError("seed must be non-negative")
