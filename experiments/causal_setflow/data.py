@@ -279,19 +279,21 @@ class CausalSourceSetGraph:
                     )
 
             cumulative = running[:, None, :] + current.cumsum(dim=1)
-            query_axis = torch.arange(
+            query_values = torch.arange(
                 start, end, device=device, dtype=torch.long
-            )[:, None]
+            )
+            query_axis = query_values[:, None]
             causal = source_axis[None, :] < query_axis
             age = (query_axis - source_axis[None, :] + 1).clamp_min(1).to(dtype)
             received = cumulative / age[None, :, :]
             received.masked_fill_(~causal[None, :, :], 0.0)
             cumulative_before = cumulative - current
+            query_for_selected = query_values.view(1, width, 1)
 
             route_weight, route_source = _topk_padded(current, route_count)
             route_received = torch.gather(received, 2, route_source)
             route_previous_age = (
-                query_axis.T.unsqueeze(0) - route_source
+                query_for_selected - route_source
             ).clamp_min(1).to(dtype)
             route_previous = torch.gather(
                 cumulative_before, 2, route_source
@@ -313,7 +315,7 @@ class CausalSourceSetGraph:
                 received, memory_count
             )
             memory_previous_age = (
-                query_axis.T.unsqueeze(0) - memory_source
+                query_for_selected - memory_source
             ).clamp_min(1).to(dtype)
             memory_previous = torch.gather(
                 cumulative_before, 2, memory_source
