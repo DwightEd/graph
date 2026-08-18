@@ -1,8 +1,11 @@
 """Label-free optimization and frozen token-row extraction.
 
-The trainer keeps the full CASF architecture and source-set bounds.  Peak CUDA
-memory is reduced by whole-model activation checkpointing and automatic mixed
-precision; neither changes the self-supervised targets or graph semantics.
+The trainer keeps the full CASF architecture and source-set bounds. Peak CUDA
+memory is reduced by exact chunked source-set execution, per-layer activation
+checkpointing inside :class:`CausalSetFlowModel`, and automatic mixed precision.
+The trainer deliberately does not wrap the complete model in another checkpoint:
+that would recompute sparse graph materialization during backward without adding
+scientific fidelity.
 """
 
 from __future__ import annotations
@@ -13,7 +16,6 @@ import random
 
 import numpy as np
 import torch
-from torch.utils.checkpoint import checkpoint
 from tqdm.auto import tqdm
 
 from .config import SourceSetConfig, TrainingConfig
@@ -76,6 +78,7 @@ def train_label_free(
         ):
             sample = dataset[sample_id]
             graph = None
+            output = None
             losses = None
             try:
                 graph = extract_causal_source_set_graph(sample, source_config)
@@ -84,23 +87,14 @@ def train_label_free(
                     + 1_000_003 * epoch
                     + sample_index
                 )
-                if model.config.activation_checkpointing:
-                    losses = _checkpointed_loss_tuple(
-                        model,
+                with _autocast_context(device, amp_dtype):
+                    output = model(
                         graph,
                         mask_seed=mask_seed,
+                        apply_masks=True,
                         device=device,
-                        amp_dtype=amp_dtype,
                     )
-                else:
-                    with _autocast_context(device, amp_dtype):
-                        output = model(
-                            graph,
-                            mask_seed=mask_seed,
-                            apply_masks=True,
-                            device=device,
-                        )
-                        losses = _loss_tuple(output)
+                    losses = _loss_tuple(output)
 
                 scaled_loss = losses[0] / int(
                     training_config.gradient_accumulation
@@ -140,15 +134,16 @@ def train_label_free(
                     reserved = torch.cuda.memory_reserved(device) / 2**30
                     peak = torch.cuda.max_memory_allocated(device) / 2**30
                     raise RuntimeError(
-                        "CASF CUDA OOM after exact sparse materialization; "
+                        "CASF CUDA OOM after exact chunked materialization; "
                         f"sample_id={sample_id} allocated_gib={allocated:.3f} "
                         f"reserved_gib={reserved:.3f} peak_gib={peak:.3f}. "
-                        "Do not reduce source-set fidelity; lower only execution "
-                        "chunk sizes if necessary."
+                        "Do not reduce source-set/model fidelity; lower only "
+                        "MATERIALIZE_QUERY_CHUNK_SIZE, SET_ROW_CHUNK_SIZE, or "
+                        "MIXER_TOKEN_CHUNK_SIZE."
                     ) from error
                 raise
             finally:
-                del losses, graph
+                del losses, output, graph
                 sample.release_attention()
 
         if pending:
@@ -180,7 +175,7 @@ def train_label_free(
     return TrainingHistory(rows=tuple(history))
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def extract_frozen_rows(
     model: CausalSetFlowModel,
     dataset,
@@ -300,35 +295,6 @@ def select_reference_rows(
         )
         selected.extend(order[position].tolist())
     return np.asarray(selected, dtype=np.int64)
-
-
-def _checkpointed_loss_tuple(
-    model: CausalSetFlowModel,
-    graph,
-    *,
-    mask_seed: int,
-    device: torch.device,
-    amp_dtype: torch.dtype | None,
-) -> tuple[torch.Tensor, ...]:
-    anchor = torch.zeros((), device=device, requires_grad=True)
-
-    def run(_: torch.Tensor) -> tuple[torch.Tensor, ...]:
-        with _autocast_context(device, amp_dtype):
-            output = model(
-                graph,
-                mask_seed=mask_seed,
-                apply_masks=True,
-                device=device,
-            )
-            return _loss_tuple(output)
-
-    return checkpoint(
-        run,
-        anchor,
-        use_reentrant=False,
-        preserve_rng_state=True,
-        determinism_check="default",
-    )
 
 
 def _loss_tuple(output) -> tuple[torch.Tensor, ...]:
