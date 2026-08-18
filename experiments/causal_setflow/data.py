@@ -1,11 +1,11 @@
 """Sparse RR attention to exact route and received-support source sets.
 
-The canonical data interface remains the only source.  One graph stores sparse
-RR events by Transformer layer.  A layer is materialized in bounded query
+The canonical data interface remains the only source. One graph stores sparse
+RR events by Transformer layer. A layer is materialized in bounded query
 chunks, so the implementation never creates persistent ``[head, token, token]``
 current/cumulative/received tensors for the complete response.
 
-Chunking is an execution detail only.  For every token/head, the returned route
+Chunking is an execution detail only. For every token/head, the returned route
 set, received-support memory set, mass coverage, and received-support delta are
 the same quantities as the dense definition up to floating-point summation
 roundoff.
@@ -188,7 +188,7 @@ class CausalSourceSetGraph:
 
         This implementation evaluates the same definition with a running
         ``[head, source]`` cumulative state and a temporary
-        ``[head, query_chunk, source]`` block.  Peak materialization memory is
+        ``[head, query_chunk, source]`` block. Peak materialization memory is
         therefore ``O(H * C * T)`` instead of ``O(H * T^2)``, where ``C`` is
         ``materialize_query_chunk_size``.
         """
@@ -287,7 +287,6 @@ class CausalSourceSetGraph:
             age = (query_axis - source_axis[None, :] + 1).clamp_min(1).to(dtype)
             received = cumulative / age[None, :, :]
             received.masked_fill_(~causal[None, :, :], 0.0)
-            cumulative_before = cumulative - current
             query_for_selected = query_values.view(1, width, 1)
 
             route_weight, route_source = _topk_padded(current, route_count)
@@ -295,8 +294,8 @@ class CausalSourceSetGraph:
             route_previous_age = (
                 query_for_selected - route_source
             ).clamp_min(1).to(dtype)
-            route_previous = torch.gather(
-                cumulative_before, 2, route_source
+            route_previous = (
+                torch.gather(cumulative, 2, route_source) - route_weight
             ) / route_previous_age
             route_delta = route_received - route_previous
 
@@ -314,14 +313,14 @@ class CausalSourceSetGraph:
             memory_received, memory_source = _topk_padded(
                 received, memory_count
             )
+            memory_current = torch.gather(current, 2, memory_source)
             memory_previous_age = (
                 query_for_selected - memory_source
             ).clamp_min(1).to(dtype)
-            memory_previous = torch.gather(
-                cumulative_before, 2, memory_source
+            memory_previous = (
+                torch.gather(cumulative, 2, memory_source) - memory_current
             ) / memory_previous_age
             memory_delta = memory_received - memory_previous
-            memory_current = torch.gather(current, 2, memory_source)
             memory_keep = memory_received > 0
 
             route_source_out[start:end] = route_source.permute(1, 0, 2).to(
@@ -341,7 +340,9 @@ class CausalSourceSetGraph:
             total_mass_out[start:end] = total_mass.transpose(0, 1)
             tail_mass_out[start:end] = tail_mass.transpose(0, 1)
             edge_count_out[start:end] = edge_count.transpose(0, 1)
-            running = cumulative[:, -1].detach()
+            # Clone the last cumulative row so the full chunk storage can be
+            # released before the next query block.
+            running = cumulative[:, -1].clone()
 
         return LayerSourceSets(
             route_source=route_source_out,
