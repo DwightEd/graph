@@ -5,8 +5,9 @@ source fields -> route/memory sets -> heads -> Transformer depth -> token time.
 All training targets are derived from attention itself.
 
 Execution chunking is exact because source sets and head/depth mixer batches are
-independent along their leading row dimension.  It changes peak memory, not the
-modelled graph or the learned functions.
+independent along their leading row dimension. Activation checkpointing wraps
+only the neural computation after one exact source-set layer has been
+materialized, so backward does not repeat sparse graph construction.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import math
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint
 
 from .config import SetFlowModelConfig, SourceSetConfig
 from .data import CausalSourceSetGraph, LayerSourceSets
@@ -214,8 +216,6 @@ class WeightedSourceSetEncoder(nn.Module):
                 ),
                 dim=1,
             )
-            # The learned empty member is active only for genuinely empty rows.
-            # It is not injected as an extra source into non-empty attention sets.
             empty_active = ~current_valid.any(dim=1, keepdim=True)
             member_mask = torch.cat((current_valid, empty_active), dim=1)
             contextual, pooled = self.set_encoder(member_state, member_mask)
@@ -520,13 +520,15 @@ class CausalSetFlowModel(nn.Module):
         route_errors: list[torch.Tensor] = []
         memory_errors: list[torch.Tensor] = []
         head_errors: list[torch.Tensor] = []
+        use_checkpoint = bool(
+            self.config.activation_checkpointing
+            and self.training
+            and torch.is_grad_enabled()
+        )
 
         for layer_index in range(self.num_layers):
             source_sets = graph.materialize_layer(
                 layer_index, self.source_config, device=device
-            )
-            active = source_sets.route_mask.any(dim=-1) | source_sets.memory_mask.any(
-                dim=-1
             )
             plan = sample_layer_mask_plan(
                 source_sets.route_mask,
@@ -539,45 +541,77 @@ class CausalSetFlowModel(nn.Module):
                 ),
                 generator=generator,
             )
-            raw_head, targets = self.head_set(
-                source_sets,
-                previous_depth,
-                route_field_mask=plan.route_element,
-                memory_field_mask=plan.memory_element,
-                attention_floor=graph.attention_floor,
-            )
-            token_layer, head_prediction = self.head_mixer(
-                raw_head,
-                active=active,
-                masked=plan.head,
-                layer_index=layer_index,
-            )
-            previous_depth = self.depth_recurrence(token_layer, previous_depth)
-            depth_rows.append(previous_depth)
-            route_errors.append(
-                _scalar_error_per_token(
-                    targets["route_prediction"],
-                    targets["route_target"],
+            if use_checkpoint:
+                layer_tensors = source_sets.tensor_tuple()
+
+                def run_layer(
+                    previous: torch.Tensor,
+                    *values: torch.Tensor,
+                    current_layer: int = layer_index,
+                ) -> tuple[torch.Tensor, ...]:
+                    materialized = LayerSourceSets.from_tensor_tuple(
+                        tuple(values[:13])
+                    )
+                    return self._forward_layer(
+                        materialized,
+                        previous,
+                        route_field_mask=values[13],
+                        memory_field_mask=values[14],
+                        head_mask=values[15],
+                        layer_index=current_layer,
+                        attention_floor=graph.attention_floor,
+                    )
+
+                (
+                    previous_depth,
+                    route_error,
+                    memory_error,
+                    head_error,
+                ) = checkpoint(
+                    run_layer,
+                    previous_depth,
+                    *layer_tensors,
                     plan.route_element,
-                )
-            )
-            memory_errors.append(
-                _scalar_error_per_token(
-                    targets["memory_prediction"],
-                    targets["memory_target"],
                     plan.memory_element,
+                    plan.head,
+                    use_reentrant=False,
+                    preserve_rng_state=True,
+                    determinism_check="default",
                 )
-            )
-            head_errors.append(
-                _vector_error_per_token(
-                    head_prediction, raw_head.detach(), plan.head
+            else:
+                (
+                    previous_depth,
+                    route_error,
+                    memory_error,
+                    head_error,
+                ) = self._forward_layer(
+                    source_sets,
+                    previous_depth,
+                    route_field_mask=plan.route_element,
+                    memory_field_mask=plan.memory_element,
+                    head_mask=plan.head,
+                    layer_index=layer_index,
+                    attention_floor=graph.attention_floor,
                 )
-            )
+            depth_rows.append(previous_depth)
+            route_errors.append(route_error)
+            memory_errors.append(memory_error)
+            head_errors.append(head_error)
 
         depth_state = torch.stack(depth_rows, dim=1)
-        final_depth, layer_prediction = self.depth_mixer(
-            depth_state, sequence_mask.layer
-        )
+        if use_checkpoint:
+            final_depth, layer_prediction = checkpoint(
+                self.depth_mixer,
+                depth_state,
+                sequence_mask.layer,
+                use_reentrant=False,
+                preserve_rng_state=True,
+                determinism_check="default",
+            )
+        else:
+            final_depth, layer_prediction = self.depth_mixer(
+                depth_state, sequence_mask.layer
+            )
         layer_error = _layer_error_per_token(
             layer_prediction, depth_state.detach(), sequence_mask.layer
         )
@@ -629,6 +663,49 @@ class CausalSetFlowModel(nn.Module):
                 variance=variance_loss,
             ),
         )
+
+    def _forward_layer(
+        self,
+        source_sets: LayerSourceSets,
+        previous_depth: torch.Tensor,
+        *,
+        route_field_mask: torch.Tensor,
+        memory_field_mask: torch.Tensor,
+        head_mask: torch.Tensor,
+        layer_index: int,
+        attention_floor: float,
+    ) -> tuple[torch.Tensor, ...]:
+        active = source_sets.route_mask.any(dim=-1) | source_sets.memory_mask.any(
+            dim=-1
+        )
+        raw_head, targets = self.head_set(
+            source_sets,
+            previous_depth,
+            route_field_mask=route_field_mask,
+            memory_field_mask=memory_field_mask,
+            attention_floor=attention_floor,
+        )
+        token_layer, head_prediction = self.head_mixer(
+            raw_head,
+            active=active,
+            masked=head_mask,
+            layer_index=layer_index,
+        )
+        next_depth = self.depth_recurrence(token_layer, previous_depth)
+        route_error = _scalar_error_per_token(
+            targets["route_prediction"],
+            targets["route_target"],
+            route_field_mask,
+        )
+        memory_error = _scalar_error_per_token(
+            targets["memory_prediction"],
+            targets["memory_target"],
+            memory_field_mask,
+        )
+        head_error = _vector_error_per_token(
+            head_prediction, raw_head.detach(), head_mask
+        )
+        return next_depth, route_error, memory_error, head_error
 
     @torch.inference_mode()
     def deterministic_scores(
