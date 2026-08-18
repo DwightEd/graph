@@ -46,6 +46,7 @@ def _add_source_args(parser):
     parser.add_argument("--max-memory-sources", type=int, default=16)
     parser.add_argument("--route-mass-coverage", type=float, default=0.98)
     parser.add_argument("--block-rows", type=int, default=8192)
+    parser.add_argument("--materialize-query-chunk-size", type=int, default=64)
 
 
 def _add_model_args(parser):
@@ -56,6 +57,13 @@ def _add_model_args(parser):
     parser.add_argument("--set-blocks", type=int, default=2)
     parser.add_argument("--head-mixer-layers", type=int, default=2)
     parser.add_argument("--depth-mixer-layers", type=int, default=2)
+    parser.add_argument("--set-row-chunk-size", type=int, default=4096)
+    parser.add_argument("--mixer-token-chunk-size", type=int, default=512)
+    parser.add_argument(
+        "--disable-activation-checkpointing",
+        action="store_true",
+        help="debug-only: retain all forward activations instead of recomputing them",
+    )
     parser.add_argument("--dropout", type=float, default=0.10)
     parser.add_argument("--element-mask-probability", type=float, default=0.20)
     parser.add_argument("--head-mask-probability", type=float, default=0.20)
@@ -72,6 +80,15 @@ def _add_training_args(parser):
     parser.add_argument("--reference-per-sample", type=int, default=8)
     parser.add_argument("--latent-trim-fraction", type=float, default=0.90)
     parser.add_argument("--deterministic-masks", type=int, default=4)
+    parser.add_argument(
+        "--precision",
+        choices=("auto", "bf16", "fp16", "fp32"),
+        default="auto",
+    )
+    parser.add_argument(
+        "--disable-cuda-memory-profile",
+        action="store_true",
+    )
     parser.add_argument("--seed", type=int, default=20260818)
 
 
@@ -87,6 +104,7 @@ def main(argv=None):
                 max_memory_sources=args.max_memory_sources,
                 route_mass_coverage=args.route_mass_coverage,
                 block_rows=args.block_rows,
+                materialize_query_chunk_size=args.materialize_query_chunk_size,
             ),
             model_config=SetFlowModelConfig(
                 hidden_dim=args.hidden_dim,
@@ -96,6 +114,11 @@ def main(argv=None):
                 set_blocks=args.set_blocks,
                 head_mixer_layers=args.head_mixer_layers,
                 depth_mixer_layers=args.depth_mixer_layers,
+                set_row_chunk_size=args.set_row_chunk_size,
+                mixer_token_chunk_size=args.mixer_token_chunk_size,
+                activation_checkpointing=(
+                    not args.disable_activation_checkpointing
+                ),
                 dropout=args.dropout,
                 element_mask_probability=args.element_mask_probability,
                 head_mask_probability=args.head_mask_probability,
@@ -111,6 +134,10 @@ def main(argv=None):
                 reference_per_sample=args.reference_per_sample,
                 latent_trim_fraction=args.latent_trim_fraction,
                 deterministic_masks=args.deterministic_masks,
+                precision=args.precision,
+                profile_cuda_memory=(
+                    not args.disable_cuda_memory_profile
+                ),
                 seed=args.seed,
             ),
             calibration_config=CalibrationConfig(
