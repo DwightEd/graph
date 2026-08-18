@@ -35,6 +35,8 @@ fi
 
 mkdir -p "$OUT/evaluation"
 
+echo "experiment=rr_topology_dynamics (diagnostic audit, not causal SetWalk)"
+echo "causal_setwalk_runner=experiments/causal_attention_setwalk/run.sh"
 echo "dataset_root=$ROOT"
 echo "spectral_reference=$SPECTRAL_REFERENCE"
 echo "output=$OUT"

@@ -86,6 +86,11 @@ AUROC `0.6601366430` was produced before commit `5fbbd95`, which hardened the
 fit/calibration protocol and changed the artifact schema. A new run of the
 current code must use a fresh output directory and must be reported separately.
 
+The independent causal attention SetWalk experiment writes timestamped runs
+under `experiments/causal_attention_setwalk/outputs/`. It does not reuse RR
+spectral/topology artifacts; `nodes.npz` is the owner artifact for its token
+representations and structural ablations.
+
 ### RR topology-dynamics mechanism audit
 
 After a full run:
