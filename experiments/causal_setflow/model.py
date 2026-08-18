@@ -3,6 +3,10 @@
 The hierarchy mirrors the data rather than flattening it:
 source fields -> route/memory sets -> heads -> Transformer depth -> token time.
 All training targets are derived from attention itself.
+
+Execution chunking is exact because source sets and head/depth mixer batches are
+independent along their leading row dimension.  It changes peak memory, not the
+modelled graph or the learned functions.
 """
 
 from __future__ import annotations
@@ -121,8 +125,6 @@ class SourceFieldEncoder(nn.Module):
         received_embed = torch.where(masked, self.scalar_mask[1], received_embed)
         delta_embed = torch.where(masked, self.scalar_mask[2], delta_embed)
         ancestry = self.source(source_state)
-        # This small concatenation operates on already typed embeddings; raw
-        # source/head/layer features are never flattened into one vector.
         gate = self.ancestry_gate(
             torch.cat((weight_embed, received_embed), dim=-1)
         )
@@ -143,9 +145,12 @@ class SourceFieldEncoder(nn.Module):
 
 
 class WeightedSourceSetEncoder(nn.Module):
+    """Encode every weighted source set without flattening its members."""
+
     def __init__(self, config: SetFlowModelConfig, *, set_type: int) -> None:
         super().__init__()
         self.set_type = int(set_type)
+        self.row_chunk_size = int(config.set_row_chunk_size)
         dim = int(config.hidden_dim)
         self.fields = SourceFieldEncoder(config)
         self.empty_member = nn.Parameter(torch.empty(1, 1, dim))
@@ -164,7 +169,8 @@ class WeightedSourceSetEncoder(nn.Module):
     def forward(
         self,
         *,
-        source_state: torch.Tensor,
+        source_state_table: torch.Tensor,
+        source_index: torch.Tensor,
         lag: torch.Tensor,
         weight: torch.Tensor,
         received: torch.Tensor,
@@ -173,38 +179,53 @@ class WeightedSourceSetEncoder(nn.Module):
         field_mask: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         tokens, heads, members = valid.shape
+        rows = tokens * heads
+        flat_source = source_index.reshape(rows, members)
+        flat_lag = lag.reshape(rows, members)
+        flat_weight = weight.reshape(rows, members)
+        flat_received = received.reshape(rows, members)
+        flat_delta = received_delta.reshape(rows, members)
+        flat_valid = valid.reshape(rows, members)
+        flat_field_mask = field_mask.reshape(rows, members)
+        pooled_parts: list[torch.Tensor] = []
+        prediction_parts: list[torch.Tensor] = []
 
-        def flatten(value: torch.Tensor) -> torch.Tensor:
-            return value.reshape(tokens * heads, members, *value.shape[3:])
-
-        member_state = self.fields(
-            source_state=flatten(source_state),
-            lag=flatten(lag),
-            weight=flatten(weight),
-            received=flatten(received),
-            received_delta=flatten(received_delta),
-            valid=flatten(valid),
-            field_mask=flatten(field_mask),
-            set_type=self.set_type,
-        )
-        flat_valid = valid.reshape(tokens * heads, members)
-        member_state = torch.cat(
-            (member_state, self.empty_member.expand(tokens * heads, -1, -1)),
-            dim=1,
-        )
-        member_mask = torch.cat(
-            (
-                flat_valid,
-                torch.ones(
-                    (tokens * heads, 1),
-                    device=valid.device,
-                    dtype=torch.bool,
+        for start in range(0, rows, self.row_chunk_size):
+            end = min(rows, start + self.row_chunk_size)
+            current_valid = flat_valid[start:end]
+            current_source_state = source_state_table[
+                flat_source[start:end].long()
+            ]
+            member_state = self.fields(
+                source_state=current_source_state,
+                lag=flat_lag[start:end],
+                weight=flat_weight[start:end],
+                received=flat_received[start:end],
+                received_delta=flat_delta[start:end],
+                valid=current_valid,
+                field_mask=flat_field_mask[start:end],
+                set_type=self.set_type,
+            )
+            chunk_rows = end - start
+            member_state = torch.cat(
+                (
+                    member_state,
+                    self.empty_member.expand(chunk_rows, -1, -1),
                 ),
-            ),
-            dim=1,
-        )
-        contextual, pooled = self.set_encoder(member_state, member_mask)
-        prediction = self.scalar_decoder(contextual[:, :members])
+                dim=1,
+            )
+            # The learned empty member is active only for genuinely empty rows.
+            # It is not injected as an extra source into non-empty attention sets.
+            empty_active = ~current_valid.any(dim=1, keepdim=True)
+            member_mask = torch.cat((current_valid, empty_active), dim=1)
+            contextual, pooled = self.set_encoder(member_state, member_mask)
+            pooled_parts.append(pooled)
+            prediction_parts.append(
+                self.scalar_decoder(contextual[:, :members])
+            )
+
+        pooled = torch.cat(pooled_parts, dim=0)
+        prediction = torch.cat(prediction_parts, dim=0)
         return (
             pooled.reshape(tokens, heads, -1),
             prediction.reshape(tokens, heads, members, 3),
@@ -241,11 +262,10 @@ class DualSourceSetHeadEncoder(nn.Module):
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         route_lag = _source_lag(layer.route_source)
         memory_lag = _source_lag(layer.memory_source)
-        route_source_state = source_state[layer.route_source]
-        memory_source_state = source_state[layer.memory_source]
         scale = max(float(attention_floor), 1e-8)
         route_state, route_prediction = self.route(
-            source_state=route_source_state,
+            source_state_table=source_state,
+            source_index=layer.route_source,
             lag=route_lag,
             weight=layer.route_weight / scale,
             received=layer.route_received / scale,
@@ -254,7 +274,8 @@ class DualSourceSetHeadEncoder(nn.Module):
             field_mask=route_field_mask,
         )
         memory_state, memory_prediction = self.memory(
-            source_state=memory_source_state,
+            source_state_table=source_state,
+            source_index=layer.memory_source,
             lag=memory_lag,
             weight=layer.memory_current_weight / scale,
             received=layer.memory_received / scale,
@@ -300,6 +321,7 @@ class HeadMixer(nn.Module):
     ) -> None:
         super().__init__()
         dim = int(config.hidden_dim)
+        self.token_chunk_size = int(config.mixer_token_chunk_size)
         self.head_identity = nn.Parameter(torch.empty(num_heads, dim))
         self.layer_identity = nn.Parameter(torch.empty(num_layers, dim))
         self.mask_token = nn.Parameter(torch.empty(dim))
@@ -328,8 +350,29 @@ class HeadMixer(nn.Module):
         active: torch.Tensor,
         masked: torch.Tensor,
         layer_index: int,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        target = head_state
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        token_parts: list[torch.Tensor] = []
+        prediction_parts: list[torch.Tensor] = []
+        for start in range(0, len(head_state), self.token_chunk_size):
+            end = min(len(head_state), start + self.token_chunk_size)
+            token_state, prediction = self._forward_chunk(
+                head_state[start:end],
+                active[start:end],
+                masked[start:end],
+                layer_index=layer_index,
+            )
+            token_parts.append(token_state)
+            prediction_parts.append(prediction)
+        return torch.cat(token_parts, dim=0), torch.cat(prediction_parts, dim=0)
+
+    def _forward_chunk(
+        self,
+        head_state: torch.Tensor,
+        active: torch.Tensor,
+        masked: torch.Tensor,
+        *,
+        layer_index: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         visible = torch.where(
             masked.unsqueeze(-1),
             self.mask_token.view(1, 1, -1),
@@ -350,15 +393,17 @@ class HeadMixer(nn.Module):
         score = score.masked_fill(~safe_active, float("-inf"))
         weight = torch.softmax(score, dim=1)
         token_state = (mixed * weight.unsqueeze(-1)).sum(dim=1)
-        if bool(empty.any()):
-            token_state[empty] = 0.0
-        return token_state, prediction, target
+        token_state = torch.where(
+            empty.unsqueeze(-1), torch.zeros_like(token_state), token_state
+        )
+        return token_state, prediction
 
 
 class DepthMixer(nn.Module):
     def __init__(self, num_layers: int, config: SetFlowModelConfig) -> None:
         super().__init__()
         dim = int(config.hidden_dim)
+        self.token_chunk_size = int(config.mixer_token_chunk_size)
         self.layer_position = nn.Parameter(torch.empty(num_layers, dim))
         self.mask_token = nn.Parameter(torch.empty(dim))
         nn.init.normal_(self.layer_position, std=1.0 / math.sqrt(dim))
@@ -379,6 +424,22 @@ class DepthMixer(nn.Module):
         self.pool_score = nn.Linear(dim, 1)
 
     def forward(
+        self, states: torch.Tensor, layer_mask: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        final_parts: list[torch.Tensor] = []
+        prediction_parts: list[torch.Tensor] = []
+        for start in range(0, len(states), self.token_chunk_size):
+            end = min(len(states), start + self.token_chunk_size)
+            final, prediction = self._forward_chunk(
+                states[start:end], layer_mask
+            )
+            final_parts.append(final)
+            prediction_parts.append(prediction)
+        return torch.cat(final_parts, dim=0), torch.cat(
+            prediction_parts, dim=0
+        )
+
+    def _forward_chunk(
         self, states: torch.Tensor, layer_mask: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         visible = torch.where(
@@ -414,6 +475,9 @@ class CausalSetFlowModel(nn.Module):
         dim = int(self.config.hidden_dim)
         self.head_set = DualSourceSetHeadEncoder(self.config)
         self.head_mixer = HeadMixer(num_heads, num_layers, self.config)
+        # This recurrence is not redundant with the depth mixer: its state is
+        # gathered by exact source indices at the next layer and is therefore
+        # the SetWalk ancestry state.
         self.depth_recurrence = nn.GRUCell(dim, dim)
         self.depth_mixer = DepthMixer(num_layers, self.config)
         self.time_encoder = nn.GRU(dim, dim, batch_first=True)
@@ -452,10 +516,10 @@ class CausalSetFlowModel(nn.Module):
         previous_depth = torch.zeros(
             (tokens, self.config.hidden_dim), device=device
         )
-        depth_rows = []
-        route_errors = []
-        memory_errors = []
-        head_errors = []
+        depth_rows: list[torch.Tensor] = []
+        route_errors: list[torch.Tensor] = []
+        memory_errors: list[torch.Tensor] = []
+        head_errors: list[torch.Tensor] = []
 
         for layer_index in range(self.num_layers):
             source_sets = graph.materialize_layer(
@@ -482,7 +546,7 @@ class CausalSetFlowModel(nn.Module):
                 memory_field_mask=plan.memory_element,
                 attention_floor=graph.attention_floor,
             )
-            token_layer, head_prediction, head_target = self.head_mixer(
+            token_layer, head_prediction = self.head_mixer(
                 raw_head,
                 active=active,
                 masked=plan.head,
@@ -506,7 +570,7 @@ class CausalSetFlowModel(nn.Module):
             )
             head_errors.append(
                 _vector_error_per_token(
-                    head_prediction, head_target, plan.head
+                    head_prediction, raw_head.detach(), plan.head
                 )
             )
 
@@ -515,16 +579,16 @@ class CausalSetFlowModel(nn.Module):
             depth_state, sequence_mask.layer
         )
         layer_error = _layer_error_per_token(
-            layer_prediction, depth_state, sequence_mask.layer
+            layer_prediction, depth_state.detach(), sequence_mask.layer
         )
         temporal_sequence, _ = self.time_encoder(final_depth.unsqueeze(0))
         token_embedding = temporal_sequence.squeeze(0)
-        temporal_error = torch.zeros(tokens, device=device)
+        temporal_error = torch.zeros(tokens, device=device, dtype=torch.float32)
         if tokens > 1:
             predicted = self.temporal_predictor(token_embedding[:-1])
             temporal_error[1:] = 1.0 - F.cosine_similarity(
-                predicted,
-                final_depth[1:],
+                predicted.float(),
+                final_depth[1:].detach().float(),
                 dim=-1,
                 eps=self.config.epsilon,
             )
@@ -539,7 +603,7 @@ class CausalSetFlowModel(nn.Module):
         temporal_loss = (
             temporal_error[1:].mean() if tokens > 1 else temporal_error.sum()
         )
-        variance_loss = variance_floor_loss(token_embedding)
+        variance_loss = variance_floor_loss(token_embedding.float())
         total = (
             self.config.element_loss_weight * (route_loss + memory_loss)
             + self.config.head_loss_weight * head_loss
@@ -566,7 +630,7 @@ class CausalSetFlowModel(nn.Module):
             ),
         )
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def deterministic_scores(
         self,
         graph: CausalSourceSetGraph,
@@ -577,16 +641,16 @@ class CausalSetFlowModel(nn.Module):
         previous_training = self.training
         self.eval()
         components: dict[str, list[torch.Tensor]] = {}
-        embeddings = []
+        embeddings: list[torch.Tensor] = []
         for index in range(int(masks)):
             output = self(
                 graph,
                 mask_seed=int(seed) + index,
                 apply_masks=True,
             )
-            embeddings.append(output.token_embedding)
+            embeddings.append(output.token_embedding.float())
             for name, value in output.score_components().items():
-                components.setdefault(name, []).append(value)
+                components.setdefault(name, []).append(value.float())
         result = {
             name: torch.stack(values).mean(dim=0)
             for name, values in components.items()
@@ -598,7 +662,7 @@ class CausalSetFlowModel(nn.Module):
 
 def _source_lag(source: torch.Tensor) -> torch.Tensor:
     token = torch.arange(source.shape[0], device=source.device)[:, None, None]
-    return (token - source).clamp_min(1).float()
+    return (token - source.to(torch.long)).clamp_min(1).float()
 
 
 def _scalar_targets(
@@ -613,7 +677,7 @@ def _scalar_targets(
             torch.asinh(received_delta),
         ),
         dim=-1,
-    )
+    ).detach()
 
 
 def _scalar_error_per_token(
@@ -621,7 +685,9 @@ def _scalar_error_per_token(
     target: torch.Tensor,
     mask: torch.Tensor,
 ) -> torch.Tensor:
-    error = F.smooth_l1_loss(prediction, target, reduction="none").mean(dim=-1)
+    error = F.smooth_l1_loss(
+        prediction.float(), target.detach().float(), reduction="none"
+    ).mean(dim=-1)
     selected = mask.to(error.dtype)
     return (error * selected).sum(dim=(1, 2)) / selected.sum(dim=(1, 2)).clamp_min(
         1.0
@@ -634,7 +700,7 @@ def _vector_error_per_token(
     mask: torch.Tensor,
 ) -> torch.Tensor:
     error = 1.0 - F.cosine_similarity(
-        prediction, target, dim=-1, eps=1e-8
+        prediction.float(), target.detach().float(), dim=-1, eps=1e-8
     )
     selected = mask.to(error.dtype)
     return (error * selected).sum(dim=1) / selected.sum(dim=1).clamp_min(1.0)
@@ -646,7 +712,7 @@ def _layer_error_per_token(
     layer_mask: torch.Tensor,
 ) -> torch.Tensor:
     error = 1.0 - F.cosine_similarity(
-        prediction, target, dim=-1, eps=1e-8
+        prediction.float(), target.detach().float(), dim=-1, eps=1e-8
     )
     selected = layer_mask.to(error.dtype).view(1, -1)
     return (error * selected).sum(dim=1) / selected.sum(dim=1).clamp_min(1.0)
