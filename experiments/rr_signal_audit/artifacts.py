@@ -1,4 +1,4 @@
-"""Strict frozen artifacts for the RR signal-decomposition audit."""
+"""Strict frozen artifacts for the causal attention signal audit."""
 
 from __future__ import annotations
 
@@ -14,10 +14,11 @@ from experiment_protocol import (
     validate_complete_token_rows,
     validate_source_audit,
 )
+from .components import EVIDENCE_DIRECTIONS, EVIDENCE_FEATURE_NAMES, SIGNAL_BLOCKS
 
-REFERENCE_SCHEMA = "rr-signal-audit-reference-v1"
-SCORE_SCHEMA = "rr-signal-audit-score-v1"
-EVALUATION_SCHEMA = "rr-signal-audit-evaluation-v1"
+REFERENCE_SCHEMA = "causal-attention-signal-audit-reference"
+SCORE_SCHEMA = "causal-attention-signal-audit-score"
+EVALUATION_SCHEMA = "causal-attention-signal-audit-evaluation"
 
 
 def score_temporal_scope() -> TemporalScope:
@@ -49,6 +50,9 @@ def load_reference(path):
         "num_heads",
         "task_names",
         "block_names",
+        "evidence_feature_names",
+        "evidence_directions",
+        "evidence_registry_json",
         "calibration_collapse_values",
         "calibration_collapse_relative_conditions",
         "calibration_collapse_causal_conditions",
@@ -66,9 +70,22 @@ def load_reference(path):
         raise ValueError("RR signal-audit fit/calibration groups are not disjoint")
     if int(reference["num_layers"]) < 1 or int(reference["num_heads"]) < 1:
         raise ValueError("RR signal-audit attention geometry is invalid")
+    block_names = tuple(
+        map(str, np.asarray(reference["block_names"], dtype=str).tolist())
+    )
+    if block_names != SIGNAL_BLOCKS:
+        raise ValueError("attention signal-audit block contract changed")
     collapse = np.asarray(reference["calibration_collapse_values"])
     if collapse.ndim != 2 or len(collapse) < 2:
         raise ValueError("RR signal-audit collapse calibration is invalid")
+    evidence_names = tuple(
+        map(str, np.asarray(reference["evidence_feature_names"], dtype=str).tolist())
+    )
+    evidence_directions = np.asarray(reference["evidence_directions"], dtype=np.int8)
+    if evidence_names != EVIDENCE_FEATURE_NAMES:
+        raise ValueError("attention signal-audit evidence contract changed")
+    if not np.array_equal(evidence_directions, EVIDENCE_DIRECTIONS):
+        raise ValueError("attention signal-audit evidence directions changed")
     if any(
         not bool(np.isfinite(value).all())
         for name, value in reference.items()
@@ -108,6 +125,9 @@ def load_score_artifact(path):
         "scores",
         "collapse_feature_names",
         "collapse_raw",
+        "evidence_feature_names",
+        "evidence_directions",
+        "evidence_raw",
     }
     missing = required.difference(artifact)
     if missing:
@@ -147,6 +167,9 @@ def load_score_artifact(path):
     scores = np.asarray(artifact["scores"])
     collapse_names = np.asarray(artifact["collapse_feature_names"], dtype=str)
     collapse = np.asarray(artifact["collapse_raw"])
+    evidence_names = np.asarray(artifact["evidence_feature_names"], dtype=str)
+    evidence_directions = np.asarray(artifact["evidence_directions"], dtype=np.int8)
+    evidence = np.asarray(artifact["evidence_raw"])
     if (
         score_names.ndim != 1
         or scores.ndim != 2
@@ -160,7 +183,23 @@ def load_score_artifact(path):
         or collapse.shape != (rows, len(collapse_names))
     ):
         raise ValueError("RR signal-audit collapse geometry is invalid")
-    if not bool(np.isfinite(scores).all()) or not bool(np.isfinite(collapse).all()):
+    if (
+        evidence_names.ndim != 1
+        or evidence_directions.shape != evidence_names.shape
+        or evidence.shape != (rows, len(evidence_names))
+    ):
+        raise ValueError("attention signal-audit evidence geometry is invalid")
+    if not set(map(int, evidence_directions.tolist())).issubset({-1, 1}):
+        raise ValueError("attention signal-audit evidence directions are invalid")
+    if tuple(map(str, evidence_names.tolist())) != EVIDENCE_FEATURE_NAMES:
+        raise ValueError("attention signal-audit evidence names changed")
+    if not np.array_equal(evidence_directions, EVIDENCE_DIRECTIONS):
+        raise ValueError("attention signal-audit evidence directions changed")
+    if (
+        not bool(np.isfinite(scores).all())
+        or not bool(np.isfinite(collapse).all())
+        or not bool(np.isfinite(evidence).all())
+    ):
         raise ValueError("RR signal-audit score artifact contains non-finite values")
     return artifact
 
@@ -185,4 +224,12 @@ def verify_score_provenance(artifact):
         np.asarray(reference["score_names"], dtype=str),
     ):
         raise ValueError("RR signal-audit score contract differs from reference")
+    if not np.array_equal(
+        np.asarray(artifact["evidence_feature_names"], dtype=str),
+        np.asarray(reference["evidence_feature_names"], dtype=str),
+    ) or not np.array_equal(
+        np.asarray(artifact["evidence_directions"], dtype=np.int8),
+        np.asarray(reference["evidence_directions"], dtype=np.int8),
+    ):
+        raise ValueError("attention signal-audit evidence contract differs from reference")
     return reference

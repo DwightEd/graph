@@ -1,4 +1,4 @@
-"""Label-free RR signal decomposition, scoring, and post-hoc mechanism audit."""
+"""Label-free PR/RR signal extraction, scoring, and mechanism audit."""
 
 from __future__ import annotations
 
@@ -38,6 +38,9 @@ from .collapse import (
 from .components import (
     COLLAPSE_DIRECTIONS,
     COLLAPSE_FEATURE_NAMES,
+    EVIDENCE_DIRECTIONS,
+    EVIDENCE_FEATURE_NAMES,
+    EVIDENCE_REGISTRY,
     SIGNAL_BLOCKS,
     RRSignalConfig,
     extract_rr_signal_features,
@@ -63,6 +66,7 @@ from .geometry import (
 
 _METADATA_BLOCKS = (
     "__collapse_global",
+    "__evidence_global",
     "__task_code",
     "__causal_bin",
     "__group_low",
@@ -174,6 +178,7 @@ def _reservoir_blocks(features, *, task_code: int, group_code: int):
     return {
         **features.blocks,
         "__collapse_global": features.collapse_global,
+        "__evidence_global": features.evidence_global,
         "__task_code": np.full((rows, 1), task_code, dtype=np.float32),
         "__causal_bin": features.causal_position_bucket[:, None].astype(np.float32),
         "__group_low": group_low,
@@ -227,7 +232,7 @@ def fit_rr_signal_audit(
     geometry: tuple[int, int] | None = None
     for sample_id in tqdm(
         sample_ids,
-        desc="extract RR signal audit train rows",
+        desc="extract attention signal audit train rows",
         unit="sample",
     ):
         sample = dataset[sample_id]
@@ -298,6 +303,9 @@ def fit_rr_signal_audit(
         "task_names": task_names,
         "source_group_names": group_names,
         "block_names": np.asarray(SIGNAL_BLOCKS, dtype=str),
+        "evidence_feature_names": np.asarray(EVIDENCE_FEATURE_NAMES, dtype=str),
+        "evidence_directions": np.asarray(EVIDENCE_DIRECTIONS, dtype=np.int8),
+        "evidence_registry_json": np.asarray(_json(EVIDENCE_REGISTRY)),
         "score_names": np.asarray(score_contract(), dtype=str),
         "fit_reservoir_rows": np.asarray(
             len(fit_relative_bin),
@@ -446,7 +454,7 @@ def score_rr_signal_audit(
     *,
     limit=None,
 ):
-    """Freeze all preregistered RR audit scores without opening labels."""
+    """Freeze all preregistered attention scores without opening labels."""
 
     reference_file = FrozenFile.capture(reference_path)
     reference = load_reference(reference_file.path)
@@ -484,12 +492,13 @@ def score_rr_signal_audit(
             "generator_model",
             "scores",
             "collapse_raw",
+            "evidence_raw",
         )
     }
 
     for sample_id in tqdm(
         sample_ids,
-        desc="score RR signal audit",
+        desc="score attention signal audit",
         unit="sample",
     ):
         sample = dataset[sample_id]
@@ -568,6 +577,7 @@ def score_rr_signal_audit(
             )
             rows["scores"].append(score_matrix)
             rows["collapse_raw"].append(features.collapse_global)
+            rows["evidence_raw"].append(features.evidence_global)
         finally:
             sample.release_attention()
 
@@ -593,6 +603,12 @@ def score_rr_signal_audit(
             dtype=str,
         ),
         "collapse_raw": np.concatenate(rows["collapse_raw"]).astype(np.float32),
+        "evidence_feature_names": np.asarray(
+            EVIDENCE_FEATURE_NAMES,
+            dtype=str,
+        ),
+        "evidence_directions": np.asarray(EVIDENCE_DIRECTIONS, dtype=np.int8),
+        "evidence_raw": np.concatenate(rows["evidence_raw"]).astype(np.float32),
     }
 
     output_path = Path(output_path)
@@ -741,7 +757,7 @@ def evaluate_rr_signal_audit(
     bootstrap_replicates: int = 1000,
     seed: int = 20260818,
 ):
-    """Open labels only after all RR audit scores have been frozen."""
+    """Open labels only after all attention scores have been frozen."""
 
     frozen = FrozenEvaluation.capture(score_path, expected_split="test")
     artifact = load_score_artifact(frozen.artifact.path)
@@ -755,6 +771,13 @@ def evaluate_rr_signal_audit(
         dtype=str,
     )
     collapse_raw = np.asarray(artifact["collapse_raw"], dtype=np.float32)
+    evidence_names = np.asarray(
+        artifact["evidence_feature_names"], dtype=str
+    )
+    evidence_directions = np.asarray(
+        artifact["evidence_directions"], dtype=np.int8
+    )
+    evidence_raw = np.asarray(artifact["evidence_raw"], dtype=np.float32)
 
     score_metrics = {}
     metric_rows = []
@@ -812,26 +835,63 @@ def evaluate_rr_signal_audit(
         if summary is not None:
             onset_rows.append({"feature": str(name), **summary})
 
+    evidence_metrics = {}
+    for index, (name, direction) in enumerate(
+        zip(evidence_names, evidence_directions, strict=True)
+    ):
+        raw = evidence_raw[:, index]
+        oriented = raw if int(direction) > 0 else -raw
+        raw_metrics = _metrics(labels, raw)
+        oriented_metrics = _metrics(labels, oriented)
+        evidence_metrics[str(name)] = {
+            "historical_registry": EVIDENCE_REGISTRY[str(name)],
+            "raw_metrics": raw_metrics,
+            "fixed_oriented_metrics": oriented_metrics,
+        }
+        if oriented_metrics is not None:
+            metric_rows.append(
+                {
+                    "family": "historically_frozen_scalar_baseline",
+                    "name": str(name),
+                    "predeclared_direction": (
+                        "higher" if int(direction) > 0 else "lower"
+                    ),
+                    **oriented_metrics,
+                }
+            )
+
     task_metrics = {}
     task = np.asarray(artifact["task_type"], dtype=str)
     for task_name in sorted(set(task.tolist())):
         selected = task == task_name
         task_metrics[task_name] = {
-            str(name): _metrics(labels[selected], scores[selected, index])
-            for index, name in enumerate(score_names)
+            "frozen_scores": {
+                str(name): _metrics(labels[selected], scores[selected, index])
+                for index, name in enumerate(score_names)
+            },
+            "evidence_baselines": {
+                str(name): _metrics(
+                    labels[selected],
+                    evidence_raw[selected, index]
+                    if int(evidence_directions[index]) > 0
+                    else -evidence_raw[selected, index],
+                )
+                for index, name in enumerate(evidence_names)
+            },
         }
 
     report = {
         "schema": EVALUATION_SCHEMA,
         "labels_read": True,
         "purpose": (
-            "RR signal decomposition and hypothesis audit; score ranking is not "
+            "PR/RR signal decomposition and hypothesis audit; score ranking is not "
             "a preregistered final detector selection"
         ),
         "tokens": int(len(labels)),
         "positive_tokens": int(labels.sum()),
         "prevalence": float(labels.mean()),
         "score_metrics": score_metrics,
+        "evidence_baselines": evidence_metrics,
         "raw_collapse_metrics": collapse_metrics,
         "first_hallucination_onset_effects": onset,
         "task_metrics": task_metrics,
@@ -842,11 +902,12 @@ def evaluate_rr_signal_audit(
         "reference_sha256": str(artifact["reference_sha256"].item()),
         "score_artifact_sha256": frozen.artifact.sha256,
         "claim_boundary": (
-            "The audit separates diagonal, future received support, persistence "
-            "ratio, the historical mixed coordinate, current-row collapse, and "
-            "joint-vs-independent geometry. It does not call the mixed coordinate "
-            "a graph eigenspectrum and does not infer correctness structure from "
-            "a passed channel-shuffle gate alone."
+            "The audit preserves prompt/history route fields and separates "
+            "diagonal, future received support, persistence ratio, current-row "
+            "collapse, and joint-vs-independent geometry. Historically oriented "
+            "scalars are exploratory baselines, not independently held-out feature "
+            "selection. The audit does not infer correctness structure from a "
+            "passed channel-shuffle gate alone."
         ),
     }
     output_dir = Path(output_dir)

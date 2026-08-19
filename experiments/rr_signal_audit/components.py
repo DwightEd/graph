@@ -1,8 +1,9 @@
-"""RR-only source-persistence and routing-collapse feature extraction.
+"""Evidence-grounded causal attention signal extraction.
 
 This module uses only :class:`ResearchSample` views.  It decomposes the
-historical mixed RR coordinate into interpretable terms and builds current-row
-collapse diagnostics without reading token labels.
+historical mixed RR coordinate into interpretable terms, preserves prompt/RR
+route fields for every layer/head, and builds current-row collapse diagnostics
+without reading token labels.
 
 Missing CSR entries remain censored.  Every quantity below is computed only
 from exact retained off-diagonal RR edges plus the separately stored exact
@@ -16,6 +17,9 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
+from attention_graph.graph import GraphBuildConfig, build_attention_graph
+from attention_graph.statistics import TOKEN_FEATURES, direct_lookback, token_statistics
+
 
 TOPK_BLOCKS = (
     "mixed_topk",
@@ -23,7 +27,32 @@ TOPK_BLOCKS = (
     "diagonal_topk",
     "ratio_topk",
 )
-SIGNAL_BLOCKS = (*TOPK_BLOCKS, "collapse_channel")
+ROLE_BLOCKS = (
+    "prompt_route_channels",
+    "history_route_channels",
+    "history_edge_channels",
+    "edge_strength_channels",
+)
+SIGNAL_BLOCKS = (*TOPK_BLOCKS, *ROLE_BLOCKS, "collapse_channel")
+
+# These five scalars are retained only as transparent baselines.  Their
+# directions and historical AUROCs were frozen from the earlier full-population
+# exploratory audit; they are not re-selected after the current labels open.
+EVIDENCE_FEATURE_NAMES = (
+    "history_edge_fraction",
+    "normalized_entropy",
+    "history_mass_fraction",
+    "mean_edge_strength",
+    "direct_lookback_anomaly",
+)
+EVIDENCE_DIRECTIONS = np.asarray((+1, -1, +1, +1, -1), dtype=np.int8)
+EVIDENCE_REGISTRY = {
+    "history_edge_fraction": {"historical_raw_auroc": 0.6418, "direction": "higher"},
+    "normalized_entropy": {"historical_raw_auroc": 0.4086, "direction": "lower"},
+    "history_mass_fraction": {"historical_raw_auroc": 0.5865, "direction": "higher"},
+    "mean_edge_strength": {"historical_raw_auroc": 0.5337, "direction": "higher"},
+    "direct_lookback_anomaly": {"historical_raw_auroc": 0.3899, "direction": "lower"},
+}
 
 COLLAPSE_FEATURE_NAMES = (
     "log_rr_mass",
@@ -94,6 +123,7 @@ class RRSignalFeatures:
 
     blocks: dict[str, np.ndarray]
     collapse_global: np.ndarray
+    evidence_global: np.ndarray
     token_index: np.ndarray
     relative_position: np.ndarray
     causal_position_bucket: np.ndarray
@@ -118,6 +148,11 @@ class RRSignalFeatures:
             len(COLLAPSE_FEATURE_NAMES),
         ):
             raise ValueError("collapse_global has the wrong shape")
+        if self.evidence_global.shape != (
+            self.response_count,
+            len(EVIDENCE_FEATURE_NAMES),
+        ):
+            raise ValueError("evidence_global has the wrong shape")
         if self.token_index.shape != (self.response_count,):
             raise ValueError("token_index has the wrong shape")
         if self.relative_position.shape != (self.response_count,):
@@ -129,12 +164,16 @@ class RRSignalFeatures:
             "received_topk": self.num_channels * 1,
             "diagonal_topk": self.num_channels * 1,
             "ratio_topk": self.num_channels * 1,
+            "prompt_route_channels": self.num_channels,
+            "history_route_channels": self.num_channels,
+            "history_edge_channels": self.num_channels,
+            "edge_strength_channels": self.num_channels,
             "collapse_channel": self.num_channels * 6,
         }
         for name, values in self.blocks.items():
             if values.ndim != 2 or len(values) != self.response_count:
                 raise ValueError(f"{name} is not a token matrix")
-            if name in TOPK_BLOCKS:
+            if name in (*TOPK_BLOCKS, *ROLE_BLOCKS):
                 if values.shape[1] % self.num_channels:
                     raise ValueError(f"{name} does not preserve channel blocks")
                 if values.shape[1] // self.num_channels < 1:
@@ -145,6 +184,8 @@ class RRSignalFeatures:
                 raise FloatingPointError(f"{name} contains non-finite values")
         if not bool(np.isfinite(self.collapse_global).all()):
             raise FloatingPointError("collapse_global contains non-finite values")
+        if not bool(np.isfinite(self.evidence_global).all()):
+            raise FloatingPointError("evidence_global contains non-finite values")
         return self
 
 
@@ -196,6 +237,106 @@ def _retained_rr_edges(sample, *, block_rows: int):
         torch.cat(channel_parts),
         torch.cat(weight_parts),
     )
+
+
+def _role_channel_blocks(sample, *, block_rows: int, epsilon: float):
+    """Preserve four non-redundant PR/RR route fields per layer/head.
+
+    Mass is divided by the number of causally available sources before PR and
+    RR are compared.  Missing cache entries remain censored and are not filled
+    or counted as observed edges.
+    """
+
+    attention = sample.attention()
+    response_count = int(attention.num_response_tokens)
+    prompt_count = int(attention.response_idx)
+    num_channels = int(attention.num_channels)
+    device = attention.response_values.device
+    shape = (response_count, num_channels)
+    prompt_mass = torch.zeros(shape, dtype=torch.float32, device=device)
+    history_mass = torch.zeros_like(prompt_mass)
+    prompt_edges = torch.zeros_like(prompt_mass)
+    history_edges = torch.zeros_like(prompt_mass)
+
+    for block in sample.iter_sparse_attention_blocks(block_rows=block_rows):
+        query = block.query.long()
+        channel = (block.layer * attention.num_heads + block.head).long()
+        weight = block.weight.float().clamp_min(0.0)
+        is_prompt = block.source < prompt_count
+        if bool(is_prompt.any()):
+            prompt_mass.index_put_(
+                (query[is_prompt], channel[is_prompt]),
+                weight[is_prompt],
+                accumulate=True,
+            )
+            prompt_edges.index_put_(
+                (query[is_prompt], channel[is_prompt]),
+                torch.ones_like(weight[is_prompt]),
+                accumulate=True,
+            )
+        is_history = ~is_prompt
+        if bool(is_history.any()):
+            history_mass.index_put_(
+                (query[is_history], channel[is_history]),
+                weight[is_history],
+                accumulate=True,
+            )
+            history_edges.index_put_(
+                (query[is_history], channel[is_history]),
+                torch.ones_like(weight[is_history]),
+                accumulate=True,
+            )
+
+    available_history = torch.arange(
+        response_count, dtype=torch.float32, device=device
+    ).unsqueeze(1)
+    total_mass = prompt_mass + history_mass
+    total_edges = prompt_edges + history_edges
+    prompt_route = prompt_mass / float(max(prompt_count, 1))
+    history_route = torch.where(
+        available_history > 0,
+        history_mass / available_history.clamp_min(1.0),
+        torch.zeros_like(history_mass),
+    )
+    history_edge_fraction = torch.where(
+        total_edges > 0,
+        history_edges / total_edges.clamp_min(1.0),
+        torch.zeros_like(total_edges),
+    )
+    mean_edge_strength = torch.where(
+        total_edges > 0,
+        total_mass / total_edges.clamp_min(float(epsilon)),
+        torch.zeros_like(total_mass),
+    )
+    return {
+        "prompt_route_channels": prompt_route.detach().cpu().numpy().astype(np.float32),
+        "history_route_channels": history_route.detach().cpu().numpy().astype(np.float32),
+        "history_edge_channels": history_edge_fraction.detach().cpu().numpy().astype(np.float32),
+        "edge_strength_channels": mean_edge_strength.detach().cpu().numpy().astype(np.float32),
+    }
+
+
+def _evidence_features(attention) -> np.ndarray:
+    """Reproduce the previously audited exact scalar baselines unchanged."""
+
+    graph = build_attention_graph(
+        attention,
+        GraphBuildConfig(
+            selection="threshold",
+            threshold=float(attention.attention_floor),
+        ),
+    )
+    statistics = token_statistics(graph).detach().cpu().numpy().astype(np.float32)
+    columns = {name: index for index, name in enumerate(TOKEN_FEATURES)}
+    lookback = direct_lookback(attention).detach().cpu().numpy().astype(np.float32)
+    values = []
+    for name in EVIDENCE_FEATURE_NAMES:
+        values.append(
+            lookback
+            if name == "direct_lookback_anomaly"
+            else statistics[:, columns[name]]
+        )
+    return np.column_stack(values).astype(np.float32, copy=False)
 
 
 def _topk(
@@ -495,6 +636,12 @@ def extract_rr_signal_features(
         .float()
         .reshape(num_channels, response_count)
     )
+    role_blocks = _role_channel_blocks(
+        sample,
+        block_rows=config.block_rows,
+        epsilon=config.epsilon,
+    )
+    evidence_global = _evidence_features(attention)
     query, source, channel, weight = _retained_rr_edges(
         sample,
         block_rows=config.block_rows,
@@ -594,6 +741,7 @@ def extract_rr_signal_features(
         .astype(np.float32, copy=False)
         for name in TOPK_BLOCKS
     }
+    blocks.update(role_blocks)
     blocks["collapse_channel"] = collapse_channel
 
     token_index = np.arange(response_count, dtype=np.int32)
@@ -610,6 +758,7 @@ def extract_rr_signal_features(
     return RRSignalFeatures(
         blocks=blocks,
         collapse_global=collapse_global,
+        evidence_global=evidence_global,
         token_index=token_index,
         relative_position=relative_position,
         causal_position_bucket=causal_bucket,
@@ -621,6 +770,8 @@ def extract_rr_signal_features(
 def features_per_channel(block: str, config: RRSignalConfig) -> int:
     if block in TOPK_BLOCKS:
         return int(config.top_k)
+    if block in ROLE_BLOCKS:
+        return 1
     if block == "collapse_channel":
         return 6
     raise KeyError(block)

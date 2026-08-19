@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -u
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PROJECT_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
@@ -34,7 +34,7 @@ else
   MIN_CONDITION_DEFAULT=32
 fi
 
-OUT=${OUT:-experiments/rr_signal_audit/outputs/v1/$RUN_NAME}
+OUT=${OUT:-experiments/rr_signal_audit/outputs/$RUN_NAME}
 
 if [[ ! -f "$ROOT/train/manifest.json" || ! -f "$ROOT/test/manifest.json" ]]; then
   echo "dataset root does not contain train/test manifests: $ROOT" >&2
@@ -56,7 +56,7 @@ echo "reservoir_rows=${RESERVOIR_ROWS:-$RESERVOIR_DEFAULT}"
 echo "pca_dim=${PCA_DIM:-$PCA_DEFAULT}"
 echo "trim_fraction=${TRIM_FRACTION:-0.90}"
 
-printf '\n[1/3] fit label-free RR signal decomposition references\n'
+printf '\n[1/3] fit label-free attention signal references\n'
 "$PYTHON" -u -m experiments.rr_signal_audit.main fit \
   --train-split "$ROOT/train" \
   --output "$OUT/reference.npz" \
@@ -75,15 +75,23 @@ printf '\n[1/3] fit label-free RR signal decomposition references\n'
   --calibration-fraction "${CALIBRATION_FRACTION:-0.25}" \
   --bootstrap-replicates "${FIT_BOOTSTRAP:-$FIT_BOOTSTRAP_DEFAULT}" \
   --seed "${SEED:-20260818}" \
-  "${TRAIN_EXTRA[@]}"
+  "${TRAIN_EXTRA[@]}" || {
+    status=$?
+    echo "fit failed (exit=$status); score/evaluate were not started" >&2
+    exit "$status"
+  }
 
-printf '\n[2/3] freeze held-out RR audit scores without labels\n'
+printf '\n[2/3] freeze held-out attention scores without labels\n'
 "$PYTHON" -u -m experiments.rr_signal_audit.main score \
   --split-root "$ROOT/test" \
   --reference "$OUT/reference.npz" \
   --output "$OUT/test_scores.npz" \
   --device "$DEVICE" \
-  "${TEST_EXTRA[@]}"
+  "${TEST_EXTRA[@]}" || {
+    status=$?
+    echo "score failed (exit=$status); evaluate was not started" >&2
+    exit "$status"
+  }
 
 printf '\n[3/3] post-hoc signal metrics and hallucination-onset effects\n'
 "$PYTHON" -u -m experiments.rr_signal_audit.main evaluate \
@@ -93,7 +101,11 @@ printf '\n[3/3] post-hoc signal metrics and hallucination-onset effects\n'
   --device cpu \
   --onset-window "${ONSET_WINDOW:-4}" \
   --bootstrap-replicates "${EVAL_BOOTSTRAP:-$EVAL_BOOTSTRAP_DEFAULT}" \
-  --seed "${SEED:-20260818}"
+  --seed "${SEED:-20260818}" || {
+    status=$?
+    echo "evaluate failed (exit=$status)" >&2
+    exit "$status"
+  }
 
 echo "done: $OUT/evaluation/evaluation.json"
 echo "metrics: $OUT/evaluation/score_metrics.csv"

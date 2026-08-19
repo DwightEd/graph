@@ -1,13 +1,15 @@
-# RR Signal Decomposition and Collapse Audit
+# Evidence-Grounded Causal Attention Signal Audit
 
 ## Status
 
-This directory is a **mechanism audit**, not a new final detector. It uses only
-retained response-to-response (RR) attention and answers two questions before a
-more complex model is built:
+This directory is a **mechanism audit**, not a new final detector. It uses
+retained prompt-to-response (PR) and response-to-response (RR) attention and
+answers three questions before a more complex model is built:
 
-1. What actually produced the historical RR residual signal?
-2. Does hallucination onset exhibit premature concentration into a small,
+1. Does the already reproduced PR/RR role shift survive without layer/head
+   averaging?
+2. What actually produced the historical RR residual signal?
+3. Does hallucination onset exhibit premature concentration into a small,
    local response-history route set?
 
 The audit does not assume that correct tokens possess a stable cross-layer/head
@@ -37,11 +39,41 @@ with exact `(layer, head, weight)` and `j < t`. Missing CSR entries mean only
 `attention <= attention_floor`; the audit never interprets them as measured
 zero-weight edges.
 
-The prompt block is deliberately excluded in this first audit. The immediate
-goal is to understand the already-observed RR signal before coupling RR with
-prompt-rooted flow.
+No missing edge is fabricated. PR and RR retained mass are divided by the
+number of causally available sources before they are compared.
 
-## 2. Decomposition of the historical mixed coordinate
+## 2. Evidence registry and channel-preserving role fields
+
+The previous exact scalar audit is reproduced unchanged for five transparent
+baselines. These are historical exploratory results, not independently held-out
+feature selection:
+
+| scalar | fixed anomaly direction | historical raw AUROC |
+|---|---:|---:|
+| history edge fraction | higher | 0.6418 |
+| normalized entropy | lower | 0.4086 |
+| history mass fraction | higher | 0.5865 |
+| mean edge strength | higher | 0.5337 |
+| direct Lookback anomaly | lower | 0.3899 |
+
+The actual representation does not concatenate those five averages. For every
+token and each channel `c=(layer,head)` it emits four separate `L×H` fields:
+
+\[
+P_{t,c}=\frac{\sum_{j\in prompt} A^c_{t,j}}{|prompt|},\qquad
+R_{t,c}=\frac{\sum_{j<t} A^c_{t,j}}{\max(t,1)},
+\]
+
+\[
+F_{t,c}=\frac{|E^{RR}_{t,c}|}{|E^{PR}_{t,c}|+|E^{RR}_{t,c}|},\qquad
+S_{t,c}=\frac{\sum_{j\ne t} A^c_{t,j}}{|E^{PR}_{t,c}|+|E^{RR}_{t,c}|}.
+\]
+
+They are saved and modeled as separate 1024-dimensional blocks for a 32-layer,
+32-head model. This prevents a weak feature from silently diluting a strong one
+and makes every gain attributable to one mechanism family.
+
+## 3. Decomposition of the historical mixed coordinate
 
 For one channel `c=(layer,head)`, prefix `t`, and response source `j <= t`, let
 
@@ -117,7 +149,7 @@ coordinate. Every block retains the strongest `K` values independently for all
 layer/head channels. Only the mixed block uses strongest absolute magnitude and
 keeps the original sign.
 
-## 3. Current-token routing collapse
+## 4. Current-token routing collapse
 
 The historical prefix coordinates describe how old response sources continue
 to be used. A separate block measures the current token's incoming RR routing
@@ -165,7 +197,7 @@ route effective rank           lower
 `cross_channel_consensus`, total RR mass, and edge count remain diagnostics;
 their directions are not treated as established.
 
-## 4. What “coordination” must prove
+## 5. What “coordination” must prove
 
 A global PCA residual being better than one peak head does not prove
 cross-channel coordination. The audit therefore fits two densities to every
@@ -218,7 +250,7 @@ alignment is statistically learnable. It does **not** establish that the
 alignment is related to correctness; label-based metrics are reported
 separately.
 
-## 5. Conditioning and temporal scope
+## 6. Conditioning and temporal scope
 
 Two condition schemes are frozen:
 
@@ -239,7 +271,7 @@ task_type × floor(log2(token_index+1))
 This uses only the current causal prefix. Comparing the two exposes whether the
 historical result depends on final-length conditioning.
 
-## 6. Scores and outputs
+## 7. Scores and outputs
 
 For every signal block and both condition modes, the audit freezes:
 
@@ -264,7 +296,7 @@ evaluation/onset_effects.csv
 AUROC/AUPRC plus orientation-free AUROC as an explicitly post-hoc diagnostic.
 No best component is silently promoted to a final detector.
 
-## 7. Decision rules
+## 8. Decision rules
 
 The next method is allowed to claim a cross-channel mechanism only if all of the
 following hold on held-out source groups:

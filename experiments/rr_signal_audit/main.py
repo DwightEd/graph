@@ -1,4 +1,4 @@
-"""CLI for the RR-only signal decomposition and collapse audit."""
+"""CLI for the evidence-grounded PR/RR attention signal audit."""
 
 from __future__ import annotations
 

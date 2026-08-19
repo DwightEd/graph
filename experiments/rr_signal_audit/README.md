@@ -1,8 +1,21 @@
-# RR signal decomposition audit
+# Evidence-grounded causal attention signal audit
 
-This experiment uses **RR attention only** to determine what produced the
-historical residual signal and whether hallucination onset exhibits local
-routing collapse. It is intentionally an audit before any new neural model.
+This is the active attention-only mechanism experiment. It preserves
+layer-by-head fields and tests three separately attributable families:
+
+- exact PR/RR route marginals, including the previously useful history-edge
+  fraction and prompt/history per-source mass;
+- RR received-support persistence, whose strict causal residual was the
+  strongest reproduced structural signal;
+- local RR concentration and route dynamics as an explicit hypothesis block.
+
+There is no GNN, synthetic-anomaly learner, or backpropagation. Robust
+standardization/PCA is fitted without labels and is reported beside independent
+coordinate density and direct historically frozen scalar baselines.
+
+See `EVIDENCE.md` for the reproduced observations and mandatory acceptance
+gates. A new propagation or fusion method is not promoted unless it clears
+those gates.
 
 ## Smoke test
 
@@ -19,7 +32,7 @@ bash experiments/rr_signal_audit/run.sh
 Default smoke output:
 
 ```text
-experiments/rr_signal_audit/outputs/v1/smoke_train128_test5/
+experiments/rr_signal_audit/outputs/smoke_train128_test5/
 ├── reference.npz
 ├── test_scores.npz
 └── evaluation/
@@ -31,7 +44,7 @@ experiments/rr_signal_audit/outputs/v1/smoke_train128_test5/
 Use a fresh output directory for a rerun:
 
 ```bash
-OUT=experiments/rr_signal_audit/outputs/v1/smoke_retry \
+OUT=experiments/rr_signal_audit/outputs/smoke_retry \
 TRAIN_LIMIT=128 TEST_LIMIT=5 \
 CUDA_VISIBLE_DEVICES=0 DEVICE=cuda \
 bash experiments/rr_signal_audit/run.sh
@@ -47,7 +60,7 @@ bash experiments/rr_signal_audit/run.sh
 
 ## What to inspect first
 
-In `score_metrics.csv`, compare the same conditioning/model across:
+In `score_metrics.csv`, first compare the same conditioning/model across:
 
 ```text
 mixed_topk
@@ -55,6 +68,10 @@ received_topk
 diagonal_topk
 ratio_topk
 collapse_channel
+prompt_route_channels
+history_route_channels
+history_edge_channels
+edge_strength_channels
 ```
 
 Interpretation:
@@ -71,6 +88,11 @@ Interpretation:
   response length.
 - `relative` much stronger than `causal`: historical performance may rely on
   offline final-length conditioning.
+
+Rows with `family=historically_frozen_scalar_baseline` reproduce five earlier
+audited scalar definitions unchanged. They are controls, not the new node
+representation. The four `*_channels` blocks retain all layer/head coordinates
+instead of averaging them into those scalars.
 
 In `evaluation.json`, inspect `coordination`. A passed channel-shuffle gate only
 shows that channel alignment is learnable; it must not be described as a

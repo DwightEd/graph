@@ -147,8 +147,31 @@ class RRSignalAuditTests(unittest.TestCase):
             self.assertEqual(features.blocks["received_topk"].shape, (3, 4))
             self.assertEqual(features.blocks["diagonal_topk"].shape, (3, 4))
             self.assertEqual(features.blocks["ratio_topk"].shape, (3, 4))
+            for name in (
+                "prompt_route_channels",
+                "history_route_channels",
+                "history_edge_channels",
+                "edge_strength_channels",
+            ):
+                self.assertEqual(features.blocks[name].shape, (3, 2))
             self.assertEqual(features.blocks["collapse_channel"].shape, (3, 12))
             self.assertEqual(features.collapse_global.shape, (3, 12))
+            self.assertEqual(features.evidence_global.shape, (3, 5))
+            np.testing.assert_allclose(
+                features.blocks["prompt_route_channels"],
+                [[0.10, 0.125], [0.0, 0.0], [0.075, 0.025]],
+                atol=3e-4,
+            )
+            np.testing.assert_allclose(
+                features.blocks["history_route_channels"],
+                [[0.0, 0.0], [0.20, 0.05], [0.20, 0.25]],
+                atol=3e-4,
+            )
+            np.testing.assert_allclose(
+                features.blocks["history_edge_channels"],
+                [[0.0, 0.0], [1.0, 1.0], [2 / 3, 2 / 3]],
+                atol=3e-4,
+            )
             sample.release_attention()
 
     def test_channel_shuffle_preserves_every_conditional_channel_marginal(self):
@@ -224,6 +247,7 @@ class RRSignalAuditTests(unittest.TestCase):
             self.assertEqual(len(artifact["sample_id"]), 6)
             self.assertNotIn("label", artifact)
             self.assertNotIn("y_token", artifact)
+            self.assertEqual(artifact["evidence_raw"].shape, (6, 5))
 
             report = evaluate_rr_signal_audit(
                 test,
