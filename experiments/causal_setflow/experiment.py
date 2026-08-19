@@ -28,18 +28,22 @@ from .artifacts import (
     save_checkpoint,
 )
 from .calibration import (
-    COMPONENT_NAMES,
+    ENERGY_NAMES,
     CalibrationConfig,
-    calibrate_component_matrix,
+    calibrate_energy_matrix,
     causal_condition,
-    component_matrix,
-    fit_latent_reference,
-    latent_mahalanobis,
+    energy_matrix,
 )
-from .config import SetFlowModelConfig, SourceSetConfig, TrainingConfig
+from .config import (
+    CORRUPTION_NAMES,
+    CorruptionConfig,
+    SetFlowModelConfig,
+    SourceSetConfig,
+    TrainingConfig,
+)
 from .data import extract_causal_source_set_graph
 from .model import CausalSetFlowModel
-from .trainer import extract_frozen_rows, select_reference_rows, train_label_free
+from .trainer import extract_frozen_rows, train_label_free
 
 
 def fit_setflow(
@@ -48,23 +52,26 @@ def fit_setflow(
     *,
     source_config: SourceSetConfig | None = None,
     model_config: SetFlowModelConfig | None = None,
+    corruption_config: CorruptionConfig | None = None,
     training_config: TrainingConfig | None = None,
     calibration_config: CalibrationConfig | None = None,
     device: str = "cuda",
     limit=None,
 ):
-    """Train CASF and fit disjoint unlabeled latent/calibration references."""
+    """Train MG-CASF and fit a disjoint unlabeled energy calibration."""
 
     source_config = SourceSetConfig() if source_config is None else source_config
     model_config = SetFlowModelConfig() if model_config is None else model_config
+    corruption_config = (
+        CorruptionConfig() if corruption_config is None else corruption_config
+    )
     training_config = TrainingConfig() if training_config is None else training_config
     calibration_config = (
-        CalibrationConfig(latent_trim_fraction=training_config.latent_trim_fraction)
-        if calibration_config is None
-        else calibration_config
+        CalibrationConfig() if calibration_config is None else calibration_config
     )
     source_config.validate()
     model_config.validate()
+    corruption_config.validate()
     training_config.validate()
     calibration_config.validate()
     output_dir = Path(output_dir).resolve()
@@ -98,6 +105,7 @@ def fit_setflow(
         dataset,
         split["fit_sample_ids"],
         source_config=source_config,
+        corruption_config=corruption_config,
         training_config=training_config,
         device=device,
     )
@@ -109,27 +117,10 @@ def fit_setflow(
             "num_heads": num_heads,
             "source_config": asdict(source_config),
             "model_config": asdict(model_config),
+            "corruption_config": asdict(corruption_config),
             "training_config": asdict(training_config),
+            "corruption_names": CORRUPTION_NAMES,
         },
-    )
-
-    fit_rows = extract_frozen_rows(
-        model,
-        dataset,
-        split["fit_sample_ids"],
-        source_config=source_config,
-        deterministic_masks=training_config.deterministic_masks,
-        seed=training_config.seed + 300_000,
-        device=device,
-        precision=training_config.precision,
-    )
-    selected = select_reference_rows(
-        fit_rows, training_config.reference_per_sample
-    )
-    latent_reference = fit_latent_reference(
-        fit_rows["embedding"][selected],
-        trim_fraction=calibration_config.latent_trim_fraction,
-        epsilon=calibration_config.epsilon,
     )
 
     calibration_rows = extract_frozen_rows(
@@ -137,14 +128,10 @@ def fit_setflow(
         dataset,
         split["calibration_sample_ids"],
         source_config=source_config,
-        deterministic_masks=training_config.deterministic_masks,
-        seed=training_config.seed + 600_000,
         device=device,
         precision=training_config.precision,
     )
-    calibration_matrix = component_matrix(
-        _raw_components(calibration_rows, latent_reference)
-    )
+    calibration_energy = energy_matrix(calibration_rows)
     calibration_conditions = causal_condition(
         calibration_rows["task_type"], calibration_rows["token_index"]
     )
@@ -156,14 +143,16 @@ def fit_setflow(
         "train_dataset_manifest_sha256": np.asarray(train_manifest.sha256),
         "source_config_json": np.asarray(_json(asdict(source_config))),
         "model_config_json": np.asarray(_json(asdict(model_config))),
+        "corruption_config_json": np.asarray(_json(asdict(corruption_config))),
         "training_config_json": np.asarray(_json(asdict(training_config))),
         "calibration_config_json": np.asarray(_json(asdict(calibration_config))),
         "fit_group_id": np.asarray(split["fit_group_ids"], dtype=str),
         "calibration_group_id": np.asarray(
             split["calibration_group_ids"], dtype=str
         ),
-        "component_names": np.asarray(COMPONENT_NAMES, dtype=str),
-        "calibration_components": calibration_matrix,
+        "energy_names": np.asarray(ENERGY_NAMES, dtype=str),
+        "corruption_names": np.asarray(CORRUPTION_NAMES, dtype=str),
+        "calibration_energy": calibration_energy,
         "calibration_conditions": calibration_conditions,
         "calibration_sample_id": calibration_rows["sample_id"],
         "calibration_token_index": calibration_rows["token_index"],
@@ -172,11 +161,9 @@ def fit_setflow(
         "calibration_samples": np.asarray(
             len(split["calibration_sample_ids"]), dtype=np.int32
         ),
-        "fit_reference_tokens": np.asarray(len(selected), dtype=np.int32),
         "calibration_tokens": np.asarray(
             len(calibration_rows["sample_id"]), dtype=np.int32
         ),
-        **latent_reference,
     }
     train_manifest.verify(train_manifest.path)
     np.savez_compressed(reference_path, **artifact)
@@ -187,7 +174,6 @@ def fit_setflow(
         "labels_read": False,
         "fit_samples": len(split["fit_sample_ids"]),
         "calibration_samples": len(split["calibration_sample_ids"]),
-        "fit_reference_tokens": int(len(selected)),
         "calibration_tokens": int(len(calibration_rows["sample_id"])),
         "num_layers": num_layers,
         "num_heads": num_heads,
@@ -215,6 +201,7 @@ def score_setflow(
     checkpoint = load_checkpoint(model_path)
     source_config = SourceSetConfig(**checkpoint["source_config"])
     model_config = SetFlowModelConfig(**checkpoint["model_config"])
+    CorruptionConfig(**checkpoint["corruption_config"]).validate()
     training_config = TrainingConfig(**checkpoint["training_config"])
     calibration_config = CalibrationConfig(
         **json.loads(str(reference["calibration_config_json"].item()))
@@ -246,16 +233,14 @@ def score_setflow(
         dataset,
         sample_ids,
         source_config=source_config,
-        deterministic_masks=training_config.deterministic_masks,
-        seed=training_config.seed + 900_000,
         device=device,
         precision=training_config.precision,
     )
     audit_result = audit.finish()
-    raw = component_matrix(_raw_components(rows, reference))
+    raw = energy_matrix(rows)
     conditions = causal_condition(rows["task_type"], rows["token_index"])
-    tail, score = calibrate_component_matrix(
-        reference["calibration_components"],
+    tail, score = calibrate_energy_matrix(
+        reference["calibration_energy"],
         reference["calibration_conditions"],
         raw,
         conditions,
@@ -278,10 +263,11 @@ def score_setflow(
         test_group_id=np.asarray(audit_result.test_source_ids, dtype=str),
         test_sample_id=np.asarray(audit_result.test_sample_ids, dtype=str),
         audit_scope=np.asarray(audit_result.test_scope),
-        component_names=np.asarray(COMPONENT_NAMES, dtype=str),
+        energy_names=np.asarray(ENERGY_NAMES, dtype=str),
+        corruption_names=np.asarray(CORRUPTION_NAMES, dtype=str),
         embedding=rows["embedding"],
-        components_raw=raw,
-        components_tail=tail,
+        energy_raw=raw,
+        energy_tail=tail,
         score=score,
         **{
             name: rows[name]
@@ -302,7 +288,7 @@ def score_setflow(
         "labels_read": False,
         "samples": len(sample_ids),
         "tokens": int(len(score)),
-        "primary_detector": "empirically_recalibrated_fisher_setflow",
+        "primary_detector": "causal_empirical_tail_general_energy",
         "precision": training_config.precision,
     }
 
@@ -316,41 +302,29 @@ def evaluate_setflow(dataset, score_path, output_path):
     components = {
         "primary": artifact["score"],
         **{
-            name: artifact["components_tail"][:, index]
-            for index, name in enumerate(COMPONENT_NAMES)
+            name: artifact["energy_tail"][:, index]
+            for index, name in enumerate(ENERGY_NAMES)
         },
     }
     metrics = {name: _metrics(labels, value) for name, value in components.items()}
     report = {
         "schema": EVALUATION_SCHEMA,
         "labels_read": True,
-        "primary_detector": "empirically_recalibrated_fisher_setflow",
+        "primary_detector": "causal_empirical_tail_general_energy",
         "metrics": metrics["primary"],
         "components": metrics,
         "reference_sha256": str(artifact["reference_sha256"].item()),
         "score_artifact_sha256": evaluation.artifact.sha256,
         "claim_boundary": (
-            "CASF is trained only on attention-derived masked reconstruction. "
-            "The primary score is a fixed empirical combination of reconstruction "
-            "and latent-density components; no test-label direction or weight is fitted."
+            "MG-CASF learns energy orientation only from label-free causal structural "
+            "corruptions. The primary score is the conditionally calibrated upper tail "
+            "of general energy; type-specific energies remain frozen diagnostics."
         ),
     }
     output_path = Path(output_path).resolve()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     return report
-
-
-def _raw_components(rows, latent_reference):
-    result = {
-        name: np.asarray(rows[name], dtype=np.float32)
-        for name in COMPONENT_NAMES
-        if name != "latent_mahalanobis"
-    }
-    result["latent_mahalanobis"] = latent_mahalanobis(
-        rows["embedding"], latent_reference
-    )
-    return result
 
 
 def _metrics(labels, score):

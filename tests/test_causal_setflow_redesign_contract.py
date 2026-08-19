@@ -43,7 +43,13 @@ class CausalSetFlowRedesignContractTests(unittest.TestCase):
         names = tuple(config.CORRUPTION_NAMES)
         self.assertGreaterEqual(len(names), 4)
         joined = " ".join(names).lower()
-        for mechanism in ("collapse", "rewire", "freeze", "head"):
+        for mechanism in (
+            "collapse",
+            "localize",
+            "freeze",
+            "homogenize",
+            "self_reinforce",
+        ):
             self.assertIn(mechanism, joined)
 
     def test_model_exposes_structured_channel_field(self):

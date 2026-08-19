@@ -697,17 +697,22 @@ class CausalSetFlowModel(nn.Module):
         self.eval()
         encoded = self.encode_online(graph, device=device)
         energy = self.energy(encoded)
+        channel_energy = energy.channel_general.float()
+        channel_energy_max = torch.where(
+            encoded.channel_active,
+            channel_energy,
+            torch.full_like(channel_energy, float("-inf")),
+        ).flatten(1).amax(dim=1)
+        channel_energy_max = channel_energy_max.masked_fill(
+            ~encoded.channel_active.any(dim=(1, 2)), 0.0
+        )
         result = {
             "embedding": encoded.token_embedding.float(),
             "general_energy": energy.general.float(),
             "token_energy": energy.token_general.float(),
             "channel_energy": energy.channel_logmeanexp.float(),
             "type_energy": energy.type_energy.float(),
-            "channel_energy_max": torch.where(
-                encoded.channel_active,
-                energy.channel_general.float(),
-                torch.full_like(energy.channel_general.float(), float("-inf")),
-            ).flatten(1).amax(dim=1),
+            "channel_energy_max": channel_energy_max,
         }
         self.train(previous)
         return result

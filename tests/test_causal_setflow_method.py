@@ -72,6 +72,13 @@ class MethodTests(unittest.TestCase):
         self.assertEqual(energy.type_energy.shape, (6, 5))
         self.assertTrue(torch.isfinite(energy.general).all())
 
+    def test_frozen_scores_are_finite_for_token_without_rr_sources(self):
+        model, graph = _model_and_graph()
+        scores = model.score_graph(graph, device="cpu")
+        self.assertTrue(
+            all(torch.isfinite(values).all() for values in scores.values())
+        )
+
     def test_paired_energy_objective_is_finite_and_backpropagates(self):
         model, graph = _model_and_graph()
         model.train()
