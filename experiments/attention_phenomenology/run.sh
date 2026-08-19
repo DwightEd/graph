@@ -38,12 +38,15 @@ printf '\n[1/3] fit unlabeled attention-routing reference\n'
   "${CONFIG[@]}" \
   "${FIT_LIMIT[@]}"
 
-printf '\n[2/3] freeze test mechanism fields and endpoint-rewired control\n'
 DETAIL_ARGS=()
 if [[ -n "${DETAIL_SAMPLE_IDS:-}" ]]; then
   IFS=',' read -ra IDS <<< "$DETAIL_SAMPLE_IDS"
-  for ID in "${IDS[@]}"; do DETAIL_ARGS+=(--detail-sample-id "$ID"); done
+  for ID in "${IDS[@]}"; do
+    DETAIL_ARGS+=(--detail-sample-id "$ID")
+  done
 fi
+
+printf '\n[2/3] freeze mechanism fields and exact-endpoint null\n'
 "$PYTHON" -u -m experiments.attention_phenomenology.main score \
   --split-root "$ROOT/test" \
   --reference "$OUT/reference.npz" \

@@ -1,4 +1,4 @@
-"""Unlabeled task/position reference for routing-state atypicality."""
+"""Unlabeled task/position references for attention mechanism fields."""
 
 from __future__ import annotations
 
@@ -6,29 +6,26 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .config import FAMILY_FEATURES, FAMILY_NAMES, FEATURE_NAMES, PhenomenologyConfig
+from .config import PhenomenologyConfig
+from .hypotheses import FAMILY_FEATURES, FAMILY_NAMES, FEATURE_INDEX, FEATURE_NAMES
 
 
 @dataclass(frozen=True)
 class PhenomenologyReference:
     task: np.ndarray
     bucket: np.ndarray
-    center: np.ndarray  # [condition, layer, feature]
+    center: np.ndarray
     scale: np.ndarray
     feature_names: np.ndarray
     family_names: np.ndarray
     config_json: str
-
-    @property
-    def layers(self) -> int:
-        return int(self.center.shape[1])
 
 
 class Reservoir:
     """Uniform bounded sample of token-level layer fields."""
 
     def __init__(self, capacity: int, rng: np.random.Generator):
-        self.capacity = int(capacity)
+        self.capacity = capacity
         self.rng = rng
         self.values: list[np.ndarray] = []
         self.seen = 0
@@ -47,9 +44,9 @@ class Reservoir:
 
 
 def causal_position_bucket(position: int, bins: int) -> int:
-    """Causal log2 prefix bucket; it never uses final response length."""
+    """Causal log2 prefix bucket; final response length is never used."""
 
-    return min(int(np.floor(np.log2(int(position) + 1))), int(bins) - 1)
+    return min(int(np.floor(np.log2(position + 1))), bins - 1)
 
 
 def token_buckets(response_count: int, bins: int) -> np.ndarray:
@@ -65,11 +62,7 @@ def robust_center_scale(
     center = np.median(values, axis=0)
     mad = 1.4826 * np.median(np.abs(values - center), axis=0)
     standard_deviation = np.std(values, axis=0)
-    scale = np.where(
-        mad > epsilon,
-        mad,
-        np.where(standard_deviation > epsilon, standard_deviation, 1.0),
-    )
+    scale = np.where(mad > epsilon, mad, np.where(standard_deviation > epsilon, standard_deviation, 1.0))
     return center.astype(np.float32), scale.astype(np.float32)
 
 
@@ -79,23 +72,23 @@ def fit_reference_from_reservoirs(
     config: PhenomenologyConfig,
     config_json: str,
 ) -> PhenomenologyReference:
-    keys = sorted(reservoirs)
-    task = []
-    bucket = []
-    center = []
-    scale = []
-    for current_task, current_bucket in keys:
-        values = reservoirs[(current_task, current_bucket)].matrix()
-        current_center, current_scale = robust_center_scale(values, config.epsilon)
-        task.append(current_task)
-        bucket.append(current_bucket)
-        center.append(current_center)
-        scale.append(current_scale)
+    tasks = []
+    buckets = []
+    centers = []
+    scales = []
+    for task, bucket in sorted(reservoirs):
+        center, scale = robust_center_scale(
+            reservoirs[(task, bucket)].matrix(), config.epsilon
+        )
+        tasks.append(task)
+        buckets.append(bucket)
+        centers.append(center)
+        scales.append(scale)
     return PhenomenologyReference(
-        task=np.asarray(task, dtype=str),
-        bucket=np.asarray(bucket, dtype=np.int16),
-        center=np.stack(center),
-        scale=np.stack(scale),
+        task=np.asarray(tasks, dtype=str),
+        bucket=np.asarray(buckets, dtype=np.int16),
+        center=np.stack(centers),
+        scale=np.stack(scales),
         feature_names=np.asarray(FEATURE_NAMES, dtype=str),
         family_names=np.asarray(FAMILY_NAMES, dtype=str),
         config_json=config_json,
@@ -105,7 +98,7 @@ def fit_reference_from_reservoirs(
 def save_reference(path, reference: PhenomenologyReference) -> None:
     np.savez_compressed(
         path,
-        schema=np.asarray("attention-phenomenology-reference-v1"),
+        schema=np.asarray("attention-phenomenology-reference-v2"),
         task=reference.task,
         bucket=reference.bucket,
         center=reference.center,
@@ -144,35 +137,33 @@ def standardize_features(
     reference: PhenomenologyReference,
 ) -> np.ndarray:
     mapping = _condition_map(reference)
-    available_global = sorted(
-        int(bucket) for current_task, bucket in mapping if current_task == "__all__"
+    global_buckets = sorted(
+        bucket for current_task, bucket in mapping if current_task == "__all__"
     )
-    result = np.empty_like(layer_features, dtype=np.float32)
+    standardized = np.empty_like(layer_features, dtype=np.float32)
     for token, bucket in enumerate(np.asarray(buckets, dtype=np.int16)):
-        current_bucket = int(bucket)
-        index = mapping.get((str(task), current_bucket))
-        if index is None:
-            fallback_bucket = min(
-                available_global, key=lambda value: abs(value - current_bucket)
-            )
-            index = mapping[("__all__", fallback_bucket)]
-        result[token] = (
-            layer_features[token] - reference.center[index]
-        ) / reference.scale[index]
-    return result
+        condition = mapping.get((task, int(bucket)))
+        if condition is None:
+            nearest = min(global_buckets, key=lambda value: abs(value - int(bucket)))
+            condition = mapping[("__all__", nearest)]
+        standardized[token] = (
+            layer_features[token] - reference.center[condition]
+        ) / reference.scale[condition]
+    return standardized
 
 
-def family_atypicality(standardized: np.ndarray) -> np.ndarray:
-    """Direction-free RMS deviations for each pre-registered mechanism family."""
+def family_layer_atypicality(standardized: np.ndarray) -> np.ndarray:
+    """Direction-free RMS deviation for every token, layer, and family."""
 
-    feature_index = {name: index for index, name in enumerate(FEATURE_NAMES)}
     scores = []
     for family in FAMILY_NAMES:
-        names = (
-            tuple(name for name in FEATURE_NAMES if not name.endswith("mass_mean"))
-            if family == "all"
-            else FAMILY_FEATURES[family]
-        )
-        selected = standardized[:, :, [feature_index[name] for name in names]]
-        scores.append(np.sqrt(np.mean(np.square(selected), axis=(1, 2))))
-    return np.column_stack(scores).astype(np.float32)
+        indices = [FEATURE_INDEX[name] for name in FAMILY_FEATURES[family]]
+        selected = standardized[:, :, indices]
+        scores.append(np.sqrt(np.mean(np.square(selected), axis=2)))
+    return np.stack(scores, axis=2).astype(np.float32)
+
+
+def family_atypicality(family_layer_scores: np.ndarray) -> np.ndarray:
+    """Aggregate layer-resolved family deviations without learning weights."""
+
+    return np.sqrt(np.mean(np.square(family_layer_scores), axis=1)).astype(np.float32)

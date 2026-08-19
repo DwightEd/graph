@@ -1,15 +1,15 @@
-"""Attention-space mechanism audit inspired by The Phenomenology of Hallucinations."""
+"""Attention-space tests of detection, fracture, integration, and lock-in."""
 
-from .config import FEATURE_NAMES, FAMILY_NAMES, PhenomenologyConfig
+from .config import PhenomenologyConfig
 from .features import SamplePhenomenology, analyze_routing
-from .routing import collect_routing_edges, rewire_exact_endpoints
+from .routing import RoutingEdges, RoutingTensor, build_routing_tensor, collect_routing_edges
 
 __all__ = [
-    "FEATURE_NAMES",
-    "FAMILY_NAMES",
     "PhenomenologyConfig",
+    "RoutingEdges",
+    "RoutingTensor",
     "SamplePhenomenology",
-    "analyze_routing",
     "collect_routing_edges",
-    "rewire_exact_endpoints",
+    "build_routing_tensor",
+    "analyze_routing",
 ]

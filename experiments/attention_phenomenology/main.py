@@ -9,6 +9,18 @@ from .evaluation import evaluate_scores
 from .experiment import fit_reference, score_split
 
 
+def _add_config(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--prompt-bins", type=int, default=4)
+    parser.add_argument("--rr-lag-bins", type=int, default=8)
+    parser.add_argument("--lid-neighbors", type=int, default=8)
+    parser.add_argument("--transition-projections", type=int, default=12)
+    parser.add_argument("--anchor-count", type=int, default=8)
+    parser.add_argument("--recent-lag-max", type=int, default=4)
+    parser.add_argument("--causal-position-bins", type=int, default=10)
+    parser.add_argument("--block-rows", type=int, default=8192)
+    parser.add_argument("--seed", type=int, default=20260819)
+
+
 def _config(arguments) -> PhenomenologyConfig:
     return PhenomenologyConfig(
         prompt_bins=arguments.prompt_bins,
@@ -23,23 +35,11 @@ def _config(arguments) -> PhenomenologyConfig:
     )
 
 
-def _add_config(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--prompt-bins", type=int, default=4)
-    parser.add_argument("--rr-lag-bins", type=int, default=8)
-    parser.add_argument("--lid-neighbors", type=int, default=8)
-    parser.add_argument("--transition-projections", type=int, default=12)
-    parser.add_argument("--anchor-count", type=int, default=8)
-    parser.add_argument("--recent-lag-max", type=int, default=4)
-    parser.add_argument("--causal-position-bins", type=int, default=10)
-    parser.add_argument("--block-rows", type=int, default=8192)
-    parser.add_argument("--seed", type=int, default=20260819)
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    commands = parser.add_subparsers(dest="command", required=True)
 
-    fit = subparsers.add_parser("fit", help="fit unlabeled routing references")
+    fit = commands.add_parser("fit", help="fit unlabeled routing references")
     fit.add_argument("--train-split", required=True)
     fit.add_argument("--output", required=True)
     fit.add_argument("--device", default="cpu")
@@ -47,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     fit.add_argument("--limit", type=int)
     _add_config(fit)
 
-    score = subparsers.add_parser("score", help="freeze test mechanism fields")
+    score = commands.add_parser("score", help="freeze test mechanism fields")
     score.add_argument("--split-root", required=True)
     score.add_argument("--reference", required=True)
     score.add_argument("--output-dir", required=True)
@@ -57,7 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
     score.add_argument("--detail-sample-id", action="append", default=[])
     _add_config(score)
 
-    evaluate = subparsers.add_parser(
+    evaluate = commands.add_parser(
         "evaluate", help="unlock labels for post-hoc hypothesis tests"
     )
     evaluate.add_argument("--split-root", required=True)

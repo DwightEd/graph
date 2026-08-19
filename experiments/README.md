@@ -1,67 +1,57 @@
 # Experiments
 
-`experiments/` contains disposable or feasibility-stage research code. The
-algorithms may change quickly; the data boundary must not.
+`experiments/` contains feasibility-stage research code. Algorithms may change;
+the data boundary and label discipline must not.
 
 ## Required data contract
 
-Every experiment that consumes model attention must open data through:
+Every attention experiment opens data through:
 
 ```python
 from research_dataset import open_research_dataset
 
 dataset = open_research_dataset(split_root, device="cpu")
 sample = dataset[sample_id]
-attention = sample.attention()
 ```
 
-Experiments must **not** import raw loaders from `cache.py` or
-`formal_cache.py`, scan `attention_*.pt` / `attention/*.npz` themselves, or
-reimplement canonical CSR parsing. Shared sparse/dense views belong in
-`research_dataset.py` and should be added there when an experiment needs a new
-format-independent data view.
-
-Allowed experiment-local I/O is limited to artifacts produced by the
-experiment itself, such as derived embeddings, scores, figures, and JSON/NPZ
-reports.
+Experiments must not parse canonical PT/NPZ caches directly or duplicate CSR
+decoding. Shared format-independent views belong in `research_dataset.py`.
+Experiment-local I/O is limited to derived references, embeddings, scores,
+figures, and reports.
 
 ## Label discipline
 
-Representation construction, parameter fitting, clustering, density fitting,
-and anomaly scoring must remain label-blind unless a directory explicitly
-describes a supervised diagnostic. `dataset.labels()` is reserved for a
-separate post-hoc evaluation stage after representations/scores are frozen.
+Representation construction, reference fitting, clustering, density estimation,
+and anomaly scoring remain label-blind unless a directory is explicitly marked
+as a supervised diagnostic. `dataset.labels()` or
+`dataset.prepare_evaluation_labels()` is reserved for a separate post-hoc stage
+after representations and scores are frozen.
 
 ## Active evidence path
 
-- `attention_phenomenology/`: attention-space mechanism audit inspired by *The
-  Phenomenology of Hallucinations*. It tests routing atypicality, persistent
+- `attention_phenomenology/`: the primary mechanism audit for routing detection,
   head-coalition fracture, prompt-provenance integration, fracture-to-lock-in
-  dynamics, and an exact-endpoint rewiring control while preserving
-  `[token, layer, head]` structure.
-- `mechanism_validation/`: attention mechanism and graph-ablation diagnostics.
-- `spectral_feasibility/`: the reproduced RR causal source-persistence
-  representation and independently calibrated robust-subspace detector.
-- `rr_signal_audit/`: the active evidence-grounded attention audit. It preserves
-  PR/RR role fields per layer/head, decomposes received support, reproduces the
-  earlier exact scalar baselines, and compares independent with joint one-class
-  geometry under a conditional channel-shuffle control.
-- `rr_topology_dynamics/`: label-free extraction followed by post-hoc analysis
-  of route convergence, prompt-grounded versus self-reinforcing RR flow, and
-  layer/head/source/lag attribution of spectral-subspace escape.
-- `conditioned_benchmark/`: a strict frozen-artifact workflow for task slices,
-  token/response evaluation, uncertainty, and controlled positive prevalence.
-  It never refits a detector after labels open.
+  dynamics, and exact-endpoint topology. It preserves `[token, layer, head]`,
+  separates known-route geometry from censoring controls, and compares real
+  endpoints with a coarse-role-preserving rewired null.
+- `rr_signal_audit/`: evidence-grounded decomposition of PR/RR channel fields,
+  received support, collapse variables, and independent versus joint one-class
+  geometry.
+- `rr_topology_dynamics/`: route convergence, prompt-grounded versus unsupported
+  RR relay, and layer/head/source/lag attribution.
+- `mechanism_validation/`: supervised post-hoc mechanism and graph-ablation
+  diagnostics.
+- `spectral_feasibility/`: reproduced RR source-persistence coordinates and a
+  robust-subspace baseline; it is not a graph Laplacian method.
+- `conditioned_benchmark/`: frozen-artifact task/token/response evaluation under
+  controlled conditions and prevalence.
 
 ## Retired negative controls
 
-- `causal_attention_setwalk/`: fixed hypergraph walk. Its smoke result was worse
-  than the no-walk control, so it is retained only as a falsified mechanism.
+- `causal_attention_setwalk/`: fixed hypergraph walk; its smoke result was worse
+  than the no-walk control.
 - `causal_multiplex_flow/`: source-prediction surprise did not establish useful
-  separation and is not an active representation.
+  hallucination separation.
 
-The incomplete neural `causal_setflow` prototype was removed. It mixed a custom
-Set Transformer, EMA teacher, and synthetic corruption bank, excluded all PR
-edges, lacked its documented decoder/ablations, and its entry point no longer
-matched its calibration/trainer interfaces. It must not be cited as a working
+The removed neural `causal_setflow` prototype must not be cited as a working
 method or empirical result.
