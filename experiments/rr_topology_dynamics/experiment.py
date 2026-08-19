@@ -28,7 +28,7 @@ from .artifacts import (
 )
 from .attractor import CONTROL_FEATURE_NAMES, PRIMARY_FEATURE_NAMES
 from .extractor import TopologyDynamicsConfig, TopologyDynamicsExtractor
-from .spectral_diagnostics import load_rr_reference
+from .spectral_diagnostics import SpectralDiagnosticsExtractor, load_rr_reference
 
 
 @dataclass(frozen=True)
@@ -181,9 +181,7 @@ def fit_topology_reference(
     spectral_file = FrozenFile.capture(spectral_reference_path)
     spectral_reference = load_rr_reference(spectral_file.path)
     spectral_file.verify(spectral_file.path)
-    extractor = TopologyDynamicsExtractor(
-        topology_config, spectral_reference=spectral_reference
-    )
+    extractor = TopologyDynamicsExtractor(topology_config)
     sample_ids = _sample_ids(dataset, limit)
 
     feature_rows = []
@@ -319,8 +317,11 @@ def score_topology_dataset(
     spectral_reference = load_rr_reference(spectral_file.path)
     spectral_file.verify(spectral_file.path)
     topology_config = _topology_config_from_reference(topology_reference)
-    extractor = TopologyDynamicsExtractor(
-        topology_config, spectral_reference=spectral_reference
+    extractor = TopologyDynamicsExtractor(topology_config)
+    diagnostics_extractor = SpectralDiagnosticsExtractor(
+        spectral_reference,
+        top_k=topology_config.spectral_top_k,
+        block_rows=topology_config.block_rows,
     )
     sample_ids = _sample_ids(dataset, limit)
     source_audit = HeldOutSourceAudit(
@@ -369,9 +370,7 @@ def score_topology_dataset(
                 np.asarray(topology_reference["control_names"], dtype=str).tolist()
             ):
                 raise RuntimeError("topology control order differs from reference")
-            diagnostics = extracted.spectral_diagnostics
-            if diagnostics is None:
-                raise RuntimeError("spectral diagnostics were not configured")
+            diagnostics = diagnostics_extractor.extract(sample)
             raw = extracted.features
             response_count = len(raw)
             task_name = _metadata_text(sample.task_type)

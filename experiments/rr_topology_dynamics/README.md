@@ -88,10 +88,10 @@ spectral_diagnostics.py
   optional frozen-PCA residual diagnostics
 
 extractor.py
-  TopologyDynamicsExtractor.extract(sample) -> TopologyExtraction
+  core TopologyDynamicsExtractor.extract(sample) -> TopologyExtraction
 
 experiment.py
-  label-blind fit and score orchestration
+  label-blind fit; score explicitly adds spectral diagnostics
 
 evaluation.py
   labels opened only after the score artifact is frozen
@@ -126,18 +126,31 @@ rr-topology-dynamics-evaluation-v4
 
 ## Run
 
-The frozen RR spectral reference is required only for diagnostics and provenance.
+The RR spectral reference is used only for diagnostics and provenance. The run
+script builds it automatically when it does not exist and reuses it on later runs.
+
+Local Windows full run from PowerShell:
+
+```powershell
+cd D:\projects\python_projects\research\graph
+& "C:\Program Files\Git\bin\bash.exe" experiments/rr_topology_dynamics/run.sh
+```
+
+The script detects the local RAGTruth directory, the checked Python environment,
+and whether CUDA is available. Each topology run gets a timestamped directory;
+every stage writes a log below its `logs/` subdirectory. A failed stage exits
+non-zero and prints the exact log path.
 
 Smoke test:
 
 ```bash
-LIMIT=5 DEVICE=cuda bash experiments/rr_topology_dynamics/run.sh
+LIMIT=5 bash experiments/rr_topology_dynamics/run.sh
 ```
 
 Full audit:
 
 ```bash
-DEVICE=cuda bash experiments/rr_topology_dynamics/run.sh
+bash experiments/rr_topology_dynamics/run.sh
 ```
 
 Important environment variables:
@@ -147,6 +160,7 @@ ROOT                  dataset root containing train/ and test/
 SPECTRAL_REFERENCE    frozen RR spectral reference.npz
 OUT                   output directory
 RECENT_LAG_MAX        recent-response lag threshold, default 4
+RUN_TESTS             run focused preflight tests, default 1
 ```
 
 Outputs:

@@ -16,16 +16,16 @@ from cache import (
 )
 from experiment_protocol import dataset_manifest_sha256, file_sha256
 from experiments.rr_topology_dynamics import experiment as topology_experiment
-from experiments.rr_topology_dynamics.attractor import (
-    CONTROL_FEATURE_NAMES,
-    PRIMARY_FEATURE_NAMES,
-)
 from experiments.rr_topology_dynamics.artifacts import (
     EVALUATION_SCHEMA,
     REFERENCE_SCHEMA,
     SCORE_SCHEMA,
     load_topology_artifact,
     load_topology_reference,
+)
+from experiments.rr_topology_dynamics.attractor import (
+    CONTROL_FEATURE_NAMES,
+    PRIMARY_FEATURE_NAMES,
 )
 from experiments.rr_topology_dynamics.evaluation import (
     evaluate_topology_artifact,
@@ -166,6 +166,51 @@ class RRTopologyDynamicsTests(unittest.TestCase):
             self.assertEqual(int(modes.source_index[1, 1, 1]), 0)
             self.assertEqual(int(modes.lag[1, 1, 1]), 2)
             sample.release_attention()
+
+    def test_topology_fit_skips_score_only_spectral_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            train = _write_dataset(
+                root / "train",
+                [0.8, 1.0, 1.2, 1.1],
+                source_prefix="train-s",
+            )
+            spectral_path = root / "spectral_reference.npz"
+            fit_spectral_reference(
+                train,
+                spectral_path,
+                config=SpectralConfig(
+                    top_k=2,
+                    position_bins=2,
+                    pca_dim=2,
+                    reference_per_sample=3,
+                    trim_fraction=0.9,
+                    channel_tail_fraction=0.5,
+                    attribution_topk=2,
+                ),
+            )
+
+            with patch(
+                "experiments.rr_topology_dynamics.spectral_diagnostics."
+                "prefix_causal_attention_modes",
+                side_effect=AssertionError(
+                    "fit must not compute score-only spectral diagnostics"
+                ),
+            ):
+                fit_topology_reference(
+                    train,
+                    spectral_path,
+                    root / "topology_reference.npz",
+                    topology_config=TopologyDynamicsConfig(
+                        spectral_top_k=2,
+                        position_bins=2,
+                        recent_lag_max=1,
+                    ),
+                    audit_config=TopologyAuditConfig(
+                        reference_per_sample=3,
+                        min_task_bin_rows=2,
+                    ),
+                )
 
     def test_label_free_fit_score_then_posthoc_topology_audit(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -466,11 +511,8 @@ class RRTopologyDynamicsTests(unittest.TestCase):
                 )
             spectral_path.write_bytes(original_spectral)
 
-            spectral_reference = load_rr_reference(spectral_path)
             sample = test["r0"]
-            extracted = TopologyDynamicsExtractor(
-                topology_config, spectral_reference=spectral_reference
-            ).extract(sample)
+            extracted = TopologyDynamicsExtractor(topology_config).extract(sample)
             self.assertEqual(
                 extracted.features.shape, (3, len(PRIMARY_FEATURE_NAMES))
             )

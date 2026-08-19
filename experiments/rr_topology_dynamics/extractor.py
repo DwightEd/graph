@@ -8,13 +8,8 @@ import numpy as np
 
 from experiments.spectral_feasibility.representations import response_position_bin
 
-from .attractor import (
-    CONTROL_FEATURE_NAMES,
-    PRIMARY_FEATURE_NAMES,
-    AttractorFeatureExtractor,
-)
+from .attractor import AttractorFeatureExtractor
 from .routing_state import RoutingStateExtractor
-from .spectral_diagnostics import SpectralDiagnostics, SpectralDiagnosticsExtractor
 
 
 @dataclass(frozen=True)
@@ -44,7 +39,6 @@ class TopologyExtraction:
     control_names: tuple[str, ...]
     controls: np.ndarray
     position_bin: np.ndarray
-    spectral_diagnostics: SpectralDiagnostics | None = None
 
 
 class TopologyDynamicsExtractor:
@@ -53,8 +47,6 @@ class TopologyDynamicsExtractor:
     def __init__(
         self,
         config: TopologyDynamicsConfig | None = None,
-        *,
-        spectral_reference=None,
     ) -> None:
         self.config = TopologyDynamicsConfig() if config is None else config
         self.config.validate()
@@ -62,15 +54,6 @@ class TopologyDynamicsExtractor:
         self.attractor = AttractorFeatureExtractor(
             recent_lag_max=self.config.recent_lag_max,
             epsilon=self.config.epsilon,
-        )
-        self.spectral = (
-            None
-            if spectral_reference is None
-            else SpectralDiagnosticsExtractor(
-                spectral_reference,
-                top_k=self.config.spectral_top_k,
-                block_rows=self.config.block_rows,
-            )
         )
 
     def extract(self, sample) -> TopologyExtraction:
@@ -91,7 +74,4 @@ class TopologyDynamicsExtractor:
             control_names=features.control_names,
             controls=features.controls.detach().cpu().numpy().astype(np.float32),
             position_bin=position_bin,
-            spectral_diagnostics=(
-                None if self.spectral is None else self.spectral.extract(sample)
-            ),
         )

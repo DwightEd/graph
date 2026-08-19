@@ -64,7 +64,6 @@ class RoutingStateExtractorTest(unittest.TestCase):
         self.assertEqual(extracted.feature_names, PRIMARY_FEATURE_NAMES)
         self.assertEqual(extracted.features.shape, (3, len(PRIMARY_FEATURE_NAMES)))
         self.assertEqual(extracted.controls.shape, (3, 2))
-        self.assertIsNone(extracted.spectral_diagnostics)
 
 
 if __name__ == "__main__":
