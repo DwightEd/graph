@@ -261,8 +261,8 @@ class CanonicalBenchmarkFrameTests(unittest.TestCase):
             ("relative_position", "position_bin"),
         )
         self.assertEqual(
-            topology_scope("offline_source_distance_to_final").offline_future_features,
-            ("offline_source_distance_to_final",),
+            topology_scope("source_stability").offline_future_features,
+            (),
         )
     def test_intersection_cannot_erase_a_canonical_positive_response_label(self):
         complete = _evaluated(

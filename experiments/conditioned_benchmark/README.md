@@ -21,7 +21,7 @@ Only current owner contracts are accepted:
 |---|---|
 | `cmrp-score-v2` | frozen `score` primary |
 | `rr-spectral-score-v2` | frozen `score_rr_residual` primary |
-| `rr-topology-dynamics-features-v3` | explicitly named `features_z` column and fixed `higher`/`lower` direction |
+| `rr-topology-dynamics-features-v4` | explicitly named primary `features_z` column and fixed `higher`/`lower` direction |
 
 Legacy, unversioned, generic numeric, probe, and trajectory artifacts are
 rejected. RR topology features are mechanism measurements rather than frozen

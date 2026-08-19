@@ -19,6 +19,7 @@ from experiments.causal_multiplex_flow.artifacts import (
     verify_score_provenance as verify_cmrp_score_provenance,
 )
 from experiments.rr_topology_dynamics.artifacts import (
+    SCORE_SCHEMA as TOPOLOGY_SCORE_SCHEMA,
     load_topology_artifact,
 )
 from experiments.rr_topology_dynamics.artifacts import (
@@ -137,7 +138,7 @@ def load_score_artifact(spec: ArtifactSpec, frozen: FrozenFile) -> ScoreArtifact
         methods = _primary_method(
             spec, arrays, "score_rr_residual", spectral_temporal_scope()
         )
-    elif schema == "rr-topology-dynamics-features-v3":
+    elif schema == TOPOLOGY_SCORE_SCHEMA:
         arrays = load_topology_artifact(frozen.path)
         verify_topology_score_provenance(arrays)
         methods = _topology_methods(spec, arrays)

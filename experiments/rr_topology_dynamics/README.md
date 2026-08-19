@@ -1,301 +1,182 @@
-# RR attention topology dynamics audit
+# Prompt-grounded routing-attractor audit
 
-This directory studies *why* hallucination tokens leave the RR spectral
-subspace. It is a mechanism audit, not a replacement detector chosen after
-seeing the test labels.
+This experiment tests one focused mechanism hypothesis: hallucination is
+associated with a simple, stable response-history attractor that loses prompt
+grounding. It is a post-hoc mechanism audit, not a detector selected after
+reading test labels.
 
-## 1. Relation to the hidden-state trajectory project
+## Method
 
-The `DwightEd/demo` hidden-state mainline studies ordered state updates. Its
-current hypothesis is not simply that correct reasoning becomes concentrated.
-A wrong chain can be internally coherent and converge to a wrong attractor; the
-important question is whether a trajectory follows the conditional class of
-correct ordered flows.
-
-The attention analogue is:
+The cache stores response queries with exact retained prompt and earlier-response
+source identities. For every generated token, the extractor first builds:
 
 ```text
-hidden state H_t       = what internal state the model occupies
-attention graph A_t    = how information is routed to form/update that state
+prompt_source_mass[response_token, prompt_token]
+response_source_mass[response_token, earlier_response_token]
 ```
 
-We therefore test whether response-history routing evolves from many modes to a
-smaller, stable set of modes, but **convergence alone is not correctness**. Two
-converged regimes must be distinguished:
+All layer/head edges are accumulated by exact source identity. Missing cache
+entries remain censored below `attention_floor`; they are not treated as exact
+zeros. Prompt query rows are unavailable, but prompt source identities for every
+response query are available and retained.
+
+The core feature matrix has eight predeclared columns:
+
+| Group | Feature | Hypothesized hallucination direction |
+|---|---|---|
+| Prompt support | `prompt_attention_share` | lower |
+| Prompt concentration | `prompt_source_effective_fraction` | lower |
+| Prompt concentration | `prompt_source_top1_share` | higher |
+| Response concentration | `response_source_effective_fraction` | lower |
+| Response concentration | `response_source_top1_share` | higher |
+| Local response feedback | `recent_response_share` | higher |
+| Routing stability | `source_stability` | higher |
+| Prompt provenance | `prompt_groundedness` | lower |
+
+`prompt_source_effective_fraction` divides the entropy-effective source count by
+prompt length. The response version divides by the number of legal earlier
+response sources. `source_stability` is one minus the normalized Jensen-Shannon
+distance between consecutive exact-source distributions.
+
+Prompt groundedness is propagated causally:
 
 ```text
-prompt-grounded convergence:
-  prompt evidence -> grounded response relays -> current token
-
-self-reinforcing convergence:
-  unsupported response history -> repeated RR feedback -> current token
+direct_t   = prompt_mass_t / retained_mass_t
+relay_t    = sum_j p(response_source=j | t) * grounded_j
+grounded_t = direct_t + (1 - direct_t) * relay_t
 ```
 
-The current attention cache contains no logits, NLL, entropy, or calibrated
-confidence. This experiment cannot claim that a lower route rank means the
-answer becomes more confident. It only measures routing concentration,
-stability, grounding, and topology.
+This distinguishes a token that has no direct prompt edge but follows a grounded
+response relay from a token inside an unsupported response-only feedback loop.
 
-## 2. Data boundary
+No arbitrary product of the eight signals is declared as a detector. Evaluation
+reports each predeclared direction at matched task/position and at the first
+hallucination onset.
 
-Every raw attention access goes through `open_research_dataset()` and
-`ResearchSample.iter_sparse_attention_blocks()`. No experiment file parses NPZ
-or PT caches directly.
+## Controls and diagnostics
 
-A retained RR edge is
+Two cache-quality controls are stored separately and never standardized as core
+features:
 
 ```text
-(source response token j, target response token t, layer, head, weight), j < t.
+retained_attention_mass
+retained_edge_count
 ```
 
-Missing CSR entries remain censored below `attention_floor`; they are not exact
-zero-weight observations. Prompt query rows are unavailable, so prompt tokens
-are source anchors rather than a fabricated full prompt graph.
-
-## 3. Frozen RR spectral reference
-
-The audit consumes the previously fitted, label-free RR spectral reference. For
-channel `c=(layer,head)`, prefix `t`, and response source `j`,
+The previous PCA reconstruction family is diagnostic-only. It lives in
+`spectral_diagnostics.py` and produces:
 
 ```text
-d_age[c,t,j] = sum_{u=j..t} A_c[u,j] / (t-j+1) - A_c[j,j]
+spectral_residual_energy
+layer_residual_energy
+spectral_rank_residual_energy
+rr_embedding
 ```
 
-This is an artificial age-normalized triangular attention operator, not a
-standard graph Laplacian. Its diagonal coordinates are used directly, without
-eigendecomposition or eigenvector rotation, and the strongest-magnitude signed
-values are retained per channel. The `prefix_causal_attention_modes()`
-interface additionally preserves the selected source index and lag. This is
-necessary to trace a PCA residual back to actual response-history anchors
-instead of reporting only a 5120-dimensional scalar error.
+These fields do not enter the eight-column attractor feature matrix.
 
-## 4. Route convergence object
-
-For every token and exact layer/head channel, RR weights are accumulated into
-log2 lag bins:
+## Code structure
 
 ```text
-R_t[c,b] = sum_{j<t, floor(log2(t-j))=b} A_c[t,j].
+routing_state.py
+  sparse attention blocks -> exact prompt/RR source mass
+
+attractor.py
+  concentration, stability, and causal prompt grounding
+
+spectral_diagnostics.py
+  optional frozen-PCA residual diagnostics
+
+extractor.py
+  TopologyDynamicsExtractor.extract(sample) -> TopologyExtraction
+
+experiment.py
+  label-blind fit and score orchestration
+
+evaluation.py
+  labels opened only after the score artifact is frozen
+
+artifacts.py
+  strict v4 artifact validation and provenance
 ```
 
-Each active channel is normalized over lag bins. Let `P_t` be the resulting
-`[channel, lag_bin]` matrix. The audit reports:
+The core extraction cost is linear in retained sparse edges plus the exact-source
+state size `R * (P + R)`, where `P` and `R` are prompt and response lengths.
 
-- effective rank, participation rank, and stable rank of `P_t`;
-- spectral entropy and leading-mode energy share;
-- cross-head cosine consensus;
-- fraction of active channels;
-- cosine velocity between consecutive route states;
-- offline distance to the final route state.
-
-A falling effective rank with rising consensus means many channels are using a
-smaller family of lag-routing patterns. It does **not** establish correctness.
-The final-state distance is explicitly offline/future-using and is never a
-causal detector feature.
-
-The audit also standardizes every trajectory using relative-position bins that
-are computed from the completed response length. Thus its per-prefix attention
-features are causally constructed, but the reported `features_z` trajectories
-and all post-hoc effects are **offline post-generation** analyses, not strictly
-online causal scores.
-
-## 5. Exact-source convergence
-
-Lag-bin rank can hide source identity. Therefore all retained RR weights are
-also pooled by exact response source. The audit reports:
-
-- effective number and normalized entropy of active sources;
-- largest-source share;
-- weighted mean and standard deviation of lag;
-- far-history mass fraction;
-- source-distribution velocity;
-- turnover of the top response anchors.
-
-These features separate `many lag modes` from `many exact source anchors`.
-
-## 6. CAT-Walk-inspired RP/RR hyperedge coordination
-
-The official CAT-Walk encoder is not copied here: it trains SetMixer and an
-MLP-Mixer for future-hyperedge prediction. We reuse only its higher-order idea
-that one walk step should retain the whole source set. For every token, layer,
-and head, the retained attention hyperedge is represented by three anonymous
-roles:
-
-```text
-[RP mass, recent-RR mass, non-recent-RR mass].
-```
-
-Here RP is response-query to prompt-source attention; in the direction of
-information flow this is prompt-to-response (PR). The 32 vectors in one layer
-form an unordered head set. Their mean and covariance are permutation invariant,
-and consecutive-layer distance is
-
-```text
-sqrt(||mean_l - mean_(l-1)||^2 + ||cov_l - cov_(l-1)||_F^2).
-```
-
-This avoids pretending that head index `h` in two different layers has the same
-semantic role. The audit retains per-layer relation effective rank, consensus,
-RP/RR specialization, RP fraction, recent-RR fraction, exact-source effective
-number, exact-source top-1 share, and relation-set transition distance.
-
-The proposed premature local-history collapse is deliberately factored rather
-than treated as a label-derived score:
-
-```text
-collapse_l = RR_fraction_l
-           * recent_RR_fraction_l
-           * exact_RR_source_top1_share_l.
-```
-
-The artifact saves the complete layer trajectory plus its early-third,
-late-third, early-minus-late, mean-strength, and layer-center summaries. For a
-layer-order control, the mean distance of true consecutive layers is also
-compared with the mean distance over every unordered layer pair. A negative
-`cross_layer_adjacency_gap_vs_all_pairs` means true neighbors are smoother than
-the layer-shuffled expectation. Thus the evaluation can separately ask whether
-hallucination is stronger, earlier in Transformer depth, or disrupts genuine
-layer order. No direction is selected from test labels.
-
-## 7. Prompt-grounded versus self-reinforcing convergence
-
-Prompt support is propagated causally through response history. For token `t`,
-
-```text
-direct_t = prompt_mass_t / (prompt_mass_t + RR_mass_t)
-relay_t  = sum_j p_RR(t,j) * grounded_j
-grounded_t = direct_t + (1-direct_t) * relay_t
-```
-
-The complementary relay through low-groundedness sources is reported as
-`ungrounded_rr_feedback`. This is a bounded diagnostic of prompt-rooted
-provenance under the retained attention graph, not a factuality oracle.
-
-It lets the experiment distinguish:
-
-```text
-low route rank + high grounded relay      (potentially supported convergence)
-low route rank + high ungrounded feedback (potential self-reinforcing attractor)
-```
-
-## 8. Where spectral-subspace reconstruction fails
-
-The frozen PCA residual is reshaped back to
-
-```text
-[token, layer, head, selected spectral rank].
-```
-
-The audit reports:
-
-- layer-wise residual energy;
-- residual energy by selected spectral rank;
-- effective number/entropy of abnormal channels;
-- top-1 and top-5%-channel residual shares;
-- residual-weighted source lag;
-- recent/middle/far residual shares;
-- residual-weighted prompt groundedness;
-- effective number and largest share of implicated source tokens.
-
-This separates three explanations:
-
-1. one isolated head spikes;
-2. a distributed set of heads drifts;
-3. the same spectral magnitude moves to different source/lag/grounding roles.
-
-## 9. Label discipline and evaluation
-
-The runner has three stages:
+## Protocol
 
 ```text
 train attention + frozen spectral reference
-    -> task/position robust topology reference       labels never opened
+    -> fit task/position scales for eight core features (labels sealed)
 
 test attention
-    -> raw/z topology trajectories and profiles      labels never opened
+    -> freeze core features, controls, and spectral diagnostics (labels sealed)
 
-frozen feature artifact
-    -> post-hoc correct/error and onset analysis      labels opened here only
+frozen artifact
+    -> feature, within-response, phase, and first-onset analysis (labels opened)
 ```
 
-The topology reference records the resolved spectral-reference path and
-SHA-256 digest. Its reserved source set is the union of the spectral fit/cal
-groups and every topology-fit group. Scoring accepts only that exact spectral
-file, verifies both frozen references, and streams each selected test sample
-through a held-out source audit before feature extraction. The score
-artifact persists both reference identities/digests, the reserved and test
-groups, the selected test sample IDs, and whether the audit covered the
-complete split or only a limited selection. It also stores the exact on-disk
-test `manifest.json` digest and per-row `response_length`, with strict complete
-`0..R-1` coverage for each selected response. Evaluation verifies that manifest,
-the canonical source, and the attention-derived response length before labels
-are opened.
-
-The frozen contracts are versioned as
-`rr-topology-dynamics-reference-v3`,
-`rr-topology-dynamics-features-v3`, and
-`rr-topology-dynamics-evaluation-v3`. The reference and feature files are
-validated again at every load boundary.
-
-The evaluation writes:
+The artifact contracts are:
 
 ```text
-report.json
-feature_metrics.csv
-within_sample_effects.csv
-onset_effects.csv
-phase_curves.csv
-layer_metrics.csv
-spectral_rank_metrics.csv
-residual_correlations.csv
+rr-topology-dynamics-reference-v4
+rr-topology-dynamics-features-v4
+rr-topology-dynamics-evaluation-v4
 ```
 
-Feature metrics report both signed direction and orientation-free separability.
-Within-sample and onset effects are computed from the train-standardized
-`features_z` coordinates and use sample-cluster bootstrap. Onset means the
-first observed `0 -> 1` transition in each response; later positive runs are
-not averaged into that response's effect. No feature direction or weight is
-fed back into representation construction.
+## Run
 
-## 10. Run
-
-The full RR spectral reference must already exist at the default location, or
-`SPECTRAL_REFERENCE` must point to another frozen `reference.npz`.
+The frozen RR spectral reference is required only for diagnostics and provenance.
 
 Smoke test:
 
 ```bash
-LIMIT=5 CUDA_VISIBLE_DEVICES=0 DEVICE=cuda \
-  bash experiments/rr_topology_dynamics/run.sh
+LIMIT=5 DEVICE=cuda bash experiments/rr_topology_dynamics/run.sh
 ```
 
 Full audit:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0 DEVICE=cuda \
-  bash experiments/rr_topology_dynamics/run.sh
+DEVICE=cuda bash experiments/rr_topology_dynamics/run.sh
 ```
 
-Outputs are isolated:
+Important environment variables:
 
 ```text
-experiments/rr_topology_dynamics/outputs/setwalk_coordination/smoke_5/
-experiments/rr_topology_dynamics/outputs/setwalk_coordination/full/
+ROOT                  dataset root containing train/ and test/
+SPECTRAL_REFERENCE    frozen RR spectral reference.npz
+OUT                   output directory
+RECENT_LAG_MAX        recent-response lag threshold, default 4
 ```
 
-## 11. Claim boundary
+Outputs:
 
-A lower route rank, higher head consensus, or smaller distance to a final route
-state is only evidence of routing convergence. The scientifically stronger
-claim requires the following joint pattern:
+```text
+reference.npz
+test_features.npz
+evaluation/report.json
+evaluation/feature_metrics.csv
+evaluation/control_metrics.csv
+evaluation/within_sample_effects.csv
+evaluation/onset_effects.csv
+evaluation/phase_curves.csv
+evaluation/layer_metrics.csv
+evaluation/spectral_rank_metrics.csv
+evaluation/residual_correlations.csv
+```
 
-1. convergence differs at hallucination onset after position/task adjustment;
-2. grounded relay and ungrounded feedback distinguish correct/error regimes;
-3. residual source/lag/layer attribution identifies a repeatable topology
-   change rather than only a scalar mass shift;
-4. exact topology later outperforms lag/mass-preserving rewired controls.
+## Claim boundary
 
-The present audit addresses the first three questions. The existing causal
-rewiring experiment in `docs/method.md` provides the complementary topology
-control, but its intervention does not preserve exact lag, in-degree, or source
-collisions and must be interpreted accordingly.
+The method observes retained attention routing, not factual truth, confidence,
+or the complete sub-floor attention distribution. A convincing error-attractor
+claim requires the joint directional pattern to repeat across tasks and sources:
+
+```text
+less and more concentrated prompt support
++ more concentrated, local response reuse
++ higher routing stability
++ lower prompt groundedness
+```
+
+Correct responses may also converge. Concentration or stability alone is not
+evidence of hallucination.

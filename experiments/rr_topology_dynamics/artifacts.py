@@ -15,27 +15,20 @@ from experiment_protocol import (
     validate_source_audit,
 )
 from experiments.spectral_feasibility.artifacts import load_spectral_reference
-from .features import LAYER_PROFILE_NAMES
+from .attractor import CONTROL_FEATURE_NAMES, PRIMARY_FEATURE_NAMES
 
-REFERENCE_SCHEMA = "rr-topology-dynamics-reference-v3"
-SCORE_SCHEMA = "rr-topology-dynamics-features-v3"
-EVALUATION_SCHEMA = "rr-topology-dynamics-evaluation-v3"
+REFERENCE_SCHEMA = "rr-topology-dynamics-reference-v4"
+SCORE_SCHEMA = "rr-topology-dynamics-features-v4"
+EVALUATION_SCHEMA = "rr-topology-dynamics-evaluation-v4"
 
 
 def score_temporal_scope(feature_column: str | None = None) -> TemporalScope:
     """Describe one topology feature or the complete direct-audit artifact."""
 
-    final_distance_features = (
-        "offline_route_distance_to_final",
-        "offline_source_distance_to_final",
-    )
-    offline = final_distance_features if feature_column is None else ()
-    if feature_column in final_distance_features:
-        offline = (feature_column,)
     return TemporalScope(
         online_causal_score=False,
         future_length_conditioned_fields=("relative_position", "position_bin"),
-        offline_future_features=offline,
+        offline_future_features=(),
     )
 
 
@@ -75,14 +68,11 @@ def load_topology_reference(path):
         "train_dataset_manifest_sha256",
         "reference_source_id",
         "feature_names",
-        "lag_bins",
+        "control_names",
         "spectral_top_k",
         "block_rows",
         "position_bins",
-        "top_source_count",
         "recent_lag_max",
-        "mid_lag_max",
-        "far_lag_fraction",
         "epsilon",
         "reference_per_sample",
         "min_task_bin_rows",
@@ -116,6 +106,7 @@ def load_topology_reference(path):
     _source_groups(reference, "reference_source_id")
 
     feature_names = np.asarray(reference["feature_names"])
+    control_names = np.asarray(reference["control_names"])
     features = np.asarray(reference["reference_features"])
     if (
         feature_names.ndim != 1
@@ -124,6 +115,14 @@ def load_topology_reference(path):
         or len(set(map(str, feature_names.tolist()))) != len(feature_names)
     ):
         raise ValueError("RR topology feature names are invalid")
+    if tuple(map(str, feature_names.tolist())) != PRIMARY_FEATURE_NAMES:
+        raise ValueError("RR topology primary feature schema changed")
+    if (
+        control_names.ndim != 1
+        or control_names.dtype.kind not in {"U", "S"}
+        or tuple(map(str, control_names.tolist())) != CONTROL_FEATURE_NAMES
+    ):
+        raise ValueError("RR topology control names are invalid")
     if features.ndim != 2 or features.shape[1] != len(feature_names) or not len(features):
         raise ValueError("RR topology reference feature geometry is inconsistent")
     if not np.issubdtype(features.dtype, np.floating):
@@ -205,11 +204,12 @@ def load_topology_artifact(path):
         "generator_model",
     }
     integer_rows = {"token_index", "response_length", "position_bin"}
-    float_rows = {"relative_position"}
+    float_rows = {"relative_position", "spectral_residual_energy"}
     matrix_rows = {
         "features_raw",
         "features_z",
-        *LAYER_PROFILE_NAMES,
+        "controls_raw",
+        "layer_residual_energy",
         "spectral_rank_residual_energy",
         "rr_embedding",
     }
@@ -226,6 +226,7 @@ def load_topology_artifact(path):
         "test_sample_id",
         "audit_scope",
         "feature_names",
+        "control_names",
     }
     missing = required.difference(artifact)
     if missing:
@@ -239,6 +240,7 @@ def load_topology_artifact(path):
     sha256_text(artifact, "dataset_manifest_sha256")
 
     feature_names = np.asarray(artifact["feature_names"])
+    control_names = np.asarray(artifact["control_names"])
     if (
         feature_names.ndim != 1
         or feature_names.dtype.kind not in {"U", "S"}
@@ -246,6 +248,14 @@ def load_topology_artifact(path):
         or len(set(map(str, feature_names.tolist()))) != len(feature_names)
     ):
         raise ValueError("RR topology artifact feature names are invalid")
+    if tuple(map(str, feature_names.tolist())) != PRIMARY_FEATURE_NAMES:
+        raise ValueError("RR topology artifact primary feature schema changed")
+    if (
+        control_names.ndim != 1
+        or control_names.dtype.kind not in {"U", "S"}
+        or tuple(map(str, control_names.tolist())) != CONTROL_FEATURE_NAMES
+    ):
+        raise ValueError("RR topology artifact control names are invalid")
     raw = np.asarray(artifact["features_raw"])
     if raw.ndim != 2 or not len(raw):
         raise ValueError("RR topology artifact requires a non-empty feature matrix")
@@ -282,12 +292,9 @@ def load_topology_artifact(path):
         feature_names
     ):
         raise ValueError("RR topology raw/z feature geometry is inconsistent")
-    layer_shape = np.asarray(artifact[LAYER_PROFILE_NAMES[0]]).shape
-    if any(
-        np.asarray(artifact[name]).shape != layer_shape
-        for name in LAYER_PROFILE_NAMES[1:]
-    ):
-        raise ValueError("RR topology layer feature geometry is inconsistent")
+    controls = np.asarray(artifact["controls_raw"])
+    if controls.shape != (row_count, len(control_names)):
+        raise ValueError("RR topology control geometry is inconsistent")
     numeric = float_rows | matrix_rows
     if any(not bool(np.isfinite(artifact[name]).all()) for name in numeric):
         raise ValueError("RR topology artifact contains non-finite values")

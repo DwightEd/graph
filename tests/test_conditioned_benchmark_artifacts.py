@@ -12,7 +12,11 @@ from experiments.conditioned_benchmark.artifacts import (
     ArtifactSpec,
     load_score_artifact,
 )
-from experiments.rr_topology_dynamics.features import LAYER_PROFILE_NAMES
+from experiments.rr_topology_dynamics.artifacts import SCORE_SCHEMA
+from experiments.rr_topology_dynamics.attractor import (
+    CONTROL_FEATURE_NAMES,
+    PRIMARY_FEATURE_NAMES,
+)
 
 
 def _spectral_v2_artifact():
@@ -49,9 +53,10 @@ def _spectral_v2_artifact():
     }
 
 
-def _topology_v3_artifact(root: Path):
+def _topology_v4_artifact(root: Path):
+    features = np.ones((2, len(PRIMARY_FEATURE_NAMES)), dtype=np.float32)
     artifact = {
-        "schema": np.asarray("rr-topology-dynamics-features-v3"),
+        "schema": np.asarray(SCORE_SCHEMA),
         "spectral_reference_path": np.asarray(str((root / "spectral.npz").resolve())),
         "spectral_reference_sha256": np.asarray("a" * 64),
         "topology_reference_path": np.asarray(str((root / "topology.npz").resolve())),
@@ -61,7 +66,8 @@ def _topology_v3_artifact(root: Path):
         "test_group_id": np.asarray(["test-source"]),
         "test_sample_id": np.asarray(["sample"]),
         "audit_scope": np.asarray("complete_split"),
-        "feature_names": np.asarray(["grounding", "rank"]),
+        "feature_names": np.asarray(PRIMARY_FEATURE_NAMES),
+        "control_names": np.asarray(CONTROL_FEATURE_NAMES),
         "sample_id": np.asarray(["sample", "sample"]),
         "source_id": np.asarray(["test-source", "test-source"]),
         "task_type": np.asarray(["QA", "QA"]),
@@ -71,17 +77,14 @@ def _topology_v3_artifact(root: Path):
         "response_length": np.asarray([2, 2], dtype=np.int32),
         "position_bin": np.asarray([0, 1], dtype=np.int32),
         "relative_position": np.asarray([0.0, 1.0], dtype=np.float32),
-        "features_raw": np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
-        "features_z": np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+        "features_raw": features,
+        "features_z": features.copy(),
+        "controls_raw": np.ones((2, len(CONTROL_FEATURE_NAMES)), dtype=np.float32),
+        "spectral_residual_energy": np.ones(2, dtype=np.float32),
+        "layer_residual_energy": np.ones((2, 1), dtype=np.float32),
         "spectral_rank_residual_energy": np.ones((2, 1), dtype=np.float32),
         "rr_embedding": np.ones((2, 1), dtype=np.float32),
     }
-    artifact.update(
-        {
-            name: np.ones((2, 1), dtype=np.float32)
-            for name in LAYER_PROFILE_NAMES
-        }
-    )
     return artifact
 
 
@@ -140,11 +143,11 @@ class StrictArtifactTests(unittest.TestCase):
             spec = ArtifactSpec(
                 "topology",
                 str(path),
-                column="grounding",
+                column="prompt_groundedness",
                 direction="lower",
             )
             for missing in ("audit_scope", "topology_reference_sha256"):
-                malformed = _topology_v3_artifact(root)
+                malformed = _topology_v4_artifact(root)
                 malformed.pop(missing)
                 np.savez_compressed(path, **malformed)
                 with (
@@ -153,7 +156,7 @@ class StrictArtifactTests(unittest.TestCase):
                 ):
                     load_score_artifact(spec, FrozenFile.capture(path))
 
-            np.savez_compressed(path, **_topology_v3_artifact(root))
+            np.savez_compressed(path, **_topology_v4_artifact(root))
             with self.assertRaises(FileNotFoundError):
                 load_score_artifact(spec, FrozenFile.capture(path))
 

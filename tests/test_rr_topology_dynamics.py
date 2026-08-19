@@ -16,6 +16,10 @@ from cache import (
 )
 from experiment_protocol import dataset_manifest_sha256, file_sha256
 from experiments.rr_topology_dynamics import experiment as topology_experiment
+from experiments.rr_topology_dynamics.attractor import (
+    CONTROL_FEATURE_NAMES,
+    PRIMARY_FEATURE_NAMES,
+)
 from experiments.rr_topology_dynamics.artifacts import (
     EVALUATION_SCHEMA,
     REFERENCE_SCHEMA,
@@ -32,14 +36,11 @@ from experiments.rr_topology_dynamics.experiment import (
     fit_topology_reference,
     score_topology_dataset,
 )
-from experiments.rr_topology_dynamics.features import (
+from experiments.rr_topology_dynamics.extractor import (
     TopologyDynamicsConfig,
-    _batched_route_spectrum,
-    _mean_pairwise_cosine,
-    _prompt_groundedness,
-    extract_sample_topology_dynamics,
-    load_rr_reference,
+    TopologyDynamicsExtractor,
 )
+from experiments.rr_topology_dynamics.spectral_diagnostics import load_rr_reference
 from experiments.spectral_feasibility.experiment import fit_spectral_reference
 from experiments.spectral_feasibility.representations import (
     SpectralConfig,
@@ -166,42 +167,6 @@ class RRTopologyDynamicsTests(unittest.TestCase):
             self.assertEqual(int(modes.lag[1, 1, 1]), 2)
             sample.release_attention()
 
-    def test_route_rank_and_consensus_distinguish_collapsed_routes(self):
-        collapsed = torch.tensor(
-            [[[1.0, 0.0], [1.0, 0.0]]], dtype=torch.float32
-        )
-        diverse = torch.tensor(
-            [[[1.0, 0.0], [0.0, 1.0]]], dtype=torch.float32
-        )
-        collapsed_rank = _batched_route_spectrum(collapsed, 1e-8)[0]
-        diverse_rank = _batched_route_spectrum(diverse, 1e-8)[0]
-        self.assertGreater(float(diverse_rank[0]), float(collapsed_rank[0]))
-        active = torch.ones((1, 2), dtype=torch.bool)
-        collapsed_consensus = _mean_pairwise_cosine(collapsed, active, 1e-8)
-        diverse_consensus = _mean_pairwise_cosine(diverse, active, 1e-8)
-        self.assertGreater(
-            float(collapsed_consensus[0]), float(diverse_consensus[0])
-        )
-
-    def test_prompt_grounding_separates_relay_from_feedback(self):
-        prompt = np.asarray([1.0, 0.0, 0.0], dtype=np.float32)
-        grounded_chain = np.zeros((3, 3), dtype=np.float32)
-        grounded_chain[1, 0] = 1.0
-        grounded_chain[2, 1] = 1.0
-        _, grounded, relay, feedback = _prompt_groundedness(
-            prompt, grounded_chain, 1e-8
-        )
-        self.assertGreater(float(grounded[2]), 0.99)
-        self.assertGreater(float(relay[2]), 0.99)
-        self.assertLess(float(feedback[2]), 0.01)
-
-        no_prompt = np.zeros(3, dtype=np.float32)
-        _, ungrounded, _, ungrounded_feedback = _prompt_groundedness(
-            no_prompt, grounded_chain, 1e-8
-        )
-        self.assertLess(float(ungrounded[2]), 0.01)
-        self.assertGreater(float(ungrounded_feedback[2]), 0.99)
-
     def test_label_free_fit_score_then_posthoc_topology_audit(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -236,12 +201,9 @@ class RRTopologyDynamicsTests(unittest.TestCase):
             self.assertFalse(spectral_fit["labels_read"])
 
             topology_config = TopologyDynamicsConfig(
-                lag_bins=3,
                 spectral_top_k=2,
                 position_bins=2,
-                top_source_count=2,
                 recent_lag_max=1,
-                mid_lag_max=2,
             )
             audit_config = TopologyAuditConfig(
                 reference_per_sample=3,
@@ -259,7 +221,7 @@ class RRTopologyDynamicsTests(unittest.TestCase):
                 audit_config=audit_config,
             )
             self.assertFalse(fitted["labels_read"])
-            self.assertEqual(fitted["feature_dim"], 48)
+            self.assertEqual(fitted["feature_dim"], len(PRIMARY_FEATURE_NAMES))
             with np.load(topology_path, allow_pickle=False) as arrays:
                 self.assertEqual(str(arrays["schema"].item()), REFERENCE_SCHEMA)
                 self.assertNotIn("label", arrays.files)
@@ -359,7 +321,14 @@ class RRTopologyDynamicsTests(unittest.TestCase):
                     dataset_manifest_sha256(test),
                 )
                 np.testing.assert_array_equal(arrays["response_length"], [3] * 6)
-                self.assertEqual(arrays["features_raw"].shape, (6, 48))
+                self.assertEqual(
+                    arrays["features_raw"].shape, (6, len(PRIMARY_FEATURE_NAMES))
+                )
+                self.assertEqual(
+                    tuple(arrays["control_names"].tolist()), CONTROL_FEATURE_NAMES
+                )
+                self.assertEqual(arrays["controls_raw"].shape, (6, 2))
+                self.assertEqual(arrays["spectral_residual_energy"].shape, (6,))
                 self.assertEqual(arrays["layer_residual_energy"].shape, (6, 1))
                 self.assertEqual(
                     arrays["spectral_rank_residual_energy"].shape, (6, 2)
@@ -499,10 +468,12 @@ class RRTopologyDynamicsTests(unittest.TestCase):
 
             spectral_reference = load_rr_reference(spectral_path)
             sample = test["r0"]
-            extracted = extract_sample_topology_dynamics(
-                sample, spectral_reference, config=topology_config
+            extracted = TopologyDynamicsExtractor(
+                topology_config, spectral_reference=spectral_reference
+            ).extract(sample)
+            self.assertEqual(
+                extracted.features.shape, (3, len(PRIMARY_FEATURE_NAMES))
             )
-            self.assertEqual(extracted["features"].shape, (3, 48))
             sample.release_attention()
 
             original_topology = topology_path.read_bytes()
@@ -537,14 +508,14 @@ class RRTopologyDynamicsTests(unittest.TestCase):
                 report["claim_boundaries"]["confidence_available"]
             )
             self.assertIn(
-                "route_effective_rank", report["feature_metrics_raw"]
+                "prompt_attention_share", report["feature_metrics_raw"]
             )
             self.assertIn(
-                "route_effective_rank",
+                "prompt_attention_share",
                 report["within_sample_effects_train_standardized"],
             )
             self.assertIn(
-                "route_effective_rank",
+                "prompt_attention_share",
                 report["first_hallucination_onset_effects_train_standardized"],
             )
             self.assertNotIn("within_sample_effects", report)
@@ -564,10 +535,7 @@ class RRTopologyDynamicsTests(unittest.TestCase):
             )
             self.assertEqual(
                 report["claim_boundaries"]["offline_future_features"],
-                [
-                    "offline_route_distance_to_final",
-                    "offline_source_distance_to_final",
-                ],
+                [],
             )
             self.assertTrue((evaluation_dir / "report.json").is_file())
             self.assertTrue((evaluation_dir / "onset_effects.csv").is_file())
@@ -602,27 +570,25 @@ class RRTopologyDynamicsTests(unittest.TestCase):
                 spectral_path,
                 topology_path,
                 topology_config=TopologyDynamicsConfig(
-                    lag_bins=3,
                     spectral_top_k=2,
                     position_bins=2,
-                    top_source_count=2,
                 ),
                 audit_config=TopologyAuditConfig(
                     reference_per_sample=3, min_task_bin_rows=2
                 ),
             )
             manifest_path = test.root / "manifest.json"
-            original_extract = topology_experiment.extract_sample_topology_dynamics
+            original_extract = TopologyDynamicsExtractor.extract
 
-            def extract_then_mutate(*args, **kwargs):
-                result = original_extract(*args, **kwargs)
+            def extract_then_mutate(extractor, sample):
+                result = original_extract(extractor, sample)
                 manifest_path.write_bytes(manifest_path.read_bytes() + b"changed")
                 return result
 
             with patch.object(
-                topology_experiment,
-                "extract_sample_topology_dynamics",
-                side_effect=extract_then_mutate,
+                topology_experiment.TopologyDynamicsExtractor,
+                "extract",
+                new=extract_then_mutate,
             ), self.assertRaisesRegex(ValueError, "frozen file digest"):
                 score_topology_dataset(
                     test,
@@ -662,10 +628,8 @@ class RRTopologyDynamicsTests(unittest.TestCase):
                 spectral_path,
                 topology_path,
                 topology_config=TopologyDynamicsConfig(
-                    lag_bins=3,
                     spectral_top_k=2,
                     position_bins=2,
-                    top_source_count=2,
                 ),
                 audit_config=TopologyAuditConfig(
                     reference_per_sample=3,
@@ -706,10 +670,8 @@ class RRTopologyDynamicsTests(unittest.TestCase):
                 spectral_path,
                 topology_path,
                 topology_config=TopologyDynamicsConfig(
-                    lag_bins=3,
                     spectral_top_k=2,
                     position_bins=2,
-                    top_source_count=2,
                 ),
                 audit_config=TopologyAuditConfig(
                     reference_per_sample=3,

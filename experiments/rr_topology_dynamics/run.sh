@@ -19,7 +19,7 @@ else
   EXTRA=()
   BOOTSTRAP_DEFAULT=1000
 fi
-OUT=${OUT:-experiments/rr_topology_dynamics/outputs/setwalk_coordination/$RUN_NAME}
+OUT=${OUT:-experiments/rr_topology_dynamics/outputs/prompt_attractor/$RUN_NAME}
 
 if [[ ! -f "$SPECTRAL_REFERENCE" ]]; then
   cat >&2 <<EOF
@@ -35,13 +35,11 @@ fi
 
 mkdir -p "$OUT/evaluation"
 
-echo "experiment=rr_topology_dynamics (diagnostic audit, not causal SetWalk)"
-echo "causal_setwalk_runner=experiments/causal_attention_setwalk/run.sh"
+echo "experiment=rr_topology_dynamics (prompt-grounded attractor audit)"
 echo "dataset_root=$ROOT"
 echo "spectral_reference=$SPECTRAL_REFERENCE"
 echo "output=$OUT"
 echo "device=$DEVICE"
-echo "lag_bins=${LAG_BINS:-8}"
 echo "spectral_top_k=${SPECTRAL_TOP_K:-5}"
 echo "position_bins=${POSITION_BINS:-8}"
 echo "reference_per_sample=${REFERENCE_PER_SAMPLE:-16}"
@@ -54,14 +52,10 @@ printf '\n[1/3] fit label-free topology feature reference on train\n'
   --spectral-reference "$SPECTRAL_REFERENCE" \
   --output "$OUT/reference.npz" \
   --device "$DEVICE" \
-  --lag-bins "${LAG_BINS:-8}" \
   --spectral-top-k "${SPECTRAL_TOP_K:-5}" \
   --block-rows "${BLOCK_ROWS:-8192}" \
   --position-bins "${POSITION_BINS:-8}" \
-  --top-source-count "${TOP_SOURCE_COUNT:-8}" \
   --recent-lag-max "${RECENT_LAG_MAX:-4}" \
-  --mid-lag-max "${MID_LAG_MAX:-16}" \
-  --far-lag-fraction "${FAR_LAG_FRACTION:-0.5}" \
   --reference-per-sample "${REFERENCE_PER_SAMPLE:-16}" \
   --min-task-bin-rows "${MIN_TASK_BIN_ROWS:-8}" \
   --phase-bins "${PHASE_BINS:-10}" \

@@ -1,15 +1,16 @@
-"""Dynamic topology audit for causal response-history attention graphs."""
+"""Prompt-grounded routing-attractor audit for generated tokens."""
 
-from .features import (
-    SCALAR_FEATURE_NAMES,
+from .attractor import CONTROL_FEATURE_NAMES, PRIMARY_FEATURE_NAMES
+from .extractor import (
     TopologyDynamicsConfig,
-    extract_sample_topology_dynamics,
-    load_rr_reference,
+    TopologyDynamicsExtractor,
 )
+from .spectral_diagnostics import load_rr_reference
 
 __all__ = [
-    "SCALAR_FEATURE_NAMES",
+    "CONTROL_FEATURE_NAMES",
+    "PRIMARY_FEATURE_NAMES",
     "TopologyDynamicsConfig",
-    "extract_sample_topology_dynamics",
+    "TopologyDynamicsExtractor",
     "load_rr_reference",
 ]

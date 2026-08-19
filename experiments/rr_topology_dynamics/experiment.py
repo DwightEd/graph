@@ -26,12 +26,9 @@ from .artifacts import (
     load_topology_artifact,
     load_topology_reference,
 )
-from .features import (
-    LAYER_PROFILE_NAMES,
-    TopologyDynamicsConfig,
-    extract_sample_topology_dynamics,
-    load_rr_reference,
-)
+from .attractor import CONTROL_FEATURE_NAMES, PRIMARY_FEATURE_NAMES
+from .extractor import TopologyDynamicsConfig, TopologyDynamicsExtractor
+from .spectral_diagnostics import load_rr_reference
 
 
 @dataclass(frozen=True)
@@ -184,6 +181,9 @@ def fit_topology_reference(
     spectral_file = FrozenFile.capture(spectral_reference_path)
     spectral_reference = load_rr_reference(spectral_file.path)
     spectral_file.verify(spectral_file.path)
+    extractor = TopologyDynamicsExtractor(
+        topology_config, spectral_reference=spectral_reference
+    )
     sample_ids = _sample_ids(dataset, limit)
 
     feature_rows = []
@@ -203,21 +203,19 @@ def fit_topology_reference(
     ):
         sample = dataset[sample_id]
         try:
-            extracted = extract_sample_topology_dynamics(
-                sample, spectral_reference, config=topology_config
-            )
+            extracted = extractor.extract(sample)
             reference_source_ids.add(canonical_source_group(sample))
-            names = np.asarray(extracted["feature_names"], dtype=str)
+            names = np.asarray(extracted.feature_names, dtype=str)
             if feature_names is None:
                 feature_names = names
             elif not np.array_equal(feature_names, names):
                 raise RuntimeError("topology feature order changes across samples")
-            response_count = len(extracted["features"])
+            response_count = len(extracted.features)
             selected = reference_positions(
                 response_count, audit_config.reference_per_sample
             )
-            feature_rows.append(extracted["features"][selected])
-            position_rows.append(extracted["position_bin"][selected])
+            feature_rows.append(extracted.features[selected])
+            position_rows.append(extracted.position_bin[selected])
             task = _metadata_text(sample.task_type)
             task_rows.extend([task] * len(selected))
             sample_rows.extend([str(sample.sample_id)] * len(selected))
@@ -248,16 +246,11 @@ def fit_topology_reference(
         train_dataset_manifest_sha256=np.asarray(train_manifest.sha256),
         reference_source_id=np.asarray(sorted(reference_source_ids), dtype=str),
         feature_names=np.asarray(feature_names, dtype=str),
-        lag_bins=np.asarray(topology_config.lag_bins, dtype=np.int16),
+        control_names=np.asarray(CONTROL_FEATURE_NAMES, dtype=str),
         spectral_top_k=np.asarray(topology_config.spectral_top_k, dtype=np.int16),
         block_rows=np.asarray(topology_config.block_rows, dtype=np.int32),
         position_bins=np.asarray(topology_config.position_bins, dtype=np.int16),
-        top_source_count=np.asarray(topology_config.top_source_count, dtype=np.int16),
         recent_lag_max=np.asarray(topology_config.recent_lag_max, dtype=np.int16),
-        mid_lag_max=np.asarray(topology_config.mid_lag_max, dtype=np.int16),
-        far_lag_fraction=np.asarray(
-            topology_config.far_lag_fraction, dtype=np.float32
-        ),
         epsilon=np.asarray(topology_config.epsilon, dtype=np.float32),
         reference_per_sample=np.asarray(
             audit_config.reference_per_sample, dtype=np.int16
@@ -291,14 +284,10 @@ def fit_topology_reference(
 
 def _topology_config_from_reference(reference):
     return TopologyDynamicsConfig(
-        lag_bins=int(reference["lag_bins"]),
         spectral_top_k=int(reference["spectral_top_k"]),
         block_rows=int(reference["block_rows"]),
         position_bins=int(reference["position_bins"]),
-        top_source_count=int(reference["top_source_count"]),
         recent_lag_max=int(reference["recent_lag_max"]),
-        mid_lag_max=int(reference["mid_lag_max"]),
-        far_lag_fraction=float(reference["far_lag_fraction"]),
         epsilon=float(reference["epsilon"]),
     )
 
@@ -330,6 +319,9 @@ def score_topology_dataset(
     spectral_reference = load_rr_reference(spectral_file.path)
     spectral_file.verify(spectral_file.path)
     topology_config = _topology_config_from_reference(topology_reference)
+    extractor = TopologyDynamicsExtractor(
+        topology_config, spectral_reference=spectral_reference
+    )
     sample_ids = _sample_ids(dataset, limit)
     source_audit = HeldOutSourceAudit(
         dataset,
@@ -352,7 +344,9 @@ def score_topology_dataset(
             "generator_model",
             "features_raw",
             "features_z",
-            *LAYER_PROFILE_NAMES,
+            "controls_raw",
+            "spectral_residual_energy",
+            "layer_residual_energy",
             "spectral_rank_residual_energy",
             "rr_embedding",
         )
@@ -365,21 +359,26 @@ def score_topology_dataset(
         try:
             sample.attention()
             source_audit.observe(sample)
-            extracted = extract_sample_topology_dynamics(
-                sample, spectral_reference, config=topology_config
-            )
+            extracted = extractor.extract(sample)
             if not np.array_equal(
-                np.asarray(extracted["feature_names"], dtype=str),
+                np.asarray(extracted.feature_names, dtype=str),
                 np.asarray(topology_reference["feature_names"], dtype=str),
             ):
                 raise RuntimeError("topology feature order differs from reference")
-            raw = extracted["features"]
+            if extracted.control_names != tuple(
+                np.asarray(topology_reference["control_names"], dtype=str).tolist()
+            ):
+                raise RuntimeError("topology control order differs from reference")
+            diagnostics = extracted.spectral_diagnostics
+            if diagnostics is None:
+                raise RuntimeError("spectral diagnostics were not configured")
+            raw = extracted.features
             response_count = len(raw)
             task_name = _metadata_text(sample.task_type)
             task = np.asarray([task_name] * response_count, dtype=str)
             z = _standardize_features(
                 raw,
-                extracted["position_bin"],
+                extracted.position_bin,
                 task,
                 topology_reference,
             )
@@ -398,7 +397,7 @@ def score_topology_dataset(
                 np.full(response_count, response_count, dtype=np.int32)
             )
             columns["relative_position"].append(relative_position)
-            columns["position_bin"].append(extracted["position_bin"])
+            columns["position_bin"].append(extracted.position_bin)
             columns["task_type"].append(task)
             columns["data_source"].append(
                 _repeat_metadata(sample.data_source, response_count)
@@ -408,12 +407,17 @@ def score_topology_dataset(
             )
             columns["features_raw"].append(raw)
             columns["features_z"].append(z)
-            for name in LAYER_PROFILE_NAMES:
-                columns[name].append(extracted[name])
-            columns["spectral_rank_residual_energy"].append(
-                extracted["spectral_rank_residual_energy"]
+            columns["controls_raw"].append(extracted.controls)
+            columns["spectral_residual_energy"].append(
+                diagnostics.residual_energy
             )
-            columns["rr_embedding"].append(extracted["rr_embedding"])
+            columns["layer_residual_energy"].append(
+                diagnostics.layer_residual_energy
+            )
+            columns["spectral_rank_residual_energy"].append(
+                diagnostics.rank_residual_energy
+            )
+            columns["rr_embedding"].append(diagnostics.embedding)
         finally:
             sample.release_attention()
 
@@ -440,7 +444,8 @@ def score_topology_dataset(
         test_group_id=np.asarray(audit.test_source_ids, dtype=str),
         test_sample_id=np.asarray(audit.test_sample_ids, dtype=str),
         audit_scope=np.asarray(audit.test_scope),
-        feature_names=np.asarray(topology_reference["feature_names"], dtype=str),
+        feature_names=np.asarray(PRIMARY_FEATURE_NAMES, dtype=str),
+        control_names=np.asarray(CONTROL_FEATURE_NAMES, dtype=str),
         **output,
     )
     load_topology_artifact(output_path)

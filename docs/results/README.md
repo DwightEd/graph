@@ -96,7 +96,7 @@ representations and structural ablations.
 After a full run:
 
 ```text
-experiments/rr_topology_dynamics/outputs/setwalk_coordination/full/evaluation/
+experiments/rr_topology_dynamics/outputs/prompt_attractor/full/evaluation/
   report.json
   feature_metrics.csv
   within_sample_effects.csv

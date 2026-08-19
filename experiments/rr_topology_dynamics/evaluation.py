@@ -18,57 +18,23 @@ from .artifacts import (
     score_temporal_scope,
     verify_score_provenance,
 )
-from .features import LAYER_PROFILE_NAMES
+from .attractor import PRIMARY_FEATURE_NAMES
 
-CONVERGENCE_FEATURES = (
-    "route_effective_rank",
-    "route_participation_rank",
-    "route_top1_energy_share",
-    "cross_head_route_consensus",
-    "source_effective_number",
-    "source_entropy",
-    "source_top1_share",
-    "channel_route_velocity",
-    "source_route_velocity",
-    "anchor_turnover",
-    "offline_route_distance_to_final",
-    "offline_source_distance_to_final",
+PROMPT_CONCENTRATION_FEATURES = (
+    "prompt_attention_share",
+    "prompt_source_effective_fraction",
+    "prompt_source_top1_share",
+)
+
+RESPONSE_ATTRACTOR_FEATURES = (
+    "response_source_effective_fraction",
+    "response_source_top1_share",
+    "recent_response_share",
+    "source_stability",
 )
 
 GROUNDING_FEATURES = (
-    "direct_prompt_share",
     "prompt_groundedness",
-    "grounded_rr_relay",
-    "ungrounded_rr_feedback",
-    "residual_grounded_source_share",
-)
-
-RESIDUAL_FEATURES = (
-    "spectral_residual_energy",
-    "residual_effective_channels",
-    "residual_channel_entropy",
-    "residual_channel_top1_share",
-    "residual_channel_top5pct_share",
-    "residual_weighted_lag",
-    "residual_recent_lag_share",
-    "residual_mid_lag_share",
-    "residual_far_lag_share",
-    "residual_source_effective_number",
-    "residual_source_top1_share",
-)
-
-SETWALK_COORDINATION_FEATURES = (
-    "local_rr_collapse_strength",
-    "early_local_rr_collapse",
-    "late_local_rr_collapse",
-    "early_minus_late_local_rr_collapse",
-    "local_rr_collapse_depth",
-    "rp_rr_relation_effective_rank_mean",
-    "rp_rr_head_consensus_mean",
-    "rp_rr_head_specialization_mean",
-    "cross_layer_relation_shift_mean",
-    "cross_layer_relation_shift_max",
-    "cross_layer_adjacency_gap_vs_all_pairs",
 )
 
 
@@ -205,7 +171,11 @@ def _spearman(values, residual, mask=None):
         finite &= np.asarray(mask, dtype=bool)
     if int(finite.sum()) < 3:
         return None
-    coefficient, p_value = spearmanr(values[finite], residual[finite])
+    finite_values = values[finite]
+    finite_residual = residual[finite]
+    if np.ptp(finite_values) == 0.0 or np.ptp(finite_residual) == 0.0:
+        return None
+    coefficient, p_value = spearmanr(finite_values, finite_residual)
     return {
         "rho": _finite_float(coefficient),
         "p_value": _finite_float(p_value),
@@ -228,17 +198,16 @@ def _feature_metric_rows(feature_names, matrix, y, *, representation):
 
 def _layer_metric_rows(y, artifact):
     rows = []
-    report = {}
-    for family in LAYER_PROFILE_NAMES:
-        matrix = np.asarray(artifact[family], dtype=np.float32)
-        current = []
-        for layer in range(matrix.shape[1]):
-            metric = _binary_metrics(y, matrix[:, layer])
-            current.append(metric)
-            if metric is not None:
-                rows.append({"family": family, "layer": layer, **metric})
-        report[family] = current
-    return report, rows
+    matrix = np.asarray(artifact["layer_residual_energy"], dtype=np.float32)
+    report = []
+    for layer in range(matrix.shape[1]):
+        metric = _binary_metrics(y, matrix[:, layer])
+        report.append(metric)
+        if metric is not None:
+            rows.append(
+                {"family": "layer_residual_energy", "layer": layer, **metric}
+            )
+    return {"layer_residual_energy": report}, rows
 
 
 def _rank_metric_rows(y, artifact):
@@ -254,18 +223,7 @@ def _rank_metric_rows(y, artifact):
 
 
 def _phase_curve_rows(feature_names, raw, y, relative_position, phase_bins):
-    selected_names = tuple(
-        name
-        for name in (
-            *CONVERGENCE_FEATURES,
-            *GROUNDING_FEATURES,
-            *SETWALK_COORDINATION_FEATURES,
-            "spectral_residual_energy",
-            "residual_effective_channels",
-            "residual_weighted_lag",
-        )
-        if name in set(feature_names)
-    )
+    selected_names = tuple(name for name in PRIMARY_FEATURE_NAMES if name in set(feature_names))
     name_to_index = {str(name): index for index, name in enumerate(feature_names)}
     phase = np.minimum(
         (np.asarray(relative_position) * int(phase_bins)).astype(np.int64),
@@ -330,7 +288,8 @@ def evaluate_topology_artifact(
     feature_names = np.asarray(artifact["feature_names"], dtype=str)
     raw = np.asarray(artifact["features_raw"], dtype=np.float32)
     z = np.asarray(artifact["features_z"], dtype=np.float32)
-    name_to_index = {str(name): index for index, name in enumerate(feature_names)}
+    control_names = np.asarray(artifact["control_names"], dtype=str)
+    controls = np.asarray(artifact["controls_raw"], dtype=np.float32)
 
     bootstrap_replicates = int(
         reference["bootstrap_replicates"]
@@ -348,6 +307,9 @@ def evaluate_topology_artifact(
     )
     z_metrics, feature_rows_z = _feature_metric_rows(
         feature_names, z, y, representation="train_standardized"
+    )
+    control_metrics, control_rows = _feature_metric_rows(
+        control_names, controls, y, representation="control_raw"
     )
     layer_metrics, layer_rows = _layer_metric_rows(y, artifact)
     rank_metrics, rank_rows = _rank_metric_rows(y, artifact)
@@ -396,7 +358,7 @@ def evaluate_topology_artifact(
                 }
             )
 
-    residual = raw[:, name_to_index["spectral_residual_energy"]]
+    residual = np.asarray(artifact["spectral_residual_energy"], dtype=np.float32)
     correlations = {}
     correlation_rows = []
     for index, name in enumerate(feature_names):
@@ -431,16 +393,17 @@ def evaluate_topology_artifact(
         "overall": overall,
         "feature_metrics_raw": raw_metrics,
         "feature_metrics_train_standardized": z_metrics,
+        "control_metrics_raw": control_metrics,
         "within_sample_effects_train_standardized": sample_effects,
         "first_hallucination_onset_effects_train_standardized": onset_effects,
         "layer_metrics": layer_metrics,
         "spectral_rank_metrics": rank_metrics,
         "correlation_with_spectral_residual": correlations,
         "hypotheses": {
-            "route_convergence": list(CONVERGENCE_FEATURES),
-            "grounding_vs_feedback": list(GROUNDING_FEATURES),
-            "setwalk_rp_rr_coordination": list(SETWALK_COORDINATION_FEATURES),
-            "spectral_escape_localization": list(RESIDUAL_FEATURES),
+            "prompt_concentration": list(PROMPT_CONCENTRATION_FEATURES),
+            "response_self_reinforcement": list(RESPONSE_ATTRACTOR_FEATURES),
+            "prompt_grounding": list(GROUNDING_FEATURES),
+            "spectral_residual": "diagnostic_only",
         },
         "claim_boundaries": {
             "labels_used_during": "posthoc_evaluation_only",
@@ -466,6 +429,7 @@ def evaluate_topology_artifact(
         encoding="utf-8",
     )
     _write_csv(output_dir / "feature_metrics.csv", feature_rows_raw + feature_rows_z)
+    _write_csv(output_dir / "control_metrics.csv", control_rows)
     _write_csv(output_dir / "within_sample_effects.csv", sample_rows)
     _write_csv(output_dir / "onset_effects.csv", onset_rows)
     _write_csv(output_dir / "layer_metrics.csv", layer_rows)

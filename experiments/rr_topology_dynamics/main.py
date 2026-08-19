@@ -13,18 +13,14 @@ from .experiment import (
     fit_topology_reference,
     score_topology_dataset,
 )
-from .features import TopologyDynamicsConfig
+from .extractor import TopologyDynamicsConfig
 
 
 def _topology_arguments(parser):
-    parser.add_argument("--lag-bins", type=int, default=8)
     parser.add_argument("--spectral-top-k", type=int, default=5)
     parser.add_argument("--block-rows", type=int, default=8192)
     parser.add_argument("--position-bins", type=int, default=8)
-    parser.add_argument("--top-source-count", type=int, default=8)
     parser.add_argument("--recent-lag-max", type=int, default=4)
-    parser.add_argument("--mid-lag-max", type=int, default=16)
-    parser.add_argument("--far-lag-fraction", type=float, default=0.5)
 
 
 def parse_args(argv=None):
@@ -73,14 +69,10 @@ def parse_args(argv=None):
 
 def _topology_config(args):
     return TopologyDynamicsConfig(
-        lag_bins=args.lag_bins,
         spectral_top_k=args.spectral_top_k,
         block_rows=args.block_rows,
         position_bins=args.position_bins,
-        top_source_count=args.top_source_count,
         recent_lag_max=args.recent_lag_max,
-        mid_lag_max=args.mid_lag_max,
-        far_lag_fraction=args.far_lag_fraction,
     )
 
 
@@ -132,14 +124,10 @@ def main(argv=None):
             phase_bins=args.phase_bins,
             seed=args.seed,
         )
-        hypothesis_names = report["hypotheses"]["setwalk_rp_rr_coordination"]
         result = {
             "output": f"{args.output_dir}/report.json",
             "labels_read": True,
-            "setwalk_coordination_metrics": {
-                name: report["feature_metrics_raw"][name]
-                for name in hypothesis_names
-            },
+            "primary_feature_metrics": report["feature_metrics_raw"],
             **report["overall"],
         }
     print(json.dumps(result, indent=2, sort_keys=True))
