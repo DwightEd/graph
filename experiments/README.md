@@ -34,6 +34,11 @@ separate post-hoc evaluation stage after representations/scores are frozen.
 
 ## Active evidence path
 
+- `attention_phenomenology/`: attention-space mechanism audit inspired by *The
+  Phenomenology of Hallucinations*. It tests routing atypicality, persistent
+  head-coalition fracture, prompt-provenance integration, fracture-to-lock-in
+  dynamics, and an exact-endpoint rewiring control while preserving
+  `[token, layer, head]` structure.
 - `mechanism_validation/`: attention mechanism and graph-ablation diagnostics.
 - `spectral_feasibility/`: the reproduced RR causal source-persistence
   representation and independently calibrated robust-subspace detector.
