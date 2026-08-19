@@ -1,0 +1,35 @@
+name: Attention phenomenology tests
+
+on:
+  push:
+    paths:
+      - "experiments/attention_phenomenology/**"
+      - "research_dataset.py"
+      - ".github/workflows/attention-phenomenology-tests.yml"
+  pull_request:
+    paths:
+      - "experiments/attention_phenomenology/**"
+      - "research_dataset.py"
+      - ".github/workflows/attention-phenomenology-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install numpy scipy scikit-learn pytest
+      - name: Compile package
+        run: python -m compileall -q experiments/attention_phenomenology
+      - name: Check runner syntax
+        run: bash -n experiments/attention_phenomenology/run.sh
+      - name: Run mechanism tests
+        run: pytest -q experiments/attention_phenomenology/tests
