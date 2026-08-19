@@ -1,5 +1,9 @@
 # Prompt-grounded routing-attractor audit
 
+> This remains the exploratory feature audit.  The runnable label-free token
+> mechanism baseline built from its supported signals is
+> [`experiments/token_routing_basin`](../token_routing_basin/README.md).
+
 This experiment tests one focused mechanism hypothesis: hallucination is
 associated with a simple, stable response-history attractor that loses prompt
 grounding. It is a post-hoc mechanism audit, not a detector selected after

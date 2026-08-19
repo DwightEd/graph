@@ -1,5 +1,10 @@
 # RR causal spectral geometry
 
+> Historical baseline: this artificial RR/PCA residual is no longer the active
+> token detector.  The redesigned baseline, with channel/source-preserving
+> multiplex sketches and rolling rectangular spectra, is in
+> [`experiments/token_routing_basin`](../token_routing_basin/README.md).
+
 This directory contains one attention-only, label-free representation and
 anomaly detector. Its narrow hypothesis is that a generated token can be
 abnormal when the causal response-history (RR) routing prefix leaves the
