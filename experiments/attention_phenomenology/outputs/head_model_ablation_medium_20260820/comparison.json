@@ -1,0 +1,67 @@
+{
+  "schema": "head-model-paired-ablation-v1",
+  "bootstrap_unit": "complete sample_id",
+  "bootstrap_replicates": 1000,
+  "reuse_predictions": "D:\\projects\\python_projects\\research\\graph-phenomenology\\experiments\\attention_phenomenology\\outputs\\head_model_reuse_medium_20260820\\test_scores.npz",
+  "no_reuse_predictions": "D:\\projects\\python_projects\\research\\graph-phenomenology\\experiments\\attention_phenomenology\\outputs\\head_model_no_reuse_medium_20260820\\test_scores.npz",
+  "current": {
+    "tokens": 10399,
+    "reuse": {
+      "tokens": 10399,
+      "positives": 832,
+      "prevalence": 0.0800076930474084,
+      "auroc": 0.7702070569103731,
+      "auprc": 0.33873046371013893
+    },
+    "no_reuse": {
+      "tokens": 10399,
+      "positives": 832,
+      "prevalence": 0.0800076930474084,
+      "auroc": 0.779637385322945,
+      "auprc": 0.32536056482300846
+    },
+    "delta_reuse_minus_no_reuse": {
+      "auroc": -0.009430328412571964,
+      "auroc_ci95": [
+        -0.04059481195235154,
+        0.009054553067248075
+      ],
+      "auprc": 0.013369898887130471,
+      "auprc_ci95": [
+        -0.05722548528080384,
+        0.03780249871940941
+      ],
+      "valid_replicates": 1000
+    }
+  },
+  "forecast_1": {
+    "tokens": 10335,
+    "reuse": {
+      "tokens": 10335,
+      "positives": 831,
+      "prevalence": 0.08040638606676342,
+      "auroc": 0.7629364746542846,
+      "auprc": 0.32612007527077225
+    },
+    "no_reuse": {
+      "tokens": 10335,
+      "positives": 831,
+      "prevalence": 0.08040638606676342,
+      "auroc": 0.7720340438075095,
+      "auprc": 0.31638145743157337
+    },
+    "delta_reuse_minus_no_reuse": {
+      "auroc": -0.009097569153224905,
+      "auroc_ci95": [
+        -0.039158535882498645,
+        0.004713544513128763
+      ],
+      "auprc": 0.009738617839198882,
+      "auprc_ci95": [
+        -0.06284359014942098,
+        0.03479296967871775
+      ],
+      "valid_replicates": 1000
+    }
+  }
+}

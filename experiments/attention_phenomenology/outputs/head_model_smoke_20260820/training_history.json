@@ -1,0 +1,22 @@
+{
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_loss": 0.9481948248336277,
+      "validation_auroc": 0.6829942331824654,
+      "validation_auprc": 0.14721763020524758
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.9098373334091228,
+      "validation_auroc": 0.7034107412264003,
+      "validation_auprc": 0.24424138337572324
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.8738110698285229,
+      "validation_auroc": 0.7104465406144692,
+      "validation_auprc": 0.24334288104392532
+    }
+  ]
+}

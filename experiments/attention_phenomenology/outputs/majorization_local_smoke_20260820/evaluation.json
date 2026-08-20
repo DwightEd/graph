@@ -1,0 +1,90 @@
+{
+  "schema": "causal-majorization-evaluation-v1",
+  "labels_read": true,
+  "score_sha256": "29aee68ff49fc008861865fbf971b8779a691cbf1af30bc58016a86c011889fb",
+  "reference_sha256": "14220077b9f07c6e736960b2f242d8de666f67632c08bb8d2f95de12f3c47617",
+  "detector_config": {
+    "history_decay": 0.9,
+    "majorization_tolerance": 1e-06,
+    "fit_tokens_per_sample": 128,
+    "minimum_scale": 0.01,
+    "maximum_standardized_value": 10.0,
+    "epsilon": 1e-12
+  },
+  "tokens": 323,
+  "positive_tokens": 0,
+  "prevalence": 0.0,
+  "valid_tokens": 321,
+  "valid_fraction": 0.9938080495356038,
+  "current_detection": {
+    "auroc": NaN,
+    "auprc": NaN,
+    "auroc_ci_low": NaN,
+    "auroc_ci_high": NaN,
+    "auprc_ci_low": NaN,
+    "auprc_ci_high": NaN
+  },
+  "forecast": {
+    "horizon_1": {
+      "auroc": NaN,
+      "auprc": NaN,
+      "source_tokens": 319,
+      "auroc_ci_low": NaN,
+      "auroc_ci_high": NaN,
+      "auprc_ci_low": NaN,
+      "auprc_ci_high": NaN
+    },
+    "horizon_2": {
+      "auroc": NaN,
+      "auprc": NaN,
+      "source_tokens": 317,
+      "auroc_ci_low": NaN,
+      "auroc_ci_high": NaN,
+      "auprc_ci_low": NaN,
+      "auprc_ci_high": NaN
+    },
+    "horizon_4": {
+      "auroc": NaN,
+      "auprc": NaN,
+      "source_tokens": 313,
+      "auroc_ci_low": NaN,
+      "auroc_ci_high": NaN,
+      "auprc_ci_low": NaN,
+      "auprc_ci_high": NaN
+    }
+  },
+  "feature_metrics": {
+    "majorization_evidence": {
+      "auroc": NaN,
+      "auprc": NaN
+    },
+    "concentration_level": {
+      "auroc": NaN,
+      "auprc": NaN
+    },
+    "hill_shape": {
+      "auroc": NaN,
+      "auprc": NaN
+    },
+    "source_affinity": {
+      "auroc": NaN,
+      "auprc": NaN
+    },
+    "entry_probability": {
+      "auroc": NaN,
+      "auprc": NaN
+    },
+    "basin_probability": {
+      "auroc": NaN,
+      "auprc": NaN
+    }
+  },
+  "mechanism_effects": {
+    "onsets": 0,
+    "majorization_onset_minus_pre": NaN,
+    "concentration_onset_minus_pre": NaN,
+    "entry_probability_onset_minus_pre": NaN,
+    "spans_with_later_tokens": 0,
+    "basin_probability_later_minus_onset": NaN
+  }
+}

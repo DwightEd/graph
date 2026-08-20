@@ -1,0 +1,5 @@
+family,auroc,auprc,auroc_ci_low,auroc_ci_high,auprc_ci_low,auprc_ci_high,rewired_auroc,rewired_auprc,auroc_drop,auprc_drop
+fracture,nan,nan,nan,nan,nan,nan,nan,nan,nan,nan
+integration,nan,nan,nan,nan,nan,nan,nan,nan,nan,nan
+lockin,nan,nan,nan,nan,nan,nan,nan,nan,nan,nan
+all,nan,nan,nan,nan,nan,nan,nan,nan,nan,nan

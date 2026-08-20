@@ -1,0 +1,32 @@
+{
+  "schema": "causal-majorization-reference-v1",
+  "labels_read": false,
+  "fit_split": "D:\\projects\\python_projects\\research\\data\\RAGTruth\\llama31_8b\\train",
+  "fit_manifest_sha256": "763004999f21d3f957af7099c5be72a9b8d4676b66c859616ec786322d379067",
+  "fit_sample_ids": [
+    "10011",
+    "10023",
+    "10029"
+  ],
+  "reserved_source_ids": [
+    "14768",
+    "14770",
+    "14771"
+  ],
+  "detector_config": {
+    "history_decay": 0.9,
+    "majorization_tolerance": 1e-06,
+    "fit_tokens_per_sample": 128,
+    "minimum_scale": 0.01,
+    "maximum_standardized_value": 10.0,
+    "epsilon": 1e-12
+  },
+  "center": [
+    0.0005628066137433052,
+    0.15736354887485504
+  ],
+  "scale": [
+    0.009999999776482582,
+    0.06964798271656036
+  ]
+}

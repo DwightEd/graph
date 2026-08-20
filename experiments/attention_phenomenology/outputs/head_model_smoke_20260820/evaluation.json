@@ -1,0 +1,138 @@
+{
+  "schema": "head-resolved-layer-temporal-evaluation-v1",
+  "labels_read": true,
+  "protocol": "train and validation are source-disjoint partitions of train_split; validation selects the epoch and owns head/layer effect maps; test_split is evaluated only after model selection",
+  "train_split": "D:\\projects\\python_projects\\research\\data\\RAGTruth\\llama31_8b\\train",
+  "test_split": "D:\\projects\\python_projects\\research\\data\\RAGTruth\\llama31_8b\\test",
+  "experiment_config": {
+    "validation_fraction": 0.25,
+    "reuse_top_k": 5,
+    "recent_response_tokens": 4,
+    "block_rows": 8192,
+    "train_limit": 32,
+    "test_limit": 16,
+    "seed": 20260820
+  },
+  "training_config": {
+    "hidden_dim": 8,
+    "epochs": 3,
+    "batch_size": 2,
+    "learning_rate": 0.002,
+    "weight_decay": 0.0001,
+    "dropout": 0.0,
+    "forecast_weight": 0.5,
+    "patience": 2,
+    "maximum_standardized_value": 10.0,
+    "seed": 20260820
+  },
+  "feature_names": [
+    "prompt_mass",
+    "response_mass",
+    "self_mass",
+    "unresolved_mass",
+    "history_edge_fraction",
+    "response_takeover",
+    "prompt_effective_sources",
+    "prompt_top1_share",
+    "prompt_source_velocity",
+    "prompt_active",
+    "response_effective_sources",
+    "response_top1_share",
+    "recent_response_share",
+    "response_mean_lag",
+    "response_source_velocity",
+    "response_active",
+    "response_reuse_rank_1",
+    "response_reuse_rank_2",
+    "response_reuse_rank_3",
+    "response_reuse_rank_4",
+    "response_reuse_rank_5"
+  ],
+  "geometry": {
+    "layers": 32,
+    "heads": 32,
+    "features": 21
+  },
+  "samples": {
+    "train": 23,
+    "validation": 9,
+    "test": 16
+  },
+  "tokens": {
+    "train": 3585,
+    "validation": 1603,
+    "test": 2475
+  },
+  "best_epoch": 2,
+  "validation": {
+    "current": {
+      "tokens": 1603,
+      "positives": 94,
+      "prevalence": 0.058640049906425455,
+      "auroc": 0.7034107412264003,
+      "auprc": 0.24424138337572324
+    },
+    "forecast_1": {
+      "tokens": 1594,
+      "positives": 94,
+      "prevalence": 0.05897114178168131,
+      "auroc": 0.7037659574468086,
+      "auprc": 0.23575698486556043
+    },
+    "by_task": {
+      "Data2txt": {
+        "tokens": 1440,
+        "positives": 84,
+        "prevalence": 0.058333333333333334,
+        "auroc": 0.7111953926113218,
+        "auprc": 0.2624731520276904
+      },
+      "Summary": {
+        "tokens": 163,
+        "positives": 10,
+        "prevalence": 0.06134969325153374,
+        "auroc": 0.7986928104575164,
+        "auprc": 0.16734177750551724
+      }
+    }
+  },
+  "test": {
+    "current": {
+      "tokens": 2475,
+      "positives": 118,
+      "prevalence": 0.04767676767676768,
+      "auroc": 0.7781473145265095,
+      "auprc": 0.260086069519034
+    },
+    "forecast_1": {
+      "tokens": 2459,
+      "positives": 118,
+      "prevalence": 0.04798698657991053,
+      "auroc": 0.7713873543828148,
+      "auprc": 0.23376448546886822
+    },
+    "by_task": {
+      "Data2txt": {
+        "tokens": 2357,
+        "positives": 118,
+        "prevalence": 0.05006364022061943,
+        "auroc": 0.774452880750335,
+        "auprc": 0.2612411421058503
+      },
+      "Summary": {
+        "tokens": 118,
+        "auroc": NaN,
+        "auprc": NaN
+      }
+    }
+  },
+  "outputs": {
+    "model": "model.pt",
+    "test_scores": "test_scores.npz",
+    "training_history": "training_history.json",
+    "split_audit": "split_audit.json",
+    "validation_effect_csv": "validation_head_layer_effects.csv",
+    "validation_effect_tensor": "validation_head_layer_effects.npz",
+    "validation_effect_figure": "validation_head_layer_effects.png"
+  }
+}

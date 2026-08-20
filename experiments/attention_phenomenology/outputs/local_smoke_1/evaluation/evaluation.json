@@ -1,0 +1,70 @@
+{
+  "schema": "attention-phenomenology-evaluation-v1",
+  "labels_read": true,
+  "tokens": 165,
+  "positive_tokens": 0,
+  "prevalence": 0.0,
+  "samples": 1,
+  "family_metrics": [
+    {
+      "family": "fracture",
+      "auroc": NaN,
+      "auprc": NaN,
+      "auroc_ci_low": NaN,
+      "auroc_ci_high": NaN,
+      "auprc_ci_low": NaN,
+      "auprc_ci_high": NaN,
+      "rewired_auroc": NaN,
+      "rewired_auprc": NaN,
+      "auroc_drop": NaN,
+      "auprc_drop": NaN
+    },
+    {
+      "family": "integration",
+      "auroc": NaN,
+      "auprc": NaN,
+      "auroc_ci_low": NaN,
+      "auroc_ci_high": NaN,
+      "auprc_ci_low": NaN,
+      "auprc_ci_high": NaN,
+      "rewired_auroc": NaN,
+      "rewired_auprc": NaN,
+      "auroc_drop": NaN,
+      "auprc_drop": NaN
+    },
+    {
+      "family": "lockin",
+      "auroc": NaN,
+      "auprc": NaN,
+      "auroc_ci_low": NaN,
+      "auroc_ci_high": NaN,
+      "auprc_ci_low": NaN,
+      "auprc_ci_high": NaN,
+      "rewired_auroc": NaN,
+      "rewired_auprc": NaN,
+      "auroc_drop": NaN,
+      "auprc_drop": NaN
+    },
+    {
+      "family": "all",
+      "auroc": NaN,
+      "auprc": NaN,
+      "auroc_ci_low": NaN,
+      "auroc_ci_high": NaN,
+      "auprc_ci_low": NaN,
+      "auprc_ci_high": NaN,
+      "rewired_auroc": NaN,
+      "rewired_auprc": NaN,
+      "auroc_drop": NaN,
+      "auprc_drop": NaN
+    }
+  ],
+  "rewire_role_max_abs_error": 0.76171875,
+  "hypothesis_tests": {
+    "routing_detection": "family_metrics.csv",
+    "routing_fracture": "onset_layer_effects.csv",
+    "integration_failure": "onset_layer_effects.csv",
+    "fracture_to_lockin": "lockin_layer_effects.csv",
+    "endpoint_topology": "real versus rewired columns in metrics CSVs"
+  }
+}

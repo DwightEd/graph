@@ -1,0 +1,120 @@
+{
+  "schema": "attention-composition-distribution-validation-v1",
+  "labels_read": false,
+  "fit_split": "D:\\projects\\python_projects\\research\\data\\RAGTruth\\llama31_8b\\train",
+  "validation_split": "D:\\projects\\python_projects\\research\\data\\RAGTruth\\llama31_8b\\test",
+  "phenomenology_config": {
+    "null_prompt_position_bins": 4,
+    "null_response_lag_bins": 8,
+    "recent_response_tokens": 4,
+    "causal_position_bins": 10,
+    "reference_minimum_scale": 0.001,
+    "maximum_standardized_value": 10.0,
+    "block_rows": 8192,
+    "random_seed": 20260820,
+    "epsilon": 1e-08
+  },
+  "validation_config": {
+    "representations": [
+      "role",
+      "provenance"
+    ],
+    "fit_reservoir_rows": 128,
+    "validation_reservoir_rows": 128,
+    "minimum_group_rows": 16,
+    "pseudocounts": [
+      1e-06,
+      0.0001,
+      0.001
+    ],
+    "simulation_rows": 256,
+    "random_seed": 20260820
+  },
+  "evaluated_groups": 3072,
+  "representations": {
+    "provenance": {
+      "pseudocounts": {
+        "1e-06": {
+          "groups": 512,
+          "validation_rows": 57344,
+          "dirichlet_converged_fraction": 1.0,
+          "weighted_dirichlet_minus_logistic_normal_nats": -5.281535992128985,
+          "groups_where_dirichlet_has_higher_log_likelihood_fraction": 0.0,
+          "groups_where_dirichlet_is_within_005_nats_fraction": 0.0,
+          "weighted_covariance_relative_frobenius_error": 0.5543650912083694,
+          "weighted_positive_offdiagonal_covariance_fraction": 0.25078125,
+          "weighted_nll_pit_ks_statistic": 0.29117257254464285,
+          "weighted_tail_probability_below_005_fraction": 0.025634765625
+        },
+        "0.0001": {
+          "groups": 512,
+          "validation_rows": 57344,
+          "dirichlet_converged_fraction": 1.0,
+          "weighted_dirichlet_minus_logistic_normal_nats": -5.168639820032906,
+          "groups_where_dirichlet_has_higher_log_likelihood_fraction": 0.0,
+          "groups_where_dirichlet_is_within_005_nats_fraction": 0.0,
+          "weighted_covariance_relative_frobenius_error": 0.5596706666957247,
+          "weighted_positive_offdiagonal_covariance_fraction": 0.25078125,
+          "weighted_nll_pit_ks_statistic": 0.23550851004464285,
+          "weighted_tail_probability_below_005_fraction": 0.04063197544642857
+        },
+        "0.001": {
+          "groups": 512,
+          "validation_rows": 57344,
+          "dirichlet_converged_fraction": 1.0,
+          "weighted_dirichlet_minus_logistic_normal_nats": -4.941127697178055,
+          "groups_where_dirichlet_has_higher_log_likelihood_fraction": 0.0,
+          "groups_where_dirichlet_is_within_005_nats_fraction": 0.0,
+          "weighted_covariance_relative_frobenius_error": 0.5936496768541825,
+          "weighted_positive_offdiagonal_covariance_fraction": 0.25078125,
+          "weighted_nll_pit_ks_statistic": 0.218475341796875,
+          "weighted_tail_probability_below_005_fraction": 0.0615234375
+        }
+      }
+    },
+    "role": {
+      "pseudocounts": {
+        "1e-06": {
+          "groups": 512,
+          "validation_rows": 57344,
+          "dirichlet_converged_fraction": 1.0,
+          "weighted_dirichlet_minus_logistic_normal_nats": -0.6938755742328101,
+          "groups_where_dirichlet_has_higher_log_likelihood_fraction": 0.072265625,
+          "groups_where_dirichlet_is_within_005_nats_fraction": 0.11328125,
+          "weighted_covariance_relative_frobenius_error": 0.6088028784974754,
+          "weighted_positive_offdiagonal_covariance_fraction": 0.2395833333333333,
+          "weighted_nll_pit_ks_statistic": 0.26880100795200895,
+          "weighted_tail_probability_below_005_fraction": 0.09940011160714286
+        },
+        "0.0001": {
+          "groups": 512,
+          "validation_rows": 57344,
+          "dirichlet_converged_fraction": 1.0,
+          "weighted_dirichlet_minus_logistic_normal_nats": -0.8067406551607712,
+          "groups_where_dirichlet_has_higher_log_likelihood_fraction": 0.01171875,
+          "groups_where_dirichlet_is_within_005_nats_fraction": 0.021484375,
+          "weighted_covariance_relative_frobenius_error": 0.55692306422575,
+          "weighted_positive_offdiagonal_covariance_fraction": 0.2395833333333333,
+          "weighted_nll_pit_ks_statistic": 0.20978873116629465,
+          "weighted_tail_probability_below_005_fraction": 0.0848388671875
+        },
+        "0.001": {
+          "groups": 512,
+          "validation_rows": 57344,
+          "dirichlet_converged_fraction": 1.0,
+          "weighted_dirichlet_minus_logistic_normal_nats": -0.9064110315432353,
+          "groups_where_dirichlet_has_higher_log_likelihood_fraction": 0.005859375,
+          "groups_where_dirichlet_is_within_005_nats_fraction": 0.005859375,
+          "weighted_covariance_relative_frobenius_error": 0.5358202871210203,
+          "weighted_positive_offdiagonal_covariance_fraction": 0.2395833333333333,
+          "weighted_nll_pit_ks_statistic": 0.19083731515066965,
+          "weighted_tail_probability_below_005_fraction": 0.08393205915178571
+        }
+      }
+    }
+  },
+  "outputs": {
+    "reference": "reference.json",
+    "group_metrics": "group_metrics.csv"
+  }
+}

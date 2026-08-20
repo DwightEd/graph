@@ -1,0 +1,110 @@
+{
+  "schema": "causal-majorization-evaluation-v1",
+  "labels_read": true,
+  "score_sha256": "efb0166569601b76f81e940c3ee1ab7f443f0efd063e7c45a5a00b1f5f7a20d3",
+  "reference_sha256": "a709a992f37853612cddd4609c5f80b892ad70f81976518dd90f806571c9052a",
+  "detector_config": {
+    "history_decay": 0.9,
+    "majorization_tolerance": 1e-06,
+    "fit_tokens_per_sample": 128,
+    "minimum_scale": 0.01,
+    "maximum_standardized_value": 10.0,
+    "epsilon": 1e-12
+  },
+  "tokens": 1602,
+  "positive_tokens": 47,
+  "prevalence": 0.02933832709113608,
+  "valid_tokens": 1592,
+  "valid_fraction": 0.9937578027465668,
+  "current_detection": {
+    "auroc": 0.445211044550024,
+    "auprc": 0.03150194664563249,
+    "auroc_ci_low": 0.21220970311451734,
+    "auroc_ci_high": 0.5237709903185876,
+    "auprc_ci_low": 0.009099538310973952,
+    "auprc_ci_high": 0.07428220255989057
+  },
+  "forecast": {
+    "horizon_1": {
+      "auroc": 0.4475708642317555,
+      "auprc": 0.031178677514953422,
+      "source_tokens": 1582,
+      "auroc_ci_low": 0.21625205394440808,
+      "auroc_ci_high": 0.536179262478323,
+      "auprc_ci_low": 0.007183625065511347,
+      "auprc_ci_high": 0.08283678537620351
+    },
+    "horizon_2": {
+      "auroc": 0.4549145448203697,
+      "auprc": 0.029400661524759224,
+      "source_tokens": 1572,
+      "auroc_ci_low": 0.22672005700317277,
+      "auroc_ci_high": 0.5561462764180667,
+      "auprc_ci_low": 0.007836622337861194,
+      "auprc_ci_high": 0.07318920169851159
+    },
+    "horizon_4": {
+      "auroc": 0.450526613416272,
+      "auprc": 0.027301984084667167,
+      "source_tokens": 1552,
+      "auroc_ci_low": 0.2712659667472481,
+      "auroc_ci_high": 0.5188092211918693,
+      "auprc_ci_low": 0.005160009082926113,
+      "auprc_ci_high": 0.06923835631877541
+    }
+  },
+  "control_metrics": {
+    "uniform": {
+      "auroc": 0.4166356813330579,
+      "auprc": 0.025226675271744714,
+      "real_minus_control_auroc": 0.028575363216966132,
+      "real_minus_control_auprc": 0.006275271373887774
+    },
+    "source_shuffle": {
+      "auroc": 0.5032362459546925,
+      "auprc": 0.02971092675618564,
+      "real_minus_control_auroc": -0.05802520140466849,
+      "real_minus_control_auprc": 0.0017910198894468474
+    },
+    "time_shuffle": {
+      "auroc": 0.5152516697652,
+      "auprc": 0.053377071210615815,
+      "real_minus_control_auroc": -0.07004062521517596,
+      "real_minus_control_auprc": -0.021875124564983327
+    }
+  },
+  "feature_metrics": {
+    "majorization_evidence": {
+      "auroc": 0.5076223920677546,
+      "auprc": 0.0375553258707334
+    },
+    "concentration_level": {
+      "auroc": 0.4160848309577911,
+      "auprc": 0.024408430202640483
+    },
+    "hill_shape": {
+      "auroc": 0.34541072781105836,
+      "auprc": 0.0208590934203199
+    },
+    "source_affinity": {
+      "auroc": 0.5166150244439853,
+      "auprc": 0.03275308921713424
+    },
+    "entry_probability": {
+      "auroc": 0.42496729325896854,
+      "auprc": 0.027529459427579023
+    },
+    "basin_probability": {
+      "auroc": 0.4476210149418164,
+      "auprc": 0.033339818881766695
+    }
+  },
+  "mechanism_effects": {
+    "onsets": 10,
+    "majorization_onset_minus_pre": 0.005189826246351004,
+    "concentration_onset_minus_pre": 0.029595013707876205,
+    "entry_probability_onset_minus_pre": 0.0013855608412995934,
+    "spans_with_later_tokens": 8,
+    "basin_probability_later_minus_onset": -0.05758889764547348
+  }
+}

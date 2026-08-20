@@ -1,0 +1,81 @@
+{
+  "schema": "attention-phenomenology-manifest-v2",
+  "labels_read": false,
+  "split_root": "D:\\projects\\python_projects\\research\\data\\RAGTruth\\llama31_8b\\test",
+  "reference_path": "D:\\projects\\python_projects\\research\\graph-phenomenology\\experiments\\attention_phenomenology\\outputs\\v2_smoke_1\\reference.npz",
+  "reference_sha256": "e301a73adf6d707eb468c3445c2a0f24d466dae56943d39b4d995f340099cb4f",
+  "config": {
+    "prompt_bins": 4,
+    "rr_lag_bins": 8,
+    "lid_neighbors": 8,
+    "transition_projections": 12,
+    "anchor_count": 8,
+    "recent_lag_max": 4,
+    "causal_position_bins": 10,
+    "block_rows": 8192,
+    "random_seed": 20260819,
+    "epsilon": 1e-08
+  },
+  "feature_names": [
+    "known_ph_mean_death",
+    "known_ph_max_death",
+    "known_ph_persistence_entropy",
+    "known_ph_largest_gap",
+    "known_head_route_effective_rank",
+    "known_head_local_intrinsic_dimension",
+    "full_ph_mean_death",
+    "full_ph_max_death",
+    "direct_prompt_mean",
+    "direct_prompt_std",
+    "grounding_lower_mean",
+    "grounding_lower_std",
+    "grounding_upper_mean",
+    "grounding_interval_width",
+    "unsupported_rr_lower",
+    "unsupported_rr_upper",
+    "response_source_effective_number",
+    "response_source_top1_share",
+    "recent_response_mass_fraction",
+    "response_mean_lag",
+    "response_anchor_turnover",
+    "source_distribution_velocity",
+    "layer_headset_transition",
+    "temporal_headset_transition",
+    "self_mass_mean",
+    "unresolved_mass_mean",
+    "known_mass_mean"
+  ],
+  "family_names": [
+    "fracture",
+    "integration",
+    "lockin",
+    "all"
+  ],
+  "role_names": [
+    "prompt_bin_0",
+    "prompt_bin_1",
+    "prompt_bin_2",
+    "prompt_bin_3",
+    "rr_lag_bin_0",
+    "rr_lag_bin_1",
+    "rr_lag_bin_2",
+    "rr_lag_bin_3",
+    "rr_lag_bin_4",
+    "rr_lag_bin_5",
+    "rr_lag_bin_6",
+    "rr_lag_bin_7",
+    "self",
+    "unresolved"
+  ],
+  "rewired_control": true,
+  "samples": [
+    {
+      "sample_id": "10005",
+      "source_id": "14767",
+      "task_type": "Data2txt",
+      "response_length": 165,
+      "score_path": "samples\\10005.npz",
+      "detail_path": null
+    }
+  ]
+}

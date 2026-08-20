@@ -1,0 +1,168 @@
+{
+  "schema": "head-resolved-layer-temporal-evaluation-v1",
+  "labels_read": true,
+  "protocol": "train and validation are source-disjoint partitions of train_split; validation selects the epoch and owns head/layer effect maps; test_split is evaluated only after model selection",
+  "train_split": "D:\\projects\\python_projects\\research\\data\\RAGTruth\\llama31_8b\\train",
+  "test_split": "D:\\projects\\python_projects\\research\\data\\RAGTruth\\llama31_8b\\test",
+  "experiment_config": {
+    "validation_fraction": 0.2,
+    "reuse_top_k": 5,
+    "recent_response_tokens": 4,
+    "block_rows": 8192,
+    "train_limit": 96,
+    "test_limit": 64,
+    "seed": 20260820
+  },
+  "training_config": {
+    "hidden_dim": 16,
+    "epochs": 8,
+    "batch_size": 2,
+    "learning_rate": 0.001,
+    "weight_decay": 0.0001,
+    "dropout": 0.0,
+    "forecast_weight": 0.5,
+    "patience": 4,
+    "maximum_standardized_value": 10.0,
+    "seed": 20260820
+  },
+  "feature_names": [
+    "prompt_mass",
+    "response_mass",
+    "self_mass",
+    "unresolved_mass",
+    "history_edge_fraction",
+    "response_takeover",
+    "prompt_effective_sources",
+    "prompt_top1_share",
+    "prompt_source_velocity",
+    "prompt_active",
+    "response_effective_sources",
+    "response_top1_share",
+    "recent_response_share",
+    "response_mean_lag",
+    "response_source_velocity",
+    "response_active",
+    "response_reuse_rank_1",
+    "response_reuse_rank_2",
+    "response_reuse_rank_3",
+    "response_reuse_rank_4",
+    "response_reuse_rank_5"
+  ],
+  "geometry": {
+    "layers": 32,
+    "heads": 32,
+    "features": 21
+  },
+  "samples": {
+    "train": 76,
+    "validation": 20,
+    "test": 64
+  },
+  "tokens": {
+    "train": 12682,
+    "validation": 3253,
+    "test": 10399
+  },
+  "best_epoch": 4,
+  "validation": {
+    "current": {
+      "tokens": 3253,
+      "positives": 435,
+      "prevalence": 0.13372271749154627,
+      "auroc": 0.815981824559686,
+      "auprc": 0.3769271282963403
+    },
+    "forecast_1": {
+      "tokens": 3233,
+      "positives": 435,
+      "prevalence": 0.13454995360346428,
+      "auroc": 0.8089033217487039,
+      "auprc": 0.36672132754948
+    },
+    "causal_position_control": {
+      "tokens": 3253,
+      "positives": 435,
+      "prevalence": 0.13372271749154627,
+      "auroc": 0.816813913837971,
+      "auprc": 0.5115175320467571
+    },
+    "by_task": {
+      "Data2txt": {
+        "tokens": 1133,
+        "positives": 74,
+        "prevalence": 0.06531332744924978,
+        "auroc": 0.7145956154454738,
+        "auprc": 0.27505380414991926
+      },
+      "QA": {
+        "tokens": 1404,
+        "positives": 330,
+        "prevalence": 0.23504273504273504,
+        "auroc": 0.7699170475706788,
+        "auprc": 0.42202024205497957
+      },
+      "Summary": {
+        "tokens": 716,
+        "positives": 31,
+        "prevalence": 0.04329608938547486,
+        "auroc": 0.7419825759359548,
+        "auprc": 0.09306946750021398
+      }
+    }
+  },
+  "test": {
+    "current": {
+      "tokens": 10399,
+      "positives": 832,
+      "prevalence": 0.0800076930474084,
+      "auroc": 0.7702070569103731,
+      "auprc": 0.33873046371013893
+    },
+    "forecast_1": {
+      "tokens": 10335,
+      "positives": 831,
+      "prevalence": 0.08040638606676342,
+      "auroc": 0.7629364746542846,
+      "auprc": 0.32612007527077225
+    },
+    "causal_position_control": {
+      "tokens": 10399,
+      "positives": 832,
+      "prevalence": 0.0800076930474084,
+      "auroc": 0.6692205804608791,
+      "auprc": 0.2225727204528708
+    },
+    "by_task": {
+      "Data2txt": {
+        "tokens": 3366,
+        "positives": 170,
+        "prevalence": 0.050505050505050504,
+        "auroc": 0.7265791798571745,
+        "auprc": 0.21341915622951205
+      },
+      "QA": {
+        "tokens": 4598,
+        "positives": 556,
+        "prevalence": 0.12092214006089604,
+        "auroc": 0.7868411357010383,
+        "auprc": 0.4229676834535697
+      },
+      "Summary": {
+        "tokens": 2435,
+        "positives": 106,
+        "prevalence": 0.04353182751540041,
+        "auroc": 0.6581211468198354,
+        "auprc": 0.15740840192037825
+      }
+    }
+  },
+  "outputs": {
+    "model": "model.pt",
+    "test_scores": "test_scores.npz",
+    "training_history": "training_history.json",
+    "split_audit": "split_audit.json",
+    "validation_effect_csv": "validation_head_layer_effects.csv",
+    "validation_effect_tensor": "validation_head_layer_effects.npz",
+    "validation_effect_figure": "validation_head_layer_effects.png"
+  }
+}

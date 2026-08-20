@@ -1,0 +1,90 @@
+{
+  "schema": "causal-majorization-evaluation-v1",
+  "labels_read": true,
+  "score_sha256": "f222fe0d76be09c90af8418d0b4d7dfbc728217679f908a7c04dc1ca2867f9d7",
+  "reference_sha256": "4baa888fe3ae377504e1ab2a385de968de7d64a71a072a537e4631af7f863915",
+  "detector_config": {
+    "history_decay": 0.9,
+    "majorization_tolerance": 1e-06,
+    "fit_tokens_per_sample": 128,
+    "minimum_scale": 0.01,
+    "maximum_standardized_value": 10.0,
+    "epsilon": 1e-12
+  },
+  "tokens": 1602,
+  "positive_tokens": 47,
+  "prevalence": 0.02933832709113608,
+  "valid_tokens": 1592,
+  "valid_fraction": 0.9937578027465668,
+  "current_detection": {
+    "auroc": 0.407395166287957,
+    "auprc": 0.023975399591171054,
+    "auroc_ci_low": 0.2588551634258726,
+    "auroc_ci_high": 0.4607713912645041,
+    "auprc_ci_low": 0.009113239487179564,
+    "auprc_ci_high": 0.05151156857923216
+  },
+  "forecast": {
+    "horizon_1": {
+      "auroc": 0.406764155520133,
+      "auprc": 0.024059878616904208,
+      "source_tokens": 1582,
+      "auroc_ci_low": 0.1781553513299454,
+      "auroc_ci_high": 0.5176551770237575,
+      "auprc_ci_low": 0.006984159831455062,
+      "auprc_ci_high": 0.05829217289144004
+    },
+    "horizon_2": {
+      "auroc": 0.4091803278688525,
+      "auprc": 0.02404243133092477,
+      "source_tokens": 1572,
+      "auroc_ci_low": 0.17790996885195,
+      "auroc_ci_high": 0.5157910484874235,
+      "auprc_ci_low": 0.007273548371517967,
+      "auprc_ci_high": 0.05199029051259282
+    },
+    "horizon_4": {
+      "auroc": 0.4007634127376829,
+      "auprc": 0.023566760357304345,
+      "source_tokens": 1552,
+      "auroc_ci_low": 0.20165761322071074,
+      "auroc_ci_high": 0.49272492050911115,
+      "auprc_ci_low": 0.004611887500540998,
+      "auprc_ci_high": 0.05817074152523025
+    }
+  },
+  "feature_metrics": {
+    "majorization_evidence": {
+      "auroc": 0.4975142876816085,
+      "auprc": 0.030937656541862306
+    },
+    "concentration_level": {
+      "auroc": 0.4160848309577911,
+      "auprc": 0.024408430202640483
+    },
+    "hill_shape": {
+      "auroc": 0.34541072781105836,
+      "auprc": 0.0208590934203199
+    },
+    "source_affinity": {
+      "auroc": 0.5166150244439853,
+      "auprc": 0.03275308921713424
+    },
+    "entry_probability": {
+      "auroc": 0.4299662604145149,
+      "auprc": 0.028893507762877316
+    },
+    "basin_probability": {
+      "auroc": 0.4106176409832679,
+      "auprc": 0.02462379721950001
+    }
+  },
+  "mechanism_effects": {
+    "onsets": 10,
+    "majorization_onset_minus_pre": 6.255715561565012e-05,
+    "concentration_onset_minus_pre": 0.029595013707876205,
+    "entry_probability_onset_minus_pre": 0.000663860235363245,
+    "spans_with_later_tokens": 8,
+    "basin_probability_later_minus_onset": -0.0783202201128006
+  }
+}
