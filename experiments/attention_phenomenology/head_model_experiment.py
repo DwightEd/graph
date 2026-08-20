@@ -35,6 +35,39 @@ class HeadModelExperimentConfig:
     seed: int = 20260820
 
 
+def stratified_sample_ids(dataset, *, limit: int | None, seed: int) -> list[str]:
+    """Choose a deterministic task-balanced subset when a limit is requested."""
+
+    sample_ids = list(dataset.sample_ids)
+    if limit is None or limit >= len(sample_ids):
+        return sample_ids
+    if limit < 1:
+        raise ValueError("sample limit must be positive")
+    by_task: dict[str, list[str]] = defaultdict(list)
+    for sample_id in sample_ids:
+        task = str(dataset[sample_id].task_type or "unknown")
+        by_task[task].append(sample_id)
+    rng = np.random.default_rng(seed)
+    for current in by_task.values():
+        rng.shuffle(current)
+
+    selected = []
+    tasks = sorted(by_task)
+    offset = 0
+    while len(selected) < limit:
+        added = False
+        for task in tasks:
+            if offset < len(by_task[task]):
+                selected.append(by_task[task][offset])
+                added = True
+                if len(selected) == limit:
+                    break
+        if not added:
+            break
+        offset += 1
+    return selected
+
+
 def source_disjoint_train_validation_split(
     sequences: Sequence[HeadSequence],
     *,
@@ -124,6 +157,7 @@ class HeadResolvedExperiment:
             extractor=extractor,
             device=device,
             limit=self.experiment_config.train_limit,
+            seed=self.experiment_config.seed,
             description="head features train+validation",
         )
         train, validation = source_disjoint_train_validation_split(
@@ -139,6 +173,7 @@ class HeadResolvedExperiment:
             extractor=extractor,
             device=device,
             limit=self.experiment_config.test_limit,
+            seed=self.experiment_config.seed + 1,
             description="head features test",
         )
         reserved_sources = {sequence.source_id for sequence in all_train}
@@ -234,11 +269,12 @@ class HeadResolvedExperiment:
         extractor: HeadResolvedFeatureExtractor,
         device: str,
         limit: int | None,
+        seed: int,
         description: str,
     ) -> list[HeadSequence]:
         dataset = open_research_dataset(split_root, device=device)
         labels = dataset.prepare_evaluation_labels()
-        sample_ids = dataset.sample_ids if limit is None else dataset.sample_ids[:limit]
+        sample_ids = stratified_sample_ids(dataset, limit=limit, seed=seed)
         sequences = []
         for sample_id in tqdm(sample_ids, desc=description, unit="sample"):
             sample = dataset[sample_id]
