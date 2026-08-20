@@ -1,4 +1,8 @@
-from experiments.attention_phenomenology.main import _config, build_parser
+from experiments.attention_phenomenology.main import (
+    _config,
+    _distribution_config,
+    build_parser,
+)
 
 
 def test_cli_uses_only_current_mechanism_parameters():
@@ -29,3 +33,29 @@ def test_cli_uses_only_current_mechanism_parameters():
     assert config.recent_response_tokens == 5
     assert config.reference_minimum_scale == 0.01
     assert config.maximum_standardized_value == 8.0
+
+
+def test_distribution_command_builds_its_own_validation_config():
+    arguments = build_parser().parse_args(
+        [
+            "validate-distributions",
+            "--fit-split",
+            "train",
+            "--validation-split",
+            "validation",
+            "--output-dir",
+            "outputs",
+            "--fit-reservoir-rows",
+            "32",
+            "--validation-reservoir-rows",
+            "48",
+            "--pseudocount",
+            "0.0001",
+        ]
+    )
+
+    config = _distribution_config(arguments)
+
+    assert config.fit_reservoir_rows == 32
+    assert config.validation_reservoir_rows == 48
+    assert config.pseudocounts == (0.0001,)

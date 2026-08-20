@@ -165,12 +165,51 @@ reference.py     unlabeled position/task reference and family scores
 compositions.py  role and provenance simplex representations
 distributions.py Dirichlet/logistic-normal fitting and adequacy metrics
 distribution_validation.py label-free held-out distribution comparison
+majorization.py  majorization curves and Rényi--Hill diversity spectrum
+majorization_dynamics.py streamed exact-source trace and causal state filter
+majorization_detector.py label-free robust fit/score interface
+majorization_nulls.py registered weight, identity, and chronology controls
+majorization_validation.py frozen scoring and post-freeze hypothesis evaluation
 nulls.py         endpoint-rewiring control
 experiment.py    fit and score artifacts; never opens labels
 evaluation.py    label-aware metrics after score freeze
 main.py          CLI only
 run.sh           one-command fit -> score -> evaluate workflow
+run_majorization_validation.sh one-command majorization validation workflow
 ```
+
+## Majorization and dynamic-state validation
+
+`validate-majorization` tests a more specific token-level mechanism without a
+Dirichlet likelihood. For each layer/head independently, it subtracts the
+cache floor, keeps exact prompt source IDs, and compares the current sorted
+cumulative source curve with a causal EWMA reference. A positive score is
+recorded only when the current distribution actually majorizes the reference;
+crossing curves receive negative evidence.
+
+The same rows produce the Rényi--Hill effective-source spectrum at orders
+`1/2, 1, 2, 4, infinity` and exact-source Hellinger affinity to the preceding
+token. A three-state causal filter separates a new concentrated entry from a
+stable concentrated residence. `current_probability[t]` is post-emission;
+`forecast_probability[t]` is evaluated only against future labels and never
+uses token `t+1` attention.
+
+Local smoke test:
+
+```bash
+ROOT=/path/to/RAGTruth/llama31_8b \
+OUT=experiments/attention_phenomenology/outputs/majorization_smoke \
+FIT_LIMIT=3 TEST_LIMIT=2 BOOTSTRAP_REPLICATES=20 DEVICE=cpu \
+PYTHON=python bash experiments/attention_phenomenology/run_majorization_validation.sh
+```
+
+The workflow writes `reference.json`, freezes all token rows in `scores.npz`,
+checks held-out source groups and manifest identity, and only then opens labels
+to create `evaluation.json`. It reports current-token detection separately from
+1/2/4-token forecasts and records onset and within-span residence effects.
+Three registered controls isolate the proposed mechanism: uniform prompt-edge
+weights remove weight concentration, per-token source permutations remove
+cross-token exact identity, and prompt-row time shuffling removes chronology.
 
 ## Run
 

@@ -11,6 +11,8 @@ from .distribution_validation import (
 )
 from .evaluation import evaluate_scores
 from .experiment import fit_reference, score_split
+from .majorization_detector import MajorizationDetectorConfig
+from .majorization_validation import run_majorization_validation
 
 
 def _add_config(parser: argparse.ArgumentParser) -> None:
@@ -83,6 +85,16 @@ def _distribution_config(arguments) -> DistributionValidationConfig:
     )
 
 
+def _majorization_config(arguments) -> MajorizationDetectorConfig:
+    return MajorizationDetectorConfig(
+        history_decay=arguments.history_decay,
+        majorization_tolerance=arguments.majorization_tolerance,
+        fit_tokens_per_sample=arguments.fit_tokens_per_sample,
+        minimum_scale=arguments.minimum_scale,
+        maximum_standardized_value=arguments.maximum_standardized_value,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -138,6 +150,29 @@ def build_parser() -> argparse.ArgumentParser:
     distributions.add_argument("--fit-limit", type=int)
     distributions.add_argument("--validation-limit", type=int)
     _add_config(distributions)
+
+    majorization = commands.add_parser(
+        "validate-majorization",
+        help="validate causal majorization, Hill spectra, and route states",
+    )
+    majorization.add_argument("--train-split", required=True)
+    majorization.add_argument("--test-split", required=True)
+    majorization.add_argument("--output-dir", required=True)
+    majorization.add_argument("--device", default="cpu")
+    majorization.add_argument("--history-decay", type=float, default=0.9)
+    majorization.add_argument(
+        "--majorization-tolerance", type=float, default=1e-6
+    )
+    majorization.add_argument("--fit-tokens-per-sample", type=int, default=128)
+    majorization.add_argument("--minimum-scale", type=float, default=0.01)
+    majorization.add_argument(
+        "--maximum-standardized-value", type=float, default=10.0
+    )
+    majorization.add_argument("--block-rows", type=int, default=8192)
+    majorization.add_argument("--fit-limit", type=int)
+    majorization.add_argument("--test-limit", type=int)
+    majorization.add_argument("--bootstrap-replicates", type=int, default=200)
+    majorization.add_argument("--seed", type=int, default=20260820)
     return parser
 
 
@@ -174,7 +209,7 @@ def main() -> None:
             fit_limit=arguments.fit_limit,
             validation_limit=arguments.validation_limit,
         )
-    else:
+    elif arguments.command == "evaluate":
         evaluate_scores(
             split_root=arguments.split_root,
             score_dir=arguments.score_dir,
@@ -182,6 +217,26 @@ def main() -> None:
             onset_window=arguments.onset_window,
             bootstrap_replicates=arguments.bootstrap_replicates,
             seed=arguments.seed,
+        )
+    else:
+        result = run_majorization_validation(
+            train_split=arguments.train_split,
+            test_split=arguments.test_split,
+            output_dir=arguments.output_dir,
+            device=arguments.device,
+            detector_config=_majorization_config(arguments),
+            block_rows=arguments.block_rows,
+            fit_limit=arguments.fit_limit,
+            test_limit=arguments.test_limit,
+            bootstrap_replicates=arguments.bootstrap_replicates,
+            seed=arguments.seed,
+        )
+        print(f"done: {arguments.output_dir}/evaluation.json")
+        print(
+            "current AUROC:",
+            result["current_detection"]["auroc"],
+            "next-token AUROC:",
+            result["forecast"]["horizon_1"]["auroc"],
         )
 
 
