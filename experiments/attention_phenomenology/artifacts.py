@@ -9,10 +9,10 @@ from pathlib import Path
 import numpy as np
 
 
-REFERENCE_SCHEMA = "attention-phenomenology-reference-v2"
-SCORE_SCHEMA = "attention-phenomenology-score-v2"
-MANIFEST_SCHEMA = "attention-phenomenology-manifest-v2"
-EVALUATION_SCHEMA = "attention-phenomenology-evaluation-v2"
+REFERENCE_SCHEMA = "attention-phenomenology-reference-v3"
+SCORE_SCHEMA = "attention-phenomenology-score-v3"
+MANIFEST_SCHEMA = "attention-phenomenology-manifest-v3"
+EVALUATION_SCHEMA = "attention-phenomenology-evaluation-v3"
 
 
 def sha256_file(path: str | Path) -> str:

@@ -6,20 +6,20 @@ from dataclasses import dataclass
 
 import torch
 
-from .routing import RoutingTensor
+from .routing import RoutingState
 
 
 @dataclass(frozen=True)
 class PromptProvenance:
     head_lower: torch.Tensor
     head_upper: torch.Tensor
-    unsupported_rr_lower: torch.Tensor
-    unsupported_rr_upper: torch.Tensor
+    unsupported_response_lower: torch.Tensor
+    unsupported_response_upper: torch.Tensor
     aggregate_lower: torch.Tensor
     aggregate_upper: torch.Tensor
 
 
-def layered_prompt_provenance(routing: RoutingTensor) -> PromptProvenance:
+def layered_prompt_provenance(routing: RoutingState) -> PromptProvenance:
     """Propagate prompt ancestry through ordered attention layers."""
 
     response_count = routing.edges.num_response_tokens
@@ -45,31 +45,33 @@ def layered_prompt_provenance(routing: RoutingTensor) -> PromptProvenance:
         upper += routing.self_mass[:, layer] * previous_upper[:, None]
         upper += routing.unresolved_mass[:, layer]
 
-        unsupported_rr_lower = torch.zeros_like(lower)
-        unsupported_rr_upper = routing.unresolved_mass[:, layer].clone()
-        selected = routing.rr_layer == layer
+        unsupported_response_lower = torch.zeros_like(lower)
+        unsupported_response_upper = routing.unresolved_mass[:, layer].clone()
+        edges = routing.edges
+        selected = (edges.layer == layer) & (edges.source >= edges.response_idx)
         if selected.any():
-            query = routing.rr_query[selected]
-            head = routing.rr_head[selected]
-            source = routing.rr_source[selected]
-            weight = routing.rr_weight[selected]
+            query = edges.query[selected]
+            head = edges.head[selected]
+            source = edges.source[selected] - edges.response_idx
+            weight = routing.edge_weight[selected]
+            # Accumulate the exact response sources that carry prompt ancestry.
             lower.index_put_(
                 (query, head), weight * previous_lower[source], accumulate=True
             )
             upper.index_put_(
                 (query, head), weight * previous_upper[source], accumulate=True
             )
-            unsupported_rr_lower.index_put_(
+            unsupported_response_lower.index_put_(
                 (query, head), weight * (1.0 - previous_upper[source]), accumulate=True
             )
-            unsupported_rr_upper.index_put_(
+            unsupported_response_upper.index_put_(
                 (query, head), weight * (1.0 - previous_lower[source]), accumulate=True
             )
 
         head_lower[:, layer] = lower.clamp(0.0, 1.0)
         head_upper[:, layer] = upper.clamp(0.0, 1.0)
-        unsupported_lower[:, layer] = unsupported_rr_lower.clamp(0.0, 1.0)
-        unsupported_upper[:, layer] = unsupported_rr_upper.clamp(0.0, 1.0)
+        unsupported_lower[:, layer] = unsupported_response_lower.clamp(0.0, 1.0)
+        unsupported_upper[:, layer] = unsupported_response_upper.clamp(0.0, 1.0)
 
         previous_lower = head_lower[:, layer].mean(dim=1)
         previous_upper = head_upper[:, layer].mean(dim=1)
@@ -79,8 +81,8 @@ def layered_prompt_provenance(routing: RoutingTensor) -> PromptProvenance:
     return PromptProvenance(
         head_lower=head_lower,
         head_upper=head_upper,
-        unsupported_rr_lower=unsupported_lower,
-        unsupported_rr_upper=unsupported_upper,
+        unsupported_response_lower=unsupported_lower,
+        unsupported_response_upper=unsupported_upper,
         aggregate_lower=aggregate_lower,
         aggregate_upper=aggregate_upper,
     )

@@ -44,4 +44,4 @@ def test_unsupported_feedback_counts_rr_not_self_attention():
         edges=([0], [0], [0], [0], [0.2]),
     )
     analysis = analyze_routing(collect_routing_edges(sample))
-    assert analysis.provenance.unsupported_rr_lower[0, 0, 0] == 0.0
+    assert analysis.provenance.unsupported_response_lower[0, 0, 0] == 0.0

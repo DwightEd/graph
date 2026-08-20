@@ -18,9 +18,9 @@ class RewireResult:
 
 
 def _prompt_candidates(prompt_count: int, bin_index: int, bins: int) -> np.ndarray:
-    start = (bin_index * prompt_count) // bins
-    stop = max(((bin_index + 1) * prompt_count) // bins, start + 1)
-    return np.arange(start, min(stop, prompt_count), dtype=np.int64)
+    source = np.arange(prompt_count, dtype=np.int64)
+    source_bin = np.minimum(source * bins // max(prompt_count, 1), bins - 1)
+    return source[source_bin == bin_index]
 
 
 def _response_candidates(query: int, bin_index: int, bins: int) -> np.ndarray:
@@ -56,22 +56,35 @@ def rewire_exact_endpoints(
         if current_source < edges.response_idx:
             edge_type = 0
             bin_index = min(
-                current_source * config.prompt_bins // max(edges.response_idx, 1),
-                config.prompt_bins - 1,
+                current_source
+                * config.null_prompt_position_bins
+                // max(edges.response_idx, 1),
+                config.null_prompt_position_bins - 1,
             )
         else:
             edge_type = 1
             lag = current_query - (current_source - edges.response_idx)
-            bin_index = min(int(np.floor(np.log2(lag))), config.rr_lag_bins - 1)
+            bin_index = min(
+                int(np.floor(np.log2(lag))),
+                config.null_response_lag_bins - 1,
+            )
         groups.setdefault(
             (current_layer, current_head, current_query, edge_type, bin_index), []
         ).append(index)
 
     for (_, _, current_query, edge_type, bin_index), indices in groups.items():
         candidates = (
-            _prompt_candidates(edges.response_idx, bin_index, config.prompt_bins)
+            _prompt_candidates(
+                edges.response_idx,
+                bin_index,
+                config.null_prompt_position_bins,
+            )
             if edge_type == 0
-            else _response_candidates(current_query, bin_index, config.rr_lag_bins)
+            else _response_candidates(
+                current_query,
+                bin_index,
+                config.null_response_lag_bins,
+            )
             + edges.response_idx
         )
         if len(candidates) <= 1 or len(candidates) < len(indices):

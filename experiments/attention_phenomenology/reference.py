@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .artifacts import REFERENCE_SCHEMA
 from .config import PhenomenologyConfig
 from .hypotheses import FAMILY_FEATURES, FAMILY_NAMES, FEATURE_INDEX, FEATURE_NAMES
 
@@ -57,12 +58,13 @@ def token_buckets(response_count: int, bins: int) -> np.ndarray:
 
 
 def robust_center_scale(
-    values: np.ndarray, epsilon: float
+    values: np.ndarray, minimum_scale: float
 ) -> tuple[np.ndarray, np.ndarray]:
     center = np.median(values, axis=0)
     mad = 1.4826 * np.median(np.abs(values - center), axis=0)
     standard_deviation = np.std(values, axis=0)
-    scale = np.where(mad > epsilon, mad, np.where(standard_deviation > epsilon, standard_deviation, 1.0))
+    scale = np.where(mad > minimum_scale, mad, standard_deviation)
+    scale = np.maximum(scale, minimum_scale)
     return center.astype(np.float32), scale.astype(np.float32)
 
 
@@ -78,7 +80,7 @@ def fit_reference_from_reservoirs(
     scales = []
     for task, bucket in sorted(reservoirs):
         center, scale = robust_center_scale(
-            reservoirs[(task, bucket)].matrix(), config.epsilon
+            reservoirs[(task, bucket)].matrix(), config.reference_minimum_scale
         )
         tasks.append(task)
         buckets.append(bucket)
@@ -98,7 +100,7 @@ def fit_reference_from_reservoirs(
 def save_reference(path, reference: PhenomenologyReference) -> None:
     np.savez_compressed(
         path,
-        schema=np.asarray("attention-phenomenology-reference-v2"),
+        schema=np.asarray(REFERENCE_SCHEMA),
         task=reference.task,
         bucket=reference.bucket,
         center=reference.center,
@@ -135,6 +137,7 @@ def standardize_features(
     task: str,
     buckets: np.ndarray,
     reference: PhenomenologyReference,
+    maximum_value: float = 10.0,
 ) -> np.ndarray:
     mapping = _condition_map(reference)
     global_buckets = sorted(
@@ -149,7 +152,7 @@ def standardize_features(
         standardized[token] = (
             layer_features[token] - reference.center[condition]
         ) / reference.scale[condition]
-    return standardized
+    return np.clip(standardized, -maximum_value, maximum_value)
 
 
 def family_layer_atypicality(standardized: np.ndarray) -> np.ndarray:

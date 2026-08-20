@@ -46,6 +46,13 @@ def _sample_bootstrap(
             current = _metrics(labels, score)
             values.append((current["auroc"], current["auprc"]))
     values = np.asarray(values)
+    if not len(values):
+        return {
+            "auroc_ci_low": float("nan"),
+            "auroc_ci_high": float("nan"),
+            "auprc_ci_low": float("nan"),
+            "auprc_ci_high": float("nan"),
+        }
     return {
         "auroc_ci_low": float(np.quantile(values[:, 0], 0.025)),
         "auroc_ci_high": float(np.quantile(values[:, 0], 0.975)),
@@ -81,6 +88,13 @@ def _paired_bootstrap_delta(
             )
         )
     delta = np.asarray(delta)
+    if not len(delta):
+        return {
+            "auroc_drop_ci_low": float("nan"),
+            "auroc_drop_ci_high": float("nan"),
+            "auprc_drop_ci_low": float("nan"),
+            "auprc_drop_ci_high": float("nan"),
+        }
     return {
         "auroc_drop_ci_low": float(np.quantile(delta[:, 0], 0.025)),
         "auroc_drop_ci_high": float(np.quantile(delta[:, 0], 0.975)),
@@ -366,10 +380,11 @@ def evaluate_scores(
             else None,
             "hypothesis_outputs": {
                 "routing_detection": "family_metrics.csv",
+                "prompt_access": "onset_layer_effects.csv",
                 "routing_fracture": "onset_layer_effects.csv",
                 "integration_failure": "onset_layer_effects.csv",
-                "fracture_to_lockin": "lockin_layer_effects.csv",
-                "endpoint_topology": "real/rewired deltas in family_metrics.csv",
+                "response_lockin": "lockin_layer_effects.csv",
+                "endpoint_identity": "real/rewired deltas in family_metrics.csv",
             },
         },
     )

@@ -10,26 +10,49 @@ from .experiment import fit_reference, score_split
 
 
 def _add_config(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--prompt-bins", type=int, default=4)
-    parser.add_argument("--rr-lag-bins", type=int, default=8)
-    parser.add_argument("--lid-neighbors", type=int, default=8)
-    parser.add_argument("--transition-projections", type=int, default=12)
-    parser.add_argument("--anchor-count", type=int, default=8)
-    parser.add_argument("--recent-lag-max", type=int, default=4)
-    parser.add_argument("--causal-position-bins", type=int, default=10)
-    parser.add_argument("--block-rows", type=int, default=8192)
-    parser.add_argument("--seed", type=int, default=20260819)
+    defaults = PhenomenologyConfig()
+    parser.add_argument(
+        "--null-prompt-position-bins",
+        type=int,
+        default=defaults.null_prompt_position_bins,
+    )
+    parser.add_argument(
+        "--null-response-lag-bins",
+        type=int,
+        default=defaults.null_response_lag_bins,
+    )
+    parser.add_argument(
+        "--recent-response-tokens",
+        type=int,
+        default=defaults.recent_response_tokens,
+    )
+    parser.add_argument(
+        "--causal-position-bins",
+        type=int,
+        default=defaults.causal_position_bins,
+    )
+    parser.add_argument(
+        "--reference-minimum-scale",
+        type=float,
+        default=defaults.reference_minimum_scale,
+    )
+    parser.add_argument(
+        "--maximum-standardized-value",
+        type=float,
+        default=defaults.maximum_standardized_value,
+    )
+    parser.add_argument("--block-rows", type=int, default=defaults.block_rows)
+    parser.add_argument("--seed", type=int, default=defaults.random_seed)
 
 
 def _config(arguments) -> PhenomenologyConfig:
     return PhenomenologyConfig(
-        prompt_bins=arguments.prompt_bins,
-        rr_lag_bins=arguments.rr_lag_bins,
-        lid_neighbors=arguments.lid_neighbors,
-        transition_projections=arguments.transition_projections,
-        anchor_count=arguments.anchor_count,
-        recent_lag_max=arguments.recent_lag_max,
+        null_prompt_position_bins=arguments.null_prompt_position_bins,
+        null_response_lag_bins=arguments.null_response_lag_bins,
+        recent_response_tokens=arguments.recent_response_tokens,
         causal_position_bins=arguments.causal_position_bins,
+        reference_minimum_scale=arguments.reference_minimum_scale,
+        maximum_standardized_value=arguments.maximum_standardized_value,
         block_rows=arguments.block_rows,
         random_seed=arguments.seed,
     )

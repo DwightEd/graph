@@ -16,13 +16,12 @@ SCORE_LIMIT=()
 [[ -n "${TEST_LIMIT:-}" ]] && SCORE_LIMIT=(--limit "$TEST_LIMIT")
 
 CONFIG=(
-  --prompt-bins "${PROMPT_BINS:-4}"
-  --rr-lag-bins "${RR_LAG_BINS:-8}"
-  --lid-neighbors "${LID_NEIGHBORS:-8}"
-  --transition-projections "${TRANSITION_PROJECTIONS:-12}"
-  --anchor-count "${ANCHOR_COUNT:-8}"
-  --recent-lag-max "${RECENT_LAG_MAX:-4}"
+  --null-prompt-position-bins "${NULL_PROMPT_POSITION_BINS:-4}"
+  --null-response-lag-bins "${NULL_RESPONSE_LAG_BINS:-8}"
+  --recent-response-tokens "${RECENT_RESPONSE_TOKENS:-4}"
   --causal-position-bins "${CAUSAL_POSITION_BINS:-10}"
+  --reference-minimum-scale "${REFERENCE_MINIMUM_SCALE:-0.001}"
+  --maximum-standardized-value "${MAXIMUM_STANDARDIZED_VALUE:-10}"
   --block-rows "${BLOCK_ROWS:-8192}"
   --seed "${SEED:-20260819}"
 )

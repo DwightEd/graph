@@ -10,7 +10,11 @@ from .helpers import SyntheticAttention, SyntheticSample
 
 
 def test_endpoint_null_preserves_roles_and_changes_sources():
-    config = PhenomenologyConfig(prompt_bins=2, rr_lag_bins=2, random_seed=9)
+    config = PhenomenologyConfig(
+        null_prompt_position_bins=2,
+        null_response_lag_bins=2,
+        random_seed=9,
+    )
     attention = SyntheticAttention(
         num_layers=1,
         num_heads=2,
@@ -39,3 +43,25 @@ def test_endpoint_null_preserves_roles_and_changes_sources():
         atol=1e-6,
     )
     assert null.changed_fraction > 0
+
+
+def test_prompt_rewire_never_crosses_its_position_bin():
+    config = PhenomenologyConfig(null_prompt_position_bins=4)
+    attention = SyntheticAttention(
+        num_layers=1,
+        num_heads=1,
+        num_response_tokens=1,
+        response_idx=7,
+        attention_diagonal=torch.zeros((1, 1, 8)),
+    )
+    sample = SyntheticSample(
+        attention,
+        edges=([0], [0], [0], [3], [0.8]),
+    )
+    edges = collect_routing_edges(sample, config=config)
+
+    rewired = rewire_exact_endpoints(edges, config=config, seed=1).edges
+
+    original_bin = edges.source * 4 // edges.response_idx
+    rewired_bin = rewired.source * 4 // edges.response_idx
+    torch.testing.assert_close(rewired_bin, original_bin)

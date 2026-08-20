@@ -25,7 +25,7 @@ from .reference import (
     standardize_features,
     token_buckets,
 )
-from .routing import collect_routing_edges
+from .routing import ROLE_NAMES, collect_routing_edges
 
 
 def _sample_seed(sample_id: str, base_seed: int) -> int:
@@ -93,6 +93,7 @@ def _sample_scores(
         task=task,
         buckets=buckets,
         reference=reference,
+        maximum_value=config.maximum_standardized_value,
     )
     family_layer = family_layer_atypicality(standardized)
     family = family_atypicality(family_layer)
@@ -104,33 +105,41 @@ def _detail_arrays(analysis: SamplePhenomenology) -> dict[str, np.ndarray]:
     edges = routing.edges
     return {
         "role_probability": routing.role_probability.cpu().numpy().astype(np.float16),
-        "known_role_probability": routing.known_role_probability.cpu()
+        "prompt_top_source": analysis.prompt_sources.top_source.cpu()
+        .numpy()
+        .astype(np.int32),
+        "response_top_source": analysis.response_sources.top_source.cpu()
+        .numpy()
+        .astype(np.int32),
+        "prompt_effective_sources": analysis.prompt_sources.effective_sources.cpu()
         .numpy()
         .astype(np.float16),
-        "known_persistence_deaths": analysis.known_geometry.persistence_deaths.cpu()
+        "response_effective_sources": analysis.response_sources.effective_sources.cpu()
         .numpy()
         .astype(np.float16),
-        "full_persistence_deaths": analysis.full_geometry.persistence_deaths.cpu()
+        "prompt_source_velocity": analysis.prompt_sources.velocity.cpu()
         .numpy()
         .astype(np.float16),
-        "head_grounding_lower": analysis.provenance.head_lower.cpu()
+        "response_source_velocity": analysis.response_sources.velocity.cpu()
         .numpy()
         .astype(np.float16),
-        "head_grounding_upper": analysis.provenance.head_upper.cpu()
+        "head_prompt_provenance_lower": analysis.provenance.head_lower.cpu()
         .numpy()
         .astype(np.float16),
-        "aggregate_grounding_lower": analysis.provenance.aggregate_lower.cpu()
+        "head_prompt_provenance_upper": analysis.provenance.head_upper.cpu()
         .numpy()
         .astype(np.float16),
-        "aggregate_grounding_upper": analysis.provenance.aggregate_upper.cpu()
+        "aggregate_prompt_provenance_lower": analysis.provenance.aggregate_lower.cpu()
         .numpy()
         .astype(np.float16),
-        "source_mass": routing.source_mass.cpu().numpy().astype(np.float16),
+        "aggregate_prompt_provenance_upper": analysis.provenance.aggregate_upper.cpu()
+        .numpy()
+        .astype(np.float16),
         "edge_layer": edges.layer.cpu().numpy().astype(np.int16),
         "edge_head": edges.head.cpu().numpy().astype(np.int16),
         "edge_query": edges.query.cpu().numpy().astype(np.int32),
         "edge_source": edges.source.cpu().numpy().astype(np.int32),
-        "edge_weight": edges.weight.cpu().numpy().astype(np.float32),
+        "edge_weight": routing.edge_weight.cpu().numpy().astype(np.float32),
     }
 
 
@@ -254,7 +263,7 @@ def score_split(
             "config": config.to_dict(),
             "feature_names": list(FEATURE_NAMES),
             "family_names": list(FAMILY_NAMES),
-            "role_names": list(config.role_names),
+            "role_names": list(ROLE_NAMES),
             "rewired_control": rewire,
             "samples": manifest_rows,
         },
