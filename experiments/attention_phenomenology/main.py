@@ -5,6 +5,10 @@ from __future__ import annotations
 import argparse
 
 from .config import PhenomenologyConfig
+from .distribution_validation import (
+    DistributionValidationConfig,
+    validate_composition_distributions,
+)
 from .evaluation import evaluate_scores
 from .experiment import fit_reference, score_split
 
@@ -58,6 +62,27 @@ def _config(arguments) -> PhenomenologyConfig:
     )
 
 
+def _distribution_config(arguments) -> DistributionValidationConfig:
+    representations = (
+        tuple(arguments.representation)
+        if arguments.representation
+        else ("role", "provenance")
+    )
+    return DistributionValidationConfig(
+        representations=representations,
+        fit_reservoir_rows=arguments.fit_reservoir_rows,
+        validation_reservoir_rows=arguments.validation_reservoir_rows,
+        minimum_group_rows=arguments.minimum_group_rows,
+        pseudocounts=(
+            tuple(arguments.pseudocount)
+            if arguments.pseudocount
+            else (1e-6, 1e-4, 1e-3)
+        ),
+        simulation_rows=arguments.simulation_rows,
+        random_seed=arguments.seed,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -89,6 +114,30 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--onset-window", type=int, default=4)
     evaluate.add_argument("--bootstrap-replicates", type=int, default=500)
     evaluate.add_argument("--seed", type=int, default=20260819)
+
+    distributions = commands.add_parser(
+        "validate-distributions",
+        help="compare Dirichlet and logistic-normal fits without opening labels",
+    )
+    distributions.add_argument("--fit-split", required=True)
+    distributions.add_argument("--validation-split", required=True)
+    distributions.add_argument("--output-dir", required=True)
+    distributions.add_argument("--device", default="cpu")
+    distributions.add_argument(
+        "--representation",
+        action="append",
+        choices=("role", "provenance"),
+    )
+    distributions.add_argument("--fit-reservoir-rows", type=int, default=1024)
+    distributions.add_argument(
+        "--validation-reservoir-rows", type=int, default=1024
+    )
+    distributions.add_argument("--minimum-group-rows", type=int, default=128)
+    distributions.add_argument("--pseudocount", type=float, action="append")
+    distributions.add_argument("--simulation-rows", type=int, default=4096)
+    distributions.add_argument("--fit-limit", type=int)
+    distributions.add_argument("--validation-limit", type=int)
+    _add_config(distributions)
     return parser
 
 
@@ -113,6 +162,17 @@ def main() -> None:
             rewire=not arguments.no_rewire,
             detail_sample_ids=tuple(arguments.detail_sample_id),
             limit=arguments.limit,
+        )
+    elif arguments.command == "validate-distributions":
+        validate_composition_distributions(
+            fit_split=arguments.fit_split,
+            validation_split=arguments.validation_split,
+            output_dir=arguments.output_dir,
+            device=arguments.device,
+            phenomenology_config=_config(arguments),
+            validation_config=_distribution_config(arguments),
+            fit_limit=arguments.fit_limit,
+            validation_limit=arguments.validation_limit,
         )
     else:
         evaluate_scores(

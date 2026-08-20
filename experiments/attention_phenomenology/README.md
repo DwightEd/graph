@@ -77,6 +77,73 @@ At evaluation time the audit asks:
 The fourth question uses `nulls.py`, which rewires exact sources while preserving
 target, layer, head, weight, role, prompt-position bin, and response-lag bin.
 
+## Dirichlet suitability audit
+
+A Dirichlet model is not assumed to be correct merely because attention rows lie
+on a simplex. `validate-distributions` first checks that assumption against a
+logistic-normal alternative on an unlabeled held-out split.
+
+`compositions.py` exposes two representations for every
+`[token, layer, head]` row:
+
+```text
+role:
+  prompt | response_history | self | unresolved
+
+provenance:
+  direct_prompt
+  | grounded_response_lower
+  | unsupported_response_lower
+  | uncertain_response
+  | self
+  | unresolved
+```
+
+The second representation uses exact response endpoints and ordered-layer prompt
+provenance. It is therefore the first gate for asking whether graph-derived,
+multi-hop ancestry adds structure beyond direct role mass.
+
+For each task, causal-position bucket, and layer, `distributions.py` fits:
+
+- one Dirichlet distribution by maximum likelihood;
+- one logistic-normal distribution in additive-log-ratio coordinates.
+
+The held-out report does not use hallucination labels. It records:
+
+- held-out log likelihood and AIC per row;
+- Dirichlet minus logistic-normal log likelihood;
+- empirical-versus-implied mean and covariance error;
+- positive off-diagonal covariance, which one Dirichlet cannot represent;
+- dispersion of per-component method-of-moments concentration estimates;
+- a simulation-based NLL probability-integral-transform calibration test;
+- sensitivity to several zero-replacement pseudocounts.
+
+A single Dirichlet should not be promoted to the detector when it is consistently
+outperformed by the logistic-normal model, when empirical positive covariance is
+substantial, or when calibration changes materially with the pseudocount. In
+that case the next candidate is a mixture, logistic-normal, or graph-conditioned
+composition model rather than forcing the Dirichlet likelihood.
+
+Smoke test:
+
+```bash
+ROOT=/path/to/RAGTruth/llama31_8b \
+OUT=experiments/attention_phenomenology/outputs/dirichlet_smoke \
+FIT_LIMIT=20 VALIDATION_LIMIT=10 \
+FIT_RESERVOIR_ROWS=128 VALIDATION_RESERVOIR_ROWS=128 \
+MINIMUM_GROUP_ROWS=16 SIMULATION_ROWS=256 \
+DEVICE=cpu \
+  bash experiments/attention_phenomenology/run_distribution_validation.sh
+```
+
+The outputs are:
+
+```text
+reference.json       fitted Dirichlet and logistic-normal parameters
+group_metrics.csv    task / position / layer adequacy diagnostics
+summary.json          representation- and pseudocount-level summary
+```
+
 ## Execution path
 
 ```text
@@ -95,6 +162,9 @@ provenance.py    ordered-layer prompt ancestry bounds
 features.py      named mechanism features
 hypotheses.py    feature families and predicted directions
 reference.py     unlabeled position/task reference and family scores
+compositions.py  role and provenance simplex representations
+distributions.py Dirichlet/logistic-normal fitting and adequacy metrics
+distribution_validation.py label-free held-out distribution comparison
 nulls.py         endpoint-rewiring control
 experiment.py    fit and score artifacts; never opens labels
 evaluation.py    label-aware metrics after score freeze
