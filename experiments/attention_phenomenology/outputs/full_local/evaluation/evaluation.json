@@ -1,0 +1,70 @@
+{
+  "schema": "attention-phenomenology-evaluation-v1",
+  "labels_read": true,
+  "tokens": 73994,
+  "positive_tokens": 4594,
+  "prevalence": 0.06208611509041274,
+  "samples": 449,
+  "family_metrics": [
+    {
+      "family": "fracture",
+      "auroc": 0.5705303779268536,
+      "auprc": 0.08006559993354978,
+      "auroc_ci_low": 0.5500264862767832,
+      "auroc_ci_high": 0.5932603980582903,
+      "auprc_ci_low": 0.06475631543907694,
+      "auprc_ci_high": 0.09873250730586489,
+      "rewired_auroc": 0.5698545527997301,
+      "rewired_auprc": 0.07978479549317105,
+      "auroc_drop": 0.0006758251271234972,
+      "auprc_drop": 0.0002808044403787291
+    },
+    {
+      "family": "integration",
+      "auroc": 0.5582738464153845,
+      "auprc": 0.07847286840217738,
+      "auroc_ci_low": 0.5368885012257884,
+      "auroc_ci_high": 0.5794827022809437,
+      "auprc_ci_low": 0.06194409361749367,
+      "auprc_ci_high": 0.09898620464196557,
+      "rewired_auroc": 0.5577481607384146,
+      "rewired_auprc": 0.07800511933258797,
+      "auroc_drop": 0.000525685676969867,
+      "auprc_drop": 0.0004677490695894071
+    },
+    {
+      "family": "lockin",
+      "auroc": 0.5227392169212066,
+      "auprc": 0.06313290969973356,
+      "auroc_ci_low": 0.5059280460151043,
+      "auroc_ci_high": 0.5400866690720324,
+      "auprc_ci_low": 0.051454789396842865,
+      "auprc_ci_high": 0.07644284569851936,
+      "rewired_auroc": 0.5072456728422865,
+      "rewired_auprc": 0.06066866460731595,
+      "auroc_drop": 0.015493544078920118,
+      "auprc_drop": 0.002464245092417612
+    },
+    {
+      "family": "all",
+      "auroc": 0.547631033273572,
+      "auprc": 0.06846790363122567,
+      "auroc_ci_low": 0.5286248958988802,
+      "auroc_ci_high": 0.5682056304174934,
+      "auprc_ci_low": 0.0555969738533335,
+      "auprc_ci_high": 0.08327532445356729,
+      "rewired_auroc": 0.5368619151781737,
+      "rewired_auprc": 0.0657587170228929,
+      "auroc_drop": 0.010769118095398267,
+      "auprc_drop": 0.0027091866083327615
+    }
+  ],
+  "rewire_role_max_abs_error": 0.99609375,
+  "hypothesis_tests": {
+    "routing_detection": "family_metrics.csv",
+    "routing_fracture": "onset_layer_effects.csv",
+    "integration_failure": "onset_layer_effects.csv",
+    "fracture_to_lockin": "lockin_layer_effects.csv",
+    "endpoint_topology": "real versus rewired columns in metrics CSVs"
+  }
+}
