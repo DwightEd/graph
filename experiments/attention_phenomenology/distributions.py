@@ -198,6 +198,12 @@ def distribution_diagnostics(
     dirichlet = fit_dirichlet(fit_matrix, pseudocount=0.0)
     logistic_normal = fit_logistic_normal(fit_matrix, pseudocount=0.0)
 
+    dirichlet_fit_log_likelihood = dirichlet_logpdf(
+        fit_matrix, dirichlet.alpha, pseudocount=0.0
+    )
+    logistic_fit_log_likelihood = logistic_normal_logpdf(
+        fit_matrix, logistic_normal, pseudocount=0.0
+    )
     dirichlet_log_likelihood = dirichlet_logpdf(
         validation_matrix, dirichlet.alpha, pseudocount=0.0
     )
@@ -233,13 +239,13 @@ def distribution_diagnostics(
         logistic_dimensions
         + logistic_dimensions * (logistic_dimensions + 1) // 2
     )
-    rows = len(validation_matrix)
+    fit_rows = len(fit_matrix)
     dirichlet_aic_per_row = (
-        -2.0 * dirichlet_log_likelihood.sum() + 2.0 * dirichlet_parameters
-    ) / rows
+        -2.0 * dirichlet_fit_log_likelihood.sum() + 2.0 * dirichlet_parameters
+    ) / fit_rows
     logistic_aic_per_row = (
-        -2.0 * logistic_log_likelihood.sum() + 2.0 * logistic_parameters
-    ) / rows
+        -2.0 * logistic_fit_log_likelihood.sum() + 2.0 * logistic_parameters
+    ) / fit_rows
 
     covariance_error = np.linalg.norm(
         empirical_covariance - model_covariance, ord="fro"
@@ -261,8 +267,8 @@ def distribution_diagnostics(
         "dirichlet_minus_logistic_normal_nats": float(
             (dirichlet_log_likelihood - logistic_log_likelihood).mean()
         ),
-        "dirichlet_aic_per_row": float(dirichlet_aic_per_row),
-        "logistic_normal_aic_per_row": float(logistic_aic_per_row),
+        "dirichlet_train_aic_per_row": float(dirichlet_aic_per_row),
+        "logistic_normal_train_aic_per_row": float(logistic_aic_per_row),
         "mean_l1_error": float(np.abs(empirical_mean - model_mean).sum()),
         "covariance_relative_frobenius_error": float(covariance_error),
         "positive_offdiagonal_covariance_fraction": positive_fraction,

@@ -110,7 +110,7 @@ For each task, causal-position bucket, and layer, `distributions.py` fits:
 
 The held-out report does not use hallucination labels. It records:
 
-- held-out log likelihood and AIC per row;
+- held-out log likelihood and train-fit AIC per row;
 - Dirichlet minus logistic-normal log likelihood;
 - empirical-versus-implied mean and covariance error;
 - positive off-diagonal covariance, which one Dirichlet cannot represent;
