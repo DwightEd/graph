@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 
+from .causal_head_model import TrainingConfig
 from .config import PhenomenologyConfig
 from .distribution_validation import (
     DistributionValidationConfig,
@@ -11,6 +12,10 @@ from .distribution_validation import (
 )
 from .evaluation import evaluate_scores
 from .experiment import fit_reference, score_split
+from .head_model_experiment import (
+    HeadModelExperimentConfig,
+    HeadResolvedExperiment,
+)
 from .majorization_detector import MajorizationDetectorConfig
 from .majorization_validation import run_majorization_validation
 
@@ -95,6 +100,33 @@ def _majorization_config(arguments) -> MajorizationDetectorConfig:
     )
 
 
+def _head_experiment_config(arguments) -> HeadModelExperimentConfig:
+    return HeadModelExperimentConfig(
+        validation_fraction=arguments.validation_fraction,
+        reuse_top_k=arguments.reuse_top_k,
+        recent_response_tokens=arguments.recent_response_tokens,
+        block_rows=arguments.block_rows,
+        train_limit=arguments.train_limit,
+        test_limit=arguments.test_limit,
+        seed=arguments.seed,
+    )
+
+
+def _head_training_config(arguments) -> TrainingConfig:
+    return TrainingConfig(
+        hidden_dim=arguments.hidden_dim,
+        epochs=arguments.epochs,
+        batch_size=arguments.batch_size,
+        learning_rate=arguments.learning_rate,
+        weight_decay=arguments.weight_decay,
+        dropout=arguments.dropout,
+        forecast_weight=arguments.forecast_weight,
+        patience=arguments.patience,
+        maximum_standardized_value=arguments.maximum_standardized_value,
+        seed=arguments.seed,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -173,6 +205,33 @@ def build_parser() -> argparse.ArgumentParser:
     majorization.add_argument("--test-limit", type=int)
     majorization.add_argument("--bootstrap-replicates", type=int, default=200)
     majorization.add_argument("--seed", type=int, default=20260820)
+
+    head_model = commands.add_parser(
+        "train-head-model",
+        help="train a head-preserving layer and causal-time token detector",
+    )
+    head_model.add_argument("--train-split", required=True)
+    head_model.add_argument("--test-split", required=True)
+    head_model.add_argument("--output-dir", required=True)
+    head_model.add_argument("--device", default="cpu")
+    head_model.add_argument("--validation-fraction", type=float, default=0.2)
+    head_model.add_argument("--reuse-top-k", type=int, default=5)
+    head_model.add_argument("--recent-response-tokens", type=int, default=4)
+    head_model.add_argument("--block-rows", type=int, default=8192)
+    head_model.add_argument("--train-limit", type=int)
+    head_model.add_argument("--test-limit", type=int)
+    head_model.add_argument("--hidden-dim", type=int, default=16)
+    head_model.add_argument("--epochs", type=int, default=20)
+    head_model.add_argument("--batch-size", type=int, default=2)
+    head_model.add_argument("--learning-rate", type=float, default=1e-3)
+    head_model.add_argument("--weight-decay", type=float, default=1e-4)
+    head_model.add_argument("--dropout", type=float, default=0.0)
+    head_model.add_argument("--forecast-weight", type=float, default=0.5)
+    head_model.add_argument("--patience", type=int, default=5)
+    head_model.add_argument(
+        "--maximum-standardized-value", type=float, default=10.0
+    )
+    head_model.add_argument("--seed", type=int, default=20260820)
     return parser
 
 
@@ -218,7 +277,7 @@ def main() -> None:
             bootstrap_replicates=arguments.bootstrap_replicates,
             seed=arguments.seed,
         )
-    else:
+    elif arguments.command == "validate-majorization":
         result = run_majorization_validation(
             train_split=arguments.train_split,
             test_split=arguments.test_split,
@@ -237,6 +296,23 @@ def main() -> None:
             result["current_detection"]["auroc"],
             "next-token AUROC:",
             result["forecast"]["horizon_1"]["auroc"],
+        )
+    else:
+        result = HeadResolvedExperiment(
+            experiment_config=_head_experiment_config(arguments),
+            training_config=_head_training_config(arguments),
+        ).run(
+            train_split=arguments.train_split,
+            test_split=arguments.test_split,
+            output_dir=arguments.output_dir,
+            device=arguments.device,
+        )
+        print(f"done: {arguments.output_dir}/evaluation.json")
+        print(
+            "test AUROC:",
+            result["test"]["current"]["auroc"],
+            "next-token AUROC:",
+            result["test"]["forecast_1"]["auroc"],
         )
 
 

@@ -170,12 +170,17 @@ majorization_dynamics.py streamed exact-source trace and causal state filter
 majorization_detector.py label-free robust fit/score interface
 majorization_nulls.py registered weight, identity, and chronology controls
 majorization_validation.py frozen scoring and post-freeze hypothesis evaluation
+head_resolved.py per-token/layer/head routes and cumulative RR-source reuse
+head_effects.py independent-validation layer-by-head effect maps
+causal_head_model.py small ordered-layer encoder and causal token GRU
+head_model_experiment.py source-disjoint train/validation/test workflow
 nulls.py         endpoint-rewiring control
 experiment.py    fit and score artifacts; never opens labels
 evaluation.py    label-aware metrics after score freeze
 main.py          CLI only
 run.sh           one-command fit -> score -> evaluate workflow
 run_majorization_validation.sh one-command majorization validation workflow
+run_head_model.sh one-command head-resolved training and evaluation
 ```
 
 ## Majorization and dynamic-state validation
@@ -210,6 +215,41 @@ to create `evaluation.json`. It reports current-token detection separately from
 Three registered controls isolate the proposed mechanism: uniform prompt-edge
 weights remove weight concentration, per-token source permutations remove
 cross-token exact identity, and prompt-row time shuffling removes chronology.
+
+## Head-resolved layer/temporal model
+
+`train-head-model` is the active supervised mechanism test. It never averages
+attention heads. Its input is
+`[response token, layer, head, feature]`; fixed head coordinates are flattened
+inside each layer, an ordered one-way layer GRU produces the token state, and a
+one-way temporal GRU emits current-token and next-token logits. Appending future
+tokens cannot alter an existing prefix score.
+
+The input includes direct prompt/RR/self/unresolved mass, exact-source
+effective count/top-1/velocity, RR lag, history-edge fraction, and
+`response_reuse_rank_1..K`. The last fields are the interpretable quantity that
+the historical "spectral residual" actually measured: for each layer/head,
+the age-normalized cumulative reuse of earlier response sources. No adjacency
+eigenvalue or diagonal subtraction is used in these fields.
+
+The original train split is divided by complete `source_id` groups. Training
+sources fit the normalizer and network; disjoint validation sources select the
+epoch and produce `validation_head_layer_effects.{csv,npz,png}`; the official
+test split is opened once after selection. Run locally from Git Bash:
+
+```bash
+ROOT=D:/projects/python_projects/research/data/RAGTruth/llama31_8b \
+PYTHON=D:/projects/python_projects/.audit_envs/llm_state_lab_py311/Scripts/python.exe \
+DEVICE=cpu TRAIN_LIMIT=128 TEST_LIMIT=64 EPOCHS=12 \
+bash experiments/attention_phenomenology/run_head_model.sh
+```
+
+The logistic-normal comparison has a narrower purpose. It established that a
+single Dirichlet cannot describe the covariance of role/provenance
+compositions; logistic-normal is a better nuisance/reference distribution.
+That does not itself distinguish hallucination. A logistic-normal NLL may be
+tested later as a covariance-aware baseline, but it is not an input to the
+head-resolved model and is not presented as a mechanism discovery.
 
 ## Run
 

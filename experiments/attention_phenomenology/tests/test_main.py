@@ -1,6 +1,8 @@
 from experiments.attention_phenomenology.main import (
     _config,
     _distribution_config,
+    _head_experiment_config,
+    _head_training_config,
     build_parser,
 )
 
@@ -59,3 +61,33 @@ def test_distribution_command_builds_its_own_validation_config():
     assert config.fit_reservoir_rows == 32
     assert config.validation_reservoir_rows == 48
     assert config.pseudocounts == (0.0001,)
+
+
+def test_head_model_command_exposes_small_explicit_configs():
+    arguments = build_parser().parse_args(
+        [
+            "train-head-model",
+            "--train-split",
+            "train",
+            "--test-split",
+            "test",
+            "--output-dir",
+            "outputs",
+            "--reuse-top-k",
+            "3",
+            "--validation-fraction",
+            "0.25",
+            "--hidden-dim",
+            "12",
+            "--epochs",
+            "7",
+        ]
+    )
+
+    experiment = _head_experiment_config(arguments)
+    training = _head_training_config(arguments)
+
+    assert experiment.reuse_top_k == 3
+    assert experiment.validation_fraction == 0.25
+    assert training.hidden_dim == 12
+    assert training.epochs == 7

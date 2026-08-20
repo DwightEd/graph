@@ -1,7 +1,10 @@
 import torch
 
 from experiments.attention_phenomenology.causal_head_model import (
+    CausalLayerTemporalDetector,
     CausalLayerTemporalModel,
+    HeadSequence,
+    TrainingConfig,
 )
 
 
@@ -53,3 +56,40 @@ def test_permuting_heads_changes_the_model_input_semantics():
     permuted = model(swapped).current_logits
 
     assert not torch.allclose(original, permuted)
+
+
+def _learnable_sequence(sample: int) -> HeadSequence:
+    labels = torch.tensor([0, 0, 1, 1, 0, 1, 0, 1], dtype=torch.float32)
+    values = torch.zeros(8, 1, 2, 1)
+    values[:, 0, 0, 0] = labels * 2.0 - 1.0 + sample * 0.01
+    values[:, 0, 1, 0] = -values[:, 0, 0, 0]
+    return HeadSequence(
+        sample_id=str(sample),
+        source_id=f"source-{sample}",
+        task_type="QA",
+        values=values,
+        labels=labels,
+    )
+
+
+def test_detector_fits_on_train_and_selects_on_validation():
+    train = [_learnable_sequence(index) for index in range(6)]
+    validation = [_learnable_sequence(index) for index in range(6, 8)]
+    detector = CausalLayerTemporalDetector(
+        TrainingConfig(
+            hidden_dim=8,
+            epochs=30,
+            batch_size=2,
+            learning_rate=0.02,
+            patience=10,
+            seed=3,
+        )
+    )
+
+    history = detector.fit(train, validation)
+    evaluation = detector.evaluate(validation)
+
+    assert history
+    assert detector.best_epoch >= 1
+    assert evaluation["current"]["auroc"] > 0.9
+    assert evaluation["forecast_1"]["tokens"] == 14
