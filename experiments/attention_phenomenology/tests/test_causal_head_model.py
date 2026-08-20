@@ -93,3 +93,4 @@ def test_detector_fits_on_train_and_selects_on_validation():
     assert detector.best_epoch >= 1
     assert evaluation["current"]["auroc"] > 0.9
     assert evaluation["forecast_1"]["tokens"] == 14
+    assert evaluation["causal_position_control"]["tokens"] == 16

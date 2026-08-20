@@ -85,3 +85,22 @@ def test_appending_future_edges_cannot_change_prefix_features():
     after = extractor.extract(extended).values[:2]
 
     torch.testing.assert_close(before, after)
+
+
+def test_reuse_coordinates_can_be_removed_for_a_control_experiment():
+    attention = SyntheticAttention(
+        num_layers=1,
+        num_heads=2,
+        num_response_tokens=2,
+        response_idx=1,
+        attention_diagonal=torch.zeros((1, 2, 3)),
+    )
+    sample = SyntheticSample(
+        attention,
+        edges=([0], [1], [1], [1], [0.7]),
+    )
+
+    result = HeadResolvedFeatureExtractor(reuse_top_k=0).extract(sample)
+
+    assert result.values.shape == (2, 1, 2, 16)
+    assert result.feature_names[-1] == "response_active"

@@ -59,8 +59,8 @@ class HeadResolvedFeatureExtractor:
         block_rows: int = 8192,
         epsilon: float = 1e-8,
     ) -> None:
-        if reuse_top_k < 1:
-            raise ValueError("reuse_top_k must be positive")
+        if reuse_top_k < 0:
+            raise ValueError("reuse_top_k cannot be negative")
         self.reuse_top_k = int(reuse_top_k)
         self.config = PhenomenologyConfig(
             recent_response_tokens=recent_response_tokens,
@@ -189,10 +189,10 @@ class HeadResolvedFeatureExtractor:
                     weight[current],
                     accumulate=True,
                 )
-            age = token - torch.arange(token + 1, device=edges.device) + 1
-            age_normalized = received[:, : token + 1] / age
             keep = min(self.reuse_top_k, token + 1)
             if keep:
+                age = token - torch.arange(token + 1, device=edges.device) + 1
+                age_normalized = received[:, : token + 1] / age
                 output[token, :, :keep] = torch.topk(
                     age_normalized,
                     k=keep,

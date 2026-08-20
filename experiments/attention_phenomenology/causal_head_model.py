@@ -334,6 +334,9 @@ class CausalLayerTemporalDetector:
     def evaluate(self, sequences: Sequence[HeadSequence]) -> dict[str, object]:
         predictions = self.predict(sequences)
         labels = np.concatenate([prediction.labels for prediction in predictions])
+        causal_position = np.concatenate(
+            [np.arange(len(prediction.labels), dtype=np.float32) for prediction in predictions]
+        )
         current = np.concatenate(
             [prediction.current_probability for prediction in predictions]
         )
@@ -358,6 +361,7 @@ class CausalLayerTemporalDetector:
         return {
             "current": _binary_metrics(labels, current),
             "forecast_1": _binary_metrics(forecast_labels, forecast),
+            "causal_position_control": _binary_metrics(labels, causal_position),
             "by_task": by_task,
         }
 

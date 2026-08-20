@@ -235,10 +235,24 @@ eigenvalue or diagonal subtraction is used in these fields.
 The original train split is divided by complete `source_id` groups. Training
 sources fit the normalizer and network; disjoint validation sources select the
 epoch and produce `validation_head_layer_effects.{csv,npz,png}`; the official
-test split is opened once after selection. Run locally from Git Bash:
+test split is opened once after selection. Every evaluation also reports a
+strictly causal raw-token-index control. Set `REUSE_TOP_K=0` with the same
+limits and seed for the registered no-reuse ablation. Run locally from Git
+Bash:
 
 ```bash
 ROOT=D:/projects/python_projects/research/data/RAGTruth/llama31_8b \
+PYTHON=D:/projects/python_projects/.audit_envs/llm_state_lab_py311/Scripts/python.exe \
+DEVICE=cpu TRAIN_LIMIT=128 TEST_LIMIT=64 EPOCHS=12 \
+bash experiments/attention_phenomenology/run_head_model.sh
+```
+
+For the matched no-reuse control, change only the output directory and
+`REUSE_TOP_K`:
+
+```bash
+OUT=experiments/attention_phenomenology/outputs/head_model_no_reuse \
+REUSE_TOP_K=0 ROOT=D:/projects/python_projects/research/data/RAGTruth/llama31_8b \
 PYTHON=D:/projects/python_projects/.audit_envs/llm_state_lab_py311/Scripts/python.exe \
 DEVICE=cpu TRAIN_LIMIT=128 TEST_LIMIT=64 EPOCHS=12 \
 bash experiments/attention_phenomenology/run_head_model.sh
