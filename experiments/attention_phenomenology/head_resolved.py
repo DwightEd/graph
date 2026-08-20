@@ -10,7 +10,6 @@ from .config import PhenomenologyConfig
 from .routing import build_routing_state, collect_routing_edges
 from .sources import response_lag_statistics, summarize_exact_sources
 
-
 BASE_FEATURE_NAMES = (
     "prompt_mass",
     "response_mass",
@@ -168,6 +167,9 @@ class HeadResolvedFeatureExtractor:
             dtype=routing.edge_weight.dtype,
             device=edges.device,
         )
+        if self.reuse_top_k == 0:
+            return output.reshape(tokens, edges.num_layers, edges.num_heads, 0)
+
         response_edge = edges.source >= edges.response_idx
         query = edges.query[response_edge]
         source = edges.source[response_edge] - edges.response_idx

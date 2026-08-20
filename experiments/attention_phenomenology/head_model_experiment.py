@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Sequence
 
 import numpy as np
 import torch
@@ -28,11 +28,22 @@ from .head_resolved import HeadResolvedFeatureExtractor
 class HeadModelExperimentConfig:
     validation_fraction: float = 0.2
     reuse_top_k: int = 5
+    mask_response_reuse: bool = False
     recent_response_tokens: int = 4
     block_rows: int = 8192
     train_limit: int | None = None
     test_limit: int | None = None
     seed: int = 20260820
+
+
+def mask_response_reuse(values: torch.Tensor, *, reuse_top_k: int) -> torch.Tensor:
+    """Zero reuse fields while preserving model geometry for an ablation."""
+
+    if reuse_top_k < 1:
+        return values
+    masked = values.clone()
+    masked[..., -reuse_top_k:] = 0
+    return masked
 
 
 def stratified_sample_ids(dataset, *, limit: int | None, seed: int) -> list[str]:
@@ -98,7 +109,7 @@ def source_disjoint_train_validation_split(
         rng.shuffle(source_ids)
         if len(source_ids) == 1:
             continue
-        count = int(round(len(source_ids) * validation_fraction))
+        count = round(len(source_ids) * validation_fraction)
         count = min(max(count, 1), len(source_ids) - 1)
         validation_sources.update(source_ids[:count])
 
@@ -106,7 +117,7 @@ def source_disjoint_train_validation_split(
         candidates = sorted(by_source)
         validation_sources.add(candidates[int(rng.integers(len(candidates)))])
     if len(validation_sources) == len(by_source):
-        validation_sources.remove(sorted(validation_sources)[-1])
+        validation_sources.remove(max(validation_sources))
 
     train = []
     validation = []
@@ -159,6 +170,7 @@ class HeadResolvedExperiment:
             limit=self.experiment_config.train_limit,
             seed=self.experiment_config.seed,
             description="head features train+validation",
+            mask_reuse=self.experiment_config.mask_response_reuse,
         )
         train, validation = source_disjoint_train_validation_split(
             all_train,
@@ -175,6 +187,7 @@ class HeadResolvedExperiment:
             limit=self.experiment_config.test_limit,
             seed=self.experiment_config.seed + 1,
             description="head features test",
+            mask_reuse=self.experiment_config.mask_response_reuse,
         )
         reserved_sources = {sequence.source_id for sequence in all_train}
         test_sources = {sequence.source_id for sequence in test}
@@ -271,6 +284,7 @@ class HeadResolvedExperiment:
         limit: int | None,
         seed: int,
         description: str,
+        mask_reuse: bool,
     ) -> list[HeadSequence]:
         dataset = open_research_dataset(split_root, device=device)
         labels = dataset.prepare_evaluation_labels()
@@ -282,13 +296,19 @@ class HeadResolvedExperiment:
                 # Feature extraction cannot access the label store. Labels are
                 # aligned only after the complete causal tensor exists.
                 features = extractor.extract(sample)
+                feature_values = features.values
+                if mask_reuse:
+                    feature_values = mask_response_reuse(
+                        feature_values,
+                        reuse_top_k=extractor.reuse_top_k,
+                    )
                 token_labels = labels.response_labels(sample).float().cpu()
                 sequences.append(
                     HeadSequence(
                         sample_id=str(sample.sample_id),
                         source_id=str(sample.source_id),
                         task_type=str(sample.task_type or "unknown"),
-                        values=features.values.detach().cpu().to(torch.float16),
+                        values=feature_values.detach().cpu().to(torch.float16),
                         labels=token_labels,
                     ).validate()
                 )

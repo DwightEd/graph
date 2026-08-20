@@ -75,6 +75,7 @@ def test_head_model_command_exposes_small_explicit_configs():
             "outputs",
             "--reuse-top-k",
             "3",
+            "--mask-response-reuse",
             "--validation-fraction",
             "0.25",
             "--hidden-dim",
@@ -88,6 +89,24 @@ def test_head_model_command_exposes_small_explicit_configs():
     training = _head_training_config(arguments)
 
     assert experiment.reuse_top_k == 3
+    assert experiment.mask_response_reuse is True
     assert experiment.validation_fraction == 0.25
     assert training.hidden_dim == 12
     assert training.epochs == 7
+
+
+def test_head_model_comparison_command_has_explicit_artifacts():
+    arguments = build_parser().parse_args(
+        [
+            "compare-head-models",
+            "--reuse-predictions",
+            "reuse.npz",
+            "--no-reuse-predictions",
+            "no-reuse.npz",
+            "--output",
+            "comparison.json",
+        ]
+    )
+
+    assert arguments.command == "compare-head-models"
+    assert arguments.bootstrap_replicates == 500

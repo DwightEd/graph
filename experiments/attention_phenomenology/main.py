@@ -12,6 +12,7 @@ from .distribution_validation import (
 )
 from .evaluation import evaluate_scores
 from .experiment import fit_reference, score_split
+from .head_ablation import compare_head_model_runs
 from .head_model_experiment import (
     HeadModelExperimentConfig,
     HeadResolvedExperiment,
@@ -104,6 +105,7 @@ def _head_experiment_config(arguments) -> HeadModelExperimentConfig:
     return HeadModelExperimentConfig(
         validation_fraction=arguments.validation_fraction,
         reuse_top_k=arguments.reuse_top_k,
+        mask_response_reuse=arguments.mask_response_reuse,
         recent_response_tokens=arguments.recent_response_tokens,
         block_rows=arguments.block_rows,
         train_limit=arguments.train_limit,
@@ -216,6 +218,11 @@ def build_parser() -> argparse.ArgumentParser:
     head_model.add_argument("--device", default="cpu")
     head_model.add_argument("--validation-fraction", type=float, default=0.2)
     head_model.add_argument("--reuse-top-k", type=int, default=5)
+    head_model.add_argument(
+        "--mask-response-reuse",
+        action="store_true",
+        help="zero reuse fields without changing input geometry",
+    )
     head_model.add_argument("--recent-response-tokens", type=int, default=4)
     head_model.add_argument("--block-rows", type=int, default=8192)
     head_model.add_argument("--train-limit", type=int)
@@ -232,6 +239,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--maximum-standardized-value", type=float, default=10.0
     )
     head_model.add_argument("--seed", type=int, default=20260820)
+
+    comparison = commands.add_parser(
+        "compare-head-models",
+        help="paired sample-bootstrap comparison of reuse and no-reuse runs",
+    )
+    comparison.add_argument("--reuse-predictions", required=True)
+    comparison.add_argument("--no-reuse-predictions", required=True)
+    comparison.add_argument("--output", required=True)
+    comparison.add_argument("--bootstrap-replicates", type=int, default=500)
+    comparison.add_argument("--seed", type=int, default=20260820)
     return parser
 
 
@@ -297,7 +314,7 @@ def main() -> None:
             "next-token AUROC:",
             result["forecast"]["horizon_1"]["auroc"],
         )
-    else:
+    elif arguments.command == "train-head-model":
         result = HeadResolvedExperiment(
             experiment_config=_head_experiment_config(arguments),
             training_config=_head_training_config(arguments),
@@ -314,6 +331,18 @@ def main() -> None:
             "next-token AUROC:",
             result["test"]["forecast_1"]["auroc"],
         )
+    else:
+        result = compare_head_model_runs(
+            arguments.reuse_predictions,
+            arguments.no_reuse_predictions,
+            output=arguments.output,
+            bootstrap_replicates=arguments.bootstrap_replicates,
+            seed=arguments.seed,
+        )
+        delta = result["current"]["delta_reuse_minus_no_reuse"]
+        print(f"done: {arguments.output}")
+        print("reuse-minus-no-reuse AUROC:", delta["auroc"])
+        print("reuse-minus-no-reuse AUPRC:", delta["auprc"])
 
 
 if __name__ == "__main__":

@@ -181,6 +181,7 @@ main.py          CLI only
 run.sh           one-command fit -> score -> evaluate workflow
 run_majorization_validation.sh one-command majorization validation workflow
 run_head_model.sh one-command head-resolved training and evaluation
+run_head_model_ablation.sh matched reuse/no-reuse runs and paired comparison
 ```
 
 ## Majorization and dynamic-state validation
@@ -236,9 +237,9 @@ The original train split is divided by complete `source_id` groups. Training
 sources fit the normalizer and network; disjoint validation sources select the
 epoch and produce `validation_head_layer_effects.{csv,npz,png}`; the official
 test split is opened once after selection. Every evaluation also reports a
-strictly causal raw-token-index control. Set `REUSE_TOP_K=0` with the same
-limits and seed for the registered no-reuse ablation. Run locally from Git
-Bash:
+strictly causal raw-token-index control. Set `MASK_RESPONSE_REUSE=1` with the
+same limits and seed for the registered no-reuse ablation; this zeros the five
+reuse fields without changing model size. Run locally from Git Bash:
 
 ```bash
 ROOT=D:/projects/python_projects/research/data/RAGTruth/llama31_8b \
@@ -247,15 +248,23 @@ DEVICE=cpu TRAIN_LIMIT=128 TEST_LIMIT=64 EPOCHS=12 \
 bash experiments/attention_phenomenology/run_head_model.sh
 ```
 
-For the matched no-reuse control, change only the output directory and
-`REUSE_TOP_K`:
+For the matched no-reuse control, change only the output directory and mask:
 
 ```bash
 OUT=experiments/attention_phenomenology/outputs/head_model_no_reuse \
-REUSE_TOP_K=0 ROOT=D:/projects/python_projects/research/data/RAGTruth/llama31_8b \
+MASK_RESPONSE_REUSE=1 ROOT=D:/projects/python_projects/research/data/RAGTruth/llama31_8b \
 PYTHON=D:/projects/python_projects/.audit_envs/llm_state_lab_py311/Scripts/python.exe \
 DEVICE=cpu TRAIN_LIMIT=128 TEST_LIMIT=64 EPOCHS=12 \
 bash experiments/attention_phenomenology/run_head_model.sh
+```
+
+Or run both matched arms and a complete-sample paired bootstrap in one command:
+
+```bash
+ROOT=D:/projects/python_projects/research/data/RAGTruth/llama31_8b \
+PYTHON=D:/projects/python_projects/.audit_envs/llm_state_lab_py311/Scripts/python.exe \
+DEVICE=cpu TRAIN_LIMIT=96 TEST_LIMIT=64 EPOCHS=8 PATIENCE=4 \
+bash experiments/attention_phenomenology/run_head_model_ablation.sh
 ```
 
 The logistic-normal comparison has a narrower purpose. It established that a
@@ -264,6 +273,26 @@ compositions; logistic-normal is a better nuisance/reference distribution.
 That does not itself distinguish hallucination. A logistic-normal NLL may be
 tested later as a covariance-aware baseline, but it is not an input to the
 head-resolved model and is not presented as a mechanism discovery.
+
+### Medium diagnostic result (2026-08-20)
+
+A task-balanced 96/64-sample run (76 train, 20 source-disjoint validation,
+64 test; one seed) produced the following test results:
+
+| input | current AUROC | current AUPRC | next-token AUROC | next-token AUPRC |
+|---|---:|---:|---:|---:|
+| all 21 head-resolved fields | 0.770 | 0.339 | 0.763 | 0.326 |
+| same geometry, five reuse fields zeroed | 0.788 | 0.337 | 0.781 | 0.327 |
+| causal token-index control | 0.669 | 0.223 | - | - |
+
+Validation effect maps contain large individual reuse effects (maximum
+absolute standardized mean difference above 2), but the complete-sample paired
+bootstrap does not show incremental current-token value after the other fields
+and temporal model are present. The next-token AUROC is lower with reuse in
+this run. This distinguishes an associated coordinate from a validated causal
+mechanism and motivates testing exact source identity, entry/exit change, and
+run length instead of adding more sorted Top-K reuse values. The frozen
+artifacts are under `outputs/head_model_*_medium_20260820/`.
 
 ## Run
 

@@ -1,10 +1,12 @@
-import torch
 from types import SimpleNamespace
+
+import torch
 
 from experiments.attention_phenomenology.causal_head_model import HeadSequence
 from experiments.attention_phenomenology.head_model_experiment import (
-    stratified_sample_ids,
+    mask_response_reuse,
     source_disjoint_train_validation_split,
+    stratified_sample_ids,
 )
 
 
@@ -58,7 +60,8 @@ def test_limited_experiment_samples_each_task_instead_of_index_prefix():
     }
 
     class Dataset:
-        sample_ids = list(tasks)
+        def __init__(self):
+            self.sample_ids = list(tasks)
 
         def __getitem__(self, sample_id):
             return SimpleNamespace(task_type=tasks[sample_id])
@@ -70,3 +73,14 @@ def test_limited_experiment_samples_each_task_instead_of_index_prefix():
     assert selected_tasks.count("Data2txt") == 3
     assert selected_tasks.count("QA") == 3
     assert selected_tasks.count("Summary") == 3
+
+
+def test_reuse_control_keeps_geometry_and_zeros_only_reuse_coordinates():
+    values = torch.arange(2 * 1 * 2 * 6, dtype=torch.float32).reshape(2, 1, 2, 6)
+
+    masked = mask_response_reuse(values, reuse_top_k=2)
+
+    torch.testing.assert_close(masked[..., :4], values[..., :4])
+    torch.testing.assert_close(masked[..., 4:], torch.zeros_like(values[..., 4:]))
+    assert masked.shape == values.shape
+    assert not torch.equal(masked, values)
