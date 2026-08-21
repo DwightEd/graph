@@ -11,6 +11,29 @@ PROMPT = 0
 RESPONSE = 1
 
 
+def select_sample_ids(
+    dataset,
+    *,
+    task_type: str | None = None,
+    limit: int | None = None,
+) -> list[str]:
+    """Select samples by task before applying an optional count limit."""
+
+    sample_ids = [str(sample_id) for sample_id in dataset.sample_ids]
+    if task_type is not None:
+        sample_ids = [
+            sample_id
+            for sample_id in sample_ids
+            if str(dataset[sample_id].task_type) == task_type
+        ]
+    if limit is not None:
+        sample_ids = sample_ids[:limit]
+    if not sample_ids:
+        selection = f" for task type {task_type!r}" if task_type is not None else ""
+        raise ValueError(f"no samples selected{selection}")
+    return sample_ids
+
+
 @dataclass(frozen=True)
 class SourceReuseGraph:
     """One response represented as a causal stream of source incidences."""

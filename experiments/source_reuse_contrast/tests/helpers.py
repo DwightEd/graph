@@ -29,11 +29,12 @@ class SyntheticSample:
         diagonal: torch.Tensor | None = None,
         sample_id: str = "synthetic",
         source_id: str | None = None,
+        task_type: str = "QA",
         labels: list[int] | None = None,
     ):
         self.sample_id = sample_id
         self.source_id = source_id or f"source-{sample_id}"
-        self.task_type = "QA"
+        self.task_type = task_type
         self.labels = torch.tensor(
             labels if labels is not None else [0] * num_response_tokens,
             dtype=torch.int8,
@@ -127,6 +128,7 @@ def sequence_sample(
     *,
     sample_id="sequence",
     source_id=None,
+    task_type="QA",
     labels=None,
     extra_token=False,
 ) -> SyntheticSample:
@@ -151,5 +153,6 @@ def sequence_sample(
         edges=(layer, head, query, source, weight),
         sample_id=sample_id,
         source_id=source_id,
+        task_type=task_type,
         labels=labels,
     )
