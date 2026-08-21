@@ -13,7 +13,7 @@ from tqdm.auto import tqdm, trange
 
 from .artifacts import CHECKPOINT_SCHEMA, SCORE_SCHEMA, save_npz, sha256_file, write_json
 from .config import SourceReuseConfig
-from .data import collect_source_reuse_graph
+from .data import collect_source_reuse_graph, select_sample_ids
 from .model import PredictabilityScores, SourceReusePredictor
 
 
@@ -28,8 +28,12 @@ def _open_dataset(split_root, *, device: str):
     return open_research_dataset(split_root, device=device)
 
 
-def _geometry(dataset, config: SourceReuseConfig) -> tuple[int, int]:
-    sample = dataset[dataset.sample_ids[0]]
+def _geometry(
+    dataset,
+    config: SourceReuseConfig,
+    sample_id: str,
+) -> tuple[int, int]:
+    sample = dataset[sample_id]
     graph = collect_source_reuse_graph(sample, block_rows=config.block_rows)
     sample.release_attention()
     return graph.num_layers, graph.num_heads
@@ -160,6 +164,7 @@ def train_model(
     device: str = "cpu",
     config: SourceReuseConfig | None = None,
     limit: int | None = None,
+    task_type: str | None = None,
 ) -> Path:
     """Train masked exact-source prediction without hallucination labels."""
 
@@ -170,8 +175,7 @@ def train_model(
     random.seed(config.random_seed)
 
     dataset = _open_dataset(train_split, device=device)
-    all_ids = dataset.sample_ids if limit is None else dataset.sample_ids[:limit]
-    sample_ids = [str(value) for value in all_ids]
+    sample_ids = select_sample_ids(dataset, task_type=task_type, limit=limit)
     if len(sample_ids) < 2:
         raise ValueError("training requires at least two samples")
     fit_ids, validation_ids = source_disjoint_split(
@@ -181,7 +185,7 @@ def train_model(
         seed=config.random_seed,
     )
 
-    num_layers, num_heads = _geometry(dataset, config)
+    num_layers, num_heads = _geometry(dataset, config, sample_ids[0])
     model = SourceReusePredictor(
         num_layers=num_layers,
         num_heads=num_heads,
@@ -313,6 +317,7 @@ def train_model(
             "schema": CHECKPOINT_SCHEMA,
             "labels_read": False,
             "train_split": str(Path(train_split).resolve()),
+            "task_type_filter": task_type,
             "config": asdict(config),
             "num_layers": num_layers,
             "num_heads": num_heads,
@@ -349,6 +354,7 @@ def score_split(
     output_dir,
     device: str = "cpu",
     limit: int | None = None,
+    task_type: str | None = None,
     save_embeddings: bool = True,
 ) -> Path:
     """Freeze raw predictive scores before hallucination labels are opened."""
@@ -357,7 +363,7 @@ def score_split(
     model.eval()
     config = model.config
     dataset = _open_dataset(split_root, device=device)
-    sample_ids = dataset.sample_ids if limit is None else dataset.sample_ids[:limit]
+    sample_ids = select_sample_ids(dataset, task_type=task_type, limit=limit)
 
     scalar_names = (
         "endpoint_nll",
@@ -504,6 +510,7 @@ def score_split(
             "schema": SCORE_SCHEMA,
             "labels_read": False,
             "split_root": str(Path(split_root).resolve()),
+            "task_type_filter": task_type,
             "checkpoint": str(Path(checkpoint_path).resolve()),
             "checkpoint_sha256": sha256_file(checkpoint_path),
             "config": config.to_dict(),

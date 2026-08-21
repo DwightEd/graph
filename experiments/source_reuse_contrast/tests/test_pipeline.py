@@ -9,13 +9,18 @@ from experiments.source_reuse_contrast.predictability import write_predictabilit
 from .helpers import SyntheticDataset, sequence_sample, tiny_config
 
 
-def _dataset(prefix: str, labels: bool) -> SyntheticDataset:
+def _dataset(
+    prefix: str,
+    labels: bool,
+    task_types: tuple[str, ...] = ("QA", "QA", "QA", "QA"),
+) -> SyntheticDataset:
     samples = []
-    for index in range(4):
+    for index, task_type in enumerate(task_types):
         samples.append(
             sequence_sample(
                 sample_id=f"{prefix}-{index}",
                 source_id=f"group-{index}",
+                task_type=task_type,
                 labels=[0, 1, 1, 0, 0] if labels else None,
             )
         )
@@ -87,6 +92,44 @@ def test_train_score_evaluate_uses_validation_and_keeps_labels_out(
     assert report["labels_read"] is True
     assert (tmp_path / "evaluation" / "metrics.csv").is_file()
     assert (tmp_path / "evaluation" / "coverage.csv").is_file()
+
+
+def test_train_and_score_filter_task_type_and_record_selection(tmp_path, monkeypatch):
+    task_types = ("Summary", "QA", "Data2txt", "QA", "QA")
+    train_dataset = _dataset("train", labels=False, task_types=task_types)
+    test_dataset = _dataset("test", labels=True, task_types=task_types)
+    monkeypatch.setattr(
+        experiment,
+        "_open_dataset",
+        lambda split_root, device: train_dataset
+        if str(split_root) == "train"
+        else test_dataset,
+    )
+
+    checkpoint = experiment.train_model(
+        train_split="train",
+        output_dir=tmp_path / "train",
+        device="cpu",
+        config=tiny_config(epochs=1, score_rounds=1),
+        task_type="QA",
+    )
+    score_path = experiment.score_split(
+        split_root="test",
+        checkpoint_path=checkpoint,
+        output_dir=tmp_path / "score",
+        device="cpu",
+        task_type="QA",
+    )
+
+    training = json.loads((tmp_path / "train" / "training.json").read_text())
+    manifest = json.loads((tmp_path / "score" / "manifest.json").read_text())
+    arrays = load_npz(score_path)
+    assert training["task_type_filter"] == "QA"
+    assert training["fit_samples"] + training["validation_samples"] == 3
+    assert manifest["task_type_filter"] == "QA"
+    assert manifest["samples"] == 3
+    assert set(arrays["task_type"].tolist()) == {"QA"}
+    assert set(arrays["sample_id"].tolist()) == {"test-1", "test-3", "test-4"}
 
 
 def test_source_disjoint_split_has_no_group_overlap():
