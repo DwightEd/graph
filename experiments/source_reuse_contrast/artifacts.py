@@ -1,4 +1,4 @@
-"""Artifact helpers for source-reuse predictability experiments."""
+"""Artifact helpers shared by source-reuse and grounding-refinement pipelines."""
 
 from __future__ import annotations
 
@@ -8,10 +8,12 @@ from pathlib import Path
 
 import numpy as np
 
-
 CHECKPOINT_SCHEMA = "source-reuse-predictability-checkpoint-v2"
 SCORE_SCHEMA = "source-reuse-predictability-scores-v2"
 EVALUATION_SCHEMA = "source-reuse-predictability-evaluation-v2"
+GROUNDING_CHECKPOINT_SCHEMA = "grounding-sensitive-graph-checkpoint-v1"
+GROUNDING_SCORE_SCHEMA = "grounding-sensitive-graph-scores-v1"
+GROUNDING_EVALUATION_SCHEMA = "grounding-sensitive-graph-evaluation-v1"
 
 
 def sha256_file(path: str | Path) -> str:
