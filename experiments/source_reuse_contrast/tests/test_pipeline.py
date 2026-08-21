@@ -1,7 +1,9 @@
 import json
+import sys
 
 import numpy as np
 
+import experiments.source_reuse_contrast.main as cli
 from experiments.source_reuse_contrast import evaluation, experiment
 from experiments.source_reuse_contrast.artifacts import load_npz
 from experiments.source_reuse_contrast.predictability import write_predictability_gate
@@ -25,6 +27,47 @@ def _dataset(
             )
         )
     return SyntheticDataset(samples)
+
+
+def test_cli_passes_task_type_to_train_and_score(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "train_model", lambda **arguments: calls.append(arguments))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "source-reuse",
+            "train",
+            "--train-split",
+            "train",
+            "--output-dir",
+            "output",
+            "--task-type",
+            "QA",
+        ],
+    )
+    cli.main()
+    assert calls[-1]["task_type"] == "QA"
+
+    monkeypatch.setattr(cli, "score_split", lambda **arguments: calls.append(arguments))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "source-reuse",
+            "score",
+            "--split-root",
+            "test",
+            "--checkpoint",
+            "model.pt",
+            "--output-dir",
+            "output",
+            "--task-type",
+            "QA",
+        ],
+    )
+    cli.main()
+    assert calls[-1]["task_type"] == "QA"
 
 
 def test_train_score_evaluate_uses_validation_and_keeps_labels_out(

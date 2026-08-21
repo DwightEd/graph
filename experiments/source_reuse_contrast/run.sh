@@ -14,9 +14,11 @@ MODES=${MODES:-current,birth,dynamic}
 
 TRAIN_LIMIT_ARGS=()
 TEST_LIMIT_ARGS=()
+TASK_TYPE_ARGS=()
 PROGRESS_ARGS=()
 [[ -n "${TRAIN_LIMIT:-}" ]] && TRAIN_LIMIT_ARGS=(--limit "$TRAIN_LIMIT")
 [[ -n "${TEST_LIMIT:-}" ]] && TEST_LIMIT_ARGS=(--limit "$TEST_LIMIT")
+[[ -n "${TASK_TYPE:-}" ]] && TASK_TYPE_ARGS=(--task-type "$TASK_TYPE")
 [[ "${NO_PROGRESS:-0}" == "1" ]] && PROGRESS_ARGS=(--no-progress)
 
 mkdir -p "$OUT"
@@ -43,6 +45,7 @@ for MODE in "${MODE_ARRAY[@]}"; do
     --early-stopping-patience "${EARLY_STOPPING_PATIENCE:-3}" \
     --score-rounds "${SCORE_ROUNDS:-4}" \
     --seed "${SEED:-20260820}" \
+    "${TASK_TYPE_ARGS[@]}" \
     "${PROGRESS_ARGS[@]}" \
     "${TRAIN_LIMIT_ARGS[@]}"
 
@@ -52,6 +55,7 @@ for MODE in "${MODE_ARRAY[@]}"; do
     --checkpoint "$OUT/$MODE/train/model.pt" \
     --output-dir "$OUT/$MODE/score" \
     --device "$DEVICE" \
+    "${TASK_TYPE_ARGS[@]}" \
     "${TEST_LIMIT_ARGS[@]}"
   SCORE_ARGS+=(--score "$MODE=$OUT/$MODE/score/scores.npz")
   TRAINING_ARGS+=(--training "$MODE=$OUT/$MODE/train/training.json")

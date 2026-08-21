@@ -101,6 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--train-split", required=True)
     train.add_argument("--output-dir", required=True)
     train.add_argument("--device", default="cpu")
+    train.add_argument("--task-type")
     train.add_argument("--limit", type=int)
     _add_train_config(train)
 
@@ -109,6 +110,7 @@ def build_parser() -> argparse.ArgumentParser:
     score.add_argument("--checkpoint", required=True)
     score.add_argument("--output-dir", required=True)
     score.add_argument("--device", default="cpu")
+    score.add_argument("--task-type")
     score.add_argument("--limit", type=int)
     score.add_argument("--no-embeddings", action="store_true")
 
@@ -146,6 +148,7 @@ def main() -> None:
             device=arguments.device,
             config=_config(arguments),
             limit=arguments.limit,
+            task_type=arguments.task_type,
         )
     elif arguments.command == "score":
         score_split(
@@ -154,6 +157,7 @@ def main() -> None:
             output_dir=arguments.output_dir,
             device=arguments.device,
             limit=arguments.limit,
+            task_type=arguments.task_type,
             save_embeddings=not arguments.no_embeddings,
         )
     elif arguments.command == "gate":
