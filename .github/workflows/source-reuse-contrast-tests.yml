@@ -1,0 +1,35 @@
+name: Source reuse predictability tests
+
+on:
+  push:
+    paths:
+      - "experiments/source_reuse_contrast/**"
+      - "research_dataset.py"
+      - ".github/workflows/source-reuse-contrast-tests.yml"
+  pull_request:
+    paths:
+      - "experiments/source_reuse_contrast/**"
+      - "research_dataset.py"
+      - ".github/workflows/source-reuse-contrast-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install numpy scikit-learn tqdm pytest
+      - name: Compile package
+        run: python -m compileall -q experiments/source_reuse_contrast
+      - name: Check runner syntax
+        run: bash -n experiments/source_reuse_contrast/run.sh
+      - name: Run source-reuse tests
+        run: pytest -q experiments/source_reuse_contrast/tests

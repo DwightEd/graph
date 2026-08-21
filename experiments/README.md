@@ -29,6 +29,11 @@ after representations and scores are frozen.
 
 ## Active evidence path
 
+- `source_reuse_contrast/`: CoLA-style causal source-hyperedge contrast. It
+  learns whether a token's current exact source selection agrees with the
+  pre-token reuse memory of those sources. Training and scoring are label-free;
+  the first implementation is the no-walk core and admits a temporal SetWalk
+  only after exact endpoint identity clears the rewiring gate.
 - `attention_phenomenology/`: the primary mechanism audit for routing detection,
   head-coalition fracture, prompt-provenance integration, fracture-to-lock-in
   dynamics, and exact-endpoint topology. It preserves `[token, layer, head]`,
