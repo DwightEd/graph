@@ -1,99 +1,121 @@
 # Design audit
 
-## Scientific question
+## Why the exact-source task was downgraded
 
-Does exact causal source history improve prediction of a token's current
-attention endpoints after current layer/head/weight marks, source role, causal
-position, source age, usage count, cumulative mass, and last-use gap are
-controlled?
+The previous CaSH variants tried to discriminate real and rewired source memory,
+then to predict exact source identity. The first objective saturated and the
+second produced near-random hallucination ranking. These results reject the
+claim that exact-source prediction NLL is itself a hallucination score.
 
-This question precedes hallucination detection. The method is rejected if
-history does not improve unlabeled held-out endpoint prediction.
+The old pipeline remains available as a negative baseline. It is no longer the
+main scientific method.
 
-## Evidence and uncertainty
+## Active hypothesis
 
-The motivation is the strict-causal `received_topk` result in
-`rr_signal_audit`: cumulative future use of response sources contains a stronger
-signal than current-row entropy and concentration summaries. That result can
-also arise from many weak high-dimensional marginals, position, or cache-floor
-effects; it does not prove a source-reuse mechanism.
+The active experiment tests three propositions separately:
 
-Transformer attention is known to contain repeatable patterns such as induction
-heads and substantial cross-layer redundancy, so route predictability is
-plausible. It remains an empirical hypothesis for RAGTruth and for this cache.
+1. weak hallucination information is distributed across the full
+   layer-head-source field rather than a single scalar statistic;
+2. not every retained attention edge is equally useful for preserving
+   source-reuse and prompt-origin structure;
+3. a token can be internally easy to reconstruct yet rely more on
+   response-origin than prompt-grounded paths.
 
-## Why the old objective was rejected
+The third proposition avoids the unsupported assumption that hallucination must
+be a low-density or hard-to-predict routing event.
 
-The first CaSH prototype discriminated a real source context from one endpoint-
-rewired context with an unbounded bilinear logit and sigmoid score. A smoke run
-produced nearly constant `-1` scores because positives and negatives were too
-easy to separate. Contrastive learning can exploit shortcut differences in
-augmentations; graph hard negatives can also be false or trivially distinct.
-Training loss therefore did not establish useful anomaly ranking.
+## Observable graph
 
-## Revised self-supervised target
+Only information available in the attention cache is used:
 
-Version 2 masks one true source identity and ranks it among several strict,
-matched alternatives. It uses fixed-temperature cosine InfoNCE and exposes raw
-NLL and margins. The candidate count is fixed for every admitted pair.
+```text
+exact source and target token
+layer and head
+retained attention weight
+self attention diagonal
+prompt/response role
+causal token position
+```
 
-Candidates preserve:
+No hidden states, logits, values, output projections, or hallucination labels are
+used during training or scoring.
 
-- prompt/response role;
-- fine prompt-position or response-lag stratum;
-- source-use-count bucket;
-- close cumulative mass, last-use gap, and deterministic history norm;
-- causal availability.
+## Prompt provenance
 
-Other sources used by the current token are excluded to avoid false negatives.
-There is no relaxed fallback. Missing candidates reduce coverage and are
-reported rather than replaced by an easier task.
+Prompt tokens are unit prompt-origin seeds. For a response token at layer `l`,
+retained prompt attention contributes directly, retained response attention
+inherits the source token's provenance from depth `l-1`, and diagonal attention
+retains the current token's previous-depth provenance. Unresolved mass is
+ignored, so the result is a lower bound.
 
-## Model ladder
+This is an analysis operator, not a claim that raw attention equals functional
+contribution.
 
-The same endpoint task is fit with:
+## Label-free objectives
 
-1. `current`: matched non-neural history statistics and current attention marks;
-2. `birth`: current view plus the source state at creation;
-3. `dynamic`: birth state plus subsequent consumer updates;
-4. `dynamic:shuffled`: score-time control that permutes memory among matched
-   candidates while leaving candidate statistics fixed.
+The unmodified graph provides three frozen targets:
 
-A source-reuse claim requires lower unlabeled validation NLL for `dynamic` than
-both `current` and `birth`, a positive real-minus-shuffled memory NLL gap, and a
-non-collapsed score distribution. Hallucination AUROC/AUPRC are inspected only
-after these gates.
+- strict-causal received-support top-k field;
+- direct-prompt / grounded-response / unsupported-response field;
+- prompt-provenance depth trajectory.
 
-## Validation protocol
+Random incidence masking prevents pure copying. The self-supervised loss is the
+weighted sum of robust reconstruction losses for these targets.
 
-- fit and validation samples are split by `source_id`;
-- checkpoint selection uses validation endpoint NLL, never training loss;
-- all position features are prefix-causal;
-- score artifacts contain raw NLL, raw cosine logits, margin, candidate count,
-  match distance, valid coverage, and embeddings;
-- labels are opened only by the final evaluation command.
+## Edge refinement
 
-## Permitted claim
+A raw pass computes
 
-If all gates pass, the permitted claim is:
+```text
+S_e = |A_e * d L_self / d A_e|
+```
 
-> Exact source-reuse history improves prediction of attention routes, and route
-> prediction error is associated with hallucination.
+for each retained incidence. `S_e` is detached. A soft gate receives the pair's
+layer/head embedding, origin score, predictive sensitivity, mass, and relation.
+The refined pass is trained on the same self-supervised targets. Gate-density
+regularization is intentionally weak and never uses labels.
 
-The experiment does not establish that attention values were adopted by the
-residual stream, that the MLP used them, or that the routes caused the output.
+Permitted claim if this succeeds:
+
+> label-free predictive sensitivity helps select attention relations needed to
+> preserve grounding-relevant graph structure.
+
+It does not identify the language model's true causal circuit.
+
+## Counterfactual interventions
+
+Every response edge receives a continuous prompt-origin coefficient. The frozen
+encoder is rerun after removing prompt-origin or response-origin message mass.
+Scores are changes in the same self-supervised reconstruction loss:
+
+```text
+prompt_gain
+response_gain
+closure = response_gain - prompt_gain
+fragility under small mass-preserving perturbations
+```
+
+This is within-token sufficiency analysis, not population-density anomaly
+scoring.
+
+## Required controls
+
+The initial implementation exposes raw/refined reconstruction, no-source-state,
+matched state shuffle, matched endpoint rewire, and reuse-memory on/off controls.
+Before a confirmatory graph claim, it must additionally run layer-order shuffle,
+prompt-origin-target ablation, multiple training seeds, and the frozen
+`received_topk.causal` baseline under the same token subset.
 
 ## Failure criteria
 
-The method is rejected or downgraded to a negative result when any of the
-following holds:
+The active method is rejected or downgraded when:
 
-- `dynamic` validation NLL is not lower than `current` and `birth`;
-- real memory does not outperform matched shuffled memory;
-- valid-token coverage is too low or concentrated only at late positions;
-- endpoint NLL has negligible variance or too few unique values;
-- detection does not exceed current/birth and the frozen
-  `received_topk.causal` baseline under paired source-level confidence intervals.
+- refined validation loss is not lower than raw validation loss;
+- exact endpoint rewiring does not change the graph representation or scores;
+- graph compression loses the signal present in `received_topk.causal`;
+- closure/fragility are dominated by causal position or unresolved mass;
+- counterfactual scores have negligible variance or do not replicate by task;
+- performance gains do not survive source-level paired confidence intervals.
 
-A learned temporal SetWalk or source-coalition module is not added until the
-one-hop dynamic memory clears these gates.
+A learned SetWalk, larger GNN, or additional topology statistic is not added
+until the refined one-hop graph clears these gates.

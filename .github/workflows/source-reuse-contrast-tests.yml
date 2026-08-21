@@ -1,4 +1,4 @@
-name: Source reuse predictability tests
+name: Source reuse and grounding refinement tests
 
 on:
   push:
@@ -30,6 +30,8 @@ jobs:
       - name: Compile package
         run: python -m compileall -q experiments/source_reuse_contrast
       - name: Check runner syntax
-        run: bash -n experiments/source_reuse_contrast/run.sh
+        run: |
+          bash -n experiments/source_reuse_contrast/run.sh
+          bash -n experiments/source_reuse_contrast/run_grounding.sh
       - name: Run source-reuse tests
         run: pytest -q experiments/source_reuse_contrast/tests
