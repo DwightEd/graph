@@ -29,10 +29,12 @@ after representations and scores are frozen.
 
 ## Active evidence path
 
-- `graph_structure_audit/`: the prerequisite graph-first audit. It saves one
-  causal layer-head multiplex graph per sample, measures source hyperedges,
-  source coalitions, prompt relay paths, and head-source topology, and compares
-  masked endpoint/channel recoverability before any learned detector is chosen.
+- `graph_structure_audit/`: the prerequisite learned recoverability audit. It
+  stores one exact token-pair edge tensor `[layer, head]` per sample, masks
+  channels and node diagonals, and reconstructs them with explicit layer-ordered
+  message passing. No `PrefixState` or handcrafted motif inventory is used in
+  the main path. Message, endpoint, layer-order, head-identity, and channel-
+  averaging controls determine whether graph structure actually helps.
 - `source_reuse_contrast/`: the active attention-graph research line. Its former
   exact-source predictability objective is retained as a negative baseline. The
   new grounding-sensitive pipeline reconstructs high-dimensional received-

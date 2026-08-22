@@ -1,6 +1,4 @@
-"""Post-hoc label evaluation for frozen graph-structure audit artifacts."""
-
-from __future__ import annotations
+"""Post-hoc label audit for frozen multiplex recovery scores."""
 
 import csv
 from pathlib import Path
@@ -18,216 +16,88 @@ def _open_dataset(split_root):
     return open_research_dataset(split_root, device="cpu", retain_embedded_labels=True)
 
 
-def _labels_for_tokens(dataset, label_store, sample_id: np.ndarray) -> np.ndarray:
-    labels = np.empty(len(sample_id), dtype=np.int8)
+def _labels(dataset, sample_ids):
+    store = dataset.prepare_evaluation_labels()
+    labels = np.empty(len(sample_ids), dtype=np.int8)
     start = 0
-    while start < len(sample_id):
-        current = str(sample_id[start])
+    while start < len(sample_ids):
         stop = start + 1
-        while stop < len(sample_id) and sample_id[stop] == current:
+        while stop < len(sample_ids) and sample_ids[stop] == sample_ids[start]:
             stop += 1
-        sample = dataset[current]
-        current_labels = label_store.response_labels(sample).cpu().numpy().astype(np.int8)
-        if len(current_labels) != stop - start:
-            raise ValueError("graph-audit token count differs from response labels")
-        labels[start:stop] = current_labels
+        labels[start:stop] = (
+            store.response_labels(dataset[str(sample_ids[start])]).cpu().numpy()
+        )
         start = stop
     return labels
 
 
-def _write_csv(path: Path, rows: list[dict[str, object]]) -> None:
+def _write_csv(path, rows):
     if not rows:
         return
-    with path.open("w", newline="", encoding="utf-8") as handle:
+    with Path(path).open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
 
 
-def _basic_metrics(labels: np.ndarray, score: np.ndarray) -> dict[str, float]:
-    if len(score) == 0 or np.unique(labels).size < 2:
+def _metrics(labels, score):
+    if np.unique(labels).size < 2:
         return {
             "auroc": float("nan"),
+            "separability": float("nan"),
             "auprc_high": float("nan"),
             "auprc_low": float("nan"),
         }
+    auc = float(roc_auc_score(labels, score))
     return {
-        "auroc": float(roc_auc_score(labels, score)),
+        "auroc": auc,
+        "separability": max(auc, 1.0 - auc),
         "auprc_high": float(average_precision_score(labels, score)),
         "auprc_low": float(average_precision_score(labels, -score)),
     }
 
 
-def _group_bootstrap(
-    labels: np.ndarray,
-    score: np.ndarray,
-    groups: np.ndarray,
-    *,
-    replicates: int,
-    seed: int,
-) -> dict[str, float]:
+def _bootstrap(labels, score, groups, replicates, seed):
     rng = np.random.default_rng(seed)
     names = np.unique(groups)
-    indices = {name: np.flatnonzero(groups == name) for name in names}
-    auc_values: list[float] = []
-    difference_values: list[float] = []
+    locations = {name: np.flatnonzero(groups == name) for name in names}
+    aucs, differences = [], []
     for _ in range(replicates):
-        chosen = rng.choice(names, size=len(names), replace=True)
-        selected = np.concatenate([indices[name] for name in chosen])
-        current_labels = labels[selected]
-        current_score = score[selected]
-        if np.unique(current_labels).size < 2:
+        chosen = rng.choice(names, len(names), replace=True)
+        index = np.concatenate([locations[name] for name in chosen])
+        if np.unique(labels[index]).size < 2:
             continue
-        auc_values.append(float(roc_auc_score(current_labels, current_score)))
-        difference_values.append(
-            float(
-                current_score[current_labels == 1].mean()
-                - current_score[current_labels == 0].mean()
-            )
+        aucs.append(roc_auc_score(labels[index], score[index]))
+        differences.append(
+            score[index][labels[index] == 1].mean()
+            - score[index][labels[index] == 0].mean()
         )
-    if not auc_values:
+    if not aucs:
         return {
-            "auroc_ci_low": float("nan"),
-            "auroc_ci_high": float("nan"),
-            "mean_difference_ci_low": float("nan"),
-            "mean_difference_ci_high": float("nan"),
+            name: float("nan")
+            for name in (
+                "auroc_ci_low",
+                "auroc_ci_high",
+                "difference_ci_low",
+                "difference_ci_high",
+            )
         }
     return {
-        "auroc_ci_low": float(np.quantile(auc_values, 0.025)),
-        "auroc_ci_high": float(np.quantile(auc_values, 0.975)),
-        "mean_difference_ci_low": float(np.quantile(difference_values, 0.025)),
-        "mean_difference_ci_high": float(np.quantile(difference_values, 0.975)),
+        "auroc_ci_low": float(np.quantile(aucs, 0.025)),
+        "auroc_ci_high": float(np.quantile(aucs, 0.975)),
+        "difference_ci_low": float(np.quantile(differences, 0.025)),
+        "difference_ci_high": float(np.quantile(differences, 0.975)),
     }
 
 
-def _benjamini_hochberg(p_values: list[float]) -> list[float]:
-    values = np.asarray(p_values, dtype=np.float64)
-    finite = np.isfinite(values)
-    result = np.full(values.shape, np.nan, dtype=np.float64)
-    selected = np.flatnonzero(finite)
-    if not len(selected):
-        return result.tolist()
-    order = selected[np.argsort(values[selected])]
-    count = len(order)
-    adjusted = np.empty(count, dtype=np.float64)
-    running = 1.0
-    for reverse_rank, index in enumerate(order[::-1], start=1):
-        rank = count - reverse_rank + 1
-        running = min(running, values[index] * count / rank)
-        adjusted[rank - 1] = running
-    for rank, index in enumerate(order):
-        result[index] = min(adjusted[rank], 1.0)
-    return result.tolist()
-
-
-def _feature_rows(
-    *,
-    labels: np.ndarray,
-    groups: np.ndarray,
-    tasks: np.ndarray,
-    names: list[str],
-    values: np.ndarray,
-    family: str,
-    bootstrap_replicates: int,
-    seed: int,
-) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
-    for column, name in enumerate(names):
-        score = values[:, column].astype(np.float64)
-        for task in ("__all__", *sorted(np.unique(tasks).tolist())):
-            selected = np.isfinite(score)
-            if task != "__all__":
-                selected &= tasks == task
-            current_labels = labels[selected]
-            current_score = score[selected]
-            current_groups = groups[selected]
-            negative = current_score[current_labels == 0]
-            positive = current_score[current_labels == 1]
-            metrics = _basic_metrics(current_labels, current_score)
-            pooled = float(current_score.std(ddof=1)) if len(current_score) > 1 else 0.0
-            difference = (
-                float(positive.mean() - negative.mean())
-                if len(positive) and len(negative)
-                else float("nan")
-            )
-            try:
-                p_value = (
-                    float(mannwhitneyu(positive, negative, alternative="two-sided").pvalue)
-                    if len(positive) and len(negative)
-                    else float("nan")
-                )
-            except ValueError:
-                p_value = float("nan")
-            row = {
-                "family": family,
-                "feature": name,
-                "task": task,
-                "tokens": int(selected.sum()),
-                "positives": int(current_labels.sum()) if len(current_labels) else 0,
-                "prevalence": float(current_labels.mean()) if len(current_labels) else float("nan"),
-                "correct_mean": float(negative.mean()) if len(negative) else float("nan"),
-                "hallucination_mean": float(positive.mean()) if len(positive) else float("nan"),
-                "correct_median": float(np.median(negative)) if len(negative) else float("nan"),
-                "hallucination_median": float(np.median(positive)) if len(positive) else float("nan"),
-                "mean_difference": difference,
-                "standardized_difference": difference / pooled if pooled > 0 else 0.0,
-                "mann_whitney_p": p_value,
-                **metrics,
-                "separability": (
-                    max(metrics["auroc"], 1.0 - metrics["auroc"])
-                    if np.isfinite(metrics["auroc"])
-                    else float("nan")
-                ),
-                "diagnostic_direction": (
-                    "high"
-                    if np.isfinite(metrics["auroc"]) and metrics["auroc"] >= 0.5
-                    else "low"
-                ),
-                "diagnostic_auprc": (
-                    max(metrics["auprc_high"], metrics["auprc_low"])
-                    if np.isfinite(metrics["auprc_high"])
-                    else float("nan")
-                ),
-            }
-            row.update(
-                _group_bootstrap(
-                    current_labels,
-                    current_score,
-                    current_groups,
-                    replicates=bootstrap_replicates,
-                    seed=seed + column,
-                )
-                if len(current_score) and np.unique(current_labels).size == 2
-                else {
-                    "auroc_ci_low": float("nan"),
-                    "auroc_ci_high": float("nan"),
-                    "mean_difference_ci_low": float("nan"),
-                    "mean_difference_ci_high": float("nan"),
-                }
-            )
-            rows.append(row)
-    q_values = _benjamini_hochberg(
-        [float(row["mann_whitney_p"]) for row in rows]
-    )
-    for row, q_value in zip(rows, q_values):
-        row["mann_whitney_q"] = q_value
-    return rows
-
-
-def _matched_rows(
-    *,
-    sample_id: np.ndarray,
-    token_index: np.ndarray,
-    response_length: np.ndarray,
-    labels: np.ndarray,
-    structural_names: list[str],
-    structural: np.ndarray,
-    feature_names: list[str],
-    feature_values: np.ndarray,
-) -> list[dict[str, object]]:
-    unique_sources = structural[:, structural_names.index("unique_sources")]
-    retained_mass = structural[:, structural_names.index("retained_mass")]
-    pairs: list[tuple[int, int]] = []
+def _matched_pairs(arrays, labels):
+    sample_id = arrays["sample_id"].astype(str)
+    token = arrays["token_index"].astype(float)
+    length = arrays["response_length"].astype(float)
+    degree = arrays["incoming_pairs"].astype(float)
+    channels = arrays["active_channels"].astype(float)
+    mass = arrays["retained_mass"].astype(float)
+    pairs = []
     start = 0
     while start < len(sample_id):
         stop = start + 1
@@ -236,176 +106,208 @@ def _matched_rows(
         local = np.arange(start, stop)
         positive = local[labels[local] == 1]
         negative = local[labels[local] == 0]
-        for index in positive.tolist():
+        for current in positive:
             if not len(negative):
                 continue
-            position_distance = np.abs(
-                token_index[negative]
-                / np.maximum(response_length[negative] - 1, 1)
-                - token_index[index] / max(response_length[index] - 1, 1)
+            cost = (
+                np.abs(
+                    token[negative] / np.maximum(length[negative] - 1, 1)
+                    - token[current] / max(length[current] - 1, 1)
+                )
+                + 0.2
+                * np.abs(np.log1p(degree[negative]) - np.log1p(degree[current]))
+                + 0.2
+                * np.abs(
+                    np.log1p(channels[negative]) - np.log1p(channels[current])
+                )
+                + 0.2 * np.abs(mass[negative] - mass[current])
             )
-            degree_distance = np.abs(
-                np.log1p(unique_sources[negative]) - np.log1p(unique_sources[index])
-            )
-            mass_distance = np.abs(retained_mass[negative] - retained_mass[index])
-            cost = position_distance + 0.25 * degree_distance + 0.25 * mass_distance
-            pairs.append((index, int(negative[np.argmin(cost)])))
+            pairs.append((current, int(negative[np.argmin(cost)])))
         start = stop
+    return pairs
 
-    rows: list[dict[str, object]] = []
-    for column, name in enumerate(feature_names):
-        differences = np.asarray(
-            [
-                feature_values[positive, column] - feature_values[negative, column]
-                for positive, negative in pairs
-                if np.isfinite(feature_values[positive, column])
-                and np.isfinite(feature_values[negative, column])
-            ],
-            dtype=np.float64,
-        )
-        standard = differences.std(ddof=1) if len(differences) > 1 else 0.0
-        rows.append(
-            {
-                "feature": name,
-                "matched_pairs": len(differences),
-                "hallucination_minus_correct": (
-                    float(differences.mean()) if len(differences) else float("nan")
+
+def _gain_gate(score, groups, replicates, seed):
+    rng = np.random.default_rng(seed)
+    names = np.unique(groups)
+    locations = {name: np.flatnonzero(groups == name) for name in names}
+    means = []
+    for _ in range(replicates):
+        chosen = rng.choice(names, len(names), replace=True)
+        index = np.concatenate([locations[name] for name in chosen])
+        means.append(score[index].mean())
+    return (
+        float(score.mean()),
+        float(np.quantile(means, 0.025)),
+        float(np.quantile(means, 0.975)),
+    )
+
+
+def evaluate_recovery_scores(
+    *,
+    split_root,
+    score_path,
+    output_dir,
+    bootstrap_replicates=500,
+    seed=20260822,
+):
+    arrays = load_npz(score_path)
+    dataset = _open_dataset(split_root)
+    labels = _labels(dataset, arrays["sample_id"].astype(str))
+    valid = arrays["valid_rounds"] > 0
+    tasks = arrays["task_type"].astype(str)
+    groups = arrays["source_id"].astype(str)
+    score_names = (
+        "recovery",
+        "edge_recovery",
+        "diagonal_recovery",
+        "message_gain",
+        "layer_order_gain",
+        "head_identity_gain",
+        "endpoint_gain",
+        "layer_head_gain",
+        "full_channel_gain",
+    )
+
+    metric_rows = []
+    for column, name in enumerate(score_names):
+        score = arrays[name].astype(np.float64)
+        for task in ("__all__", *sorted(np.unique(tasks).tolist())):
+            selected = valid if task == "__all__" else valid & (tasks == task)
+            current_labels = labels[selected]
+            current_score = score[selected]
+            correct = current_score[current_labels == 0]
+            hallucination = current_score[current_labels == 1]
+            row = {
+                "score": name,
+                "task": task,
+                "tokens": int(selected.sum()),
+                "positives": int(current_labels.sum()),
+                "prevalence": (
+                    float(current_labels.mean())
+                    if len(current_labels)
+                    else float("nan")
                 ),
-                "paired_dz": (
-                    float(differences.mean() / standard) if standard > 0 else 0.0
+                "correct_mean": (
+                    float(correct.mean()) if len(correct) else float("nan")
+                ),
+                "hallucination_mean": (
+                    float(hallucination.mean())
+                    if len(hallucination)
+                    else float("nan")
+                ),
+                "hallucination_minus_correct": (
+                    float(hallucination.mean() - correct.mean())
+                    if len(correct) and len(hallucination)
+                    else float("nan")
+                ),
+                "mann_whitney_p": (
+                    float(
+                        mannwhitneyu(
+                            hallucination, correct, alternative="two-sided"
+                        ).pvalue
+                    )
+                    if len(correct) and len(hallucination)
+                    else float("nan")
+                ),
+                **_metrics(current_labels, current_score),
+            }
+            row.update(
+                _bootstrap(
+                    current_labels,
+                    current_score,
+                    groups[selected],
+                    bootstrap_replicates,
+                    seed + column,
+                )
+            )
+            metric_rows.append(row)
+
+    matched_pairs = _matched_pairs(arrays, labels)
+    matched_rows = []
+    for name in score_names:
+        score = arrays[name].astype(np.float64)
+        difference = np.asarray([score[p] - score[n] for p, n in matched_pairs])
+        standard = difference.std(ddof=1) if len(difference) > 1 else 0.0
+        matched_rows.append(
+            {
+                "score": name,
+                "pairs": len(difference),
+                "hallucination_minus_matched_correct": (
+                    float(difference.mean()) if len(difference) else float("nan")
                 ),
                 "median_difference": (
-                    float(np.median(differences)) if len(differences) else float("nan")
+                    float(np.median(difference)) if len(difference) else float("nan")
+                ),
+                "paired_dz": (
+                    float(difference.mean() / standard) if standard > 0 else 0.0
                 ),
             }
         )
-    return rows
 
+    structure_rows = []
+    for index, name in enumerate(score_names[3:]):
+        score = arrays[name].astype(np.float64)[valid]
+        mean, low, high = _gain_gate(
+            score, groups[valid], bootstrap_replicates, seed + 100 + index
+        )
+        structure_rows.append(
+            {
+                "gate": name,
+                "mean_gain": mean,
+                "ci_low": low,
+                "ci_high": high,
+                "passed": bool(low > 0),
+            }
+        )
 
-def _recoverability_rows(metric_rows: list[dict[str, object]]) -> list[dict[str, object]]:
-    selected_features = {
-        "endpoint_recovery_error",
-        "channel_recovery_error",
-        "channel_weight_mae",
-        "endpoint_mrr",
-        "channel_mrr",
-    }
-    rows: list[dict[str, object]] = []
-    for row in metric_rows:
-        if row["family"] != "recovery" or row["task"] != "__all__":
-            continue
-        if row["feature"] not in selected_features:
-            continue
-        difference = float(row["mean_difference"])
-        low = float(row["mean_difference_ci_low"])
-        high = float(row["mean_difference_ci_high"])
-        error_metric = row["feature"] in {
-            "endpoint_recovery_error",
-            "channel_recovery_error",
-            "channel_weight_mae",
-        }
-        signed_error_difference = difference if error_metric else -difference
-        signed_low = low if error_metric else -high
-        signed_high = high if error_metric else -low
-        if signed_low > 0:
+    recoverability_rows = []
+    for name in ("recovery", "edge_recovery", "diagonal_recovery"):
+        row = next(
+            item
+            for item in metric_rows
+            if item["score"] == name and item["task"] == "__all__"
+        )
+        if row["difference_ci_low"] > 0:
             conclusion = "correct_more_recoverable"
-        elif signed_high < 0:
+        elif row["difference_ci_high"] < 0:
             conclusion = "hallucination_more_recoverable"
         else:
             conclusion = "inconclusive"
-        rows.append(
+        recoverability_rows.append(
             {
-                "feature": row["feature"],
-                "tokens": row["tokens"],
-                "hallucination_minus_correct_error": signed_error_difference,
-                "error_difference_ci_low": signed_low,
-                "error_difference_ci_high": signed_high,
+                "score": name,
+                "hallucination_minus_correct": row[
+                    "hallucination_minus_correct"
+                ],
+                "ci_low": row["difference_ci_low"],
+                "ci_high": row["difference_ci_high"],
                 "conclusion": conclusion,
             }
         )
-    return rows
 
-
-def evaluate_graph_audit(
-    *,
-    split_root,
-    token_path,
-    output_dir,
-    bootstrap_replicates: int = 500,
-    seed: int = 20260822,
-) -> None:
-    arrays = load_npz(token_path)
-    if bool(arrays["labels_included"].item()):
-        raise ValueError("graph-audit artifact unexpectedly contains labels")
-    dataset = _open_dataset(split_root)
-    label_store = dataset.prepare_evaluation_labels()
-    sample_id = arrays["sample_id"].astype(str)
-    labels = _labels_for_tokens(dataset, label_store, sample_id)
-    source_id = arrays["source_id"].astype(str)
-    tasks = arrays["task_type"].astype(str)
-    structural_names = arrays["structural_names"].astype(str).tolist()
-    recovery_names = arrays["recovery_names"].astype(str).tolist()
-    structural = arrays["structural"].astype(np.float64)
-    recovery = arrays["recovery"].astype(np.float64)
-
-    structural_rows = _feature_rows(
-        labels=labels,
-        groups=source_id,
-        tasks=tasks,
-        names=structural_names,
-        values=structural,
-        family="structure",
-        bootstrap_replicates=bootstrap_replicates,
-        seed=seed,
-    )
-    recovery_rows = _feature_rows(
-        labels=labels,
-        groups=source_id,
-        tasks=tasks,
-        names=recovery_names,
-        values=recovery,
-        family="recovery",
-        bootstrap_replicates=bootstrap_replicates,
-        seed=seed + 10000,
-    )
-    metric_rows = structural_rows + recovery_rows
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    _write_csv(output_dir / "feature_metrics.csv", metric_rows)
-
-    combined_names = [f"structure:{name}" for name in structural_names] + [
-        f"recovery:{name}" for name in recovery_names
-    ]
-    combined_values = np.concatenate((structural, recovery), axis=1)
-    matched = _matched_rows(
-        sample_id=sample_id,
-        token_index=arrays["token_index"].astype(np.int32),
-        response_length=arrays["response_length"].astype(np.int32),
-        labels=labels,
-        structural_names=structural_names,
-        structural=structural,
-        feature_names=combined_names,
-        feature_values=combined_values,
-    )
-    _write_csv(output_dir / "matched_effects.csv", matched)
-
-    recoverability = _recoverability_rows(metric_rows)
-    _write_csv(output_dir / "recoverability_hypotheses.csv", recoverability)
+    _write_csv(output_dir / "metrics.csv", metric_rows)
+    _write_csv(output_dir / "matched_effects.csv", matched_rows)
+    _write_csv(output_dir / "structure_gates.csv", structure_rows)
+    _write_csv(output_dir / "recoverability.csv", recoverability_rows)
     write_json(
         output_dir / "evaluation.json",
         {
             "schema": EVALUATION_SCHEMA,
             "labels_read": True,
-            "token_path": str(Path(token_path).resolve()),
             "tokens": int(len(labels)),
+            "valid_tokens": int(valid.sum()),
             "positive_tokens": int(labels.sum()),
             "prevalence": float(labels.mean()),
-            "features": len(metric_rows),
-            "recoverability_hypotheses": recoverability,
+            "recoverability": recoverability_rows,
+            "structure_gates": structure_rows,
             "outputs": {
-                "feature_metrics": "feature_metrics.csv",
+                "metrics": "metrics.csv",
                 "matched_effects": "matched_effects.csv",
-                "recoverability_hypotheses": "recoverability_hypotheses.csv",
+                "structure_gates": "structure_gates.csv",
+                "recoverability": "recoverability.csv",
             },
         },
     )

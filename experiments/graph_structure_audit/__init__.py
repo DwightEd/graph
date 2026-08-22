@@ -1,6 +1,7 @@
-"""Graph-structure-first audits for attention-derived causal token graphs."""
+"""Lossless multiplex attention graph recovery."""
 
-from .config import GraphAuditConfig
-from .structures import STRUCTURAL_METRICS, RECOVERY_METRICS, audit_graph
+from .config import RecoveryConfig
+from .graph_data import MultiplexGraph, build_multiplex_graph
+from .model import LayeredGraphRecovery
 
-__all__ = ["GraphAuditConfig", "STRUCTURAL_METRICS", "RECOVERY_METRICS", "audit_graph"]
+__all__ = ["LayeredGraphRecovery", "MultiplexGraph", "RecoveryConfig", "build_multiplex_graph"]

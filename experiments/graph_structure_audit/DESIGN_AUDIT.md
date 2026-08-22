@@ -1,57 +1,54 @@
 # Design audit
 
-## Scientific question
+## Rejected design
 
-Before introducing a GNN, hypergraph walk, edge gate, or reconstruction model,
-we need to know whether correct and hallucinated response tokens differ in the
-structure of their causal attention graphs.
+The former implementation stored a `PrefixState` and emitted 39 handcrafted
+statistics. It briefly formed `[source, layer, head]` tensors, but most analyses
+then averaged them into mass, counts, cosine similarities, or heuristic ranks.
+That code could not learn message propagation and could not test whether the full
+layer-head graph was recoverable.
 
-## Why this experiment precedes CaSH-GR
+## Current hypothesis
 
-Previous experiments mixed three unknowns:
+A useful attention-graph method requires all three conditions:
+
+1. full layer-head values recover better than layer/head averages;
+2. exact source endpoints and neighbor messages improve recovery;
+3. recovery or structural reliance differs between correct and hallucinated
+   tokens after position and graph-density matching.
+
+No direction is assumed. Hallucinated graphs may be harder to recover, easier to
+recover as a stable erroneous regime, or indistinguishable.
+
+## Canonical representation
+
+The indivisible observation is
 
 ```text
-whether raw attention contains signal
-whether graph compression preserves it
-whether an unsupervised loss aligns with hallucination
+(source, target, layer, head, weight)
 ```
 
-The graph structure audit removes the learned bottleneck. It preserves exact
-endpoints, layer/head incidence, source hyperedges, and causal paths, and tests
-recoverability directly.
+Sparse observations are materialized as one exact token-pair edge with an
+`[L, H]` tensor and observation mask. This is at least as information-preserving
+as CHARM's flattened `L*H` edge vector, while keeping layer and head axes explicit.
 
-## Competing recoverability hypotheses
+## Learned operator
 
-```text
-H_normal:    hallucinated graphs are harder to recover
-H_attractor: hallucinated graphs are easier to recover
-H_null:      graph recoverability is unrelated to hallucination
-```
+At each transformer layer, the model reads the complete head vector, sends
+messages along exact token-pair endpoints, updates token states, and reconstructs
+masked channels. This is explicit layer-ordered graph propagation. It does not
+use handcrafted prompt paths, source popularity, source co-use counts, or
+manually weighted recovery formulas.
 
-No score sign is selected before labels are opened.
+## Required gates
 
-## What counts as graph structure
+The graph claim is rejected when any of these fail:
 
-A quantity is structural when changing exact endpoint incidence while preserving
-local edge values can change it. Examples include source-hyperedge consumer
-sets, source-pair co-use, prompt-to-response relay paths, head-source bipartite
-components and four-cycles, and masked endpoint recovery from prefix topology.
-Prompt mass, response mass, diagonal mass, edge count, and causal position are
-retained only as nuisance/baseline variables.
+- `full_channel_gain <= 0`: full channels do not beat a global mean input;
+- `layer_head_gain <= 0`: head structure does not beat per-layer means;
+- `layer_order_gain <= 0`: ordered layers do not beat shuffled layers;
+- `message_gain <= 0`: neighbor propagation does not help;
+- `endpoint_gain <= 0`: exact endpoints do not beat matched rewiring.
 
-## Failure criteria
-
-The topology line is downgraded when recoverability is indistinguishable after
-source-level bootstrap, endpoint metrics do not exceed role/mass baselines,
-effects disappear under same-response position/density matching, or channel
-recovery is explained entirely by global layer/head frequency.
-
-## Permitted claim
-
-A positive audit supports only:
-
-> Correct and hallucinated tokens differ in specified causal attention-graph
-> structures or in the recoverability of masked graph relations.
-
-It does not establish that attention caused the generated content or that MLP
-updates were directly observed.
+Only after these gates pass is it meaningful to use learned graph embeddings in
+an unsupervised hallucination method.

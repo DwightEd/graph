@@ -1,103 +1,105 @@
-# Graph Structure Audit
+# Multiplex Graph Recovery Audit
 
-This experiment comes **before** a learned hallucination detector. It builds one
-causal multiplex attention graph per `prompt + response` sample, then asks:
+This experiment asks a narrow question before designing a hallucination detector:
 
-1. Do correct and hallucinated response tokens occupy different graph motifs?
-2. Are masked endpoints and layer-head incidences differently recoverable from
-   the causal prefix graph?
+> Does the full causal attention graph have a recoverable layer-head structure,
+> and do correct and hallucinated response tokens differ in that recoverability?
 
-No direction is assumed: correct may be more recoverable, hallucination may be
-more recoverable as a simple/stable erroneous regime, or there may be no
-difference.
+The previous audit reduced the graph to dozens of handcrafted prefix statistics.
+Those statistics are removed from the main path. The current implementation keeps
+all retained layer-head values and learns recovery directly from the graph.
 
-## Graph
+## Sample graph
 
-For prompt length `P`, response length `T`, `L` layers, and `H` heads, one sample
-is a directed causal multiplex graph. Nodes are prompt and response tokens. An
-incidence is `source s -> response token t` with `(layer, head, weight)` and
-`source < target`. Self-attention diagonal is stored separately. Parallel edges
-at different layers and heads are not averaged before the audit. Every response
-token is scored against its prefix graph `G_{<=t}`; prefix state is updated only
-after that token is scored.
+One `prompt + response` sample is one graph. A unique token pair is an edge
 
-## Structural families
+```text
+source token s -> response token t
+```
 
-### Dynamic source hyperedges
+with an attribute tensor
 
-Each source token defines a hyperedge containing earlier response tokens that
-used it. The audit measures historical hyperedge size/span, novel-source mass,
-source-pair co-use, connected components in the induced source-coalition graph,
-and overlap between sources' previous consumer sets.
+```text
+edge_attr[e, layer, head]  # [E, L, H]
+```
 
-### Causal path structure
+and a matching observation mask. Response-node diagonal attention is stored as
 
-A prompt-bin distribution is propagated through exact response endpoints. The
-audit reports prompt reachability, path entropy/effective support, widest prompt
-path, path redundancy, expected response hops, two-hop prompt relay, and
-response-echo mass. This is an attention-derived path operator, not a claim
-about residual-stream causality.
+```text
+diagonal[node, layer, head]  # [N, L, H]
+```
 
-### Layer-head topology
+No layer, head, source, or target averaging is performed when the graph is
+materialized. Sparse layer-head events are grouped only into their exact token-pair
+edge tensor.
 
-For each target token, every layer induces a bipartite graph between heads and
-source tokens. The audit measures adjacent-layer source-distribution change,
-support Jaccard, connected components, giant-component fraction, normalized
-four-cycle density, and similarity to each source's historical channel profile.
+## Learned recovery
 
-## Recoverability
+Random active channels, complete pair-layer slices, and response-node diagonal
+channels are masked. The model then walks through transformer depth:
 
-### Masked endpoint recovery
+1. encode the full head vector for every edge at layer `l`;
+2. send source-node messages along exact token-pair endpoints;
+3. aggregate messages at response targets;
+4. update token states with a GRU cell;
+5. reconstruct the masked head vector and node diagonal for layer `l`.
 
-A fraction of current exact sources is hidden. The true source is ranked among
-same-role causal candidates using source-hyperedge popularity, historical co-use
-with observed sources, layer-head profile compatibility, and prompt-path profile
-compatibility. Outputs include MRR, Hits@1/5, percentile rank, and recovery
-error.
+The model therefore represents the graph as an ordered sequence of layer-specific
+message-passing graphs, rather than a bag of 1024 values or a list of scalar
+statistics.
 
-### Masked layer-head recovery
+## Structural controls
 
-For a token-source pair, active layer-head incidences are hidden. Channels are
-ranked using the source's historical channel profile, the current token's
-remaining channel profile, the global prefix channel profile, and adjacent-layer
-continuity for the same head.
+The same frozen mask is scored under:
 
-## Label protocol and outputs
+- `no_message`: removes neighbor propagation;
+- `layer_shuffled`: destroys transformer-depth order;
+- `head_shuffled`: destroys head identity;
+- `endpoint_rewired`: keeps edge tensors but changes exact source endpoints;
+- `layer_mean`: keeps layer means but removes head structure;
+- `global_mean`: removes both layer and head structure.
 
-`extract` never opens hallucination labels. It saves one NPZ graph per sample,
-one population token artifact, frozen structural metrics, recovery metrics, and
-raw graph arrays. `evaluate` opens labels only after these artifacts are frozen.
-It reports raw AUROC/AUPRC, effect sizes, source-level bootstrap intervals,
-multiple-testing-adjusted rank tests, same-response matched effects, and explicit
-recoverability conclusions. Diagnostic direction is not final detector
-performance.
+Positive gains mean the corresponding structure improves recovery. These are
+model-reliance tests, not hallucination labels.
 
-Smoke test:
+## Frozen token scores
+
+Each response token receives:
+
+```text
+recovery
+edge_recovery
+diagonal_recovery
+message_gain
+layer_order_gain
+head_identity_gain
+endpoint_gain
+layer_head_gain
+full_channel_gain
+```
+
+Training and scoring do not read hallucination labels. Evaluation opens labels
+only after scores are saved and reports source-level bootstrap intervals and
+same-response matched effects.
+
+## Run
 
 ```bash
-ROOT=/path/to/attention_cache OUT=experiments/graph_structure_audit/outputs/smoke \
-LIMIT_SAMPLES=20 BOOTSTRAP_REPLICATES=50 \
+ROOT=/path/to/attention_cache \
+OUT=experiments/graph_structure_audit/outputs/smoke \
+TRAIN_LIMIT=30 TEST_LIMIT=10 EPOCHS=2 SCORE_ROUNDS=2 DEVICE=cpu \
   bash experiments/graph_structure_audit/run.sh
 ```
 
-Full audit:
+For the full audit:
 
 ```bash
-ROOT=/path/to/attention_cache bash experiments/graph_structure_audit/run.sh
+ROOT=/path/to/attention_cache DEVICE=cuda \
+  bash experiments/graph_structure_audit/run.sh
 ```
 
-Outputs:
-
-```text
-<out>/audit/manifest.json
-<out>/audit/tokens.npz
-<out>/audit/graphs/sample_<hash>.npz
-<out>/evaluation/feature_metrics.csv
-<out>/evaluation/matched_effects.csv
-<out>/evaluation/recoverability_hypotheses.csv
-<out>/evaluation/evaluation.json
-```
-
-A learned graph model is justified only when endpoint/channel recoverability,
-exact source-coalition/path structure, or layer-head topology shows stable signal
-beyond position, retained mass, and edge-count controls.
+The main result is not assumed in advance. `recoverability.csv` reports whether
+correct tokens are more recoverable, hallucinated tokens are more recoverable,
+or the result is inconclusive. `structure_gates.csv` reports whether message
+passing, exact endpoints, layer order, head identity, and full layer-head values
+actually improve recovery.

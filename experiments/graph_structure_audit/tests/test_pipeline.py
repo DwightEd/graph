@@ -2,48 +2,48 @@ import json
 
 import numpy as np
 
-from experiments.graph_structure_audit import evaluate, extract
+from experiments.graph_structure_audit import evaluate, experiment
 from experiments.graph_structure_audit.artifacts import load_npz
-from experiments.graph_structure_audit.config import GraphAuditConfig
-
-from .helpers import SyntheticDataset, SyntheticSample
+from .helpers import dataset, tiny_config
 
 
-def test_extract_then_evaluate_keeps_labels_out(tmp_path, monkeypatch):
-    dataset = SyntheticDataset(
-        [
-            SyntheticSample("sample-a", [0, 0, 1, 0]),
-            SyntheticSample("sample-b", [0, 1, 0, 0]),
-        ]
+def test_train_score_evaluate_keeps_labels_out(tmp_path, monkeypatch):
+    train = dataset("train", 4)
+    test = dataset("test", 3, labels=True)
+
+    monkeypatch.setattr(
+        experiment,
+        "_open_dataset",
+        lambda split_root, device: train if str(split_root) == "train" else test,
     )
-    monkeypatch.setattr(extract, "_open_dataset", lambda split_root: dataset)
-    monkeypatch.setattr(evaluate, "_open_dataset", lambda split_root: dataset)
+    monkeypatch.setattr(evaluate, "_open_dataset", lambda split_root: test)
 
-    token_path = extract.extract_graph_audit(
+    checkpoint = experiment.train_recovery_model(
+        train_split="train",
+        output_dir=tmp_path / "train",
+        device="cpu",
+        config=tiny_config(),
+    )
+    scores = experiment.score_recovery_split(
         split_root="test",
-        output_dir=tmp_path / "audit",
-        config=GraphAuditConfig(
-            prompt_bins=4,
-            minimum_sources_for_recovery=2,
-            minimum_channels_for_recovery=2,
-            show_progress=False,
-        ),
+        checkpoint_path=checkpoint,
+        output_dir=tmp_path / "score",
+        device="cpu",
+        save_graphs=True,
     )
-    arrays = load_npz(token_path)
+    arrays = load_npz(scores)
     assert not bool(arrays["labels_included"].item())
-    assert arrays["structural"].shape[0] == 8
-    assert len(list((tmp_path / "audit" / "graphs").glob("*.npz"))) == 2
+    assert arrays["embedding"].shape[0] == 12
+    assert np.isfinite(arrays["recovery"]).all()
+    assert list((tmp_path / "score" / "graphs").glob("*.npz"))
 
-    evaluate.evaluate_graph_audit(
+    evaluate.evaluate_recovery_scores(
         split_root="test",
-        token_path=token_path,
+        score_path=scores,
         output_dir=tmp_path / "evaluation",
         bootstrap_replicates=10,
         seed=3,
     )
     report = json.loads((tmp_path / "evaluation" / "evaluation.json").read_text())
     assert report["labels_read"] is True
-    assert report["tokens"] == 8
-    assert (tmp_path / "evaluation" / "feature_metrics.csv").is_file()
-    assert (tmp_path / "evaluation" / "recoverability_hypotheses.csv").is_file()
-    assert np.isfinite(arrays["structural"]).all()
+    assert (tmp_path / "evaluation" / "structure_gates.csv").is_file()
