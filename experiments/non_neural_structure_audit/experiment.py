@@ -69,8 +69,7 @@ def _non_identity_permutation(rng: np.random.Generator, size: int) -> tuple[int,
     return tuple(order.tolist())
 
 
-def _real_analysis(sample, config: AuditConfig):
-    edges = collect_routing_edges(sample, config=config)
+def _analyze_edges(edges, config: AuditConfig):
     routing = build_routing_state(edges)
     operator = LineageOperator(routing)
     features = build_layer_features(
@@ -78,7 +77,7 @@ def _real_analysis(sample, config: AuditConfig):
         operator.run(),
         recent_tokens=config.recent_tokens,
     )
-    return edges, routing, operator, features
+    return routing, operator, features
 
 
 def _fit_sample(sample, config: AuditConfig) -> tuple[str, str, np.ndarray]:
@@ -87,8 +86,9 @@ def _fit_sample(sample, config: AuditConfig) -> tuple[str, str, np.ndarray]:
     with loaded_attention(sample):
         task = str(sample.task_type or "unknown")
         source_id = canonical_source_group(sample)
-        analysis = _real_analysis(sample, config)
-        values = analysis[-1].cpu().numpy().astype(np.float32)
+        edges = collect_routing_edges(sample, config=config)
+    feature_tensor = _analyze_edges(edges, config)[-1]
+    values = feature_tensor.cpu().numpy().astype(np.float32)
     return task, source_id, values
 
 
@@ -264,8 +264,9 @@ class StructureAudit:
             response_tokens = (
                 attention.token_ids[attention.response_idx :].cpu().numpy().copy()
             )
-            edges, routing, operator, feature_tensor = _real_analysis(sample, config)
+            edges = collect_routing_edges(sample, config=config)
         del attention
+        routing, operator, feature_tensor = _analyze_edges(edges, config)
         features = feature_tensor.cpu().numpy().astype(np.float32)
         buckets = token_buckets(len(features), config.causal_position_bins)
         standardized = standardize(

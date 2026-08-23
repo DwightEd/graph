@@ -107,6 +107,15 @@ def test_fit_and_score_freeze_compact_artifacts_without_opening_labels(
 
     from experiments.non_neural_structure_audit import experiment
 
+    original_build = experiment.build_routing_state
+
+    def tracked_build(edges):
+        assert test["test-0"].release_calls == 1
+        gc.collect()
+        assert test["test-0"].released_attention() is None
+        return original_build(edges)
+
+    monkeypatch.setattr(experiment, "build_routing_state", tracked_build)
     original_swap = experiment.EndpointSwapPlan.sample
 
     def tracked_swap(plan, *arguments, **keywords):
@@ -154,7 +163,9 @@ def test_fit_and_score_freeze_compact_artifacts_without_opening_labels(
     assert test["test-0"].release_calls == 1
 
 
-def test_fit_drops_previous_sample_graph_before_loading_the_next(tmp_path, monkeypatch):
+def test_fit_releases_attention_before_analysis_and_drops_previous_graph(
+    tmp_path, monkeypatch
+):
     train = Dataset("train", tmp_path / "train", count=2)
     monkeypatch.setattr(
         "experiments.non_neural_structure_audit.experiment.open_research_dataset",
@@ -162,19 +173,23 @@ def test_fit_drops_previous_sample_graph_before_loading_the_next(tmp_path, monke
     )
     from experiments.non_neural_structure_audit import experiment
 
-    original = experiment._real_analysis
-    previous_operator = None
+    original = experiment.build_routing_state
+    previous_routing = None
+    sample_ids = iter(train.sample_ids)
 
-    def tracked(sample, config):
-        nonlocal previous_operator
+    def tracked(edges):
+        nonlocal previous_routing
+        sample = train[next(sample_ids)]
+        assert sample.release_calls == 1
         gc.collect()
-        if previous_operator is not None:
-            assert previous_operator() is None
-        result = original(sample, config)
-        previous_operator = weakref.ref(result[2])
+        assert sample.released_attention() is None
+        if previous_routing is not None:
+            assert previous_routing() is None
+        result = original(edges)
+        previous_routing = weakref.ref(result)
         return result
 
-    monkeypatch.setattr(experiment, "_real_analysis", tracked)
+    monkeypatch.setattr(experiment, "build_routing_state", tracked)
     StructureAudit(AuditConfig(show_progress=False)).fit(
         train_split="train",
         output=tmp_path / "reference.npz",
