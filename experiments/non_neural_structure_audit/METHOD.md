@@ -93,7 +93,7 @@ z^\ell_t=\frac{1}{H}\sum_h\tilde z^{\ell,h}_t.
 - head 结构：prompt/history head 标准差与角色分歧；
 - response endpoint 结构：有效来源数、top-1 share、近期来源占比、平均 lag；
 - lineage：prompt-connected total/relay、response-base local/inherited/multihop、lineage unresolved，以及 response-to-prompt log ratio。
-- 跨层观测变化：相邻 layer step 的 prompt/history/diagonal head-mean absolute change、history-minus-prompt origin gap，以及 interaction-minus-diagonal gap。
+- 跨层观测变化：相邻 layer step 的 prompt/history/diagonal head-mean absolute change、history-minus-prompt origin gap，以及 off-diagonal-minus-diagonal gap。
 
 最后一组是从已观测 routing 直接计算的 transition magnitude，不是训练得到的 hidden state，也不是“预测下一层后得到的重建残差”。第一个 layer step 固定为 0；其后对相邻 step 的每个 head 取绝对差，再对 heads 求均值。它只回答“该 routing 量随层顺序变化多少”，不能回答某条边是否被模型恢复、某层是否充分，或该变化是否是因果机制。
 
@@ -103,13 +103,13 @@ z^\ell_t=\frac{1}{H}\sum_h\tilde z^{\ell,h}_t.
 
 ### Response endpoint null
 
-[`nulls.py`](nulls.py) 只交换 response-history endpoints。交换限制在相同 `(layer, head, coarse log2-lag bin)` 内，并保持边权所在 target row 不变，同时拒绝非因果边与重复边。因此它保持 row mass、response role、粗粒度 lag 分层和非加权 source 次数，但会改变精确 lag、source 与权重的配对及继承到的 lineage。
+[`nulls.py`](nulls.py) 只交换 response-history endpoints。交换限制在相同 `(layer, head, coarse log2-lag bin)` 内，并保持边权所在 target row 不变，同时拒绝非因果边与重复边。因此它保持 row mass、response role、粗粒度 lag 分层和非加权 source 次数，但会改变精确 lag、source 与权重的配对及继承到的 lineage。每个 replicate 都实际审计 `coarse_lag_violations`，并逐 stratum 核对 `(layer, head, lag-bin, source)` 计数；二者必须为零。
 
 该 null 是 A2 的 pilot，不是计划中的正式 degree/weighted-strength preserving null。它不保持 weighted source strength，也没有均匀采样或 mixing 证明。评估只把它用于 manifest 中列出的 lineage relations；`changed_fraction` 的分母是全部 retained response-history edges，不包含 prompt edges。若实际可合法交换的比例低于计划阈值 0.7，pilot 质量标记为 null 无效；即使覆盖率达标，在更强 null 完成前也不能授权 exact graph。
 
-### Final-state layer shuffle
+### Matched layer-order shuffle
 
-[`experiment.py`](experiment.py) 对完整 layer operator 做多次随机排列。每次仅取全部乱序层执行后的最终 lineage state，并重算跨层 transition features；这些 layer-order-sensitive 坐标替换真实样本的 final-layer 对应坐标，直接 routing、head 和 endpoint 特征保持真实值。这样避免把“实际第 20 层”拿去和“正常第 0 层”标准化，检验的是该有限传播算子及观测 transition 对层顺序的敏感性，而不是对原 LLM 做了真实 layer intervention。
+[`experiment.py`](experiment.py) 对完整 layer operator 做多次随机排列。lineage relation 比较完整乱序执行后的最终 state；transition relation 则在真实与乱序两侧都比较全部相邻 step 的平均 transition magnitude，而不是只比较最后一对 layer。每个 replicate 只重算这两组 layer-order-sensitive 坐标，直接 routing、head 与 endpoint 特征复用真实值。检验的是有限传播算子及观测 transition 对层顺序的敏感性，不是对原 LLM 做了真实 layer intervention。
 
 ## 6. 标签后置评估
 
@@ -146,15 +146,15 @@ z^\ell_t=\frac{1}{H}\sum_h\tilde z^{\ell,h}_t.
 
 该 source digest 覆盖当前 audit、attention routing、dataset/cache 与共享 protocol 代码，但本地文件摘要不能证明操作者没有重新生成 plan；论文级运行仍须把 Git commit/tree、plan 和首次 confirmation 命令写入只追加记录。
 
-endpoint/layer null 的主 p 值保持原始 pooled-AUPRC 定义。若真实 AUPRC 为 (m(x,y))，第 (k) 个 null ensemble 为 (x^{(k)})，则
+layer-order control 的 pooled-AUPRC rank statistic 保持原始定义。若真实 AUPRC 为 (m(x,y))，第 (k) 个 shuffled ensemble 为 (x^{(k)})，则
 
 \[
 p=\frac{1+\sum_{k=1}^{K}\mathbf 1[m(x^{(k)},y)\ge m(x,y)]}{K+1}.
 \]
 
-[`bounded_ensemble.py`](bounded_ensemble.py) 用临时磁盘矩阵逐 replicate 精确计算 pooled AUPRC；没有用可分解的均值差近似替换 AUPRC。由于 endpoint 生成器没有均匀性或交换性证明，这只是 Monte Carlo constrained-null p-value，不是 exact permutation test。source-group bootstrap 只用于 real-vs-null-mean 的 effect CI，两种统计的职责分开。
+[`bounded_ensemble.py`](bounded_ensemble.py) 用临时磁盘矩阵逐 replicate 精确计算 pooled AUPRC；没有用可分解的均值差近似替换 AUPRC。endpoint 生成器没有均匀性、交换性或 mixing 证明，因此 endpoint 输出只命名为 `endpoint_null_exceedance_rate`，不作为 p/q 值、不进入 BH 或 gate。source-group bootstrap 仍用于 real-vs-null-mean 的 exploratory effect CI。
 
-[`bounded_samples.py`](bounded_samples.py) 同时把跨样本的 compact real/final/null-mean/layer-mean 矩阵放到临时 memmap。这样原始 attention、replicate ensemble 和紧凑样本矩阵都不会在 Python heap 中随样本数累计；各统计仍可通过 `FrozenSample` 的切片接口复用相同数据。
+[`bounded_samples.py`](bounded_samples.py) 同时把跨样本的 compact real/layer-order-real/null-mean/layer-mean 矩阵放到临时 memmap。这样原始 attention、replicate ensemble 和紧凑样本矩阵都不会在 Python heap 中随样本数累计；各统计仍可通过 `FrozenSample` 的切片接口复用相同数据。
 
 ## 9. 当前 gate 为什么保守
 

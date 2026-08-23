@@ -50,7 +50,9 @@ replicate 数组在开始前一次性预分配，循环直接写入，不再采�
 
 `EndpointSwapPlan` 只在单样本内保存一份不变 CPU edge geometry；不同 null replicate 复用它，避免重复做 GPU→CPU 几何复制。每轮仍需要排序当前 edge keys，所以它主要是 CPU 时间瓶颈，不是跨样本泄漏。
 
-该 geometry 使用 `int32` 保存 layer/head/query/source，并预先按 `(layer, head, coarse lag)` 划分 response edges；每轮在单个 stratum 内随机配对，不再为全部 response edges 同时构造全局 random/order/pair 数组。endpoint-only control 只替换实际会变化的 lineage 坐标，复用真实 routing/source-concentration 特征；全部 endpoint replicates 完成后立即释放 plan，再进入 layer shuffle。
+该 geometry 直接预分配 `int32` layer/head/query/source，避免先构造整块 `int64` column stack；并预先按 `(layer, head, coarse lag)` 划分 response edges。每轮在单个 stratum 内随机配对，只对 response-edge key 原位排序，不再为全部 edges 同时构造全局 random/order/pair 数组。endpoint-only control 只替换实际会变化的 lineage 坐标，复用真实 routing/source-concentration 特征；全部 endpoint replicates 完成后立即释放 plan，再进入 layer shuffle。
+
+layer shuffle 同样只重算 lineage 与五个 transition 坐标，不再每个 replicate 重算 source concentration、lag 和 head disagreement。真实 head disagreement 按一个 anchor head 对其余 heads 累加，临时量为 `O(T * L * H)`，不再物化 `O(T * L * H^2)` 的 head-pair 张量。
 
 ## 3. evaluation 保留 pooled AUPRC，但不堆积 replicate 维
 
@@ -67,7 +69,7 @@ from experiments.non_neural_structure_audit.bounded_ensemble import DiskBackedAU
 - 临时文件在 evaluation 正常结束后删除；
 - 磁盘 scratch 上限约为 `(R_e + R_l) * T_total * M * 4 bytes`，另加很小的 real/label 文件。
 
-`evaluation_data.py` 只从 NPZ 读取实际使用的字段，并在单样本 helper 内把完整 ensemble 折叠成 per-sample null mean。独立模块 [`bounded_samples.py`](bounded_samples.py) 将 real/final/null-mean/layer-mean 四个 `[T,M]` 矩阵以及 label/eligible 写入 memmap；`FrozenSample` 只持有对应磁盘切片。evaluation 持久 scratch 额外约为 `4 * T_total * M * 4 bytes` 加标签，结束后自动删除。
+`evaluation_data.py` 只从 NPZ 读取实际使用的字段，并在单样本 helper 内把完整 ensemble 折叠成 per-sample null mean。独立模块 [`bounded_samples.py`](bounded_samples.py) 将 real/layer-order-real/null-mean/layer-mean 四个 `[T,M]` 矩阵以及 label/eligible 写入 memmap；`FrozenSample` 只持有对应磁盘切片。evaluation 持久 scratch 额外约为 `4 * T_total * M * 4 bytes` 加标签，结束后自动删除。
 
 `bounded_samples.py` 与 `bounded_ensemble.py` 共享 [`../disk_row_store.py`](../disk_row_store.py) 的固定 schema append seam。它只负责数值 row 的预分配、原位写入、切片和关闭；sample/source 等科学元数据仍由现有 manifest 管理，没有引入通用存储框架。
 
@@ -96,7 +98,7 @@ O(number_of_task_buckets * reference_capacity * L * F)
 
 这说明全量运行的必要边界是“当前最大样本”，而不是平均样本。预分配 causal decoder 对最大 `K=3,370,875` 的五个 buffer 约需 `4 * K * 8 + K * 4 ≈ 116 MiB`；派生 routing、lineage、null scratch 还会增加峰值。
 
-Windows 上对最大 test QA `sample_id=12471`（436 response tokens）执行完整单样本 score，参数为 `NULL_REPLICATES=10`、`LAYER_SHUFFLE_REPLICATES=10`、CPU、默认 `BLOCK_ROWS=4096`，监控虚拟环境启动器及其全部子进程，成功退出且进程树 peak RSS 为 **1021.1 MiB**。10 次 replicate 没有导致逐轮常驻增长。这个数值是当前机器/数据/参数的工程 profile，不是跨平台保证。
+Windows 上对最大 test QA `sample_id=12471`（436 response tokens）执行完整单样本 score，参数为 `NULL_REPLICATES=10`、`LAYER_SHUFFLE_REPLICATES=10`、CPU、`BLOCK_ROWS=4096`，以 20 ms 间隔采样实际 Python worker 的 RSS。该版成功退出，耗时 85.8 秒，观测 peak RSS 为 **657.3 MiB**；10 次 endpoint 与 layer replicate 没有导致逐轮常驻增长。这个数值是一次 score-only、当前机器/数据/参数下的观测值，不是全 pipeline 或跨平台上界。
 
 修复后的默认 CPU 路径没有已知的跨样本线性堆积，但不能承诺任何内存配置都绝不 OOM：可用 RAM 低于当前单样本峰值、显著提高 replicate/reference capacity、并行启动多个 run，仍可能耗尽内存。建议至少预留 2 GiB 给该进程；若机器总内存紧张，先保持 CPU 单进程、不要并行跑多个 audit，并降低 `REFERENCE_CAPACITY`，而不是减小 `BLOCK_ROWS` 后误以为最终 graph 也会变小。
 

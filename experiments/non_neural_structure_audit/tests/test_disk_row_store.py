@@ -30,7 +30,6 @@ def test_row_store_appends_one_sample_without_concatenating_prior_rows(tmp_path)
 
     assert first == slice(0, 2)
     assert second == slice(2, 3)
-    assert isinstance(store.view("map", first), np.memmap)
     np.testing.assert_array_equal(store.view("label"), [0, 1, 1])
     assert store.view("map").shape == (3, 2, 3)
     store.close()
@@ -62,6 +61,65 @@ def test_row_store_context_closes_windows_mappings_on_failure(tmp_path):
     ):
         store.append({"value": np.asarray([1.0], dtype=np.float32)})
         raise RuntimeError("audit failed")
+
+    shutil.rmtree(root)
+    assert not root.exists()
+
+
+def test_row_store_constructor_closes_mappings_if_a_later_field_fails(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "rows"
+    open_memmap = np.lib.format.open_memmap
+    opened = []
+
+    def fail_after_first_mapping(*args, **kwargs):
+        if opened:
+            raise RuntimeError("second mapping failed")
+        mapping = open_memmap(*args, **kwargs)
+        opened.append(mapping)
+        return mapping
+
+    monkeypatch.setattr(np.lib.format, "open_memmap", fail_after_first_mapping)
+
+    with pytest.raises(RuntimeError, match="second mapping failed"):
+        DiskRowStore(
+            root,
+            capacity=1,
+            fields={
+                "first": FieldSpec(np.dtype("float32")),
+                "second": FieldSpec(np.dtype("float32")),
+            },
+        )
+
+    shutil.rmtree(root)
+    assert not root.exists()
+
+
+def test_row_store_closes_every_mapping_when_one_flush_fails(tmp_path, monkeypatch):
+    root = tmp_path / "rows"
+    store = DiskRowStore(
+        root,
+        capacity=1,
+        fields={
+            "first": FieldSpec(np.dtype("float32")),
+            "second": FieldSpec(np.dtype("float32")),
+        },
+    )
+    flush = np.memmap.flush
+    calls = 0
+
+    def fail_first_flush(mapping):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("flush failed")
+        return flush(mapping)
+
+    monkeypatch.setattr(np.memmap, "flush", fail_first_flush)
+
+    with pytest.raises(OSError, match="flush failed"):
+        store.close()
 
     shutil.rmtree(root)
     assert not root.exists()

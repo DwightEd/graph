@@ -37,7 +37,7 @@ FEATURE_NAMES = (
     "history_transition_magnitude",
     "diagonal_transition_magnitude",
     "origin_transition_gap",
-    "interaction_diagonal_transition_gap",
+    "offdiagonal_diagonal_transition_gap",
 )
 FEATURE_INDEX = {name: index for index, name in enumerate(FEATURE_NAMES)}
 
@@ -56,7 +56,7 @@ DYNAMICS_FEATURE_NAMES = (
     "history_transition_magnitude",
     "diagonal_transition_magnitude",
     "origin_transition_gap",
-    "interaction_diagonal_transition_gap",
+    "offdiagonal_diagonal_transition_gap",
 )
 LAYER_ORDER_FEATURE_NAMES = (*LINEAGE_FEATURE_NAMES, *DYNAMICS_FEATURE_NAMES)
 
@@ -73,8 +73,8 @@ RELATION_SPECS = (
     ("response_transition_volatility", "history_transition_magnitude", 1.0),
     ("origin_transition_gap", "origin_transition_gap", 1.0),
     (
-        "interaction_diagonal_decoupling",
-        "interaction_diagonal_transition_gap",
+        "offdiagonal_diagonal_transition_gap",
+        "offdiagonal_diagonal_transition_gap",
         1.0,
     ),
 )
@@ -83,6 +83,11 @@ LINEAGE_RELATION_NAMES = tuple(
     relation
     for relation, feature, _ in RELATION_SPECS
     if feature in LINEAGE_FEATURE_NAMES
+)
+DYNAMICS_RELATION_NAMES = tuple(
+    relation
+    for relation, feature, _ in RELATION_SPECS
+    if feature in DYNAMICS_FEATURE_NAMES
 )
 LAYER_ORDER_RELATION_NAMES = tuple(
     relation
@@ -102,16 +107,14 @@ def _head_disagreement(routing: RoutingState, epsilon: float) -> torch.Tensor:
     total = mass.sum(dim=-1)
     valid = total > epsilon
     root = (mass / total[..., None].clamp_min(epsilon)).sqrt()
-    affinity = (root.unsqueeze(-2) * root.unsqueeze(-3)).sum(dim=-1)
-    distance = (1.0 - affinity.clamp(0.0, 1.0)).sqrt()
-    heads = routing.edges.num_heads
-    pairs = torch.triu(
-        torch.ones((heads, heads), dtype=torch.bool, device=distance.device),
-        diagonal=1,
-    )
-    selected = valid.unsqueeze(-1) & valid.unsqueeze(-2) & pairs
-    count = selected.sum(dim=(-2, -1))
-    total_distance = torch.where(selected, distance, 0.0).sum(dim=(-2, -1))
+    count = torch.zeros_like(total[..., 0], dtype=torch.long)
+    total_distance = torch.zeros_like(total[..., 0])
+    for first in range(routing.edges.num_heads - 1):
+        selected = valid[..., first, None] & valid[..., first + 1 :]
+        affinity = (root[..., first, None, :] * root[..., first + 1 :, :]).sum(dim=-1)
+        distance = (1.0 - affinity.clamp(0.0, 1.0)).sqrt()
+        count += selected.sum(dim=-1)
+        total_distance += torch.where(selected, distance, 0.0).sum(dim=-1)
     return torch.where(
         count > 0, total_distance / count.clamp_min(1), torch.zeros_like(total_distance)
     )
@@ -161,6 +164,45 @@ def replace_lineage_features(
     return result
 
 
+def _layer_order_fields(
+    routing: RoutingState,
+    lineage: LineageTrace,
+    epsilon: float,
+) -> dict[str, torch.Tensor]:
+    layer_index = torch.as_tensor(
+        lineage.layer_order, dtype=torch.long, device=routing.edges.device
+    )
+    prompt_transition = _transition_magnitude(routing.prompt_mass[:, layer_index])
+    history_transition = _transition_magnitude(routing.response_mass[:, layer_index])
+    diagonal_transition = _transition_magnitude(routing.self_mass[:, layer_index])
+    fields = {
+        "prompt_transition_magnitude": prompt_transition,
+        "history_transition_magnitude": history_transition,
+        "diagonal_transition_magnitude": diagonal_transition,
+        "origin_transition_gap": history_transition - prompt_transition,
+        "offdiagonal_diagonal_transition_gap": (
+            0.5 * (prompt_transition + history_transition) - diagonal_transition
+        ),
+    }
+    fields.update(_lineage_fields(lineage, epsilon))
+    return fields
+
+
+def replace_layer_order_features(
+    features: torch.Tensor,
+    routing: RoutingState,
+    lineage: LineageTrace,
+    *,
+    epsilon: float = 1e-8,
+) -> torch.Tensor:
+    """Recompute only coordinates changed by a layer-order control."""
+
+    result = features.clone()
+    for name, values in _layer_order_fields(routing, lineage, epsilon).items():
+        result[..., FEATURE_INDEX[name]] = values
+    return result
+
+
 def build_layer_features(
     routing: RoutingState,
     lineage: LineageTrace,
@@ -200,9 +242,6 @@ def build_layer_features(
     response_effective = response_sources.effective_sources[:, layer_index]
     response_top1 = response_sources.top1_share[:, layer_index]
 
-    prompt_transition = _transition_magnitude(prompt_mass)
-    history_transition = _transition_magnitude(response_mass)
-    diagonal_transition = _transition_magnitude(self_mass)
     fields = {
         "prompt_mass": prompt_mass.mean(dim=-1),
         "history_mass": response_mass.mean(dim=-1),
@@ -220,15 +259,8 @@ def build_layer_features(
         "response_top1_share": _valid_head_mean(response_top1, response_valid),
         "recent_response_share": _valid_head_mean(recent_share, response_valid),
         "response_mean_lag": _valid_head_mean(mean_lag, response_valid),
-        "prompt_transition_magnitude": prompt_transition,
-        "history_transition_magnitude": history_transition,
-        "diagonal_transition_magnitude": diagonal_transition,
-        "origin_transition_gap": history_transition - prompt_transition,
-        "interaction_diagonal_transition_gap": (
-            0.5 * (prompt_transition + history_transition) - diagonal_transition
-        ),
     }
-    fields.update(_lineage_fields(lineage, epsilon))
+    fields.update(_layer_order_fields(routing, lineage, epsilon))
     return torch.stack([fields[name] for name in FEATURE_NAMES], dim=-1)
 
 
@@ -241,3 +273,14 @@ def relation_scores(standardized_features: np.ndarray) -> np.ndarray:
         for _, feature, direction in RELATION_SPECS
     ]
     return np.stack(scores, axis=1).astype(np.float32)
+
+
+def layer_order_relation_scores(standardized_features: np.ndarray) -> np.ndarray:
+    """Match each layer-order control to its audited trajectory statistic."""
+
+    final_scores = relation_scores(standardized_features[:, -1:, :])
+    full_scores = relation_scores(standardized_features)
+    for name in DYNAMICS_RELATION_NAMES:
+        index = RELATION_NAMES.index(name)
+        final_scores[:, index] = full_scores[:, index]
+    return final_scores

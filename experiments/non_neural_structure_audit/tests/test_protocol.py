@@ -1,6 +1,10 @@
 import json
+from pathlib import Path
+
+import pytest
 
 from experiment_protocol import file_sha256
+from experiments.non_neural_structure_audit import protocol as audit_protocol
 from experiments.non_neural_structure_audit.artifacts import write_json
 from experiments.non_neural_structure_audit.config import EvaluationConfig
 from experiments.non_neural_structure_audit.protocol import (
@@ -11,6 +15,30 @@ from experiments.non_neural_structure_audit.protocol import (
     prepare_split_plan,
     tokenizer_sha256,
 )
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        Path("experiments/causal_attention_edges.py"),
+        Path("experiments/disk_row_store.py"),
+    ),
+)
+def test_method_digest_binds_shared_runtime_dependencies(monkeypatch, relative_path):
+    original_digest = method_sha256()
+    repository = Path(audit_protocol.__file__).resolve().parents[2]
+    dependency = (repository / relative_path).resolve()
+    read_bytes = Path.read_bytes
+
+    def read_with_synthetic_change(path):
+        contents = read_bytes(path)
+        if path.resolve() == dependency:
+            return contents + b"\nsynthetic dependency change"
+        return contents
+
+    monkeypatch.setattr(Path, "read_bytes", read_with_synthetic_change)
+
+    assert method_sha256() != original_digest
 
 
 def test_split_and_confirmation_plans_bind_disjoint_sources_and_config(tmp_path):
@@ -85,8 +113,6 @@ def test_split_and_confirmation_plans_bind_disjoint_sources_and_config(tmp_path)
     discovery["decisions"][0]["status"] = "INCONCLUSIVE_A0_CONTROLS_MISSING"
     discovery_path.write_text(json.dumps(discovery), encoding="utf-8")
 
-    import pytest
-
     with pytest.raises(ValueError, match="A0 is incomplete"):
         freeze_confirmation(
             split_plan=split_path,
@@ -121,8 +147,6 @@ def test_split_plan_rejects_sample_ids_that_do_not_match_their_frozen_sources(
     split = prepare_split_plan(score_dir=score_dir, output=split_path, seed=7)
     split["discovery_sample_ids"].append(split["confirmation_sample_ids"][0])
     write_json(split_path, split)
-
-    import pytest
 
     with pytest.raises(ValueError, match="sample groups do not match"):
         load_split_plan(split_path, score_dir=score_dir)

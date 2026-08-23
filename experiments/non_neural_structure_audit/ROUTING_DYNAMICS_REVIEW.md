@@ -9,7 +9,7 @@
 | prompt-origin 与 response-origin 分开观察 | 保留 | `prompt_transition_volatility`、`response_transition_volatility` 与 `origin_transition_gap` |
 | 跨 layer 的变化而不只看最终层 | 保留 | 相邻 step 的 head-mean absolute transition magnitude |
 | layer order 对照 | 保留并扩展 | lineage 与 transition relations 都进入独立 non-identity layer shuffle；不影响 endpoint-null relations |
-| head fracture / interaction 与 diagonal 的关系 | 探索性保留 | `interaction_diagonal_decoupling`；只有描述性含义，尚无 conditional nuisance control |
+| head fracture / off-diagonal 与 diagonal 的关系 | 探索性保留 | `offdiagonal_diagonal_transition_gap`；只有描述性含义，尚无 conditional nuisance control |
 | source-disjoint、label-late evaluation | 保留 | 继续使用现有 frozen source plan、artifact hash 与标签边界 |
 | 神经 next-layer reconstruction / repairability | 退役 | 候选 topology 由所有层的 union edges 构造，会泄漏未来层 edge support；当前数据也不足以把 reconstruction 叫作计算恢复 |
 | learned hidden state、message gain、sufficiency 命名 | 退役 | 原型是不用幻觉标签的 next-layer graph reconstruction 训练，但数值仍依赖训练参数与架构先验；它没有证明 hidden state 对应真实图表征、message passing 或机制充分性 |
@@ -30,9 +30,9 @@ history 与 diagonal 同理。随后冻结四个 relation：
 - `prompt_transition_volatility`：prompt transition；
 - `response_transition_volatility`：history transition；
 - `origin_transition_gap`：history transition − prompt transition；
-- `interaction_diagonal_decoupling`：`0.5 * (prompt + history) transition − diagonal transition`。
+- `offdiagonal_diagonal_transition_gap`：`0.5 * (prompt + history) transition − diagonal transition`；它是差值，不是统计交互项。
 
-这些量没有模型参数、没有 hidden=16/32/96、没有重建目标，也不读取 hallucination label。它们与其他 relation 一样使用 train-only task/position robust reference，再在标签边界之后评估；layer shuffle 只用于检查对层序的依赖。
+这些量没有模型参数、没有 hidden=16/32/96、没有重建目标，也不读取 hallucination label。它们与其他 relation 一样使用 train-only task/position robust reference，再在标签边界之后评估；layer shuffle 对真实与乱序轨迹都使用全 layer transition 均值，只用于检查对层序的依赖。
 
 ## 仍不完善、不能越界解释的部分
 
@@ -41,7 +41,7 @@ history 与 diagonal 同理。随后冻结四个 relation：
 3. A0b gold trace/token alignment 与 A0c 全 pipeline label-permutation sanity 尚缺，正式 A1–A10 仍统一 `BLOCKED_BY_A0`。
 4. endpoint null 的已观察合法交换覆盖率偏低，且不保持 weighted source strength；A2 仍是无效/不充分 pilot。
 5. transition relations 尚缺 position、token class、known-mass matching 和同强度无序层基线，不能据此授权 GRU/SSM。
-6. head/diagonal interaction 尚缺在 direct role mass 条件下的增量检验，不能据此授权 head-resolved neural aggregation。
+6. off-diagonal/diagonal gap 尚缺在 direct role mass 条件下的增量检验，且不是统计交互项，不能据此授权 head-resolved neural aggregation。
 7. 当前 layer shuffle 是审计算子的重排，不是 base LLM layer intervention；真实机制结论仍需 A10 matched activation/KV intervention。
 
 因此，值得保留的是“跨层 routing 如何变化、这种变化是否依赖层序、是否在 source-disjoint 标签后置评估中稳定”的审计问题；不值得保留的是目前会泄漏未来 topology、全量驻留并把重建分数过度命名为 message gain/repairability 的具体神经实现。

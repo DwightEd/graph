@@ -20,7 +20,7 @@ from .token_classes import content_token_mask
 SCORE_FIELDS = (
     "response_token_ids",
     "relation_scores",
-    "final_relation_scores",
+    "layer_order_real_relation_scores",
     "response_endpoint_null_changed_fraction",
 )
 
@@ -34,7 +34,7 @@ VALIDATION_FIELDS = (
 
 SCORE_MATRIX_FIELDS = (
     "relation_scores",
-    "final_relation_scores",
+    "layer_order_real_relation_scores",
     "response_endpoint_null_relation_scores",
     "response_endpoint_null_changed_fraction",
     "layer_shuffle_relation_scores",
@@ -48,7 +48,7 @@ class FrozenSample:
     labels: np.ndarray
     eligible: np.ndarray
     relation: np.ndarray
-    final_relation: np.ndarray
+    layer_order_real: np.ndarray
     endpoint_null: np.ndarray
     layer_shuffle: np.ndarray
     endpoint_changed_fraction_mean: float
@@ -64,8 +64,10 @@ class EvaluationBundle:
     _temporary: TemporaryDirectory
 
     def close(self) -> None:
-        self._sample_store.close()
-        self._temporary.cleanup()
+        try:
+            self._sample_store.close()
+        finally:
+            self._temporary.cleanup()
 
     def __enter__(self):
         return self
@@ -136,7 +138,7 @@ def validate_frozen_scores(
         token_ids = arrays["response_token_ids"]
         token_count = len(canonical_tokens)
         valid = (
-            str(arrays["schema"].item()) == "non-neural-structure-score-v1"
+            str(arrays["schema"].item()) == "non-neural-structure-score-v2"
             and str(arrays["sample_id"].item()) == str(row["sample_id"])
             and str(arrays["source_id"].item()) == str(row["source_id"])
             and token_ids.ndim == 1
@@ -144,7 +146,8 @@ def validate_frozen_scores(
             and int(row["response_length"]) == token_count
             and np.array_equal(arrays["relation_names"].astype(str), expected_relations)
             and shapes["relation_scores"] == (token_count, relation_count)
-            and shapes["final_relation_scores"] == (token_count, relation_count)
+            and shapes["layer_order_real_relation_scores"]
+            == (token_count, relation_count)
             and shapes["response_endpoint_null_relation_scores"]
             == (endpoint_replicates, token_count, relation_count)
             and shapes["response_endpoint_null_changed_fraction"]
@@ -181,7 +184,9 @@ def _load_sample(
     )
     selected = eligible[1:]
     relation = arrays["relation_scores"].astype(np.float32, copy=False)
-    final_relation = arrays["final_relation_scores"].astype(np.float32, copy=False)
+    layer_order_real = arrays["layer_order_real_relation_scores"].astype(
+        np.float32, copy=False
+    )
     endpoint_null = load_npz(
         score_dir / row["score_path"],
         ("response_endpoint_null_relation_scores",),
@@ -200,7 +205,7 @@ def _load_sample(
     )["layer_shuffle_relation_scores"].astype(np.float32, copy=False)
     layer_accumulator.add_masked(
         labels[1:],
-        final_relation[:-1],
+        layer_order_real[:-1],
         layer_shuffle[:, :-1],
         selected,
     )
@@ -211,7 +216,7 @@ def _load_sample(
         labels=labels,
         eligible=eligible,
         relation=relation,
-        final_relation=final_relation,
+        layer_order_real=layer_order_real,
         endpoint_null=endpoint_mean,
         layer_shuffle=layer_mean,
     )
@@ -221,7 +226,7 @@ def _load_sample(
         labels=stored[0],
         eligible=stored[1],
         relation=stored[2],
-        final_relation=stored[3],
+        layer_order_real=stored[3],
         endpoint_null=stored[4],
         layer_shuffle=stored[5],
         endpoint_changed_fraction_mean=float(changed.mean()),
@@ -260,13 +265,14 @@ def load_frozen_samples(
     scratch_dir.mkdir(parents=True, exist_ok=True)
     temporary_owner = TemporaryDirectory(prefix="structure-audit-", dir=scratch_dir)
     temporary = Path(temporary_owner.name)
-    sample_store = DiskBackedSamples(
-        temporary / "samples",
-        capacity=sample_capacity,
-        relations=len(RELATION_NAMES),
-    )
+    sample_store = None
     samples = []
     try:
+        sample_store = DiskBackedSamples(
+            temporary / "samples",
+            capacity=sample_capacity,
+            relations=len(RELATION_NAMES),
+        )
         with (
             DiskBackedAUPRC(
                 temporary / "endpoint",
@@ -303,6 +309,9 @@ def load_frozen_samples(
             _temporary=temporary_owner,
         )
     except Exception:
-        sample_store.close()
-        temporary_owner.cleanup()
+        try:
+            if sample_store is not None:
+                sample_store.close()
+        finally:
+            temporary_owner.cleanup()
         raise

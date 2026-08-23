@@ -26,14 +26,14 @@ from research_dataset import open_research_dataset
 from .artifacts import save_npz, write_json
 from .config import AuditConfig
 from .features import (
-    FEATURE_INDEX,
     FEATURE_NAMES,
-    LAYER_ORDER_FEATURE_NAMES,
     LAYER_ORDER_RELATION_NAMES,
     LINEAGE_RELATION_NAMES,
     RELATION_NAMES,
     build_layer_features,
+    layer_order_relation_scores,
     relation_scores,
+    replace_layer_order_features,
     replace_lineage_features,
 )
 from .lineage import LineageOperator
@@ -306,7 +306,7 @@ class StructureAudit:
             del null
         del endpoint_plan
 
-        final_relations = relation_scores(standardized[:, -1:, :])
+        layer_order_real_relations = layer_order_relation_scores(standardized)
         if edges.num_layers < 2:
             raise ValueError("layer-order null requires at least two layers")
         rng = np.random.default_rng(base_seed)
@@ -314,7 +314,7 @@ class StructureAudit:
             (config.layer_shuffle_replicates, edges.num_layers), dtype=np.int16
         )
         shuffle_scores = np.empty(
-            (config.layer_shuffle_replicates, *final_relations.shape),
+            (config.layer_shuffle_replicates, *layer_order_real_relations.shape),
             dtype=np.float32,
         )
         for replicate in tqdm(
@@ -326,32 +326,28 @@ class StructureAudit:
             order = _non_identity_permutation(rng, edges.num_layers)
             shuffle_orders[replicate] = order
             shuffled_features = (
-                build_layer_features(
+                replace_layer_order_features(
+                    feature_tensor,
                     routing,
                     operator.run(layer_order=order),
-                    recent_tokens=config.recent_tokens,
                 )
                 .cpu()
                 .numpy()
             )
-            final_control = features.copy()
-            for name in LAYER_ORDER_FEATURE_NAMES:
-                index = FEATURE_INDEX[name]
-                final_control[:, -1, index] = shuffled_features[:, -1, index]
             shuffled_standardized = standardize(
-                final_control,
+                shuffled_features,
                 task=task,
                 buckets=buckets,
                 reference=reference,
                 maximum=config.maximum_standardized_value,
             )
-            shuffle_scores[replicate] = relation_scores(
-                shuffled_standardized[:, -1:, :]
+            shuffle_scores[replicate] = layer_order_relation_scores(
+                shuffled_standardized
             )
-            del shuffled_features, final_control, shuffled_standardized
+            del shuffled_features, shuffled_standardized
 
         arrays = {
-            "schema": np.asarray("non-neural-structure-score-v1"),
+            "schema": np.asarray("non-neural-structure-score-v2"),
             "sample_id": np.asarray(str(sample.sample_id)),
             "source_id": np.asarray(source_id),
             "task_type": np.asarray(task),
@@ -363,7 +359,7 @@ class StructureAudit:
             "layer_features": features,
             "standardized_features": standardized,
             "relation_scores": real_relations,
-            "final_relation_scores": final_relations,
+            "layer_order_real_relation_scores": layer_order_real_relations,
             "response_endpoint_null_relation_scores": null_scores,
             "response_endpoint_null_changed_fraction": changed_fraction,
             "layer_shuffle_order": shuffle_orders,
@@ -384,8 +380,14 @@ class StructureAudit:
                 "source_count_degree_max_error": max(
                     audit["source_count_degree_max_error"] for audit in null_audits
                 ),
+                "stratified_source_count_max_error": max(
+                    audit["stratified_source_count_max_error"] for audit in null_audits
+                ),
                 "causal_violations": max(
                     audit["causal_violations"] for audit in null_audits
+                ),
+                "coarse_lag_violations": max(
+                    audit["coarse_lag_violations"] for audit in null_audits
                 ),
                 "duplicate_edges": max(
                     audit["duplicate_edges"] for audit in null_audits

@@ -6,6 +6,20 @@ from experiments.non_neural_structure_audit.bounded_ensemble import (
 from experiments.non_neural_structure_audit.statistics import binary_metrics
 
 
+class ReplicateReadableEnsemble:
+    """Expose one replicate at a time and reject whole-ensemble indexing."""
+
+    def __init__(self, values):
+        self.values = values
+        self.read_replicates = []
+
+    def __getitem__(self, index):
+        if not isinstance(index, (int, np.integer)):
+            raise TypeError("the null ensemble must be read one replicate at a time")
+        self.read_replicates.append(int(index))
+        return self.values[index]
+
+
 def test_disk_backed_ensemble_matches_pooled_auprc_definition(tmp_path):
     labels = [np.asarray([0, 1, 0]), np.asarray([1, 0])]
     real = [
@@ -67,4 +81,21 @@ def test_masked_add_matches_explicitly_selected_rows(tmp_path):
     np.testing.assert_array_equal(accumulator.labels[:2], labels[mask])
     np.testing.assert_array_equal(accumulator.real[:2], real[mask])
     np.testing.assert_array_equal(accumulator.null[:, :2], null[:, mask])
+    accumulator.close()
+
+
+def test_masked_add_reads_and_writes_one_null_replicate_at_a_time(tmp_path):
+    labels = np.asarray([0, 1, 0, 1])
+    real = np.arange(8, dtype=np.float32).reshape(4, 2)
+    null_values = np.stack((real[::-1], real * 0.5))
+    null = ReplicateReadableEnsemble(null_values)
+    mask = np.asarray([True, False, True, False])
+    accumulator = DiskBackedAUPRC(
+        tmp_path / "replicate-wise.dat", capacity=2, replicates=2, relations=2
+    )
+
+    accumulator.add_masked(labels, real, null, mask)
+
+    assert null.read_replicates == [0, 1]
+    np.testing.assert_array_equal(accumulator.null[:, :2], null_values[:, mask])
     accumulator.close()

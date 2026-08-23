@@ -68,7 +68,7 @@ RAGTruth 提供自然生成回答的细粒度 hallucination 标注，数据定�
 ### 4.2 多重检验和方向稳定性
 
 - 每个 audit 只指定一个 primary hypothesis；其余统计量标记为 secondary/exploratory。
-- A1–A9 的 primary p 值统一做 Benjamini–Hochberg 校正，要求 `q < 0.05`。
+- A1–A9 中具有有效随机化/交换性依据的 primary p 值统一做 Benjamini–Hochberg 校正，要求 `q < 0.05`；当前启发式 endpoint pilot 只报告 exceedance rate，不作为 p/q 值。
 - grouped CV 要求至少 4/5 outer folds 与预注册方向一致。
 - 置换检验以 sample/span 为单位，正式运行至少 499 次。标签置换检验的设计依据 [Ojala & Garriga, JMLR 2010](https://www.jmlr.org/beta/papers/v11/ojala10a.html)。
 
@@ -165,10 +165,12 @@ confirmation 中含幻觉的回答少于 50 条时，所有 hallucination-specif
 - `row_mass_max_error`；
 - `role_mass_max_error`；
 - source degree/strength error；
+- `(layer, head, lag-bin, source)` 分层计数误差；
 - `causal_violations`；
+- `coarse_lag_violations`；
 - `duplicate_edges`。
 
-当前 pilot 实现只在 response-history 边内匹配 `(layer, head, coarse log2-lag bin)`，保持 row mass、response role 和非加权 source degree；它不保持 weighted source strength，也没有 mixing/均匀性证明。最新两条 QA engineering smoke 的 coverage 约为 0.139、0.162，并不是总体估计，低于待预注册的计划阈值 0.70。实际顶层 A2 decision 因总 A0 未完成而是 `BLOCKED_BY_A0`；若只检查 pilot null 质量则为 `INCONCLUSIVE_NULL_INVALID`。正式实现应另行设计 degree/weighted-strength preserving double-edge-swap/MCMC，并报告 burn-in、mixing、coverage 与不变量校准，不能把当前 pilot 冒充本段目标 null。
+当前 pilot 实现只在 response-history 边内匹配 `(layer, head, coarse log2-lag bin)`，保持 row mass、response role 和非加权 source degree，并逐 replicate 验证 coarse lag 与分层 source count；它不保持 weighted source strength，也没有 mixing/均匀性证明。因此当前输出只把 ensemble rank 写成 `endpoint_null_exceedance_rate`，不参与 BH 或 gate。最新两条 QA engineering smoke 的 coverage 约为 0.139、0.162，并不是总体估计，低于待预注册的计划阈值 0.70。实际顶层 A2 decision 因总 A0 未完成而是 `BLOCKED_BY_A0`；若只检查 pilot null 质量则为 `INCONCLUSIVE_NULL_INVALID`。正式实现应另行设计 degree/weighted-strength preserving double-edge-swap/MCMC，并报告 burn-in、mixing、coverage 与不变量校准，不能把当前 pilot 冒充本段目标 null。
 
 **PASS 门槛**：`changed_fraction >= 0.70`，质量不变量通过，exact-endpoint 特征相对 A1 `Delta AUPRC >= 0.01` 且 CI 全部大于 0。
 

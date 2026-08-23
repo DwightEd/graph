@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
@@ -31,15 +32,18 @@ class DiskRowStore:
         self.capacity = int(capacity)
         self.fields = dict(fields)
         self.rows = 0
-        self._arrays = {
-            name: np.lib.format.open_memmap(
-                self.root / f"{name}.npy",
-                mode="w+",
-                dtype=spec.dtype,
-                shape=(self.capacity, *spec.tail_shape),
-            )
-            for name, spec in self.fields.items()
-        }
+        self._arrays = {}
+        with ExitStack() as cleanup:
+            for name, spec in self.fields.items():
+                array = np.lib.format.open_memmap(
+                    self.root / f"{name}.npy",
+                    mode="w+",
+                    dtype=spec.dtype,
+                    shape=(self.capacity, *spec.tail_shape),
+                )
+                self._arrays[name] = array
+                cleanup.callback(array._mmap.close)
+            cleanup.pop_all()
 
     def append(self, arrays: Mapping[str, np.ndarray]) -> slice:
         if arrays.keys() != self.fields.keys():
@@ -68,10 +72,13 @@ class DiskRowStore:
         return self._arrays[field][selected]
 
     def close(self) -> None:
-        for array in self._arrays.values():
-            array.flush()
-            array._mmap.close()
+        arrays = tuple(self._arrays.values())
         self._arrays.clear()
+        with ExitStack() as closing:
+            for array in arrays:
+                closing.callback(array._mmap.close)
+            for array in arrays:
+                array.flush()
 
     def __enter__(self) -> Self:
         return self

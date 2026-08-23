@@ -75,7 +75,27 @@ class DiskBackedAUPRC:
         """Write selected rows without copying a full replicate ensemble."""
 
         mask = np.asarray(mask, dtype=bool)
-        self.add(labels[mask], real[mask], null[:, mask])
+        selected_labels = np.asarray(labels[mask], dtype=np.int8)
+        selected_real = np.asarray(real[mask], dtype=np.float32)
+        end = self.rows + len(selected_labels)
+        if end > self.store.capacity:
+            raise ValueError("row-store capacity exceeded")
+
+        selected = slice(self.rows, end)
+        selected_null = self.store.view("null", selected)
+        for replicate in range(self.replicates):
+            np.copyto(
+                selected_null[:, replicate],
+                np.asarray(null[replicate], dtype=np.float32)[mask],
+                casting="no",
+            )
+        self.store.append(
+            {
+                "labels": selected_labels,
+                "real": selected_real,
+                "null": selected_null,
+            }
+        )
 
     def __enter__(self):
         return self

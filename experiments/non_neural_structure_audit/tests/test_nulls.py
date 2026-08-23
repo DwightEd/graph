@@ -63,7 +63,7 @@ def test_lineage_endpoint_null_does_not_count_or_rewire_prompt_edges():
     assert result.audit["eligible_response_edges"] == 3
 
 
-def test_endpoint_plan_uses_compact_integer_geometry():
+def test_endpoint_plan_uses_compact_integer_geometry(monkeypatch):
     routing = routing_state(
         layers=[0, 0],
         heads=[0, 0],
@@ -75,6 +75,11 @@ def test_endpoint_plan_uses_compact_integer_geometry():
         num_layers=1,
     )
 
+    def unexpected_column_stack(*_args, **_kwargs):
+        raise AssertionError("compact geometry must be allocated directly")
+
+    monkeypatch.setattr(np, "column_stack", unexpected_column_stack)
+
     plan = EndpointSwapPlan(routing.edges)
 
     assert plan.rows.dtype == np.int32
@@ -83,3 +88,24 @@ def test_endpoint_plan_uses_compact_integer_geometry():
     assert sum(group.stop - group.start for group in plan.group_slices) == len(
         plan.response_edges
     )
+
+
+def test_endpoint_swap_audits_each_layer_head_lag_source_stratum():
+    routing = routing_state(
+        layers=[0, 0, 0, 0, 1, 1, 1, 1],
+        heads=[0, 0, 1, 1, 0, 0, 1, 1],
+        queries=[6, 7, 12, 13, 10, 11, 5, 6],
+        sources=[4, 5, 4, 5, 4, 5, 4, 5],
+        weights=[0.1] * 8,
+        diagonal=torch.zeros((14, 2, 2)),
+        response_idx=4,
+        response_tokens=14,
+        num_layers=2,
+        num_heads=2,
+    )
+
+    result = constrained_endpoint_swap(routing.edges, seed=11, rounds=1)
+
+    assert result.changed_fraction == 1.0
+    assert result.audit["coarse_lag_violations"] == 0
+    assert result.audit["stratified_source_count_max_error"] == 0

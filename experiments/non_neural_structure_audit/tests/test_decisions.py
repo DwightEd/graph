@@ -17,7 +17,6 @@ def test_invalid_endpoint_null_is_inconclusive_and_cannot_authorize_a_graph():
         "endpoint_null_valid": False,
         "endpoint_auprc_delta": 0.2,
         "endpoint_auprc_delta_ci_low": 0.1,
-        "endpoint_null_q": 0.01,
         "layer_auprc_delta": 0.0,
         "layer_auprc_delta_ci_low": -0.1,
         "layer_shuffle_q": 1.0,

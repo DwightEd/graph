@@ -125,6 +125,15 @@ def test_fit_and_score_freeze_compact_artifacts_without_opening_labels(
         return original_swap(plan, *arguments, **keywords)
 
     monkeypatch.setattr(experiment.EndpointSwapPlan, "sample", tracked_swap)
+    original_features = experiment.build_layer_features
+    feature_builds = 0
+
+    def tracked_features(*arguments, **keywords):
+        nonlocal feature_builds
+        feature_builds += 1
+        return original_features(*arguments, **keywords)
+
+    monkeypatch.setattr(experiment, "build_layer_features", tracked_features)
     test["test-0"].source_id = None
     audit.score(
         split_root="test",
@@ -144,11 +153,14 @@ def test_fit_and_score_freeze_compact_artifacts_without_opening_labels(
     assert manifest["layer_order_null_relations"] == list(LAYER_ORDER_RELATION_NAMES)
     null_audit = manifest["samples"][0]["null_audit"]
     assert null_audit["source_count_degree_max_error"] == 0
+    assert null_audit["stratified_source_count_max_error"] == 0
+    assert null_audit["coarse_lag_violations"] == 0
     assert null_audit["changed_fraction_min"] <= null_audit["changed_fraction_mean"]
     score_path = score_dir / manifest["samples"][0]["score_path"]
     assert score_path.is_file()
     assert len(manifest["samples"][0]["score_sha256"]) == 64
     with np.load(score_path, allow_pickle=False) as arrays:
+        assert str(arrays["schema"].item()) == "non-neural-structure-score-v2"
         assert arrays["layer_shuffle_relation_scores"].shape[0] == 2
         assert all(
             not np.array_equal(order, np.arange(len(order)))
@@ -157,10 +169,20 @@ def test_fit_and_score_freeze_compact_artifacts_without_opening_labels(
         direct = list(arrays["relation_names"]).index("direct_role")
         np.testing.assert_allclose(
             arrays["layer_shuffle_relation_scores"][:, :, direct],
-            np.repeat(arrays["final_relation_scores"][None, :, direct], 2, axis=0),
+            np.repeat(
+                arrays["layer_order_real_relation_scores"][None, :, direct],
+                2,
+                axis=0,
+            ),
+        )
+        dynamics = list(arrays["relation_names"]).index("origin_transition_gap")
+        np.testing.assert_allclose(
+            arrays["layer_order_real_relation_scores"][:, dynamics],
+            arrays["relation_scores"][:, dynamics],
         )
     assert train["train-0"].release_calls == 1
     assert test["test-0"].release_calls == 1
+    assert feature_builds == 1
 
 
 def test_fit_releases_attention_before_analysis_and_drops_previous_graph(

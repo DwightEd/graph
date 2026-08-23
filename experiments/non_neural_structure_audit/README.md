@@ -66,6 +66,8 @@ Set-Location 'D:\projects\python_projects\research\graph_latest'
 & 'C:\Program Files\Git\bin\bash.exe' -lc 'cd /d/projects/python_projects/research/graph_latest && TRAIN_LIMIT= TEST_LIMIT= NULL_REPLICATES=10 LAYER_SHUFFLE_REPLICATES=10 BOOTSTRAP_REPLICATES=200 PERMUTATION_REPLICATES=99 SCOPE=smoke OUTPUT_DIR=experiments/non_neural_structure_audit/outputs/full_qa_smoke ./experiments/non_neural_structure_audit/run.sh'
 ```
 
+该 CPU 路径逐样本保存并释放 graph/null scratch，evaluation 的跨样本矩阵写入 memmap；当前没有已知的“样本越跑越多、RAM 线性堆积”路径。但最大单样本仍需要显著内存，不能承诺任意机器绝不 OOM：保持单进程、不要并行启动多个 audit，并至少预留约 2 GiB 进程空间。实测边界与解释见 [MEMORY.md](MEMORY.md)。
+
 要运行带 content-token 筛选的 discovery，先把上面 Bash 命令中的 `SCOPE=smoke` 改为 `SCOPE=discovery`，再加入 `TOKENIZER=D:/实际的/Meta-Llama-3.1-8B-Instruct`。`TRAIN_LIMIT=` 与 `TEST_LIMIT=` 是在 Bash 进程内显式传空值，表示不传 `--limit`；在 PowerShell 里把 `$env:TRAIN_LIMIT=''` 可能等价于删除环境变量，从而重新触发脚本默认值 100/30。
 
 流程默认只选 `task_type=QA`，使用完整 canonical train QA 作为 reference；test QA source groups 在读标签前确定性分成 50% discovery、50% confirmation。`split_plan.json` 绑定 dataset、reference、score manifest、source/sample IDs 与 audit source-code dependency digest；它不替代 Python/PyTorch/NumPy/scikit-learn 环境记录。
@@ -162,7 +164,7 @@ python -m experiments.non_neural_structure_audit.main freeze-confirmation --help
 | `../disk_row_store.py` | evaluation 两个消费者共享的固定 schema 磁盘 row store |
 | `lineage.py` | 六类守恒 routing lineage |
 | `features.py` | 可解释坐标与预注册 relation scores |
-| `nulls.py` | 可复用 `EndpointSwapPlan` 与严格 endpoint null |
+| `nulls.py` | 可复用 `EndpointSwapPlan`、受约束 endpoint pilot 与逐 replicate 不变量审计 |
 | `reference.py` | 有界、train-only robust reference |
 | `protocol.py` | 数据/source/code/tokenizer 的冻结协议 |
 | `evaluation_data.py` | 唯一标签边界与单样本折叠 |

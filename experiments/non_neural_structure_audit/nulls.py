@@ -39,20 +39,66 @@ def _present(sorted_keys: np.ndarray, candidates: np.ndarray) -> np.ndarray:
     return result
 
 
+def _source_count_max_error(
+    original_keys: np.ndarray,
+    rewired_keys: np.ndarray,
+) -> int:
+    original_keys.sort()
+    rewired_keys.sort()
+    if np.array_equal(original_keys, rewired_keys):
+        return 0
+
+    original_index = 0
+    rewired_index = 0
+    max_error = 0
+    while original_index < len(original_keys) or rewired_index < len(rewired_keys):
+        if rewired_index == len(rewired_keys) or (
+            original_index < len(original_keys)
+            and original_keys[original_index] < rewired_keys[rewired_index]
+        ):
+            key = original_keys[original_index]
+        else:
+            key = rewired_keys[rewired_index]
+        original_end = int(np.searchsorted(original_keys, key, side="right"))
+        rewired_end = int(np.searchsorted(rewired_keys, key, side="right"))
+        max_error = max(
+            max_error,
+            abs((original_end - original_index) - (rewired_end - rewired_index)),
+        )
+        original_index = original_end
+        rewired_index = rewired_end
+    return max_error
+
+
+def _stratified_source_count_max_error(
+    original: np.ndarray,
+    rewired: np.ndarray,
+    response_edges: np.ndarray,
+    group_slices: tuple[slice, ...],
+) -> int:
+    max_error = 0
+    for group_slice in group_slices:
+        members = response_edges[group_slice]
+        error = _source_count_max_error(
+            original[members],
+            rewired[members],
+        )
+        max_error = max(max_error, error)
+    return max_error
+
+
 class EndpointSwapPlan:
     """Reuse invariant CPU edge geometry across endpoint-null replicates."""
 
     def __init__(self, edges: RoutingEdges, *, lag_bins: int = 8):
         self.edges = edges
         self.lag_bins = lag_bins
-        self.rows = np.column_stack(
-            (
-                edges.layer.cpu().numpy(),
-                edges.head.cpu().numpy(),
-                edges.query.cpu().numpy(),
-            )
-        ).astype(np.int32, copy=False)
-        self.original = edges.source.cpu().numpy().astype(np.int32, copy=False)
+        edge_count = len(edges.source)
+        self.rows = np.empty((edge_count, 3), dtype=np.int32)
+        for column, values in enumerate((edges.layer, edges.head, edges.query)):
+            self.rows[:, column] = values.cpu().numpy()
+        self.original = np.empty(edge_count, dtype=np.int32)
+        self.original[:] = edges.source.cpu().numpy()
         self.response_edges = np.flatnonzero(
             self.original >= edges.response_idx
         ).astype(np.int32, copy=False)
@@ -69,6 +115,7 @@ class EndpointSwapPlan:
             ) * self.lag_bins + lag
             order = np.argsort(group, kind="stable")
             self.response_edges = self.response_edges[order]
+            self.response_lag = lag[order]
             sorted_group = group[order]
             boundary = np.flatnonzero(np.diff(sorted_group)) + 1
             starts = np.concatenate(([0], boundary))
@@ -77,6 +124,7 @@ class EndpointSwapPlan:
                 slice(int(start), int(end)) for start, end in zip(starts, ends)
             )
         else:
+            self.response_lag = np.empty(0, dtype=np.int16)
             self.group_slices = ()
         self.key_prefix = (
             (self.rows[:, 0].astype(np.int64) * edges.num_heads + self.rows[:, 1])
@@ -94,7 +142,9 @@ class EndpointSwapPlan:
         rng = np.random.default_rng(seed)
 
         for _ in range(rounds):
-            current_keys = np.sort(_edge_keys(self.key_prefix, source))
+            current_keys = self.key_prefix[response_edges]
+            current_keys += source[response_edges]
+            current_keys.sort()
             paired = False
             for group_slice in self.group_slices:
                 members = response_edges[group_slice]
@@ -165,11 +215,30 @@ class EndpointSwapPlan:
                 source[second_accepted] = first_source[accepted]
                 changed[first_accepted] = True
                 changed[second_accepted] = True
+            del current_keys
             if not paired:
                 break
 
-        keys = _edge_keys(self.key_prefix, source)
+        keys = self.key_prefix[response_edges]
+        keys += source[response_edges]
+        keys.sort()
+        duplicate_edges = int(np.count_nonzero(keys[1:] == keys[:-1]))
+        del keys
         rewired_degree = np.bincount(source, minlength=edges.num_tokens)
+        rewired_lag = _lag_bins(
+            rows[response_edges, 2],
+            source[response_edges],
+            edges.response_idx,
+            self.lag_bins,
+        )
+        coarse_lag_violations = int(np.count_nonzero(rewired_lag != self.response_lag))
+        stratified_source_count_max_error = _stratified_source_count_max_error(
+            self.original,
+            source,
+            response_edges,
+            self.group_slices,
+        )
+        del rewired_lag
         changed_count = int(changed[response_edges].sum())
         changed_fraction = (
             changed_count / len(response_edges) if len(response_edges) else 0.0
@@ -180,10 +249,12 @@ class EndpointSwapPlan:
             "source_count_degree_max_error": int(
                 np.max(np.abs(self.original_degree - rewired_degree))
             ),
+            "stratified_source_count_max_error": stratified_source_count_max_error,
             "eligible_response_edges": len(response_edges),
             "changed_response_edges": changed_count,
             "causal_violations": int(np.sum(source >= edges.response_idx + rows[:, 2])),
-            "duplicate_edges": int(len(keys) - len(np.unique(keys))),
+            "coarse_lag_violations": coarse_lag_violations,
+            "duplicate_edges": duplicate_edges,
         }
         return EndpointSwapResult(
             edges=replace(

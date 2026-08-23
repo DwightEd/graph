@@ -19,7 +19,7 @@ class DiskBackedSamples:
                 "labels": FieldSpec(np.dtype(np.int8)),
                 "eligible": FieldSpec(np.dtype(np.bool_)),
                 "relation": FieldSpec(np.dtype(np.float32), vector),
-                "final": FieldSpec(np.dtype(np.float32), vector),
+                "layer_order_real": FieldSpec(np.dtype(np.float32), vector),
                 "endpoint": FieldSpec(np.dtype(np.float32), vector),
                 "layer": FieldSpec(np.dtype(np.float32), vector),
             },
@@ -31,7 +31,7 @@ class DiskBackedSamples:
         labels: np.ndarray,
         eligible: np.ndarray,
         relation: np.ndarray,
-        final_relation: np.ndarray,
+        layer_order_real: np.ndarray,
         endpoint_null: np.ndarray,
         layer_shuffle: np.ndarray,
     ) -> tuple[np.ndarray, ...]:
@@ -39,14 +39,21 @@ class DiskBackedSamples:
             "labels": labels,
             "eligible": eligible,
             "relation": relation,
-            "final": final_relation,
+            "layer_order_real": layer_order_real,
             "endpoint": endpoint_null,
             "layer": layer_shuffle,
         }
         selected = self.store.append(fields)
         return tuple(
             self.store.view(name, selected)
-            for name in ("labels", "eligible", "relation", "final", "endpoint", "layer")
+            for name in (
+                "labels",
+                "eligible",
+                "relation",
+                "layer_order_real",
+                "endpoint",
+                "layer",
+            )
         )
 
     def close(self) -> None:

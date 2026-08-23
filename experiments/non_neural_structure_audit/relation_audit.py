@@ -28,6 +28,14 @@ def _ensemble_p_value(ensemble: EnsembleAUPRC, relation: int) -> float:
     return float((1 + np.sum(null >= observed)) / (len(null) + 1))
 
 
+def _ensemble_exceedance_rate(ensemble: EnsembleAUPRC, relation: int) -> float:
+    observed = ensemble.real[relation]
+    if not np.isfinite(observed):
+        return float("nan")
+    null = ensemble.null[:, relation]
+    return float(np.mean(null >= observed))
+
+
 def _adjust(rows: list[dict[str, object]], p_name: str, q_name: str) -> None:
     selected = [
         index
@@ -85,7 +93,7 @@ def relation_rows(
                 seed=config.random_seed + relation_index,
             ),
             "endpoint_null_valid": None,
-            "endpoint_null_p": None,
+            "endpoint_null_exceedance_rate": None,
             "layer_shuffle_p": None,
         }
         if name in endpoint_relations:
@@ -149,14 +157,14 @@ def relation_rows(
                 endpoint_changed_fraction_label_gap=positive_changed - correct_changed,
                 endpoint_null_valid=changed_min
                 >= config.endpoint_minimum_changed_fraction,
-                endpoint_null_p=_ensemble_p_value(
+                endpoint_null_exceedance_rate=_ensemble_exceedance_rate(
                     bundle.endpoint_auprc, relation_index
                 ),
                 **{f"endpoint_{key}": value for key, value in endpoint_delta.items()},
             )
         if name in layer_order_relations:
             final_labels, final_by_source = grouped_relation(
-                samples, lambda sample: sample.final_relation, relation_index
+                samples, lambda sample: sample.layer_order_real, relation_index
             )
             _, shuffled_by_source = grouped_relation(
                 samples,
@@ -177,6 +185,5 @@ def relation_rows(
         rows.append(row)
 
     _adjust(rows, "association_shift_p", "association_shift_q")
-    _adjust(rows, "endpoint_null_p", "endpoint_null_q")
     _adjust(rows, "layer_shuffle_p", "layer_shuffle_q")
     return rows

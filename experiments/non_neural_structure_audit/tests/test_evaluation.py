@@ -2,6 +2,7 @@ import json
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import torch
 
 from experiment_protocol import file_sha256
@@ -72,13 +73,13 @@ def test_evaluation_opens_labels_only_after_scores_and_marks_small_run_as_smoke(
     )
     save_npz(
         sample_path,
-        schema=np.asarray("non-neural-structure-score-v1"),
+        schema=np.asarray("non-neural-structure-score-v2"),
         sample_id=np.asarray("sample-0"),
         source_id=np.asarray("source-0"),
         relation_names=np.asarray(RELATION_NAMES),
         response_token_ids=np.arange(4, dtype=np.int32),
         relation_scores=relations,
-        final_relation_scores=relations,
+        layer_order_real_relation_scores=relations,
         response_endpoint_null_relation_scores=np.stack(
             (relations[::-1], relations[::-1])
         ),
@@ -125,7 +126,9 @@ def test_evaluation_opens_labels_only_after_scores_and_marks_small_run_as_smoke(
                         "row_mass_max_error": 0,
                         "role_mass_max_error": 0,
                         "source_count_degree_max_error": 0,
+                        "stratified_source_count_max_error": 0,
                         "causal_violations": 0,
+                        "coarse_lag_violations": 0,
                         "duplicate_edges": 0,
                     },
                 }
@@ -186,6 +189,10 @@ def test_evaluation_opens_labels_only_after_scores_and_marks_small_run_as_smoke(
     relation_rows = {row["relation"]: row for row in report["relation_metrics"]}
     assert relation_rows["origin_transition_gap"]["layer_shuffle_p"] is not None
     assert relation_rows["direct_role"]["layer_shuffle_p"] is None
+    lineage = relation_rows["lineage_margin"]
+    assert lineage["endpoint_null_exceedance_rate"] is not None
+    assert "endpoint_null_p" not in lineage
+    assert "endpoint_null_q" not in lineage
     assert all(
         row["status"] == "NOT_EVALUATED_SMOKE"
         for row in report["decisions"]
@@ -193,10 +200,22 @@ def test_evaluation_opens_labels_only_after_scores_and_marks_small_run_as_smoke(
     )
     assert dataset.sample.attention_calls == 1
     assert dataset.sample.release_calls == 2
-    assert isinstance(captured["bundle"].samples[0].relation, np.memmap)
     assert list((output / ".scratch").iterdir()) == []
     assert captured["bundle"].samples[0].endpoint_null.shape == relations.shape
     assert captured["bundle"].samples[0].layer_shuffle.shape == relations.shape
+
+    manifest = json.loads((score_dir / "manifest.json").read_text(encoding="utf-8"))
+    manifest["samples"][0]["null_audit"]["coarse_lag_violations"] = 1
+    write_json(score_dir / "manifest.json", manifest)
+    dataset.labels_opened = False
+
+    with pytest.raises(ValueError, match="endpoint null violates"):
+        StructureEvaluator().run(
+            split_root="test",
+            score_dir=score_dir,
+            output_dir=tmp_path / "invalid-null-evaluation",
+        )
+    assert dataset.labels_opened is False
 
 
 def test_evaluation_rejects_a_mismatched_trace_before_opening_labels(
@@ -221,8 +240,6 @@ def test_evaluation_rejects_a_mismatched_trace_before_opening_labels(
         "experiments.non_neural_structure_audit.evaluation.load_frozen_samples",
         unexpected_loader,
     )
-
-    import pytest
 
     with pytest.raises(ValueError, match="trace alignment"):
         StructureEvaluator().run(

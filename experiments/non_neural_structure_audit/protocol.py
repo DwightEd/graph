@@ -43,6 +43,10 @@ def _method_files() -> list[Path]:
     files = list(package.glob("*.py"))
     files.extend((repository / "experiments" / "attention_phenomenology").glob("*.py"))
     files.extend(
+        repository / "experiments" / name
+        for name in ("causal_attention_edges.py", "disk_row_store.py")
+    )
+    files.extend(
         repository / name
         for name in (
             "attention_lifecycle.py",
@@ -314,7 +318,9 @@ def validate_score_binding(
                 "row_mass_max_error",
                 "role_mass_max_error",
                 "source_count_degree_max_error",
+                "stratified_source_count_max_error",
                 "causal_violations",
+                "coarse_lag_violations",
                 "duplicate_edges",
             )
         ):

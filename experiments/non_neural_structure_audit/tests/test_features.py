@@ -4,9 +4,13 @@ import torch
 from experiments.non_neural_structure_audit.features import (
     DYNAMICS_FEATURE_NAMES,
     FEATURE_INDEX,
+    LINEAGE_FEATURE_NAMES,
     RELATION_NAMES,
+    _head_disagreement,
     build_layer_features,
+    layer_order_relation_scores,
     relation_scores,
+    replace_layer_order_features,
     replace_lineage_features,
 )
 from experiments.non_neural_structure_audit.lineage import (
@@ -133,8 +137,86 @@ def test_cross_layer_dynamics_are_observed_role_transition_magnitudes():
         atol=1e-6,
     )
     np.testing.assert_allclose(
-        token[:, FEATURE_INDEX["interaction_diagonal_transition_gap"]],
+        token[:, FEATURE_INDEX["offdiagonal_diagonal_transition_gap"]],
         [0.0, 0.1, -0.25],
         atol=1e-6,
     )
     assert set(DYNAMICS_FEATURE_NAMES) <= set(FEATURE_INDEX)
+
+
+def test_layer_order_replacement_changes_only_lineage_and_transition_fields():
+    diagonal = torch.zeros((2, 3, 1))
+    routing = routing_state(
+        layers=[0, 0, 1, 1, 2, 2],
+        heads=[0] * 6,
+        queries=[1] * 6,
+        sources=[0, 1] * 3,
+        weights=[0.2, 0.1, 0.5, 0.4, 0.3, 0.1],
+        diagonal=diagonal,
+        response_idx=1,
+        response_tokens=2,
+        num_layers=3,
+    )
+    operator = LineageOperator(routing)
+    real = build_layer_features(routing, operator.run())
+    order = (2, 0, 1)
+
+    replaced = replace_layer_order_features(
+        real, routing, operator.run(layer_order=order)
+    )
+    rebuilt = build_layer_features(routing, operator.run(layer_order=order))
+
+    for name in DYNAMICS_FEATURE_NAMES:
+        torch.testing.assert_close(
+            replaced[..., FEATURE_INDEX[name]], rebuilt[..., FEATURE_INDEX[name]]
+        )
+    untouched = [
+        index
+        for name, index in FEATURE_INDEX.items()
+        if name not in DYNAMICS_FEATURE_NAMES and name not in LINEAGE_FEATURE_NAMES
+    ]
+    torch.testing.assert_close(replaced[..., untouched], real[..., untouched])
+
+
+def test_head_disagreement_matches_pairwise_definition_without_head_square_output():
+    routing = routing_state(
+        layers=[0, 0, 0],
+        heads=[0, 1, 2],
+        queries=[1, 1, 1],
+        sources=[0, 1, 0],
+        weights=[0.8, 0.6, 0.2],
+        diagonal=torch.zeros((2, 1, 3)),
+        response_idx=1,
+        response_tokens=2,
+        num_layers=1,
+        num_heads=3,
+    )
+
+    actual = _head_disagreement(routing, 1e-8)
+    mass = torch.stack((routing.prompt_mass, routing.response_mass), dim=-1)
+    total = mass.sum(dim=-1)
+    valid = total > 1e-8
+    root = (mass / total[..., None].clamp_min(1e-8)).sqrt()
+    affinity = (root.unsqueeze(-2) * root.unsqueeze(-3)).sum(dim=-1)
+    distance = (1.0 - affinity.clamp(0.0, 1.0)).sqrt()
+    pairs = torch.triu(torch.ones((3, 3), dtype=torch.bool), diagonal=1)
+    selected = valid.unsqueeze(-1) & valid.unsqueeze(-2) & pairs
+    expected = torch.where(
+        selected.sum(dim=(-2, -1)) > 0,
+        torch.where(selected, distance, 0.0).sum(dim=(-2, -1))
+        / selected.sum(dim=(-2, -1)).clamp_min(1),
+        0.0,
+    )
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_layer_order_statistic_uses_full_transition_but_final_lineage_state():
+    standardized = np.zeros((1, 3, len(FEATURE_INDEX)), dtype=np.float32)
+    standardized[0, :, FEATURE_INDEX["prompt_transition_magnitude"]] = [0, 1, 2]
+    standardized[0, :, FEATURE_INDEX["prompt_connected_total"]] = [1, 2, 9]
+
+    scores = layer_order_relation_scores(standardized)
+
+    assert scores[0, RELATION_NAMES.index("prompt_transition_volatility")] == 1.0
+    assert scores[0, RELATION_NAMES.index("prompt_connected_lineage")] == -9.0
