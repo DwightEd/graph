@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 import hashlib
-from pathlib import Path
 import random
+from dataclasses import asdict
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -366,7 +366,7 @@ def score_grounding_split(
             "samples": len(sample_ids),
             "tokens": len(rows["sample_id"]),
             "score_file": "scores.npz",
-            "embeddings_saved": save_embddings,
+            "embeddings_saved": save_embeddings,
         },
     )
     return score_path
