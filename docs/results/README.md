@@ -7,6 +7,13 @@ attention-graph hallucination experiments.
 
 - `attention_signal_summary.csv`
 
+## Graph structure audit
+
+- `graph_structure_audit/qa30_20260823T130526Z/RESULTS.md`
+
+This versioned bundle publishes the 30-QA multiplex graph recovery smoke
+evaluation, its structure gates, matched effects, and reporting limitations.
+
 The CSV contains one row per feature or detector and records:
 
 - mathematical/operational definition;
