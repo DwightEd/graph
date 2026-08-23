@@ -1,7 +1,10 @@
 import torch
 
-from experiments.graph_structure_audit.graph_data import build_multiplex_graph
-from .helpers import raw_graph
+from experiments.graph_structure_audit.graph_data import (
+    build_multiplex_graph,
+    load_multiplex_graph,
+)
+from .helpers import Sample, raw_graph
 
 
 def test_graph_preserves_exact_layer_head_tensor():
@@ -17,3 +20,14 @@ def test_graph_preserves_exact_layer_head_tensor():
         as_tuple=False,
     ).item()
     assert graph.edge_attr[pair, raw.layer[0], raw.head[0]] == raw.weight[0]
+
+
+def test_loading_graph_releases_sample_attention_before_returning():
+    raw, labels = raw_graph()
+    sample = Sample(raw, labels)
+
+    graph = load_multiplex_graph(sample, block_rows=8)
+
+    assert graph.num_edges > 0
+    assert sample._attention is None
+    assert sample.release_calls == 1

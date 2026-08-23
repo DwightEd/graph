@@ -29,3 +29,31 @@ def test_layered_messages_and_gradients_are_active():
         for parameter in model.parameters()
         if parameter.grad is not None
     ) > 0
+
+
+def test_forward_streams_losses_without_returning_dense_predictions():
+    torch.manual_seed(123)
+    raw, _ = raw_graph()
+    graph = build_multiplex_graph(raw)
+    config = tiny_config()
+    model = LayeredGraphRecovery(
+        num_layers=graph.num_layers,
+        num_heads=graph.num_heads,
+        config=config,
+    )
+    masked = mask_graph(
+        graph,
+        config,
+        generator=torch.Generator().manual_seed(7),
+    )
+
+    output = model(graph, masked)
+
+    assert not hasattr(output, "edge_prediction")
+    assert not hasattr(output, "diagonal_prediction")
+    torch.testing.assert_close(
+        output.token_loss.detach(),
+        torch.tensor(
+            [0.0835825428, 0.0834918842, 0.0756942779, 0.0713390708]
+        ),
+    )

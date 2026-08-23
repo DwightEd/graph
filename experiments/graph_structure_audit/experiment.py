@@ -9,12 +9,12 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from experiments.source_reuse_contrast.data import collect_source_reuse_graph, select_sample_ids
+from experiments.source_reuse_contrast.data import select_sample_ids
 
 from .artifacts import CHECKPOINT_SCHEMA, GRAPH_SCHEMA, SCORE_SCHEMA, save_npz, write_json
 from .config import RecoveryConfig
 from .controls import collapse_channels, rewire_endpoints, shuffle_heads, shuffle_layers
-from .graph_data import MultiplexGraph, build_multiplex_graph
+from .graph_data import MultiplexGraph, load_multiplex_graph
 from .masking import mask_graph
 from .model import LayeredGraphRecovery
 
@@ -45,9 +45,8 @@ def _source_split(dataset, sample_ids, fraction: float, seed: int):
 
 def _geometry(dataset, sample_id: str, config: RecoveryConfig):
     sample = dataset[sample_id]
-    raw = collect_source_reuse_graph(sample, block_rows=config.block_rows)
-    sample.release_attention()
-    return raw.num_layers, raw.num_heads
+    graph = load_multiplex_graph(sample, block_rows=config.block_rows)
+    return graph.num_layers, graph.num_heads
 
 
 def _run_epoch(
@@ -62,6 +61,8 @@ def _run_epoch(
 ):
     training = optimizer is not None
     model.train(training)
+    if training:
+        optimizer.zero_grad(set_to_none=True)
     values: list[float] = []
     tokens = 0
     valid_tokens = 0
@@ -75,19 +76,18 @@ def _run_epoch(
     )
     for sample_id in iterator:
         sample = dataset[sample_id]
-        raw = collect_source_reuse_graph(sample, block_rows=config.block_rows)
-        graph = build_multiplex_graph(raw)
+        graph = load_multiplex_graph(sample, block_rows=config.block_rows)
         generator = torch.Generator(device=graph.device)
         generator.manual_seed(_stable_seed(graph.sample_id, config.random_seed, epoch * 100003))
         masked = collapse_channels(mask_graph(graph, config, generator=generator), config.representation)
-        output = model(graph, masked)
-        sample.release_attention()
-
+        with torch.set_grad_enabled(training):
+            output = model(graph, masked)
+            if training:
+                output.loss.backward()
         if training:
-            optimizer.zero_grad()
-            output.loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
             optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
         values.append(float(output.loss.detach().cpu()))
         tokens += graph.num_response_tokens
         valid_tokens += int(output.valid.sum())
@@ -95,6 +95,7 @@ def _run_epoch(
             loss=f"{np.mean(values[-20:]):.4f}",
             coverage=f"{valid_tokens / max(tokens, 1):.3f}",
         )
+        del output, masked, generator, graph, sample
     return {
         "loss": float(np.mean(values)),
         "samples": len(values),
@@ -299,8 +300,7 @@ def score_recovery_split(
     with torch.no_grad():
         for sample_id in iterator:
             sample = dataset[sample_id]
-            raw = collect_source_reuse_graph(sample, block_rows=config.block_rows)
-            graph = build_multiplex_graph(raw)
+            graph = load_multiplex_graph(sample, block_rows=config.block_rows)
             rounds = [
                 _score_round(
                     model,
@@ -310,7 +310,6 @@ def score_recovery_split(
                 )
                 for index in range(config.score_rounds)
             ]
-            sample.release_attention()
 
             count = graph.num_response_tokens
             rows["sample_id"].extend([graph.sample_id] * count)
@@ -349,6 +348,7 @@ def score_recovery_split(
                     num_heads=np.asarray(graph.num_heads, dtype=np.int16),
                     **graph.numpy_dict(),
                 )
+            del rounds, graph, sample
 
     artifact = {
         "schema": np.asarray(SCORE_SCHEMA),

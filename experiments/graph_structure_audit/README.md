@@ -98,6 +98,21 @@ ROOT=/path/to/attention_cache DEVICE=cuda \
   bash experiments/graph_structure_audit/run.sh
 ```
 
+For a 30-QA local CPU smoke run on a machine with 32 GB RAM, reduce only the
+model width and keep the full layer-head representation:
+
+```bash
+ROOT=/path/to/attention_cache TASK_TYPE=QA \
+TRAIN_LIMIT=30 TEST_LIMIT=30 EPOCHS=2 SCORE_ROUNDS=2 \
+HIDDEN_DIM=16 DEVICE=cpu SAVE_GRAPHS=0 \
+  bash experiments/graph_structure_audit/run.sh
+```
+
+`HIDDEN_DIM` controls the dominant training activations. `BLOCK_ROWS` only
+limits temporary sparse-cache decoding and does not shrink the materialized
+graph. `EPOCHS` and `SCORE_ROUNDS` reduce total work rather than the peak of one
+model pass. `SAVE_GRAPHS=0` avoids serializing redundant per-sample graph copies.
+
 The main result is not assumed in advance. `recoverability.csv` reports whether
 correct tokens are more recoverable, hallucinated tokens are more recoverable,
 or the result is inconclusive. `structure_gates.csv` reports whether message

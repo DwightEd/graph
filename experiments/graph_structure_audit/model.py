@@ -19,8 +19,6 @@ class RecoveryOutput:
     edge_loss: torch.Tensor
     diagonal_loss: torch.Tensor
     embedding: torch.Tensor
-    edge_prediction: torch.Tensor
-    diagonal_prediction: torch.Tensor
 
 
 class LayeredGraphRecovery(nn.Module):
@@ -115,8 +113,12 @@ class LayeredGraphRecovery(nn.Module):
         lag = self.lag(self._lag_bin(graph))
         edge_role = self.role(role[source])
 
-        edge_predictions: list[torch.Tensor] = []
-        diagonal_predictions: list[torch.Tensor] = []
+        response = slice(graph.response_idx, graph.num_nodes)
+        edge_token = graph.edge_index[1] - graph.response_idx
+        token_edge_total = graph.edge_attr.new_zeros(graph.num_response_tokens)
+        token_edge_count = graph.edge_attr.new_zeros(graph.num_response_tokens)
+        token_diagonal_total = graph.diagonal.new_zeros(graph.num_response_tokens)
+        token_diagonal_count = graph.diagonal.new_zeros(graph.num_response_tokens)
         for layer in range(self.num_layers):
             edge_value = masked.edge_value[:, layer]
             edge_visible = masked.edge_visible[:, layer].float()
@@ -138,15 +140,40 @@ class LayeredGraphRecovery(nn.Module):
                 )
             )
 
-            edge_predictions.append(
-                torch.sigmoid(
-                    self.edge_decoder(
-                        torch.cat((states[source], states[target], edge_local), dim=-1)
-                    )
+            edge_prediction = torch.sigmoid(
+                self.edge_decoder(
+                    torch.cat((states[source], states[target], edge_local), dim=-1)
                 )
             )
-            diagonal_predictions.append(
-                torch.sigmoid(self.diagonal_decoder(torch.cat((states, node_local), dim=-1)))
+            edge_target = masked.edge_target[:, layer]
+            edge_error = F.smooth_l1_loss(
+                edge_prediction,
+                graph.edge_attr[:, layer],
+                reduction="none",
+            ) * edge_target
+            token_edge_total = token_edge_total.index_add(
+                0,
+                edge_token,
+                edge_error.sum(dim=-1),
+            )
+            token_edge_count = token_edge_count.index_add(
+                0,
+                edge_token,
+                edge_target.sum(dim=-1).float(),
+            )
+
+            diagonal_prediction = torch.sigmoid(
+                self.diagonal_decoder(torch.cat((states, node_local), dim=-1))
+            )
+            diagonal_target = masked.diagonal_target[response, layer]
+            diagonal_error = F.smooth_l1_loss(
+                diagonal_prediction[response],
+                graph.diagonal[response, layer],
+                reduction="none",
+            ) * diagonal_target
+            token_diagonal_total = token_diagonal_total + diagonal_error.sum(dim=-1)
+            token_diagonal_count = (
+                token_diagonal_count + diagonal_target.sum(dim=-1).float()
             )
 
             aggregate = states.new_zeros(states.shape)
@@ -162,13 +189,9 @@ class LayeredGraphRecovery(nn.Module):
                 states,
             )
 
-        edge_prediction = torch.stack(edge_predictions, dim=1)
-        diagonal_prediction = torch.stack(diagonal_predictions, dim=1)
-        token_edge_loss, token_edge_count = self._edge_loss(
-            graph, masked, edge_prediction
-        )
-        token_diagonal_loss, token_diagonal_count = self._diagonal_loss(
-            graph, masked, diagonal_prediction
+        token_edge_loss = token_edge_total / token_edge_count.clamp_min(1.0)
+        token_diagonal_loss = (
+            token_diagonal_total / token_diagonal_count.clamp_min(1.0)
         )
         total_count = token_edge_count + token_diagonal_count
         token_loss = (
@@ -184,38 +207,4 @@ class LayeredGraphRecovery(nn.Module):
             edge_loss=token_edge_loss,
             diagonal_loss=token_diagonal_loss,
             embedding=states[graph.response_idx :],
-            edge_prediction=edge_prediction,
-            diagonal_prediction=diagonal_prediction,
         )
-
-    def _edge_loss(
-        self,
-        graph: MultiplexGraph,
-        masked: MaskedGraph,
-        prediction: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        error = F.smooth_l1_loss(prediction, graph.edge_attr, reduction="none")
-        error = error * masked.edge_target
-        per_edge = error.sum(dim=(1, 2))
-        count_edge = masked.edge_target.sum(dim=(1, 2)).float()
-        token = graph.edge_index[1] - graph.response_idx
-        total = per_edge.new_zeros(graph.num_response_tokens)
-        count = per_edge.new_zeros(graph.num_response_tokens)
-        total.index_add_(0, token, per_edge)
-        count.index_add_(0, token, count_edge)
-        return total / count.clamp_min(1.0), count
-
-    def _diagonal_loss(
-        self,
-        graph: MultiplexGraph,
-        masked: MaskedGraph,
-        prediction: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        response = slice(graph.response_idx, graph.num_nodes)
-        target = masked.diagonal_target[response]
-        error = F.smooth_l1_loss(
-            prediction[response], graph.diagonal[response], reduction="none"
-        ) * target
-        count = target.sum(dim=(1, 2)).float()
-        total = error.sum(dim=(1, 2))
-        return total / count.clamp_min(1.0), count

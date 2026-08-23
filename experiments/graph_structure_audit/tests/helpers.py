@@ -1,4 +1,5 @@
 from dataclasses import replace
+from types import SimpleNamespace
 
 import torch
 
@@ -66,9 +67,44 @@ class Sample:
         self.source_id = graph.source_id
         self.task_type = graph.task_type
         self.labels = torch.tensor(labels, dtype=torch.int8)
+        self._attention = None
+        self.release_calls = 0
+
+    def attention(self):
+        if self._attention is None:
+            diagonal = torch.zeros(
+                self.graph.num_layers,
+                self.graph.num_heads,
+                self.graph.num_tokens,
+            )
+            diagonal[:, :, self.graph.response_idx :] = self.graph.diagonal.permute(
+                1, 2, 0
+            )
+            self._attention = SimpleNamespace(
+                response_idx=self.graph.response_idx,
+                response_values=torch.empty(0),
+                num_tokens=self.graph.num_tokens,
+                num_response_tokens=self.graph.num_response_tokens,
+                num_layers=self.graph.num_layers,
+                num_heads=self.graph.num_heads,
+                attention_floor=self.graph.attention_floor,
+                attention_diagonal=diagonal,
+            )
+        return self._attention
+
+    def iter_sparse_attention_blocks(self, block_rows=8192):
+        del block_rows
+        yield SimpleNamespace(
+            layer=self.graph.layer,
+            head=self.graph.head,
+            query=self.graph.query,
+            source=self.graph.source,
+            weight=self.graph.weight,
+        )
 
     def release_attention(self):
-        pass
+        self._attention = None
+        self.release_calls += 1
 
 
 class LabelStore:

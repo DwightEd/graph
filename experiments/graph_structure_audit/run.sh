@@ -9,11 +9,13 @@ TASK_ARGS=()
 TRAIN_LIMIT_ARGS=()
 TEST_LIMIT_ARGS=()
 PROGRESS_ARGS=()
+GRAPH_ARGS=()
 
 [[ -n "${TASK_TYPE:-}" ]] && TASK_ARGS=(--task-type "$TASK_TYPE")
 [[ -n "${TRAIN_LIMIT:-}" ]] && TRAIN_LIMIT_ARGS=(--limit "$TRAIN_LIMIT")
 [[ -n "${TEST_LIMIT:-}" ]] && TEST_LIMIT_ARGS=(--limit "$TEST_LIMIT")
 [[ "${TQDM_DISABLE:-0}" == "1" ]] && PROGRESS_ARGS=(--no-progress)
+[[ "${SAVE_GRAPHS:-1}" == "0" ]] && GRAPH_ARGS=(--no-graphs)
 
 mkdir -p "$OUT"
 
@@ -25,6 +27,7 @@ mkdir -p "$OUT"
   --hidden-dim "${HIDDEN_DIM:-96}" \
   --epochs "${EPOCHS:-15}" \
   --score-rounds "${SCORE_ROUNDS:-4}" \
+  --block-rows "${BLOCK_ROWS:-8192}" \
   --seed "${SEED:-20260822}" \
   "${TASK_ARGS[@]}" "${TRAIN_LIMIT_ARGS[@]}" "${PROGRESS_ARGS[@]}"
 
@@ -33,7 +36,7 @@ mkdir -p "$OUT"
   --checkpoint "$OUT/train/model.pt" \
   --output-dir "$OUT/score" \
   --device "$DEVICE" \
-  "${TASK_ARGS[@]}" "${TEST_LIMIT_ARGS[@]}"
+  "${TASK_ARGS[@]}" "${TEST_LIMIT_ARGS[@]}" "${GRAPH_ARGS[@]}"
 
 "$PYTHON" -u -m experiments.graph_structure_audit.main evaluate \
   --split-root "$ROOT/test" \
