@@ -1,4 +1,4 @@
-name: Multiplex graph and routing dynamics tests
+name: Multiplex graph recovery tests
 
 on:
   push:
@@ -30,5 +30,4 @@ jobs:
           python -m pip install numpy scipy scikit-learn tqdm pytest
       - run: python -m compileall -q experiments/graph_structure_audit
       - run: bash -n experiments/graph_structure_audit/run.sh
-      - run: bash -n experiments/graph_structure_audit/run_dynamics.sh
       - run: pytest -q experiments/graph_structure_audit/tests
