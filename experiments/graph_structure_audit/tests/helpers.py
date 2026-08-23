@@ -82,7 +82,7 @@ class Sample:
             )
             self._attention = SimpleNamespace(
                 response_idx=self.graph.response_idx,
-                response_values=torch.empty(0),
+                response_values=torch.empty(self.graph.weight.numel()),
                 num_tokens=self.graph.num_tokens,
                 num_response_tokens=self.graph.num_response_tokens,
                 num_layers=self.graph.num_layers,
