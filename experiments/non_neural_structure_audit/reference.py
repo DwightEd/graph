@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from experiment_protocol import scalar_text, sha256_text
 from experiments.attention_phenomenology.reference import Reservoir, robust_center_scale
 
 from .features import FEATURE_NAMES
@@ -18,7 +19,11 @@ class StructureReference:
     center: np.ndarray
     scale: np.ndarray
     feature_names: np.ndarray
-    settings_json: str = "{}"
+    settings_json: str
+    train_dataset_manifest_sha256: str
+    source_ids: np.ndarray
+    sample_ids: np.ndarray
+    audit_scope: str
 
 
 class ReferenceAccumulator:
@@ -41,11 +46,18 @@ class ReferenceAccumulator:
     def add(self, task: str, bucket: int, value: np.ndarray) -> None:
         for current_task in (str(task), "__all__"):
             key = (current_task, int(bucket))
-            self.reservoirs.setdefault(
-                key, Reservoir(self.capacity, self.rng)
-            ).add(value)
+            self.reservoirs.setdefault(key, Reservoir(self.capacity, self.rng)).add(
+                value
+            )
 
-    def finish(self) -> StructureReference:
+    def finish(
+        self,
+        *,
+        train_dataset_manifest_sha256: str,
+        source_ids,
+        sample_ids,
+        audit_scope: str,
+    ) -> StructureReference:
         tasks, buckets, centers, scales = [], [], [], []
         for task, bucket in sorted(self.reservoirs):
             center, scale = robust_center_scale(
@@ -62,6 +74,10 @@ class ReferenceAccumulator:
             scale=np.stack(scales),
             feature_names=np.asarray(FEATURE_NAMES, dtype=str),
             settings_json=self.settings_json,
+            train_dataset_manifest_sha256=str(train_dataset_manifest_sha256),
+            source_ids=np.asarray(sorted(set(source_ids)), dtype=str),
+            sample_ids=np.asarray(sample_ids, dtype=str),
+            audit_scope=str(audit_scope),
         )
 
 
@@ -72,6 +88,10 @@ def fit_reference(
     capacity: int = 2048,
     seed: int = 20260823,
     settings_json: str = "{}",
+    train_dataset_manifest_sha256: str,
+    source_ids,
+    sample_ids,
+    audit_scope: str = "selected_samples",
 ) -> StructureReference:
     accumulator = ReferenceAccumulator(
         capacity=capacity,
@@ -81,24 +101,37 @@ def fit_reference(
     )
     for task, bucket, value in rows:
         accumulator.add(task, bucket, value)
-    return accumulator.finish()
+    return accumulator.finish(
+        train_dataset_manifest_sha256=train_dataset_manifest_sha256,
+        source_ids=source_ids,
+        sample_ids=sample_ids,
+        audit_scope=audit_scope,
+    )
 
 
 def save_reference(path, reference: StructureReference) -> None:
     np.savez_compressed(
         path,
-        schema=np.asarray("non-neural-structure-reference-v1"),
+        schema=np.asarray("non-neural-structure-reference-v2"),
         task=reference.task,
         bucket=reference.bucket,
         center=reference.center,
         scale=reference.scale,
         feature_names=reference.feature_names,
         settings_json=np.asarray(reference.settings_json),
+        train_dataset_manifest_sha256=np.asarray(
+            reference.train_dataset_manifest_sha256
+        ),
+        reference_source_id=reference.source_ids,
+        reference_sample_id=reference.sample_ids,
+        audit_scope=np.asarray(reference.audit_scope),
     )
 
 
 def load_reference(path) -> StructureReference:
     with np.load(path, allow_pickle=False) as arrays:
+        if scalar_text(arrays, "schema") != "non-neural-structure-reference-v2":
+            raise ValueError("unsupported structure reference schema")
         return StructureReference(
             task=arrays["task"].astype(str),
             bucket=arrays["bucket"].astype(np.int16),
@@ -106,6 +139,12 @@ def load_reference(path) -> StructureReference:
             scale=arrays["scale"].astype(np.float32),
             feature_names=arrays["feature_names"].astype(str),
             settings_json=str(arrays["settings_json"].item()),
+            train_dataset_manifest_sha256=sha256_text(
+                arrays, "train_dataset_manifest_sha256"
+            ),
+            source_ids=arrays["reference_source_id"].astype(str),
+            sample_ids=arrays["reference_sample_id"].astype(str),
+            audit_scope=scalar_text(arrays, "audit_scope"),
         )
 
 
@@ -130,7 +169,7 @@ def standardize(
         if index is None:
             nearest = min(global_buckets, key=lambda value: abs(value - int(bucket)))
             index = mapping[("__all__", nearest)]
-        result[token] = (
-            features[token] - reference.center[index]
-        ) / reference.scale[index]
+        result[token] = (features[token] - reference.center[index]) / reference.scale[
+            index
+        ]
     return np.clip(result, -maximum, maximum)

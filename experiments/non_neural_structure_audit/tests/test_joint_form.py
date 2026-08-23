@@ -20,4 +20,6 @@ def test_interaction_model_detects_xor_that_additive_logistic_misses():
 
     by_name = {row["model"]: row for row in result}
     assert by_name["interaction"]["mean_auprc"] > 0.9
-    assert by_name["interaction"]["mean_auprc"] > by_name["additive"]["mean_auprc"] + 0.2
+    assert (
+        by_name["interaction"]["mean_auprc"] > by_name["additive"]["mean_auprc"] + 0.2
+    )

@@ -3,6 +3,7 @@ import numpy as np
 from experiments.non_neural_structure_audit.statistics import (
     benjamini_hochberg,
     grouped_bootstrap_delta,
+    grouped_metric_interval,
 )
 
 
@@ -27,3 +28,15 @@ def test_group_bootstrap_resamples_whole_samples():
 
     assert result["auprc_delta"] > 0
     assert result["auprc_delta_ci_low"] > 0
+
+
+def test_single_class_smoke_returns_undefined_metrics_instead_of_crashing():
+    result = grouped_metric_interval(
+        [np.zeros(4, dtype=np.int8)],
+        [np.arange(4, dtype=np.float32)],
+        replicates=5,
+        seed=2,
+    )
+
+    assert np.isnan(result["auprc"])
+    assert np.isnan(result["auprc_ci_low"])

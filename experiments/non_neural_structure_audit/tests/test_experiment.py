@@ -1,34 +1,50 @@
 import gc
 import json
-from types import SimpleNamespace
 import weakref
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import torch
 
 from experiments.non_neural_structure_audit.config import AuditConfig
-from experiments.non_neural_structure_audit.experiment import StructureAudit
+from experiments.non_neural_structure_audit.experiment import (
+    StructureAudit,
+    _selected_ids,
+)
+
+
+class Attention:
+    pass
 
 
 class Sample:
-    def __init__(self, sample_id):
+    def __init__(self, sample_id, dataset):
+        self.dataset = dataset
         self.sample_id = sample_id
         self.source_id = f"source-{sample_id}"
         self.task_type = "QA"
         self.release_calls = 0
-        self._attention = SimpleNamespace(
-            response_idx=1,
-            num_response_tokens=2,
-            num_tokens=3,
-            num_layers=2,
-            num_heads=1,
-            attention_floor=0.01,
-            response_values=torch.empty(0),
-            attention_diagonal=torch.zeros((2, 1, 3)),
-            token_ids=torch.arange(3),
-        )
+        self._attention = self._new_attention()
+        self.released_attention = None
+
+    @staticmethod
+    def _new_attention():
+        attention = Attention()
+        attention.response_idx = 1
+        attention.num_response_tokens = 2
+        attention.num_tokens = 3
+        attention.num_layers = 2
+        attention.num_heads = 1
+        attention.attention_floor = 0.01
+        attention.response_values = torch.empty(0)
+        attention.attention_diagonal = torch.zeros((2, 1, 3))
+        attention.token_ids = torch.arange(3)
+        return attention
 
     def attention(self):
+        if self._attention is None:
+            self._attention = self._new_attention()
         return self._attention
 
     def iter_sparse_attention_blocks(self, block_rows=8192):
@@ -43,12 +59,20 @@ class Sample:
 
     def release_attention(self):
         self.release_calls += 1
+        self.released_attention = weakref.ref(self._attention)
+        self._attention = None
 
 
 class Dataset:
-    def __init__(self, prefix, count=1):
+    def __init__(self, prefix, root, count=1):
+        self.root = Path(root)
+        self.root.mkdir(parents=True)
+        self.manifest = {"split": prefix}
+        (self.root / "manifest.json").write_text(
+            json.dumps(self.manifest), encoding="utf-8"
+        )
         self.samples = {
-            f"{prefix}-{index}": Sample(f"{prefix}-{index}")
+            f"{prefix}-{index}": Sample(f"{prefix}-{index}", self)
             for index in range(count)
         }
         self.sample_ids = list(self.samples)
@@ -63,8 +87,8 @@ class Dataset:
 def test_fit_and_score_freeze_compact_artifacts_without_opening_labels(
     tmp_path, monkeypatch
 ):
-    train = Dataset("train")
-    test = Dataset("test")
+    train = Dataset("train", tmp_path / "train")
+    test = Dataset("test", tmp_path / "test")
     monkeypatch.setattr(
         "experiments.non_neural_structure_audit.experiment.open_research_dataset",
         lambda path, device: train if str(path) == "train" else test,
@@ -79,6 +103,19 @@ def test_fit_and_score_freeze_compact_artifacts_without_opening_labels(
     score_dir = tmp_path / "scores"
 
     audit.fit(train_split="train", output=reference, device="cpu")
+
+    from experiments.non_neural_structure_audit import experiment
+
+    original_swap = experiment.EndpointSwapPlan.sample
+
+    def tracked_swap(plan, *arguments, **keywords):
+        assert test["test-0"].release_calls == 1
+        gc.collect()
+        assert test["test-0"].released_attention() is None
+        return original_swap(plan, *arguments, **keywords)
+
+    monkeypatch.setattr(experiment.EndpointSwapPlan, "sample", tracked_swap)
+    test["test-0"].source_id = None
     audit.score(
         split_root="test",
         reference_path=reference,
@@ -90,25 +127,33 @@ def test_fit_and_score_freeze_compact_artifacts_without_opening_labels(
     assert manifest["labels_read"] is False
     assert manifest["trace_alignment"] == "post_token_query_at_same_position"
     assert manifest["evaluation_alignment"] == "query_t_to_response_token_t_plus_1"
+    assert len(manifest["dataset_manifest_sha256"]) == 64
+    assert manifest["reference_source_ids"] == ["source-train-0"]
+    assert manifest["test_source_ids"] == ["test-0"]
+    assert manifest["samples"][0]["source_id"] == "test-0"
+    null_audit = manifest["samples"][0]["null_audit"]
+    assert null_audit["source_count_degree_max_error"] == 0
+    assert null_audit["changed_fraction_min"] <= null_audit["changed_fraction_mean"]
     score_path = score_dir / manifest["samples"][0]["score_path"]
     assert score_path.is_file()
+    assert len(manifest["samples"][0]["score_sha256"]) == 64
     with np.load(score_path, allow_pickle=False) as arrays:
         assert arrays["layer_shuffle_relation_scores"].shape[0] == 2
+        assert all(
+            not np.array_equal(order, np.arange(len(order)))
+            for order in arrays["layer_shuffle_order"]
+        )
         direct = list(arrays["relation_names"]).index("direct_role")
         np.testing.assert_allclose(
             arrays["layer_shuffle_relation_scores"][:, :, direct],
-            np.repeat(
-                arrays["final_relation_scores"][None, :, direct], 2, axis=0
-            ),
+            np.repeat(arrays["final_relation_scores"][None, :, direct], 2, axis=0),
         )
     assert train["train-0"].release_calls == 1
     assert test["test-0"].release_calls == 1
 
 
-def test_fit_drops_previous_sample_graph_before_loading_the_next(
-    tmp_path, monkeypatch
-):
-    train = Dataset("train", count=2)
+def test_fit_drops_previous_sample_graph_before_loading_the_next(tmp_path, monkeypatch):
+    train = Dataset("train", tmp_path / "train", count=2)
     monkeypatch.setattr(
         "experiments.non_neural_structure_audit.experiment.open_research_dataset",
         lambda path, device: train,
@@ -133,3 +178,14 @@ def test_fit_drops_previous_sample_graph_before_loading_the_next(
         output=tmp_path / "reference.npz",
         device="cpu",
     )
+
+
+def test_default_selection_can_restrict_the_pipeline_to_qa(tmp_path):
+    dataset = Dataset("test", tmp_path / "test", count=2)
+    dataset["test-1"].task_type = "Summary"
+
+    assert _selected_ids(dataset, limit=None, task_type="QA") == ["test-0"]
+    assert _selected_ids(dataset, limit=None, task_type="all") == [
+        "test-0",
+        "test-1",
+    ]

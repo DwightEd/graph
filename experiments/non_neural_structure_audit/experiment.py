@@ -10,6 +10,12 @@ import numpy as np
 from tqdm import tqdm
 
 from attention_lifecycle import loaded_attention
+from experiment_protocol import (
+    FrozenFile,
+    HeldOutSourceAudit,
+    canonical_source_group,
+    file_sha256,
+)
 from experiments.attention_phenomenology.reference import token_buckets
 from experiments.attention_phenomenology.routing import (
     build_routing_state,
@@ -29,7 +35,8 @@ from .features import (
     relation_scores,
 )
 from .lineage import LineageOperator
-from .nulls import constrained_endpoint_swap
+from .nulls import EndpointSwapPlan
+from .protocol import method_sha256
 from .reference import (
     ReferenceAccumulator,
     load_reference,
@@ -43,9 +50,22 @@ def _sample_seed(sample_id: str, base_seed: int) -> int:
     return base_seed + int.from_bytes(digest[:4], "little")
 
 
-def _selected_ids(dataset, limit: int | None) -> list[str]:
-    sample_ids = [str(sample_id) for sample_id in dataset.sample_ids]
+def _selected_ids(dataset, limit: int | None, task_type: str) -> list[str]:
+    sample_ids = [
+        str(sample_id)
+        for sample_id in dataset.sample_ids
+        if task_type.casefold() == "all"
+        or str(dataset[sample_id].task_type).casefold() == task_type.casefold()
+    ]
     return sample_ids if limit is None else sample_ids[:limit]
+
+
+def _non_identity_permutation(rng: np.random.Generator, size: int) -> tuple[int, ...]:
+    identity = np.arange(size)
+    order = rng.permutation(size)
+    while np.array_equal(order, identity):
+        order = rng.permutation(size)
+    return tuple(order.tolist())
 
 
 def _real_analysis(sample, config: AuditConfig):
@@ -60,14 +80,15 @@ def _real_analysis(sample, config: AuditConfig):
     return edges, routing, operator, features
 
 
-def _fit_sample(sample, config: AuditConfig) -> tuple[str, np.ndarray]:
+def _fit_sample(sample, config: AuditConfig) -> tuple[str, str, np.ndarray]:
     """Return only compact CPU features so graph tensors die at this boundary."""
 
     with loaded_attention(sample):
         task = str(sample.task_type or "unknown")
+        source_id = canonical_source_group(sample)
         analysis = _real_analysis(sample, config)
         values = analysis[-1].cpu().numpy().astype(np.float32)
-    return task, values
+    return task, source_id, values
 
 
 def _null_relations(
@@ -80,11 +101,15 @@ def _null_relations(
     reference,
     config,
 ) -> np.ndarray:
-    features = build_layer_features(
-        routing,
-        operator.run(source=source),
-        recent_tokens=config.recent_tokens,
-    ).cpu().numpy()
+    features = (
+        build_layer_features(
+            routing,
+            operator.run(source=source),
+            recent_tokens=config.recent_tokens,
+        )
+        .cpu()
+        .numpy()
+    )
     standardized = standardize(
         features,
         task=task,
@@ -101,10 +126,15 @@ class StructureAudit:
     def __init__(self, config: AuditConfig | None = None):
         self.config = AuditConfig() if config is None else config
 
-    def fit(self, *, train_split, output, device="cpu", limit=None) -> None:
+    def fit(
+        self, *, train_split, output, device="cpu", limit=None, task_type="QA"
+    ) -> None:
         config = self.config
         dataset = open_research_dataset(train_split, device=device)
-        settings_json = json.dumps(config.reference_settings(), sort_keys=True)
+        train_manifest = FrozenFile.capture(Path(dataset.root) / "manifest.json")
+        settings_json = json.dumps(
+            {**config.reference_settings(), "task_type": task_type}, sort_keys=True
+        )
         accumulator = ReferenceAccumulator(
             capacity=config.reference_capacity,
             seed=config.random_seed,
@@ -112,18 +142,31 @@ class StructureAudit:
             settings_json=settings_json,
         )
 
-        sample_ids = _selected_ids(dataset, limit)
+        sample_ids = _selected_ids(dataset, limit, task_type)
+        source_ids = []
         for sample_id in tqdm(
             sample_ids, desc="fit structure reference", disable=not config.show_progress
         ):
-            task, values = _fit_sample(dataset[sample_id], config)
+            task, source_id, values = _fit_sample(dataset[sample_id], config)
+            source_ids.append(source_id)
             buckets = token_buckets(len(values), config.causal_position_bins)
             for token, bucket in enumerate(buckets):
                 accumulator.add(task, int(bucket), values[token])
 
         output = Path(output)
         output.parent.mkdir(parents=True, exist_ok=True)
-        save_reference(output, accumulator.finish())
+        train_manifest.verify(Path(dataset.root) / "manifest.json")
+        save_reference(
+            output,
+            accumulator.finish(
+                train_dataset_manifest_sha256=train_manifest.sha256,
+                source_ids=source_ids,
+                sample_ids=sample_ids,
+                audit_scope="complete_split"
+                if limit is None and task_type.casefold() == "all"
+                else "selected_samples",
+            ),
+        )
 
     def score(
         self,
@@ -133,10 +176,16 @@ class StructureAudit:
         output_dir,
         device="cpu",
         limit=None,
+        task_type="QA",
     ) -> None:
         config = self.config
-        reference = load_reference(reference_path)
-        expected = json.dumps(config.reference_settings(), sort_keys=True)
+        reference_file = FrozenFile.capture(reference_path)
+        reference = load_reference(reference_file.path)
+        if tuple(reference.feature_names.tolist()) != FEATURE_NAMES:
+            raise ValueError("reference features differ from the current method")
+        expected = json.dumps(
+            {**config.reference_settings(), "task_type": task_type}, sort_keys=True
+        )
         if reference.settings_json != expected:
             raise ValueError("score settings differ from the fitted reference")
 
@@ -145,21 +194,33 @@ class StructureAudit:
         sample_dir = output_dir / "samples"
         sample_dir.mkdir(parents=True, exist_ok=True)
         manifest_rows = []
-        sample_ids = _selected_ids(dataset, limit)
+        sample_ids = _selected_ids(dataset, limit, task_type)
+        source_audit = HeldOutSourceAudit(
+            dataset,
+            selected_sample_ids=sample_ids,
+            reserved_source_ids=reference.source_ids,
+            require_complete_split=limit is None and task_type.casefold() == "all",
+        )
+        dataset_manifest = FrozenFile.capture(Path(dataset.root) / "manifest.json")
 
         for sample_id in tqdm(
             sample_ids, desc="freeze structure scores", disable=not config.show_progress
         ):
-            arrays, row = self._score_sample(dataset[sample_id], reference)
+            sample = dataset[sample_id]
+            source_audit.observe(sample)
             score_path = sample_dir / f"{sample_id}.npz"
-            save_npz(score_path, **arrays)
-            row["score_path"] = str(score_path.relative_to(output_dir))
-            manifest_rows.append(row)
+            manifest_rows.append(
+                self._score_to_file(sample, reference, score_path, output_dir)
+            )
+
+        audit = source_audit.finish()
+        dataset_manifest.verify(Path(dataset.root) / "manifest.json")
+        reference_file.verify(reference_file.path)
 
         write_json(
             output_dir / "manifest.json",
             {
-                "schema": "non-neural-structure-manifest-v1",
+                "schema": "non-neural-structure-manifest-v2",
                 "labels_read": False,
                 "trace_alignment": "post_token_query_at_same_position",
                 "evaluation_alignment": "query_t_to_response_token_t_plus_1",
@@ -169,7 +230,15 @@ class StructureAudit:
                     "not evidence grounding or model computation ancestry"
                 ),
                 "split_root": str(Path(split_root).resolve()),
-                "reference_path": str(Path(reference_path).resolve()),
+                "dataset_manifest_sha256": dataset_manifest.sha256,
+                "reference_path": str(reference_file.path),
+                "reference_sha256": reference_file.sha256,
+                "method_sha256": method_sha256(),
+                "reference_source_ids": reference.source_ids.tolist(),
+                "test_source_ids": list(audit.test_source_ids),
+                "test_sample_ids": list(audit.test_sample_ids),
+                "audit_scope": audit.test_scope,
+                "task_type": task_type,
                 "config": config.to_dict(),
                 "feature_names": list(FEATURE_NAMES),
                 "relation_names": list(RELATION_NAMES),
@@ -178,75 +247,107 @@ class StructureAudit:
             },
         )
 
+    def _score_to_file(self, sample, reference, score_path: Path, output_dir: Path):
+        arrays, row = self._score_sample(sample, reference)
+        save_npz(score_path, **arrays)
+        row["score_path"] = str(score_path.relative_to(output_dir))
+        row["score_sha256"] = file_sha256(score_path)
+        return row
+
     def _score_sample(self, sample, reference):
         config = self.config
         with loaded_attention(sample) as attention:
             task = str(sample.task_type or "unknown")
-            source_id = str(sample.source_id)
-            response_tokens = attention.token_ids[attention.response_idx :].cpu().numpy()
+            source_id = canonical_source_group(sample)
+            response_tokens = (
+                attention.token_ids[attention.response_idx :].cpu().numpy().copy()
+            )
             edges, routing, operator, feature_tensor = _real_analysis(sample, config)
-            features = feature_tensor.cpu().numpy().astype(np.float32)
-            buckets = token_buckets(len(features), config.causal_position_bins)
-            standardized = standardize(
-                features,
+        del attention
+        features = feature_tensor.cpu().numpy().astype(np.float32)
+        buckets = token_buckets(len(features), config.causal_position_bins)
+        standardized = standardize(
+            features,
+            task=task,
+            buckets=buckets,
+            reference=reference,
+            maximum=config.maximum_standardized_value,
+        )
+        real_relations = relation_scores(standardized)
+
+        null_scores = np.empty(
+            (config.null_replicates, *real_relations.shape), dtype=np.float32
+        )
+        changed_fraction = np.empty(config.null_replicates, dtype=np.float32)
+        null_audits = []
+        base_seed = _sample_seed(sample.sample_id, config.random_seed)
+        endpoint_plan = EndpointSwapPlan(edges, lag_bins=config.response_lag_bins)
+        for replicate in tqdm(
+            range(config.null_replicates),
+            desc=f"{sample.sample_id} endpoint null",
+            leave=False,
+            disable=not config.show_progress,
+        ):
+            null = endpoint_plan.sample(
+                seed=base_seed + replicate,
+                rounds=config.swap_rounds,
+            )
+            null_scores[replicate] = _null_relations(
+                operator,
+                routing,
+                null.edges.source,
+                task=task,
+                buckets=buckets,
+                reference=reference,
+                config=config,
+            )
+            changed_fraction[replicate] = null.changed_fraction
+            null_audits.append(null.audit)
+            del null
+
+        final_relations = relation_scores(standardized[:, -1:, :])
+        if edges.num_layers < 2:
+            raise ValueError("layer-order null requires at least two layers")
+        rng = np.random.default_rng(base_seed)
+        shuffle_orders = np.empty(
+            (config.layer_shuffle_replicates, edges.num_layers), dtype=np.int16
+        )
+        shuffle_scores = np.empty(
+            (config.layer_shuffle_replicates, *final_relations.shape),
+            dtype=np.float32,
+        )
+        for replicate in tqdm(
+            range(config.layer_shuffle_replicates),
+            desc=f"{sample.sample_id} layer shuffle",
+            leave=False,
+            disable=not config.show_progress,
+        ):
+            order = _non_identity_permutation(rng, edges.num_layers)
+            shuffle_orders[replicate] = order
+            shuffled_features = (
+                build_layer_features(
+                    routing,
+                    operator.run(layer_order=order),
+                    recent_tokens=config.recent_tokens,
+                )
+                .cpu()
+                .numpy()
+            )
+            final_control = features.copy()
+            for name in LINEAGE_FEATURE_NAMES:
+                index = FEATURE_INDEX[name]
+                final_control[:, -1, index] = shuffled_features[:, -1, index]
+            shuffled_standardized = standardize(
+                final_control,
                 task=task,
                 buckets=buckets,
                 reference=reference,
                 maximum=config.maximum_standardized_value,
             )
-            real_relations = relation_scores(standardized)
-
-            null_scores = []
-            changed_fraction = []
-            null_audits = []
-            base_seed = _sample_seed(sample.sample_id, config.random_seed)
-            for replicate in range(config.null_replicates):
-                null = constrained_endpoint_swap(
-                    edges,
-                    seed=base_seed + replicate,
-                    attempts_per_edge=config.swap_attempts_per_edge,
-                    lag_bins=config.response_lag_bins,
-                )
-                null_scores.append(
-                    _null_relations(
-                        operator,
-                        routing,
-                        null.edges.source,
-                        task=task,
-                        buckets=buckets,
-                        reference=reference,
-                        config=config,
-                    )
-                )
-                changed_fraction.append(null.changed_fraction)
-                null_audits.append(null.audit)
-
-            final_relations = relation_scores(standardized[:, -1:, :])
-            rng = np.random.default_rng(base_seed)
-            shuffle_orders = []
-            shuffle_scores = []
-            for _ in range(config.layer_shuffle_replicates):
-                order = tuple(rng.permutation(edges.num_layers).tolist())
-                shuffle_orders.append(order)
-                shuffled_features = build_layer_features(
-                    routing,
-                    operator.run(layer_order=order),
-                    recent_tokens=config.recent_tokens,
-                ).cpu().numpy()
-                final_control = features.copy()
-                for name in LINEAGE_FEATURE_NAMES:
-                    index = FEATURE_INDEX[name]
-                    final_control[:, -1, index] = shuffled_features[:, -1, index]
-                shuffled_standardized = standardize(
-                    final_control,
-                    task=task,
-                    buckets=buckets,
-                    reference=reference,
-                    maximum=config.maximum_standardized_value,
-                )
-                shuffle_scores.append(
-                    relation_scores(shuffled_standardized[:, -1:, :])
-                )
+            shuffle_scores[replicate] = relation_scores(
+                shuffled_standardized[:, -1:, :]
+            )
+            del shuffled_features, final_control, shuffled_standardized
 
         arrays = {
             "schema": np.asarray("non-neural-structure-score-v1"),
@@ -262,16 +363,10 @@ class StructureAudit:
             "standardized_features": standardized,
             "relation_scores": real_relations,
             "final_relation_scores": final_relations,
-            "response_endpoint_null_relation_scores": np.stack(null_scores).astype(
-                np.float32
-            ),
-            "response_endpoint_null_changed_fraction": np.asarray(
-                changed_fraction, dtype=np.float32
-            ),
-            "layer_shuffle_order": np.asarray(shuffle_orders, dtype=np.int16),
-            "layer_shuffle_relation_scores": np.stack(shuffle_scores).astype(
-                np.float32
-            ),
+            "response_endpoint_null_relation_scores": null_scores,
+            "response_endpoint_null_changed_fraction": changed_fraction,
+            "layer_shuffle_order": shuffle_orders,
+            "layer_shuffle_relation_scores": shuffle_scores,
         }
         row = {
             "sample_id": str(sample.sample_id),
@@ -279,10 +374,23 @@ class StructureAudit:
             "task_type": task,
             "response_length": len(features),
             "null_audit": {
+                "row_mass_max_error": max(
+                    audit["row_mass_max_error"] for audit in null_audits
+                ),
+                "role_mass_max_error": max(
+                    audit["role_mass_max_error"] for audit in null_audits
+                ),
+                "source_count_degree_max_error": max(
+                    audit["source_count_degree_max_error"] for audit in null_audits
+                ),
                 "causal_violations": max(
                     audit["causal_violations"] for audit in null_audits
                 ),
-                "duplicate_edges": max(audit["duplicate_edges"] for audit in null_audits),
+                "duplicate_edges": max(
+                    audit["duplicate_edges"] for audit in null_audits
+                ),
+                "eligible_response_edges": null_audits[0]["eligible_response_edges"],
+                "changed_fraction_min": float(np.min(changed_fraction)),
                 "changed_fraction_mean": float(np.mean(changed_fraction)),
             },
         }

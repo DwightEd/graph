@@ -23,10 +23,10 @@ def test_constrained_swap_preserves_role_lag_degree_and_target_weights():
     )
     edges = routing.edges
 
-    result = constrained_endpoint_swap(edges, seed=7, attempts_per_edge=20)
+    result = constrained_endpoint_swap(edges, seed=7, rounds=20)
     rewired = result.edges
 
-    assert result.changed_fraction > 0
+    assert result.changed_fraction >= 0.75
     torch.testing.assert_close(rewired.weight, edges.weight)
     torch.testing.assert_close(
         _lag_bin(rewired.query, rewired.source, edges.response_idx),
@@ -53,9 +53,7 @@ def test_lineage_endpoint_null_does_not_count_or_rewire_prompt_edges():
         num_layers=1,
     )
 
-    result = constrained_endpoint_swap(
-        routing.edges, seed=3, attempts_per_edge=20
-    )
+    result = constrained_endpoint_swap(routing.edges, seed=3, rounds=20)
 
     assert result.edges.source[0] == 0
     assert result.audit["eligible_response_edges"] == 3

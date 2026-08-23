@@ -13,7 +13,6 @@ from experiments.attention_phenomenology.sources import (
 
 from .lineage import LINEAGE_INDEX, LineageTrace
 
-
 FEATURE_NAMES = (
     "prompt_mass",
     "history_mass",
@@ -154,25 +153,17 @@ def build_layer_features(
         "response_effective_sources": _valid_head_mean(
             response_effective, response_valid
         ),
-        "response_top1_share": _valid_head_mean(
-            response_top1, response_valid
-        ),
-        "recent_response_share": _valid_head_mean(
-            recent_share, response_valid
-        ),
+        "response_top1_share": _valid_head_mean(response_top1, response_valid),
+        "recent_response_share": _valid_head_mean(recent_share, response_valid),
         "response_mean_lag": _valid_head_mean(mean_lag, response_valid),
         "prompt_connected_total": prompt_connected,
         "prompt_connected_relay": state[..., LINEAGE_INDEX["prompt_relay"]],
         "response_base_local": state[..., LINEAGE_INDEX["response_base"]],
         "inherited_response_base": inherited_response,
-        "multihop_response_base": state[
-            ..., LINEAGE_INDEX["response_relay_multihop"]
-        ],
+        "multihop_response_base": state[..., LINEAGE_INDEX["response_relay_multihop"]],
         "lineage_unresolved": state[..., LINEAGE_INDEX["unresolved"]],
         "response_to_prompt_log_ratio": known_lineage
-        * torch.log(
-            (inherited_response + epsilon) / (prompt_connected + epsilon)
-        ),
+        * torch.log((inherited_response + epsilon) / (prompt_connected + epsilon)),
     }
     return torch.stack([fields[name] for name in FEATURE_NAMES], dim=-1)
 

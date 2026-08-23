@@ -14,4 +14,6 @@ def content_token_mask(token_ids: np.ndarray, tokenizer) -> np.ndarray:
         )
         for token_id in token_ids
     ]
-    return np.asarray([any(character.isalnum() for character in piece) for piece in text])
+    return np.asarray(
+        [any(character.isalnum() for character in piece) for piece in text]
+    )

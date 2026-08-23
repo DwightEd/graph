@@ -13,7 +13,13 @@ def test_reference_uses_unlabeled_task_position_rows_and_has_a_scale_floor():
     )
     rows = [("QA", 0, values[0]), ("QA", 0, values[1])]
 
-    reference = fit_reference(rows, minimum_scale=0.1)
+    reference = fit_reference(
+        rows,
+        minimum_scale=0.1,
+        train_dataset_manifest_sha256="0" * 64,
+        source_ids=("source-0",),
+        sample_ids=("sample-0",),
+    )
     standardized = standardize(
         values[:1], task="QA", buckets=np.asarray([0]), reference=reference
     )

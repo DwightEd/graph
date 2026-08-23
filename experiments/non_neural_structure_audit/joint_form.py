@@ -5,9 +5,13 @@ from __future__ import annotations
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
-from sklearn.model_selection import GroupKFold
+from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+
+from .config import EvaluationConfig
+from .evaluation_data import FrozenSample, aligned_matrix
+from .features import RELATION_NAMES
 
 
 def _model(*, interaction: bool, seed: int):
@@ -41,7 +45,11 @@ def compare_joint_forms(
     labels = np.asarray(labels, dtype=np.int8)
     relations = np.asarray(relations, dtype=np.float32)
     groups = np.asarray(groups)
-    splitter = GroupKFold(n_splits=min(folds, len(np.unique(groups))))
+    splitter = StratifiedGroupKFold(
+        n_splits=min(folds, len(np.unique(groups))),
+        shuffle=True,
+        random_state=seed,
+    )
     specifications = (
         ("direct", relations[:, direct_columns], False),
         ("additive", relations, False),
@@ -77,3 +85,43 @@ def compare_joint_forms(
         )
         previous_auprc = mean_auprc
     return rows
+
+
+def evaluate_joint_forms(
+    samples: list[FrozenSample], config: EvaluationConfig
+) -> list[dict[str, object]]:
+    labels, relations, groups = [], [], []
+    for sample in samples:
+        current_labels, current_relations = aligned_matrix(
+            sample.relation, sample.labels, sample.eligible
+        )
+        labels.append(current_labels)
+        relations.append(current_relations)
+        groups.extend([sample.source_id] * len(current_labels))
+    labels = np.concatenate(labels)
+    groups = np.asarray(groups)
+    folds = min(
+        config.grouped_cv_folds,
+        len(np.unique(groups)),
+        len(np.unique(groups[labels == 1])),
+        len(np.unique(groups[labels == 0])),
+    )
+    if folds < 2:
+        return []
+    direct_columns = tuple(
+        RELATION_NAMES.index(name)
+        for name in (
+            "direct_role",
+            "endpoint_concentration",
+            "head_fracture",
+            "censoring_control",
+        )
+    )
+    return compare_joint_forms(
+        labels,
+        np.concatenate(relations),
+        groups,
+        direct_columns=direct_columns,
+        folds=folds,
+        seed=config.random_seed,
+    )

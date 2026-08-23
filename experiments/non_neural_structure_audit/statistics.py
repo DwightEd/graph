@@ -97,6 +97,14 @@ def grouped_metric_interval(
         current = binary_metrics(labels, scores)
         draws.append((current["auprc"], current["auroc"]))
     draws = np.asarray(draws, dtype=np.float64)
+    if not len(draws):
+        return {
+            **metrics,
+            "auprc_ci_low": float("nan"),
+            "auprc_ci_high": float("nan"),
+            "auroc_ci_low": float("nan"),
+            "auroc_ci_high": float("nan"),
+        }
     return {
         **metrics,
         "auprc_ci_low": float(np.quantile(draws[:, 0], 0.025)),
@@ -118,6 +126,8 @@ def circular_shift_p_value(
     observed = binary_metrics(
         np.concatenate(labels_by_group), np.concatenate(scores_by_group)
     )["auprc"]
+    if not np.isfinite(observed):
+        return float("nan")
     rng = np.random.default_rng(seed)
     null = []
     for _ in range(replicates):

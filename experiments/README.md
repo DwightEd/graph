@@ -29,6 +29,13 @@ after representations and scores are frozen.
 
 ## Active evidence path
 
+- `non_neural_structure_audit/`: the model-selection audit that runs before a
+  new GNN/GRU is justified. It freezes prompt-connected/response-base routing
+  lineage without labels, runs pilot response-endpoint and final-state
+  layer-order controls, then opens labels only after frozen-score validation.
+  The current A0 artifact subcheck passes, but gold alignment and full-pipeline
+  permutation sanity are still missing, so formal A1-A10 gates remain blocked
+  and no graph or neural component is currently authorized.
 - `graph_structure_audit/`: the prerequisite learned recoverability audit. It
   stores one exact token-pair edge tensor `[layer, head]` per sample, masks
   channels and node diagonals, and reconstructs them with explicit layer-ordered

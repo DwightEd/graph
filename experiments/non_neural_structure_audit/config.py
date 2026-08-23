@@ -15,7 +15,7 @@ class AuditConfig:
     maximum_standardized_value: float = 10.0
     null_replicates: int = 50
     layer_shuffle_replicates: int = 50
-    swap_attempts_per_edge: int = 10
+    swap_rounds: int = 10
     response_lag_bins: int = 8
     random_seed: int = 20260823
     show_progress: bool = True
@@ -33,6 +33,7 @@ class AuditConfig:
 
 @dataclass(frozen=True)
 class EvaluationConfig:
+    scope: str = "smoke"
     bootstrap_replicates: int = 2000
     permutation_replicates: int = 499
     onset_window: int = 4
