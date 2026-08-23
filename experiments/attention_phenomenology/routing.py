@@ -6,8 +6,9 @@ from dataclasses import dataclass
 
 import torch
 
-from .config import PhenomenologyConfig
+from experiments.causal_attention_edges import collect_causal_attention_edges
 
+from .config import PhenomenologyConfig
 
 PROMPT = 0
 RESPONSE_HISTORY = 1
@@ -63,30 +64,7 @@ def collect_routing_edges(
     config = PhenomenologyConfig() if config is None else config
     attention = sample.attention()
     response_idx = int(attention.response_idx)
-    parts = {name: [] for name in ("layer", "head", "query", "source", "weight")}
-
-    for block in sample.iter_sparse_attention_blocks(block_rows=config.block_rows):
-        target = response_idx + block.query
-        causal_off_diagonal = block.source < target
-        if not causal_off_diagonal.any():
-            continue
-        parts["layer"].append(block.layer[causal_off_diagonal].long())
-        parts["head"].append(block.head[causal_off_diagonal].long())
-        parts["query"].append(block.query[causal_off_diagonal].long())
-        parts["source"].append(block.source[causal_off_diagonal].long())
-        parts["weight"].append(block.weight[causal_off_diagonal].float().clamp_min(0.0))
-
-    device = attention.response_values.device
-    if parts["weight"]:
-        layer, head, query, source, weight = (
-            torch.cat(parts[name]) for name in ("layer", "head", "query", "source", "weight")
-        )
-    else:
-        layer = torch.empty(0, dtype=torch.long, device=device)
-        head = torch.empty_like(layer)
-        query = torch.empty_like(layer)
-        source = torch.empty_like(layer)
-        weight = torch.empty(0, dtype=torch.float32, device=device)
+    decoded = collect_causal_attention_edges(sample, block_rows=config.block_rows)
 
     diagonal = (
         attention.attention_diagonal[:, :, response_idx:]
@@ -101,11 +79,11 @@ def collect_routing_edges(
         num_tokens=int(attention.num_tokens),
         response_idx=response_idx,
         attention_floor=float(attention.attention_floor),
-        layer=layer,
-        head=head,
-        query=query,
-        source=source,
-        weight=weight,
+        layer=decoded.layer,
+        head=decoded.head,
+        query=decoded.query,
+        source=decoded.source,
+        weight=decoded.weight,
         diagonal=diagonal,
     )
 

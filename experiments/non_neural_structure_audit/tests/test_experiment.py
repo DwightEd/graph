@@ -38,7 +38,7 @@ class Sample:
         attention.num_layers = 2
         attention.num_heads = 1
         attention.attention_floor = 0.01
-        attention.response_values = torch.empty(0)
+        attention.response_values = torch.empty(2)
         attention.attention_diagonal = torch.zeros((2, 1, 3))
         attention.token_ids = torch.arange(3)
         return attention

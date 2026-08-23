@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 
 import torch
 
+from experiments.causal_attention_edges import collect_causal_attention_edges
 
 PROMPT = 0
 RESPONSE = 1
@@ -69,7 +70,7 @@ class SourceReuseGraph:
             int(self.query_ptr[token + 1].item()),
         )
 
-    def to(self, device: str | torch.device) -> "SourceReuseGraph":
+    def to(self, device: str | torch.device) -> SourceReuseGraph:
         tensor_fields = {
             name: getattr(self, name).to(device)
             for name in (
@@ -85,52 +86,29 @@ class SourceReuseGraph:
         return replace(self, **tensor_fields)
 
 
-def _empty_long(device: torch.device) -> torch.Tensor:
-    return torch.empty(0, dtype=torch.long, device=device)
-
-
 def collect_source_reuse_graph(sample, *, block_rows: int = 8192) -> SourceReuseGraph:
     """Decode retained causal attention through ``research_dataset`` only."""
 
     attention = sample.attention()
     response_idx = int(attention.response_idx)
-    parts = {name: [] for name in ("layer", "head", "query", "source", "weight")}
-
-    for block in sample.iter_sparse_attention_blocks(block_rows=block_rows):
-        target = response_idx + block.query
-        off_diagonal = block.source < target
-        if not bool(off_diagonal.any()):
-            continue
-        parts["layer"].append(block.layer[off_diagonal].long())
-        parts["head"].append(block.head[off_diagonal].long())
-        parts["query"].append(block.query[off_diagonal].long())
-        parts["source"].append(block.source[off_diagonal].long())
-        parts["weight"].append(block.weight[off_diagonal].float().clamp_min(0.0))
-
+    decoded = collect_causal_attention_edges(sample, block_rows=block_rows)
+    layer = decoded.layer
+    head = decoded.head
+    query = decoded.query
+    source = decoded.source
+    weight = decoded.weight
     device = attention.response_values.device
-    if parts["weight"]:
-        layer, head, query, source, weight = (
-            torch.cat(parts[name])
-            for name in ("layer", "head", "query", "source", "weight")
-        )
+    if decoded.num_edges:
         key = (
-            ((query * int(attention.num_tokens) + source) * int(attention.num_layers) + layer)
-            * int(attention.num_heads)
-            + head
-        )
+            (query * int(attention.num_tokens) + source) * int(attention.num_layers)
+            + layer
+        ) * int(attention.num_heads) + head
         order = key.argsort()
         layer = layer[order]
         head = head[order]
         query = query[order]
         source = source[order]
         weight = weight[order]
-    else:
-        layer = _empty_long(device)
-        head = _empty_long(device)
-        query = _empty_long(device)
-        source = _empty_long(device)
-        weight = torch.empty(0, dtype=torch.float32, device=device)
-
     response_count = int(attention.num_response_tokens)
     counts = torch.bincount(query, minlength=response_count)
     query_ptr = torch.cat(
