@@ -8,7 +8,10 @@ from experiment_protocol import file_sha256
 from experiments.non_neural_structure_audit.artifacts import save_npz, write_json
 from experiments.non_neural_structure_audit.config import EvaluationConfig
 from experiments.non_neural_structure_audit.evaluation import StructureEvaluator
-from experiments.non_neural_structure_audit.features import RELATION_NAMES
+from experiments.non_neural_structure_audit.features import (
+    LAYER_ORDER_RELATION_NAMES,
+    RELATION_NAMES,
+)
 from experiments.non_neural_structure_audit.protocol import method_sha256
 
 
@@ -110,6 +113,7 @@ def test_evaluation_opens_labels_only_after_scores_and_marks_small_run_as_smoke(
                 "multihop_response_base",
                 "lineage_margin",
             ],
+            "layer_order_null_relations": list(LAYER_ORDER_RELATION_NAMES),
             "samples": [
                 {
                     "sample_id": "sample-0",
@@ -179,6 +183,9 @@ def test_evaluation_opens_labels_only_after_scores_and_marks_small_run_as_smoke(
         row["scientific_status"] == "ENGINEERING_SMOKE_ONLY"
         for row in report["relation_metrics"]
     )
+    relation_rows = {row["relation"]: row for row in report["relation_metrics"]}
+    assert relation_rows["origin_transition_gap"]["layer_shuffle_p"] is not None
+    assert relation_rows["direct_role"]["layer_shuffle_p"] is None
     assert all(
         row["status"] == "NOT_EVALUATED_SMOKE"
         for row in report["decisions"]

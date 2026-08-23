@@ -46,6 +46,7 @@ def _adjust(rows: list[dict[str, object]], p_name: str, q_name: str) -> None:
 def relation_rows(
     bundle: EvaluationBundle,
     endpoint_relations: set[str],
+    layer_order_relations: set[str],
     config: EvaluationConfig,
 ) -> list[dict[str, object]]:
     samples = bundle.samples
@@ -153,6 +154,7 @@ def relation_rows(
                 ),
                 **{f"endpoint_{key}": value for key, value in endpoint_delta.items()},
             )
+        if name in layer_order_relations:
             final_labels, final_by_source = grouped_relation(
                 samples, lambda sample: sample.final_relation, relation_index
             )

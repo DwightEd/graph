@@ -33,6 +33,11 @@ FEATURE_NAMES = (
     "multihop_response_base",
     "lineage_unresolved",
     "response_to_prompt_log_ratio",
+    "prompt_transition_magnitude",
+    "history_transition_magnitude",
+    "diagonal_transition_magnitude",
+    "origin_transition_gap",
+    "interaction_diagonal_transition_gap",
 )
 FEATURE_INDEX = {name: index for index, name in enumerate(FEATURE_NAMES)}
 
@@ -46,6 +51,15 @@ LINEAGE_FEATURE_NAMES = (
     "response_to_prompt_log_ratio",
 )
 
+DYNAMICS_FEATURE_NAMES = (
+    "prompt_transition_magnitude",
+    "history_transition_magnitude",
+    "diagonal_transition_magnitude",
+    "origin_transition_gap",
+    "interaction_diagonal_transition_gap",
+)
+LAYER_ORDER_FEATURE_NAMES = (*LINEAGE_FEATURE_NAMES, *DYNAMICS_FEATURE_NAMES)
+
 RELATION_SPECS = (
     ("direct_role", "response_takeover", 1.0),
     ("endpoint_concentration", "response_top1_share", 1.0),
@@ -55,12 +69,25 @@ RELATION_SPECS = (
     ("multihop_response_base", "multihop_response_base", 1.0),
     ("lineage_margin", "response_to_prompt_log_ratio", 1.0),
     ("censoring_control", "unresolved_mass", 1.0),
+    ("prompt_transition_volatility", "prompt_transition_magnitude", 1.0),
+    ("response_transition_volatility", "history_transition_magnitude", 1.0),
+    ("origin_transition_gap", "origin_transition_gap", 1.0),
+    (
+        "interaction_diagonal_decoupling",
+        "interaction_diagonal_transition_gap",
+        1.0,
+    ),
 )
 RELATION_NAMES = tuple(spec[0] for spec in RELATION_SPECS)
 LINEAGE_RELATION_NAMES = tuple(
     relation
     for relation, feature, _ in RELATION_SPECS
     if feature in LINEAGE_FEATURE_NAMES
+)
+LAYER_ORDER_RELATION_NAMES = tuple(
+    relation
+    for relation, feature, _ in RELATION_SPECS
+    if feature in LAYER_ORDER_FEATURE_NAMES
 )
 
 
@@ -88,6 +115,13 @@ def _head_disagreement(routing: RoutingState, epsilon: float) -> torch.Tensor:
     return torch.where(
         count > 0, total_distance / count.clamp_min(1), torch.zeros_like(total_distance)
     )
+
+
+def _transition_magnitude(values: torch.Tensor) -> torch.Tensor:
+    result = values.new_zeros(values.shape[:2])
+    if values.shape[1] > 1:
+        result[:, 1:] = (values[:, 1:] - values[:, :-1]).abs().mean(dim=-1)
+    return result
 
 
 def build_layer_features(
@@ -139,6 +173,9 @@ def build_layer_features(
         + state[..., LINEAGE_INDEX["response_relay_multihop"]]
     )
     known_lineage = prompt_connected + inherited_response
+    prompt_transition = _transition_magnitude(prompt_mass)
+    history_transition = _transition_magnitude(response_mass)
+    diagonal_transition = _transition_magnitude(self_mass)
     fields = {
         "prompt_mass": prompt_mass.mean(dim=-1),
         "history_mass": response_mass.mean(dim=-1),
@@ -164,6 +201,13 @@ def build_layer_features(
         "lineage_unresolved": state[..., LINEAGE_INDEX["unresolved"]],
         "response_to_prompt_log_ratio": known_lineage
         * torch.log((inherited_response + epsilon) / (prompt_connected + epsilon)),
+        "prompt_transition_magnitude": prompt_transition,
+        "history_transition_magnitude": history_transition,
+        "diagonal_transition_magnitude": diagonal_transition,
+        "origin_transition_gap": history_transition - prompt_transition,
+        "interaction_diagonal_transition_gap": (
+            0.5 * (prompt_transition + history_transition) - diagonal_transition
+        ),
     }
     return torch.stack([fields[name] for name in FEATURE_NAMES], dim=-1)
 

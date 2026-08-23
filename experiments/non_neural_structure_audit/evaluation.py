@@ -109,6 +109,7 @@ class StructureEvaluator:
             relations = relation_rows(
                 bundle,
                 set(manifest["response_endpoint_null_relations"]),
+                set(manifest["layer_order_null_relations"]),
                 self.config,
             )
             samples = bundle.samples

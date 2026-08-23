@@ -28,7 +28,8 @@ from .config import AuditConfig
 from .features import (
     FEATURE_INDEX,
     FEATURE_NAMES,
-    LINEAGE_FEATURE_NAMES,
+    LAYER_ORDER_FEATURE_NAMES,
+    LAYER_ORDER_RELATION_NAMES,
     LINEAGE_RELATION_NAMES,
     RELATION_NAMES,
     build_layer_features,
@@ -243,6 +244,7 @@ class StructureAudit:
                 "feature_names": list(FEATURE_NAMES),
                 "relation_names": list(RELATION_NAMES),
                 "response_endpoint_null_relations": list(LINEAGE_RELATION_NAMES),
+                "layer_order_null_relations": list(LAYER_ORDER_RELATION_NAMES),
                 "samples": manifest_rows,
             },
         )
@@ -334,7 +336,7 @@ class StructureAudit:
                 .numpy()
             )
             final_control = features.copy()
-            for name in LINEAGE_FEATURE_NAMES:
+            for name in LAYER_ORDER_FEATURE_NAMES:
                 index = FEATURE_INDEX[name]
                 final_control[:, -1, index] = shuffled_features[:, -1, index]
             shuffled_standardized = standardize(

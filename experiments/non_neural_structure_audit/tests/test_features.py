@@ -2,6 +2,7 @@ import numpy as np
 import torch
 
 from experiments.non_neural_structure_audit.features import (
+    DYNAMICS_FEATURE_NAMES,
     FEATURE_INDEX,
     RELATION_NAMES,
     build_layer_features,
@@ -43,3 +44,49 @@ def test_relation_scores_are_single_oriented_coordinates_not_a_learned_fusion():
     np.testing.assert_allclose(
         scores[:, RELATION_NAMES.index("inherited_response_base")], 3.0
     )
+
+
+def test_cross_layer_dynamics_are_observed_role_transition_magnitudes():
+    diagonal = torch.zeros((2, 3, 1))
+    diagonal[1, :, 0] = torch.tensor([0.3, 0.1, 0.6])
+    routing = routing_state(
+        layers=[0, 0, 1, 1, 2, 2],
+        heads=[0] * 6,
+        queries=[1] * 6,
+        sources=[0, 1] * 3,
+        weights=[0.2, 0.1, 0.5, 0.4, 0.3, 0.1],
+        diagonal=diagonal,
+        response_idx=1,
+        response_tokens=2,
+        num_layers=3,
+    )
+
+    features = build_layer_features(routing, propagate_lineage(routing))
+    token = features[1]
+
+    np.testing.assert_allclose(
+        token[:, FEATURE_INDEX["prompt_transition_magnitude"]],
+        [0.0, 0.3, 0.2],
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        token[:, FEATURE_INDEX["history_transition_magnitude"]],
+        [0.0, 0.3, 0.3],
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        token[:, FEATURE_INDEX["diagonal_transition_magnitude"]],
+        [0.0, 0.2, 0.5],
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        token[:, FEATURE_INDEX["origin_transition_gap"]],
+        [0.0, 0.0, 0.1],
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        token[:, FEATURE_INDEX["interaction_diagonal_transition_gap"]],
+        [0.0, 0.1, -0.25],
+        atol=1e-6,
+    )
+    assert set(DYNAMICS_FEATURE_NAMES) <= set(FEATURE_INDEX)

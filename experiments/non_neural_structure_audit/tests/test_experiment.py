@@ -12,6 +12,7 @@ from experiments.non_neural_structure_audit.experiment import (
     StructureAudit,
     _selected_ids,
 )
+from experiments.non_neural_structure_audit.features import LAYER_ORDER_RELATION_NAMES
 
 
 class Attention:
@@ -131,6 +132,7 @@ def test_fit_and_score_freeze_compact_artifacts_without_opening_labels(
     assert manifest["reference_source_ids"] == ["source-train-0"]
     assert manifest["test_source_ids"] == ["test-0"]
     assert manifest["samples"][0]["source_id"] == "test-0"
+    assert manifest["layer_order_null_relations"] == list(LAYER_ORDER_RELATION_NAMES)
     null_audit = manifest["samples"][0]["null_audit"]
     assert null_audit["source_count_degree_max_error"] == 0
     assert null_audit["changed_fraction_min"] <= null_audit["changed_fraction_mean"]
