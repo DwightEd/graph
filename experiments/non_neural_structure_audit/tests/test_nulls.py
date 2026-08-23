@@ -1,6 +1,10 @@
+import numpy as np
 import torch
 
-from experiments.non_neural_structure_audit.nulls import constrained_endpoint_swap
+from experiments.non_neural_structure_audit.nulls import (
+    EndpointSwapPlan,
+    constrained_endpoint_swap,
+)
 
 from .helpers import routing_state
 
@@ -57,3 +61,25 @@ def test_lineage_endpoint_null_does_not_count_or_rewire_prompt_edges():
 
     assert result.edges.source[0] == 0
     assert result.audit["eligible_response_edges"] == 3
+
+
+def test_endpoint_plan_uses_compact_integer_geometry():
+    routing = routing_state(
+        layers=[0, 0],
+        heads=[0, 0],
+        queries=[6, 7],
+        sources=[1, 3],
+        weights=[0.1, 0.2],
+        diagonal=torch.zeros((8, 1, 1)),
+        response_tokens=8,
+        num_layers=1,
+    )
+
+    plan = EndpointSwapPlan(routing.edges)
+
+    assert plan.rows.dtype == np.int32
+    assert plan.original.dtype == np.int32
+    assert plan.response_edges.dtype == np.int32
+    assert sum(group.stop - group.start for group in plan.group_slices) == len(
+        plan.response_edges
+    )

@@ -8,7 +8,7 @@ import torch
 from experiments.attention_phenomenology.routing import RoutingState
 from experiments.attention_phenomenology.sources import (
     response_lag_statistics,
-    summarize_exact_sources,
+    summarize_source_concentration,
 )
 
 from .lineage import LINEAGE_INDEX, LineageTrace
@@ -124,6 +124,43 @@ def _transition_magnitude(values: torch.Tensor) -> torch.Tensor:
     return result
 
 
+def _lineage_fields(lineage: LineageTrace, epsilon: float) -> dict[str, torch.Tensor]:
+    state = lineage.state
+    prompt_connected = (
+        state[..., LINEAGE_INDEX["prompt_direct"]]
+        + state[..., LINEAGE_INDEX["prompt_relay"]]
+    )
+    inherited_response = (
+        state[..., LINEAGE_INDEX["response_relay_one_hop"]]
+        + state[..., LINEAGE_INDEX["response_relay_multihop"]]
+    )
+    known_lineage = prompt_connected + inherited_response
+    return {
+        "prompt_connected_total": prompt_connected,
+        "prompt_connected_relay": state[..., LINEAGE_INDEX["prompt_relay"]],
+        "response_base_local": state[..., LINEAGE_INDEX["response_base"]],
+        "inherited_response_base": inherited_response,
+        "multihop_response_base": state[..., LINEAGE_INDEX["response_relay_multihop"]],
+        "lineage_unresolved": state[..., LINEAGE_INDEX["unresolved"]],
+        "response_to_prompt_log_ratio": known_lineage
+        * torch.log((inherited_response + epsilon) / (prompt_connected + epsilon)),
+    }
+
+
+def replace_lineage_features(
+    features: torch.Tensor,
+    lineage: LineageTrace,
+    *,
+    epsilon: float = 1e-8,
+) -> torch.Tensor:
+    """Reuse invariant routing coordinates under an endpoint-only control."""
+
+    result = features.clone()
+    for name, values in _lineage_fields(lineage, epsilon).items():
+        result[..., FEATURE_INDEX[name]] = values
+    return result
+
+
 def build_layer_features(
     routing: RoutingState,
     lineage: LineageTrace,
@@ -133,7 +170,7 @@ def build_layer_features(
 ) -> torch.Tensor:
     """Return ``[response token, layer step, feature]`` coordinates."""
 
-    response_sources = summarize_exact_sources(
+    response_sources = summarize_source_concentration(
         routing, role="response", epsilon=epsilon
     )
     recent_share, mean_lag = response_lag_statistics(
@@ -163,16 +200,6 @@ def build_layer_features(
     response_effective = response_sources.effective_sources[:, layer_index]
     response_top1 = response_sources.top1_share[:, layer_index]
 
-    state = lineage.state
-    prompt_connected = (
-        state[..., LINEAGE_INDEX["prompt_direct"]]
-        + state[..., LINEAGE_INDEX["prompt_relay"]]
-    )
-    inherited_response = (
-        state[..., LINEAGE_INDEX["response_relay_one_hop"]]
-        + state[..., LINEAGE_INDEX["response_relay_multihop"]]
-    )
-    known_lineage = prompt_connected + inherited_response
     prompt_transition = _transition_magnitude(prompt_mass)
     history_transition = _transition_magnitude(response_mass)
     diagonal_transition = _transition_magnitude(self_mass)
@@ -193,14 +220,6 @@ def build_layer_features(
         "response_top1_share": _valid_head_mean(response_top1, response_valid),
         "recent_response_share": _valid_head_mean(recent_share, response_valid),
         "response_mean_lag": _valid_head_mean(mean_lag, response_valid),
-        "prompt_connected_total": prompt_connected,
-        "prompt_connected_relay": state[..., LINEAGE_INDEX["prompt_relay"]],
-        "response_base_local": state[..., LINEAGE_INDEX["response_base"]],
-        "inherited_response_base": inherited_response,
-        "multihop_response_base": state[..., LINEAGE_INDEX["response_relay_multihop"]],
-        "lineage_unresolved": state[..., LINEAGE_INDEX["unresolved"]],
-        "response_to_prompt_log_ratio": known_lineage
-        * torch.log((inherited_response + epsilon) / (prompt_connected + epsilon)),
         "prompt_transition_magnitude": prompt_transition,
         "history_transition_magnitude": history_transition,
         "diagonal_transition_magnitude": diagonal_transition,
@@ -209,6 +228,7 @@ def build_layer_features(
             0.5 * (prompt_transition + history_transition) - diagonal_transition
         ),
     }
+    fields.update(_lineage_fields(lineage, epsilon))
     return torch.stack([fields[name] for name in FEATURE_NAMES], dim=-1)
 
 

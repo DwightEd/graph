@@ -7,8 +7,12 @@ from experiments.non_neural_structure_audit.features import (
     RELATION_NAMES,
     build_layer_features,
     relation_scores,
+    replace_lineage_features,
 )
-from experiments.non_neural_structure_audit.lineage import propagate_lineage
+from experiments.non_neural_structure_audit.lineage import (
+    LineageOperator,
+    propagate_lineage,
+)
 
 from .helpers import routing_state
 
@@ -28,6 +32,50 @@ def test_features_keep_prompt_and_response_base_paths_separate():
     assert features[1, 1, FEATURE_INDEX["prompt_connected_relay"]] == 1.0
     assert features[1, 1, FEATURE_INDEX["inherited_response_base"]] == 0.0
     assert features.shape[-1] == len(FEATURE_INDEX)
+
+
+def test_structure_features_skip_unused_exact_source_velocity(monkeypatch):
+    from experiments.attention_phenomenology import sources
+
+    def unexpected_velocity(*args, **kwargs):
+        raise AssertionError("structure audit does not consume exact-source velocity")
+
+    monkeypatch.setattr(sources, "_adjacent_velocity", unexpected_velocity)
+    routing = routing_state(
+        layers=[0, 1],
+        heads=[0, 0],
+        queries=[0, 1],
+        sources=[0, 1],
+        weights=[1.0, 1.0],
+        diagonal=torch.zeros((2, 2, 1)),
+    )
+
+    features = build_layer_features(routing, propagate_lineage(routing))
+
+    assert features.shape[-1] == len(FEATURE_INDEX)
+
+
+def test_endpoint_control_reuses_routing_features_and_replaces_only_lineage():
+    routing = routing_state(
+        layers=[0, 1],
+        heads=[0, 0],
+        queries=[0, 1],
+        sources=[0, 1],
+        weights=[1.0, 1.0],
+        diagonal=torch.zeros((2, 2, 1)),
+    )
+    operator = LineageOperator(routing)
+    base = build_layer_features(routing, operator.run())
+    controlled_lineage = operator.run(source=torch.tensor([0, 0]))
+
+    replaced = replace_lineage_features(base, controlled_lineage)
+    rebuilt = build_layer_features(routing, controlled_lineage)
+
+    torch.testing.assert_close(replaced, rebuilt)
+    assert not torch.equal(
+        replaced[..., FEATURE_INDEX["prompt_connected_total"]],
+        base[..., FEATURE_INDEX["prompt_connected_total"]],
+    )
 
 
 def test_relation_scores_are_single_oriented_coordinates_not_a_learned_fusion():

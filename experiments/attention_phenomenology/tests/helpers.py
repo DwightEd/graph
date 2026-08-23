@@ -14,6 +14,7 @@ class SyntheticAttention:
     response_idx: int
     attention_diagonal: torch.Tensor
     attention_floor: float = 0.01
+    response_value_count: int = 0
 
     @property
     def num_tokens(self):
@@ -25,13 +26,14 @@ class SyntheticAttention:
 
     @property
     def response_values(self):
-        return torch.empty(0)
+        return torch.empty(self.response_value_count)
 
 
 class SyntheticSample:
     def __init__(self, attention, edges):
         self._attention = attention
         self.edges = edges
+        self._attention.response_value_count = len(edges[-1])
 
     def attention(self):
         return self._attention

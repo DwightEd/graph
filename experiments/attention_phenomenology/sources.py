@@ -23,11 +23,99 @@ class ExactSourceStatistics:
     transition_valid: torch.Tensor
 
 
+@dataclass(frozen=True)
+class SourceConcentration:
+    """Per-head source concentration without exact-anchor transitions."""
+
+    mass: torch.Tensor
+    valid: torch.Tensor
+    effective_sources: torch.Tensor
+    top1_share: torch.Tensor
+
+
+@dataclass(frozen=True)
+class _SourceDistribution:
+    mass: torch.Tensor
+    valid: torch.Tensor
+    selected: torch.Tensor
+    group: torch.Tensor
+    source: torch.Tensor
+    weight: torch.Tensor
+    probability: torch.Tensor
+
+
 def _edge_group(routing: RoutingState) -> torch.Tensor:
     edges = routing.edges
+    return (edges.query * edges.num_layers + edges.layer) * edges.num_heads + edges.head
+
+
+def _source_distribution(
+    routing: RoutingState,
+    *,
+    role: Literal["prompt", "response"],
+    epsilon: float,
+) -> _SourceDistribution:
+    edges = routing.edges
+    is_prompt = edges.source < edges.response_idx
+    selected = is_prompt if role == "prompt" else ~is_prompt
+    mass = routing.prompt_mass if role == "prompt" else routing.response_mass
+    valid = mass > epsilon
+    group = _edge_group(routing)[selected]
+    source = edges.source[selected]
+    if role == "response":
+        source = source - edges.response_idx
+    weight = routing.edge_weight[selected]
+    probability = weight / mass.reshape(-1)[group].clamp_min(epsilon)
+    return _SourceDistribution(
+        mass=mass,
+        valid=valid,
+        selected=selected,
+        group=group,
+        source=source,
+        weight=weight,
+        probability=probability,
+    )
+
+
+def _concentration(
+    distribution: _SourceDistribution,
+    *,
+    epsilon: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    mass = distribution.mass
+    zeros = torch.zeros_like(mass)
+    if distribution.group.numel() == 0:
+        return zeros, zeros, mass.new_empty(0)
+
+    group_count = mass.numel()
+    entropy = mass.new_zeros(group_count)
+    entropy.index_add_(
+        0,
+        distribution.group,
+        -distribution.probability * distribution.probability.clamp_min(epsilon).log(),
+    )
+    effective_sources = entropy.exp()
+    effective_sources[~distribution.valid.reshape(-1)] = 0.0
+
+    maximum_weight = torch.full(
+        (group_count,),
+        -torch.inf,
+        dtype=distribution.weight.dtype,
+        device=distribution.weight.device,
+    )
+    maximum_weight.scatter_reduce_(
+        0,
+        distribution.group,
+        distribution.weight,
+        reduce="amax",
+        include_self=True,
+    )
+    top1_share = maximum_weight / mass.reshape(-1).clamp_min(epsilon)
+    top1_share[~distribution.valid.reshape(-1)] = 0.0
     return (
-        (edges.query * edges.num_layers + edges.layer) * edges.num_heads
-        + edges.head
+        effective_sources.reshape(mass.shape),
+        top1_share.reshape(mass.shape),
+        maximum_weight,
     )
 
 
@@ -54,9 +142,9 @@ def _adjacent_velocity(
         groups_per_token = edges.num_layers * edges.num_heads
         edge_key = group * source_domain + source
         sorted_key, order = edge_key.sort()
-        previous_key = (
-            (group[current] - groups_per_token) * source_domain + source[current]
-        )
+        previous_key = (group[current] - groups_per_token) * source_domain + source[
+            current
+        ]
         position = torch.searchsorted(sorted_key, previous_key)
         in_bounds = position < len(sorted_key)
         safe_position = position.clamp_max(len(sorted_key) - 1)
@@ -87,16 +175,14 @@ def summarize_exact_sources(
     """Summarize one exact-source role for every token/layer/head row."""
 
     edges = routing.edges
-    shape = (edges.num_response_tokens, edges.num_layers, edges.num_heads)
-    group_count = edges.num_response_tokens * edges.num_layers * edges.num_heads
-    is_prompt = edges.source < edges.response_idx
-    selected = is_prompt if role == "prompt" else ~is_prompt
-    mass = routing.prompt_mass if role == "prompt" else routing.response_mass
-    valid = mass > epsilon
+    distribution = _source_distribution(routing, role=role, epsilon=epsilon)
+    mass = distribution.mass
+    valid = distribution.valid
+    shape = mass.shape
 
     zeros = mass.new_zeros(shape)
     no_source = torch.full(shape, -1, dtype=torch.long, device=edges.device)
-    if not selected.any():
+    if distribution.group.numel() == 0:
         return ExactSourceStatistics(
             mass=mass,
             valid=valid,
@@ -107,50 +193,22 @@ def summarize_exact_sources(
             transition_valid=torch.zeros_like(valid),
         )
 
-    group = _edge_group(routing)[selected]
-    source = edges.source[selected]
-    if role == "response":
-        source = source - edges.response_idx
-    weight = routing.edge_weight[selected]
-    total = mass.reshape(-1)
-    probability = weight / total[group].clamp_min(epsilon)
-
-    entropy = weight.new_zeros(group_count)
-    entropy.index_add_(
-        0,
-        group,
-        -probability * probability.clamp_min(epsilon).log(),
+    effective_sources, top1_share, maximum_weight = _concentration(
+        distribution,
+        epsilon=epsilon,
     )
-    effective_sources = entropy.exp()
-    effective_sources[~valid.reshape(-1)] = 0.0
-
-    maximum_weight = torch.full(
-        (group_count,),
-        -torch.inf,
-        dtype=weight.dtype,
-        device=weight.device,
-    )
-    maximum_weight.scatter_reduce_(
-        0,
-        group,
-        weight,
-        reduce="amax",
-        include_self=True,
-    )
-    top1_share = maximum_weight / total.clamp_min(epsilon)
-    top1_share[~valid.reshape(-1)] = 0.0
 
     top_source = torch.full(
-        (group_count,),
+        (mass.numel(),),
         edges.num_tokens,
         dtype=torch.long,
         device=edges.device,
     )
-    is_maximum = weight == maximum_weight[group]
+    is_maximum = distribution.weight == maximum_weight[distribution.group]
     top_source.scatter_reduce_(
         0,
-        group[is_maximum],
-        source[is_maximum],
+        distribution.group[is_maximum],
+        distribution.source[is_maximum],
         reduce="amin",
         include_self=True,
     )
@@ -158,26 +216,47 @@ def summarize_exact_sources(
 
     velocity, transition_valid = _adjacent_velocity(
         routing,
-        selected=selected,
-        group=group,
-        source=source,
-        probability=probability,
+        selected=distribution.selected,
+        group=distribution.group,
+        source=distribution.source,
+        probability=distribution.probability,
         valid=valid,
     )
     return ExactSourceStatistics(
         mass=mass,
         valid=valid,
-        effective_sources=effective_sources.reshape(shape),
-        top1_share=top1_share.reshape(shape),
+        effective_sources=effective_sources,
+        top1_share=top1_share,
         top_source=top_source.reshape(shape),
         velocity=velocity,
         transition_valid=transition_valid,
     )
 
 
+def summarize_source_concentration(
+    routing: RoutingState,
+    *,
+    role: Literal["prompt", "response"],
+    epsilon: float,
+) -> SourceConcentration:
+    """Summarize mass and concentration without sorting exact source transitions."""
+
+    distribution = _source_distribution(routing, role=role, epsilon=epsilon)
+    effective_sources, top1_share, _ = _concentration(
+        distribution,
+        epsilon=epsilon,
+    )
+    return SourceConcentration(
+        mass=distribution.mass,
+        valid=distribution.valid,
+        effective_sources=effective_sources,
+        top1_share=top1_share,
+    )
+
+
 def response_lag_statistics(
     routing: RoutingState,
-    response_sources: ExactSourceStatistics,
+    response_sources: ExactSourceStatistics | SourceConcentration,
     *,
     recent_tokens: int,
     epsilon: float,

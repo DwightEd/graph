@@ -34,6 +34,7 @@ from .features import (
     RELATION_NAMES,
     build_layer_features,
     relation_scores,
+    replace_lineage_features,
 )
 from .lineage import LineageOperator
 from .nulls import EndpointSwapPlan
@@ -94,8 +95,8 @@ def _fit_sample(sample, config: AuditConfig) -> tuple[str, str, np.ndarray]:
 
 def _null_relations(
     operator,
-    routing,
     source,
+    real_features,
     *,
     task,
     buckets,
@@ -103,11 +104,7 @@ def _null_relations(
     config,
 ) -> np.ndarray:
     features = (
-        build_layer_features(
-            routing,
-            operator.run(source=source),
-            recent_tokens=config.recent_tokens,
-        )
+        replace_lineage_features(real_features, operator.run(source=source))
         .cpu()
         .numpy()
     )
@@ -297,8 +294,8 @@ class StructureAudit:
             )
             null_scores[replicate] = _null_relations(
                 operator,
-                routing,
                 null.edges.source,
+                feature_tensor,
                 task=task,
                 buckets=buckets,
                 reference=reference,
@@ -307,6 +304,7 @@ class StructureAudit:
             changed_fraction[replicate] = null.changed_fraction
             null_audits.append(null.audit)
             del null
+        del endpoint_plan
 
         final_relations = relation_scores(standardized[:, -1:, :])
         if edges.num_layers < 2:
