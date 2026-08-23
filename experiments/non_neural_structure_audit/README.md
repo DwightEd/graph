@@ -59,6 +59,15 @@ OUTPUT_DIR=experiments/non_neural_structure_audit/outputs/exploratory_full \
 ./experiments/non_neural_structure_audit/run.sh
 ```
 
+如果本机尚未安装与缓存 token IDs 对应的 Llama-3.1-8B tokenizer，其他模型的 tokenizer 不能替代。若只想先把 **全部 822 train QA + 149 test QA** 的工程链路跑通，可直接在 PowerShell 使用下面的全量 smoke 命令（不做 content-token primary outcome）：
+
+```powershell
+Set-Location 'D:\projects\python_projects\research\graph_latest'
+& 'C:\Program Files\Git\bin\bash.exe' -lc 'cd /d/projects/python_projects/research/graph_latest && TRAIN_LIMIT= TEST_LIMIT= NULL_REPLICATES=10 LAYER_SHUFFLE_REPLICATES=10 BOOTSTRAP_REPLICATES=200 PERMUTATION_REPLICATES=99 SCOPE=smoke OUTPUT_DIR=experiments/non_neural_structure_audit/outputs/full_qa_smoke ./experiments/non_neural_structure_audit/run.sh'
+```
+
+要运行带 content-token 筛选的 discovery，先把上面 Bash 命令中的 `SCOPE=smoke` 改为 `SCOPE=discovery`，再加入 `TOKENIZER=D:/实际的/Meta-Llama-3.1-8B-Instruct`。`TRAIN_LIMIT=` 与 `TEST_LIMIT=` 是在 Bash 进程内显式传空值，表示不传 `--limit`；在 PowerShell 里把 `$env:TRAIN_LIMIT=''` 可能等价于删除环境变量，从而重新触发脚本默认值 100/30。
+
 流程默认只选 `task_type=QA`，使用完整 canonical train QA 作为 reference；test QA source groups 在读标签前确定性分成 50% discovery、50% confirmation。`split_plan.json` 绑定 dataset、reference、score manifest、source/sample IDs 与 audit source-code dependency digest；它不替代 Python/PyTorch/NumPy/scikit-learn 环境记录。
 
 `499` 个严格 endpoint null 很昂贵。应先用 30 条、10–20 replicates 做 coverage/profile。最新两条 QA engineering smoke 的合法交换比例分别约为 `0.139`、`0.162`，不是总体 coverage 估计，并低于计划阈值 `0.70`。实际 decision 总体仍是 `BLOCKED_BY_A0`；若暂时忽略 A0、只检查 A2 pilot 质量，则是 `INCONCLUSIVE_NULL_INVALID`。在修好或替换 null 之前，不应启动昂贵的全量 A2。
@@ -114,7 +123,8 @@ fit (labels closed)
   train attention -> bounded robust task/position reference
 
 score (labels closed)
-  one sample -> sparse routing -> conserved lineage
+  one sample -> preallocated sparse edges -> release raw attention
+             -> routing -> conserved lineage + observed layer transitions
              -> response-endpoint null + non-identity layer shuffle
              -> hashed compact NPZ
 
@@ -148,6 +158,8 @@ python -m experiments.non_neural_structure_audit.main freeze-confirmation --help
 |---|---|
 | `main.py` | 参数入口与五个阶段的直接调用 |
 | `experiment.py` | `StructureAudit.fit()` / `score()` 无标签路径 |
+| `../causal_attention_edges.py` | 当前样本稀疏因果边的一次预分配解码 |
+| `../disk_row_store.py` | evaluation 两个消费者共享的固定 schema 磁盘 row store |
 | `lineage.py` | 六类守恒 routing lineage |
 | `features.py` | 可解释坐标与预注册 relation scores |
 | `nulls.py` | 可复用 `EndpointSwapPlan` 与严格 endpoint null |
@@ -161,6 +173,8 @@ python -m experiments.non_neural_structure_audit.main freeze-confirmation --help
 | `joint_form.py` | discovery-only grouped-CV 联合形式比较 |
 | `decisions.py` | 保守 gate；缺 control 时不授权模型模块 |
 | `attention_lifecycle.py` | 仓库级、可复用的单样本 attention 生命周期 |
+
+远端 routing-dynamics 更新的逐项审查与保留/退役理由见 [ROUTING_DYNAMICS_REVIEW.md](ROUTING_DYNAMICS_REVIEW.md)。
 
 ## 输出与解读
 

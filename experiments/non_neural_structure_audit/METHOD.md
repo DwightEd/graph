@@ -10,11 +10,12 @@
 
 ## 2. 从稀疏 attention 到 routing
 
-入口在 [`experiment.py`](experiment.py) 的 `_real_analysis()`：
+入口在 [`experiment.py`](experiment.py) 的 `_fit_sample()` / `_score_sample()`：
 
 ```text
-sample
-  -> collect_routing_edges()
+sample + loaded attention
+  -> collect_routing_edges() + copy response token IDs
+  -> release_attention()
   -> build_routing_state()
   -> LineageOperator.run()
   -> build_layer_features()
@@ -92,6 +93,9 @@ z^\ell_t=\frac{1}{H}\sum_h\tilde z^{\ell,h}_t.
 - head 结构：prompt/history head 标准差与角色分歧；
 - response endpoint 结构：有效来源数、top-1 share、近期来源占比、平均 lag；
 - lineage：prompt-connected total/relay、response-base local/inherited/multihop、lineage unresolved，以及 response-to-prompt log ratio。
+- 跨层观测变化：相邻 layer step 的 prompt/history/diagonal head-mean absolute change、history-minus-prompt origin gap，以及 interaction-minus-diagonal gap。
+
+最后一组是从已观测 routing 直接计算的 transition magnitude，不是训练得到的 hidden state，也不是“预测下一层后得到的重建残差”。第一个 layer step 固定为 0；其后对相邻 step 的每个 head 取绝对差，再对 heads 求均值。它只回答“该 routing 量随层顺序变化多少”，不能回答某条边是否被模型恢复、某层是否充分，或该变化是否是因果机制。
 
 [`reference.py`](reference.py) 只用训练 split，按 task 与 response 因果位置桶拟合 robust center/scale；这只是无标签标准化，不是模型训练。`relation_scores()` 将预先指定的单个坐标定向为“越高越风险”，再对层取均值。fit 与 score 阶段不打开标签，冻结产物及 `labels_read=false` 由 [`experiment.py`](experiment.py) 写入。
 
@@ -105,7 +109,7 @@ z^\ell_t=\frac{1}{H}\sum_h\tilde z^{\ell,h}_t.
 
 ### Final-state layer shuffle
 
-[`experiment.py`](experiment.py) 对完整 layer operator 做多次随机排列。每次仅取全部乱序层执行后的最终 lineage state，并把它替换进真实样本的 final-layer 特征；直接 routing 与其他非-lineage 特征保持真实值。这样避免把“实际第 20 层”拿去和“正常第 0 层”标准化，检验的是该有限传播算子对层顺序的敏感性，而不是对原 LLM 做了真实 layer intervention。
+[`experiment.py`](experiment.py) 对完整 layer operator 做多次随机排列。每次仅取全部乱序层执行后的最终 lineage state，并重算跨层 transition features；这些 layer-order-sensitive 坐标替换真实样本的 final-layer 对应坐标，直接 routing、head 和 endpoint 特征保持真实值。这样避免把“实际第 20 层”拿去和“正常第 0 层”标准化，检验的是该有限传播算子及观测 transition 对层顺序的敏感性，而不是对原 LLM 做了真实 layer intervention。
 
 ## 6. 标签后置评估
 
