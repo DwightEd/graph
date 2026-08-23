@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 import torch
 
+from attention_lifecycle import loaded_attention
 from experiments.source_reuse_contrast.data import (
     SourceReuseGraph,
     collect_source_reuse_graph,
@@ -125,8 +126,6 @@ def build_multiplex_graph(raw: SourceReuseGraph) -> MultiplexGraph:
 def load_multiplex_graph(sample, *, block_rows: int = 8192) -> MultiplexGraph:
     """Materialize one graph and release the source attention immediately."""
 
-    try:
+    with loaded_attention(sample):
         raw = collect_source_reuse_graph(sample, block_rows=block_rows)
-    finally:
-        sample.release_attention()
     return build_multiplex_graph(raw)
