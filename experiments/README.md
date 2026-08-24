@@ -29,40 +29,27 @@ after representations and scores are frozen.
 
 ## Active evidence path
 
-- `causal_walk_audit/`: the integrated typed route-grammar detector. It preserves
-  exact causal endpoints and every layer/head channel, propagates a
-  mass-conserving prompt/response lineage automaton, fits an unlabeled
-  variable-order De Bruijn grammar over generation time, and calibrates grammar
-  rupture hierarchically across heads and layers. Order two is enabled only when
-  it improves unlabeled held-out prediction. Response closure remains a
-  separately reported mechanism diagnostic rather than a forced component of
-  the primary detector.
-- `non_neural_structure_audit/`: the model-selection audit that runs before a
-  new GNN/GRU is justified. It freezes prompt-connected/response-base routing
-  lineage without labels, runs pilot response-endpoint and final-state
-  layer-order controls, then opens labels only after frozen-score validation.
-  The current A0 artifact subcheck passes, but gold alignment and full-pipeline
-  permutation sanity are still missing, so formal A1-A10 gates remain blocked
-  and no graph or neural component is currently authorized.
-- `graph_structure_audit/`: the prerequisite learned recoverability audit. It
-  stores one exact token-pair edge tensor `[layer, head]` per sample, masks
-  channels and node diagonals, and reconstructs them with explicit layer-ordered
-  message passing. No `PrefixState` or handcrafted motif inventory is used in
-  the main path. Message, endpoint, layer-order, head-identity, and channel-
-  averaging controls determine whether graph structure actually helps.
-- `source_reuse_contrast/`: the active attention-graph research line. Its former
-  exact-source predictability objective is retained as a negative baseline. The
-  new grounding-sensitive pipeline reconstructs high-dimensional received-
-  support and prompt-origin fields, computes label-free edge sensitivity,
-  refines the graph, and evaluates prompt/response counterfactual sufficiency.
-- `attention_phenomenology/`: the primary mechanism audit for routing detection,
-  head-coalition fracture, prompt-provenance integration, fracture-to-lock-in
-  dynamics, and exact-endpoint topology. It preserves `[token, layer, head]`,
-  separates known-route geometry from censoring controls, and compares real
-  endpoints with a coarse-role-preserving rewired null.
-- `rr_signal_audit/`: evidence-grounded decomposition of PR/RR channel fields,
-  received support, collapse variables, and independent versus joint one-class
-  geometry.
+- `attention_holonomy_audit/`: mechanism gate for the proposed HoloRoute neural
+  model. It builds a dual-axis causal attention event graph with exact
+  token-pair/layer nodes, same-pair depth edges, depth-respecting relay edges,
+  query source sets, and causal diamonds. Small train-only transport probes test
+  depth, relay, query-set, middle-token, and holonomy hypotheses before any
+  neural architecture is authorized. All token features are residualized on
+  position, length, graph size, retained mass, censoring, and task before labels
+  are opened.
+- `causal_walk_audit/`: statistical typed route-grammar baseline retained for
+  comparison. Its earlier cumulative rupture score was strongly confounded with
+  token position, so it is no longer the proposed main method.
+- `non_neural_structure_audit/`: prompt-connected/response-base routing-lineage
+  model-selection audit.
+- `graph_structure_audit/`: learned masked recoverability baseline over exact
+  token-pair `[layer, head]` edge tensors.
+- `source_reuse_contrast/`: grounding-sensitive reconstruction and
+  counterfactual-sufficiency experiments.
+- `attention_phenomenology/`: routing, head-coalition, prompt-provenance,
+  fracture-to-lock-in, and endpoint-topology audits.
+- `rr_signal_audit/`: PR/RR fields, received support, collapse variables, and
+  independent versus joint one-class geometry.
 - `rr_topology_dynamics/`: route convergence, prompt-grounded versus unsupported
   RR relay, and layer/head/source/lag attribution.
 - `mechanism_validation/`: supervised post-hoc mechanism and graph-ablation
