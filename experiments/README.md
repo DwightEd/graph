@@ -29,17 +29,19 @@ after representations and scores are frozen.
 
 ## Active evidence path
 
-- `attention_holonomy_audit/`: mechanism gate for the proposed HoloRoute neural
-  model. It builds a dual-axis causal attention event graph with exact
-  token-pair/layer nodes, same-pair depth edges, depth-respecting relay edges,
-  query source sets, and causal diamonds. Small train-only transport probes test
-  depth, relay, query-set, middle-token, and holonomy hypotheses before any
-  neural architecture is authorized. All token features are residualized on
-  position, length, graph size, retained mass, censoring, and task before labels
-  are opened.
+- `holoroute/`: proposed neural method. It reuses the audited dual-axis attention
+  event graph, encodes complete head profiles, transports messages separately
+  over depth and causal-relay relations, mixes query source sets, and learns by
+  whole-event, path, depth, query and holonomy self-supervision. A disjoint
+  unlabeled calibration stream removes position/length/coverage nuisance and
+  scores the local mechanism residual vector. No CUSUM or cumulative token score
+  is used.
+- `attention_holonomy_audit/`: mechanism gate and graph-construction audit for
+  HoloRoute. Small train-only probes test depth, relay, query-set, middle-token
+  and holonomy relations before strong graph claims are made.
 - `causal_walk_audit/`: statistical typed route-grammar baseline retained for
   comparison. Its earlier cumulative rupture score was strongly confounded with
-  token position, so it is no longer the proposed main method.
+  token position, so it is not the proposed main method.
 - `non_neural_structure_audit/`: prompt-connected/response-base routing-lineage
   model-selection audit.
 - `graph_structure_audit/`: learned masked recoverability baseline over exact
@@ -47,8 +49,8 @@ after representations and scores are frozen.
 - `source_reuse_contrast/`: grounding-sensitive reconstruction and
   counterfactual-sufficiency experiments.
 - `attention_phenomenology/`: routing, head-coalition, prompt-provenance,
-  fracture-to-lock-in, and endpoint-topology audits.
-- `rr_signal_audit/`: PR/RR fields, received support, collapse variables, and
+  fracture-to-lock-in and endpoint-topology audits.
+- `rr_signal_audit/`: PR/RR fields, received support, collapse variables and
   independent versus joint one-class geometry.
 - `rr_topology_dynamics/`: route convergence, prompt-grounded versus unsupported
   RR relay, and layer/head/source/lag attribution.
