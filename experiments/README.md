@@ -29,6 +29,12 @@ after representations and scores are frozen.
 
 ## Active evidence path
 
+- `causal_walk_audit/`: a falsifiable validation suite for non-Markov causal-walk
+  memory, prompt-anchor path congruence, evidence re-entry, and response-walk
+  lock-in. It fits nested order-1/2/3 routing predictors without hallucination
+  labels, uses matched-dimension path-shuffle controls, freezes token scores, and
+  opens labels only in the final evaluator. Without an explicit anchor manifest,
+  results are prompt-chunk lineage proxies rather than evidence grounding.
 - `non_neural_structure_audit/`: the model-selection audit that runs before a
   new GNN/GRU is justified. It freezes prompt-connected/response-base routing
   lineage without labels, runs pilot response-endpoint and final-state

@@ -1,0 +1,29 @@
+name: Causal-walk audit tests
+
+on:
+  push:
+    paths:
+      - "experiments/causal_walk_audit/**"
+      - ".github/workflows/causal-walk-audit-tests.yml"
+  pull_request:
+    paths:
+      - "experiments/causal_walk_audit/**"
+      - ".github/workflows/causal-walk-audit-tests.yml"
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install numpy scipy scikit-learn tqdm pytest
+      - run: python -m compileall -q experiments/causal_walk_audit
+      - run: bash -n experiments/causal_walk_audit/run.sh
+      - run: pytest -q experiments/causal_walk_audit/tests
