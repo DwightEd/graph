@@ -1,5 +1,14 @@
 # Attention graph research
 
+The new hypothesis-stage, fully modular typed-path method is in
+`experiments/causal_typed_path_debruijn/`. It keeps every observed
+`[layer, head]` attention row and emits a route state per channel, models the
+generation-time route grammar with a fixed second-order De Bruijn process, and
+couples recent rupture with response-closed lock-in. Cross-layer head transport
+is explicitly an equal-head proxy because `W_O/W_V` are unavailable. See its
+`METHOD.md`; no real-cache performance claim has been made from the
+implementation-only smoke tests.
+
 The active spectral method is in `experiments/spectral_feasibility/`. It keeps
 signed RR causal-prefix modes independently for every layer/head, fits a robust
 PCA on one set of unlabeled source groups, and calibrates anomaly tails on a

@@ -29,6 +29,14 @@ after representations and scores are frozen.
 
 ## Active evidence path
 
+- `causal_typed_path_debruijn/`: new hypothesis-stage, parameter-free detector.
+  It constructs a mass-conserving five-state lineage distribution in every
+  layer/head, fits an order-2 De Bruijn grammar on unlabeled source groups, and
+  scores recent routing rupture times response-closed lock-in. Its documented
+  cross-layer equal-head transport is a proxy necessitated by missing W_O/W_V,
+  not a hidden-state contribution claim. It has its own
+  three-stream calibration, endpoint/time nulls, frozen artifacts, evaluation,
+  visualization, and causal-RR bridge. No real-cache result is claimed yet.
 - `attention_phenomenology/`: the primary mechanism audit for routing detection,
   head-coalition fracture, prompt-provenance integration, fracture-to-lock-in
   dynamics, and exact-endpoint topology. It preserves `[token, layer, head]`,
