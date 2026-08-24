@@ -1,77 +1,125 @@
+import json
 from types import SimpleNamespace
 
-import numpy as np
+import torch
 
 from experiments.causal_walk_audit import experiment
-from experiments.causal_walk_audit.artifacts import load_npz, read_json
-from experiments.causal_walk_audit.config import WalkAuditConfig
-
-from .helpers import routing_state
+from experiments.causal_walk_audit.config import AuditConfig, CalibrationConfig
+from experiments.causal_walk_audit.evaluation import evaluate_scores
 
 
-class _Dataset:
-    def __init__(self, prefix, count):
-        self.sample_ids = [f"{prefix}-{index}" for index in range(count)]
-        self.items = {
-            sample_id: SimpleNamespace(
-                sample_id=sample_id,
-                source_id=f"source-{index}",
-                task_type="QA",
+class Sample:
+    def __init__(self, sample_id, source_id, scale):
+        self.sample_id = sample_id
+        self.source_id = source_id
+        self.task_type = "QA"
+        self.scale = scale
+        self._attention = None
+
+    def attention(self):
+        if self._attention is None:
+            self._attention = SimpleNamespace(
+                response_idx=2,
+                num_response_tokens=5,
+                num_layers=2,
+                num_heads=2,
+                num_tokens=7,
+                response_values=torch.ones(1),
+                attention_diagonal=torch.full((2, 2, 7), 0.2),
+                attention_floor=0.01,
             )
+        return self._attention
+
+    def iter_sparse_attention_blocks(self, block_rows=4096):
+        source, target, layer, head, weight = [], [], [], [], []
+        for current_layer in range(2):
+            for current_head in range(2):
+                for query in range(5):
+                    current_target = 2 + query
+                    source.append(query % 2)
+                    target.append(current_target)
+                    layer.append(current_layer)
+                    head.append(current_head)
+                    weight.append(0.35 * self.scale)
+                    if query:
+                        source.append(current_target - 1)
+                        target.append(current_target)
+                        layer.append(current_layer)
+                        head.append(current_head)
+                        weight.append(0.25 * self.scale)
+        yield SimpleNamespace(
+            source=torch.tensor(source),
+            target=torch.tensor(target),
+            layer=torch.tensor(layer),
+            head=torch.tensor(head),
+            weight=torch.tensor(weight),
+        )
+
+    def release_attention(self):
+        self._attention = None
+
+
+class Labels:
+    def response_labels(self, sample):
+        value = torch.zeros(5, dtype=torch.long)
+        if sample.sample_id.endswith("-0"):
+            value[2] = 1
+        return value
+
+
+class Dataset:
+    def __init__(self, root, split, count):
+        self.root = root
+        self.device = "cpu"
+        self.manifest = {"split": split, "num_layers": 2, "num_heads": 2}
+        (root / "manifest.json").write_text(json.dumps(self.manifest))
+        self.sample_ids = [f"{split}-{index}" for index in range(count)]
+        self.samples = {
+            sample_id: Sample(sample_id, f"group-{index}", 1.0 + 0.01 * index)
             for index, sample_id in enumerate(self.sample_ids)
         }
 
     def __getitem__(self, sample_id):
-        return self.items[str(sample_id)]
+        return self.samples[str(sample_id)]
+
+    def prepare_evaluation_labels(self):
+        return Labels()
 
 
-def test_fit_and_score_pipeline(tmp_path, monkeypatch):
-    train = _Dataset("train", 6)
-    test = _Dataset("test", 2)
+def test_fit_score_evaluate_pipeline(tmp_path, monkeypatch):
     monkeypatch.setattr(
         experiment,
-        "_open_dataset",
-        lambda root, device: train if str(root).endswith("train") else test,
+        "canonical_source_group",
+        lambda sample: sample.source_id,
     )
-    monkeypatch.setattr(
-        experiment,
-        "_routing_for_sample",
-        lambda sample, config: (
-            routing_state(),
-            np.array([10, 11, 12], dtype=np.int32),
-        ),
+    train_root = tmp_path / "train"
+    test_root = tmp_path / "test"
+    train_root.mkdir()
+    test_root.mkdir()
+    train = Dataset(train_root, "train", 15)
+    test = Dataset(test_root, "test", 4)
+    config = AuditConfig(
+        calibration=CalibrationConfig(
+            channel_fraction=0.2,
+            fusion_fraction=0.2,
+            reservoir_rows=200,
+            topology_min_changed_fraction=0.0,
+            seed=7,
+        )
     )
-    config = WalkAuditConfig(
-        max_anchors=2,
-        prompt_chunk_tokens=1,
-        train_reservoir_rows=500,
-        anchor_shuffle_replicates=2,
-        bootstrap_replicates=5,
-        permutation_replicates=5,
-        show_progress=False,
-    )
-    train_output = tmp_path / "train_output"
-    model = experiment.fit_walk_audit(
-        train_split=tmp_path / "train",
-        output_dir=train_output,
-        config=config,
-        task_type="QA",
-    )
-    assert model.exists()
-    training = read_json(train_output / "training.json")
-    assert training["labels_read"] is False
-    assert training["validation_samples"] == 1
 
-    score_output = tmp_path / "score_output"
-    experiment.score_walk_audit(
-        split_root=tmp_path / "test",
-        model_path=model,
-        output_dir=score_output,
-        task_type="QA",
+    reference = tmp_path / "reference.npz"
+    scores = tmp_path / "scores.npz"
+    fit = experiment.fit_reference(train, reference, config=config)
+    scored = experiment.score_split(test, reference, scores)
+    report = evaluate_scores(
+        test,
+        scores,
+        tmp_path / "evaluation",
+        bootstrap_replicates=10,
     )
-    manifest = read_json(score_output / "manifest.json")
-    assert manifest["labels_read"] is False
-    assert len(manifest["samples"]) == 2
-    arrays = load_npz(score_output / manifest["samples"][0]["score_path"])
-    assert arrays["scores"].shape[0] == 3
-    assert arrays["anchor_js_map"].shape[:2] == (3, 3)
+
+    assert fit["labels_read"] is False
+    assert scored["labels_read"] is False
+    assert report["labels_read"] is True
+    assert report["primary_detector"] == "score"

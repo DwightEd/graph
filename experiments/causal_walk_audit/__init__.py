@@ -1,15 +1,17 @@
-"""Causal-walk and prompt-anchor validation for attention routing."""
+"""Typed route-grammar hallucination detector."""
 
-from .anchors import Anchor, AnchorMap
-from .config import WalkAuditConfig
-from .lineage import LineageTrace, propagate_anchor_lineage
-from .markov import NestedMarkovModel
+from .automaton import AutomatonTrace, STATE_NAMES, run_typed_automaton
+from .config import AuditConfig
+from .grammar import GrammarAccumulator, RouteGrammar
+from .graph import RoutingGraph, build_routing_graph
 
 __all__ = [
-    "Anchor",
-    "AnchorMap",
-    "LineageTrace",
-    "NestedMarkovModel",
-    "WalkAuditConfig",
-    "propagate_anchor_lineage",
+    "AuditConfig",
+    "AutomatonTrace",
+    "GrammarAccumulator",
+    "RouteGrammar",
+    "RoutingGraph",
+    "STATE_NAMES",
+    "build_routing_graph",
+    "run_typed_automaton",
 ]

@@ -1,132 +1,133 @@
-"""CLI for the causal-walk hypothesis validation suite."""
+"""CLI for the typed route-grammar detector."""
 
 from __future__ import annotations
 
 import argparse
 
-from .config import WalkAuditConfig
-from .evaluation import evaluate_walk_audit
-from .experiment import fit_walk_audit, score_walk_audit
+from research_dataset import open_research_dataset
+
+from .config import (
+    AuditConfig,
+    CalibrationConfig,
+    GrammarConfig,
+    GraphConfig,
+    PhaseConfig,
+)
+from .evaluation import evaluate_scores
+from .experiment import fit_reference, score_split
 
 
-def _common(parser: argparse.ArgumentParser) -> None:
-    defaults = WalkAuditConfig()
+def _config(arguments) -> AuditConfig:
+    return AuditConfig(
+        graph=GraphConfig(
+            block_rows=arguments.block_rows,
+            recent_lag=arguments.recent_lag,
+        ),
+        grammar=GrammarConfig(
+            alpha=arguments.alpha,
+            backoff_tau=arguments.backoff_tau,
+        ),
+        phase=PhaseConfig(
+            cusum_slack=arguments.cusum_slack,
+            rupture_decay=arguments.rupture_decay,
+            closure_decay=arguments.closure_decay,
+        ),
+        calibration=CalibrationConfig(
+            channel_fraction=arguments.channel_fraction,
+            fusion_fraction=arguments.fusion_fraction,
+            reservoir_rows=arguments.reservoir_rows,
+            topology_min_changed_fraction=arguments.topology_min_changed_fraction,
+            seed=arguments.seed,
+        ),
+    )
+
+
+def _fit_score_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--task-type", default="QA")
     parser.add_argument("--limit", type=int)
-    parser.add_argument("--anchor-manifest")
-    parser.add_argument("--block-rows", type=int, default=defaults.block_rows)
-    parser.add_argument("--max-anchors", type=int, default=defaults.max_anchors)
+    parser.add_argument("--block-rows", type=int, default=4096)
+    parser.add_argument("--recent-lag", type=int, default=4)
+    parser.add_argument("--alpha", type=float, default=0.5)
+    parser.add_argument("--backoff-tau", type=float, default=32.0)
+    parser.add_argument("--cusum-slack", type=float, default=0.5)
+    parser.add_argument("--rupture-decay", type=float, default=0.95)
+    parser.add_argument("--closure-decay", type=float, default=0.9)
+    parser.add_argument("--channel-fraction", type=float, default=0.2)
+    parser.add_argument("--fusion-fraction", type=float, default=0.2)
+    parser.add_argument("--reservoir-rows", type=int, default=20_000)
     parser.add_argument(
-        "--prompt-chunk-tokens",
-        type=int,
-        default=defaults.prompt_chunk_tokens,
-    )
-    parser.add_argument(
-        "--reservoir-rows",
-        type=int,
-        default=defaults.train_reservoir_rows,
-    )
-    parser.add_argument("--ridge-alpha", type=float, default=defaults.ridge_alpha)
-    parser.add_argument("--horizon", type=int, default=defaults.score_horizon)
-    parser.add_argument(
-        "--minimum-anchor-mass",
+        "--topology-min-changed-fraction",
         type=float,
-        default=defaults.minimum_anchor_mass,
+        default=0.5,
     )
-    parser.add_argument(
-        "--anchor-shuffle-replicates",
-        type=int,
-        default=defaults.anchor_shuffle_replicates,
-    )
-    parser.add_argument(
-        "--bootstrap-replicates",
-        type=int,
-        default=defaults.bootstrap_replicates,
-    )
-    parser.add_argument(
-        "--permutation-replicates",
-        type=int,
-        default=defaults.permutation_replicates,
-    )
-    parser.add_argument("--seed", type=int, default=defaults.random_seed)
-    parser.add_argument("--no-progress", action="store_true")
-
-
-def _config(arguments) -> WalkAuditConfig:
-    return WalkAuditConfig(
-        block_rows=arguments.block_rows,
-        max_anchors=arguments.max_anchors,
-        prompt_chunk_tokens=arguments.prompt_chunk_tokens,
-        train_reservoir_rows=arguments.reservoir_rows,
-        ridge_alpha=arguments.ridge_alpha,
-        score_horizon=arguments.horizon,
-        minimum_anchor_mass=arguments.minimum_anchor_mass,
-        anchor_shuffle_replicates=arguments.anchor_shuffle_replicates,
-        bootstrap_replicates=arguments.bootstrap_replicates,
-        permutation_replicates=arguments.permutation_replicates,
-        random_seed=arguments.seed,
-        show_progress=not arguments.no_progress,
-    )
+    parser.add_argument("--seed", type=int, default=20260825)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
 
-    fit = commands.add_parser("fit", help="fit label-free nested Markov models")
+    fit = commands.add_parser("fit")
     fit.add_argument("--train-split", required=True)
-    fit.add_argument("--output-dir", required=True)
-    _common(fit)
+    fit.add_argument("--reference", required=True)
+    _fit_score_options(fit)
 
-    score = commands.add_parser(
-        "score",
-        help="freeze label-free causal-walk scores",
-    )
-    score.add_argument("--split-root", required=True)
-    score.add_argument("--model", required=True)
-    score.add_argument("--output-dir", required=True)
-    _common(score)
+    score = commands.add_parser("score")
+    score.add_argument("--test-split", required=True)
+    score.add_argument("--reference", required=True)
+    score.add_argument("--output", required=True)
+    _fit_score_options(score)
 
-    evaluate = commands.add_parser("evaluate", help="open labels and test H1-H4")
-    evaluate.add_argument("--split-root", required=True)
-    evaluate.add_argument("--score-dir", required=True)
+    evaluate = commands.add_parser("evaluate")
+    evaluate.add_argument("--test-split", required=True)
+    evaluate.add_argument("--scores", required=True)
     evaluate.add_argument("--output-dir", required=True)
-    evaluate.add_argument("--bootstrap-replicates", type=int)
-    evaluate.add_argument("--permutation-replicates", type=int)
+    evaluate.add_argument("--bootstrap-replicates", type=int, default=500)
+    evaluate.add_argument("--seed", type=int, default=20260825)
     return parser
 
 
 def main() -> None:
     arguments = build_parser().parse_args()
     if arguments.command == "fit":
-        fit_walk_audit(
-            train_split=arguments.train_split,
-            output_dir=arguments.output_dir,
+        dataset = open_research_dataset(
+            arguments.train_split,
             device=arguments.device,
+        )
+        result = fit_reference(
+            dataset,
+            arguments.reference,
             config=_config(arguments),
             task_type=arguments.task_type,
             limit=arguments.limit,
-            anchor_manifest=arguments.anchor_manifest,
         )
     elif arguments.command == "score":
-        score_walk_audit(
-            split_root=arguments.split_root,
-            model_path=arguments.model,
-            output_dir=arguments.output_dir,
+        dataset = open_research_dataset(
+            arguments.test_split,
             device=arguments.device,
+        )
+        result = score_split(
+            dataset,
+            arguments.reference,
+            arguments.output,
             task_type=arguments.task_type,
             limit=arguments.limit,
-            anchor_manifest=arguments.anchor_manifest,
         )
     else:
-        evaluate_walk_audit(
-            split_root=arguments.split_root,
-            score_dir=arguments.score_dir,
-            output_dir=arguments.output_dir,
-            bootstrap_replicates=arguments.bootstrap_replicates,
-            permutation_replicates=arguments.permutation_replicates,
+        dataset = open_research_dataset(
+            arguments.test_split,
+            device="cpu",
+            retain_embedded_labels=True,
         )
+        result = evaluate_scores(
+            dataset,
+            arguments.scores,
+            arguments.output_dir,
+            bootstrap_replicates=arguments.bootstrap_replicates,
+            seed=arguments.seed,
+        )
+    print(result)
 
 
 if __name__ == "__main__":

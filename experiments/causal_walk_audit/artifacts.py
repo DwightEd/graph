@@ -1,22 +1,24 @@
-"""Small artifact helpers."""
+"""Small, pickle-free artifacts for the typed route-grammar method."""
 
 from __future__ import annotations
 
-import csv
+import hashlib
 import json
 from pathlib import Path
 
 import numpy as np
 
-
-def write_json(path, value) -> None:
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8")
+REFERENCE_SCHEMA = "typed-route-grammar-reference-v2"
+SCORE_SCHEMA = "typed-route-grammar-score-v2"
+EVALUATION_SCHEMA = "typed-route-grammar-evaluation-v2"
 
 
-def read_json(path):
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+def sha256(path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def save_npz(path, **arrays) -> None:
@@ -27,15 +29,13 @@ def save_npz(path, **arrays) -> None:
 
 def load_npz(path) -> dict[str, np.ndarray]:
     with np.load(path, allow_pickle=False) as arrays:
-        return {name: arrays[name] for name in arrays.files}
+        return {name: arrays[name].copy() for name in arrays.files}
 
 
-def write_csv(path, rows: list[dict[str, object]]) -> None:
-    if not rows:
-        return
+def write_json(path, value: dict[str, object]) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
+    path.write_text(
+        json.dumps(value, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
