@@ -20,7 +20,7 @@ COMMON=(
   --block-rows "${BLOCK_ROWS:-8192}"
   --max-anchors "${MAX_ANCHORS:-12}"
   --prompt-chunk-tokens "${PROMPT_CHUNK_TOKENS:-32}"
-  --reservoir-rows "${RESERVOIR_ROWS:-100000}"
+  --reservoir-rows "${RESERVOIR_ROWS:-20000}"
   --ridge-alpha "${RIDGE_ALPHA:-1.0}"
   --horizon "${HORIZON:-4}"
   --minimum-anchor-mass "${MINIMUM_ANCHOR_MASS:-0.001}"

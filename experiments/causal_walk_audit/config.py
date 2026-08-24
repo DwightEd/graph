@@ -10,7 +10,7 @@ class WalkAuditConfig:
     block_rows: int = 8192
     max_anchors: int = 12
     prompt_chunk_tokens: int = 32
-    train_reservoir_rows: int = 100_000
+    train_reservoir_rows: int = 20_000
     ridge_alpha: float = 1.0
     score_horizon: int = 4
     minimum_anchor_mass: float = 1e-3
