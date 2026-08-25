@@ -19,6 +19,7 @@ class ModelConfig:
     hidden_dim: int = 64
     head_layers: int = 2
     head_attention_heads: int = 4
+    head_pool_batch_size: int = 8192
     transport_rank: int = 8
     message_layers: int = 2
     dropout: float = 0.1
