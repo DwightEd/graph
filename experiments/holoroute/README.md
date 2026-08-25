@@ -1,7 +1,14 @@
 # HoloRoute
 
 HoloRoute learns normal structure in an attention event graph without
-hallucination labels.
+hallucination labels. The current implementation is the engineering and
+representation baseline for the ICLR project; it is not yet the final mechanism
+claim.
+
+## ICLR research documents
+
+- [`iclr/LITERATURE_AND_EXPERIMENT_AUDIT.md`](iclr/LITERATURE_AND_EXPERIMENT_AUDIT.md): literature hypotheses, every historical feature and how it was computed, results, confounds, implementation failures, and the evidence that remains credible.
+- [`iclr/CORE_RESEARCH_PARADIGM.md`](iclr/CORE_RESEARCH_PARADIGM.md): P-Cut, a proposed shift from generic graph anomaly detection to a prompt-evidence dependence test.
 
 Read the code in this order:
 
