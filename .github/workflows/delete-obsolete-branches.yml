@@ -1,0 +1,26 @@
+name: Delete obsolete branches
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/delete-obsolete-branches.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Delete every remote branch except main
+        run: |
+          git ls-remote --heads origin |
+          awk '{sub("refs/heads/", "", $2); print $2}' |
+          while IFS= read -r branch; do
+            if [ "$branch" != "main" ]; then
+              git push origin --delete "$branch"
+            fi
+          done
