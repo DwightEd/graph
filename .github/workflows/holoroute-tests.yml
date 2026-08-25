@@ -1,14 +1,6 @@
 name: HoloRoute tests
 
 on:
-  push:
-    paths:
-      - "experiments/holoroute/**"
-      - ".github/workflows/holoroute-tests.yml"
-  pull_request:
-    paths:
-      - "experiments/holoroute/**"
-      - ".github/workflows/holoroute-tests.yml"
   workflow_dispatch:
 
 jobs:

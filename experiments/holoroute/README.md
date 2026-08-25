@@ -1,50 +1,51 @@
 # HoloRoute
 
-Unsupervised neural learning on the causal attention event graph audited in
-`experiments/attention_holonomy_audit/`.
+HoloRoute learns normal structure in an attention event graph without
+hallucination labels.
+
+Read the code in this order:
+
+```text
+graph.py       attention -> event graph
+model.py       event graph -> neural event states
+learning.py    self-supervised graph tasks
+detection.py   local residuals -> anomaly score
+pipeline.py    train, calibrate and score
+evaluate.py    label-posthoc metrics
+baseline.py    flat all-layer no-topology control
+run.py         command-line interface
+```
+
+The public computation path is deliberately short:
+
+```python
+graph = build_graph(sample, config.graph)
+model = HoloRoute(graph.layer_count, graph.head_count, config.model)
+loss = self_supervised_loss(model, graph, config, generator)
+residuals = score_graph(model, graph, config, seed)
+```
+
+Internal tensors are grouped in small data classes. The model returns one
+`ModelOutput` rather than a dictionary of named feature fields. Token residuals
+are stored as one `[token, residual]` matrix; names exist only in the reporting
+layer.
+
+## Run
 
 ```bash
 TRAIN_SPLIT=/path/to/train \
 TEST_SPLIT=/path/to/test \
-OUT=experiments/holoroute/outputs/qa \
-TASK_TYPE=QA DEVICE=cuda \
+OUT=experiments/holoroute/outputs/full \
+MODEL=holoroute DEVICE=cuda \
 bash experiments/holoroute/run.sh
 ```
 
-The workflow performs:
-
-```text
-train neural graph encoder
--> fit position-conditioned density
--> freeze test token scores
--> open labels only in evaluate
-```
-
-## Mandatory flat all-layer baseline
-
-`flat-1024` keeps the same exact token-pair `layer x head` tensor but removes all
-adjacency. For a 32-layer, 32-head model, each pair has 1024 raw attention
-coordinates. It uses the same source split, block masking, conditional density
-and evaluation protocol.
+Flat all-layer control:
 
 ```bash
 TRAIN_SPLIT=/path/to/train \
 TEST_SPLIT=/path/to/test \
-OUT=experiments/holoroute/outputs/flat_1024 \
-TASK_TYPE=QA DEVICE=cuda \
-bash experiments/holoroute/run_flat1024.sh
+OUT=experiments/holoroute/outputs/flat \
+MODEL=flat1024 DEVICE=cuda \
+bash experiments/holoroute/run.sh
 ```
-
-Run both with identical environment variables:
-
-```bash
-TRAIN_SPLIT=/path/to/train TEST_SPLIT=/path/to/test \
-OUT_ROOT=experiments/holoroute/outputs/comparison \
-TASK_TYPE=QA DEVICE=cuda \
-bash experiments/holoroute/run_comparison.sh
-```
-
-See `FLAT1024_BASELINE.md` for the exact control design. The first implementation
-intentionally excludes CUSUM, Markov state tables, prompt-anchor claims and
-spectral hybrids. See `METHOD.md` and `EXPERIMENT_PLAN.md` before interpreting
-results.

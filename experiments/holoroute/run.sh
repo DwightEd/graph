@@ -5,43 +5,51 @@ set -euo pipefail
 : "${TEST_SPLIT:?set TEST_SPLIT}"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-OUT=${OUT:-"${ROOT}/experiments/holoroute/outputs/full"}
+OUT=${OUT:-"${ROOT}/experiments/holoroute/outputs/run"}
 PYTHON=${PYTHON:-python}
 DEVICE=${DEVICE:-cuda}
-TASK_TYPE=${TASK_TYPE:-QA}
+TASK=${TASK:-QA}
+EPOCHS=${EPOCHS:-8}
 TRAIN_LIMIT=${TRAIN_LIMIT:-}
 TEST_LIMIT=${TEST_LIMIT:-}
-EPOCHS=${EPOCHS:-8}
-BOOTSTRAP_REPLICATES=${BOOTSTRAP_REPLICATES:-500}
+MODEL=${MODEL:-holoroute}
 
 mkdir -p "${OUT}"
 cd "${ROOT}"
 
-train_args=(
-  --train-split "${TRAIN_SPLIT}"
+train_command=train
+score_command=score
+if [[ "${MODEL}" == "flat1024" ]]; then
+  train_command=flat-train
+  score_command=flat-score
+fi
+
+train=(
+  "${PYTHON}" -m experiments.holoroute.run "${train_command}"
+  --train "${TRAIN_SPLIT}"
   --checkpoint "${OUT}/model.pt"
-  --density "${OUT}/density.npz"
-  --task-type "${TASK_TYPE}"
-  --device "${DEVICE}"
+  --reference "${OUT}/reference.npz"
+  --task "${TASK}"
   --epochs "${EPOCHS}"
-)
-[[ -z "${TRAIN_LIMIT}" ]] || train_args+=(--limit "${TRAIN_LIMIT}")
-"${PYTHON}" -m experiments.holoroute.main train "${train_args[@]}"
-
-score_args=(
-  --test-split "${TEST_SPLIT}"
-  --checkpoint "${OUT}/model.pt"
-  --density "${OUT}/density.npz"
-  --output "${OUT}/scores.npz"
-  --task-type "${TASK_TYPE}"
   --device "${DEVICE}"
 )
-[[ -z "${TEST_LIMIT}" ]] || score_args+=(--limit "${TEST_LIMIT}")
-"${PYTHON}" -m experiments.holoroute.main score "${score_args[@]}"
+[[ -z "${TRAIN_LIMIT}" ]] || train+=(--limit "${TRAIN_LIMIT}")
+"${train[@]}"
 
-"${PYTHON}" -m experiments.holoroute.main evaluate \
-  --test-split "${TEST_SPLIT}" \
+score=(
+  "${PYTHON}" -m experiments.holoroute.run "${score_command}"
+  --test "${TEST_SPLIT}"
+  --checkpoint "${OUT}/model.pt"
+  --reference "${OUT}/reference.npz"
+  --output "${OUT}/scores.npz"
+  --task "${TASK}"
+  --device "${DEVICE}"
+)
+[[ -z "${TEST_LIMIT}" ]] || score+=(--limit "${TEST_LIMIT}")
+"${score[@]}"
+
+"${PYTHON}" -m experiments.holoroute.run evaluate \
+  --test "${TEST_SPLIT}" \
   --scores "${OUT}/scores.npz" \
-  --output-dir "${OUT}/evaluation" \
-  --bootstrap-replicates "${BOOTSTRAP_REPLICATES}" \
+  --output "${OUT}/evaluation" \
   --device "${DEVICE}"

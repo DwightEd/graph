@@ -1,43 +1,26 @@
-"""Frozen configuration for the HoloRoute attention-event graph model."""
-
-from __future__ import annotations
+"""Configuration for the HoloRoute event-graph model."""
 
 from dataclasses import asdict, dataclass, field
 
 
 @dataclass(frozen=True)
+class GraphConfig:
+    block_rows: int = 4096
+    max_relay_predecessors: int = 12
+    max_query_events: int = 32
+    minimum_event_mass: float = 1e-8
+    numerical_tolerance: float = 4e-3
+
+
+@dataclass(frozen=True)
 class ModelConfig:
     hidden_dim: int = 64
-    head_encoder_layers: int = 2
-    head_encoder_heads: int = 4
+    head_layers: int = 2
+    head_attention_heads: int = 4
     transport_rank: int = 8
-    query_inducing_points: int = 4
-    message_blocks: int = 2
+    message_layers: int = 2
     dropout: float = 0.1
     lag_buckets: int = 12
-    use_depth: bool = True
-    use_relay: bool = True
-    use_query: bool = True
-    use_transport: bool = True
-    use_holonomy: bool = True
-
-
-@dataclass(frozen=True)
-class MaskConfig:
-    event_fraction: float = 0.2
-    relay_fraction: float = 0.15
-    minimum_events: int = 1
-    score_rounds: int = 6
-
-
-@dataclass(frozen=True)
-class LossConfig:
-    event_weight: float = 1.0
-    path_weight: float = 0.5
-    depth_weight: float = 0.5
-    query_weight: float = 0.5
-    holonomy_weight: float = 0.25
-    variance_weight: float = 0.05
 
 
 @dataclass(frozen=True)
@@ -47,25 +30,42 @@ class TrainConfig:
     weight_decay: float = 1e-4
     gradient_clip: float = 1.0
     validation_fraction: float = 0.15
-    calibration_fraction: float = 0.2
+    calibration_fraction: float = 0.20
+    mask_fraction: float = 0.20
+    relay_drop_fraction: float = 0.15
+    minimum_masked_events: int = 1
+    validation_masks: int = 3
     seed: int = 20260825
 
 
 @dataclass(frozen=True)
-class DensityConfig:
-    ridge_alpha: float = 1e-3
-    covariance_shrinkage: float = 0.2
-    scale_floor: float = 1e-3
+class LossConfig:
+    event: float = 1.0
+    depth: float = 0.75
+    query: float = 0.50
+    relay: float = 0.15
+    holonomy: float = 0.05
+    variance: float = 0.05
+    support: float = 0.25
+    censored: float = 0.10
+
+
+@dataclass(frozen=True)
+class DetectionConfig:
+    score_folds: int = 8
     reservoir_rows: int = 20_000
+    ridge_alpha: float = 1e-3
+    covariance_shrinkage: float = 0.20
+    scale_floor: float = 1e-3
 
 
 @dataclass(frozen=True)
 class HoloRouteConfig:
+    graph: GraphConfig = field(default_factory=GraphConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
-    masking: MaskConfig = field(default_factory=MaskConfig)
-    loss: LossConfig = field(default_factory=LossConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
-    density: DensityConfig = field(default_factory=DensityConfig)
+    loss: LossConfig = field(default_factory=LossConfig)
+    detection: DetectionConfig = field(default_factory=DetectionConfig)
 
-    def to_dict(self) -> dict[str, object]:
+    def as_dict(self) -> dict[str, object]:
         return asdict(self)
