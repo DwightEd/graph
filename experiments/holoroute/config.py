@@ -6,8 +6,10 @@ from dataclasses import asdict, dataclass, field
 @dataclass(frozen=True)
 class GraphConfig:
     block_rows: int = 4096
-    max_relay_predecessors: int = 12
-    max_query_events: int = 32
+    max_events_per_query_layer: int = 8
+    max_relay_predecessors: int = 4
+    max_query_events: int = 8
+    max_diamonds_per_query_layer: int = 4
     minimum_event_mass: float = 1e-8
     numerical_tolerance: float = 4e-3
 
@@ -35,6 +37,7 @@ class TrainConfig:
     relay_drop_fraction: float = 0.15
     minimum_masked_events: int = 1
     validation_masks: int = 3
+    mixed_precision: bool = True
     seed: int = 20260825
 
 
