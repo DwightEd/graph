@@ -86,7 +86,7 @@ class HeadEncoder(nn.Module):
         nn.init.normal_(self.seeds, std=0.02)
         self.head_pool = nn.MultiheadAttention(
             hidden,
-            nhead=config.head_attention_heads,
+            num_heads=config.head_attention_heads,
             dropout=config.dropout,
             batch_first=True,
         )
