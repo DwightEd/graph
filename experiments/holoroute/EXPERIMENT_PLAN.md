@@ -10,8 +10,15 @@ labels?
 
 ### H1: neural graph utility
 
-The full event graph improves held-out self-supervised completion over
-`event_only` and a flat event encoder.
+The full event graph improves held-out self-supervised completion and
+label-posthoc detection over both `event_only` and the mandatory `flat-1024`
+baseline.
+
+`flat-1024` receives the exact same `L x H` values for every token pair, the
+observation mask and matched metadata, but no depth, relay, query-set or diamond
+adjacency. It masks complete layer blocks and uses the same source split,
+conditional density and evaluation. The comparison therefore tests graph
+organization rather than access to more attention numbers.
 
 ### H2: causal-path utility
 
@@ -38,10 +45,15 @@ invalidate the graph encoder.
 1. absolute token position;
 2. relative token position;
 3. direct Lookback-style prompt/response score;
-4. flat MLP on the complete event head vector;
-5. one-hop token/event GNN without relay paths;
-6. HoloRoute structural ablations;
-7. the strongest frozen RR spectral residual.
+4. `flat-1024`: no-topology MLP on the complete token-pair `L x H` tensor;
+5. layer-mean and single-layer views;
+6. one-hop token/event GNN without relay paths;
+7. HoloRoute structural ablations;
+8. the strongest frozen RR spectral residual.
+
+Every neural comparison reports parameter count. A smaller/larger flat hidden
+dimension may be used only to match the HoloRoute parameter budget and must be
+chosen without hallucination labels.
 
 ## Position gate
 
@@ -52,6 +64,23 @@ only when:
 - position-conditioned feature residuals remain useful;
 - the score-position Spearman correlation is substantially below the former
   rupture baseline and is reported for every task.
+
+## Graph-contribution gate
+
+The graph claim requires both:
+
+\[
+\mathcal L_{full}^{val}<\mathcal L_{flat1024}^{val}
+\]
+
+and
+
+\[
+\mathrm{AUPRC}_{full}>\mathrm{AUPRC}_{flat1024}
+\]
+
+under matched source groups, masking semantics and comparable parameter counts.
+The AUPRC difference is reported with paired source bootstrap uncertainty.
 
 ## Evaluation
 
@@ -65,6 +94,7 @@ only when:
 
 ## Stopping rules
 
+- Full does not beat flat-1024: remove or redesign the graph claim.
 - No path gain: remove De Bruijn relay propagation.
 - No query gain: replace SetMixer with a simpler local encoder.
 - No transport gain: use identity transport and drop sheaf-style claims.
