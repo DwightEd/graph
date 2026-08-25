@@ -2,7 +2,7 @@
 
 HoloRoute is the active research implementation in this repository. It performs attention-only, unsupervised, token-level hallucination detection by learning normal structure on a multilayer causal attention event graph.
 
-The repository has been consolidated around one method and one branch. Historical implementations are no longer kept as executable code; their hypotheses, results, and rejection decisions are recorded in [`docs/EXPERIMENT_HISTORY.md`](docs/EXPERIMENT_HISTORY.md).
+The default branch has been consolidated around one method. Historical implementations are no longer kept as executable code on `main`; their hypotheses, results, and rejection decisions are recorded in [`docs/EXPERIMENT_HISTORY.md`](docs/EXPERIMENT_HISTORY.md). Historical branch refs are archival only and are not active development lines.
 
 ## Method in one line
 
