@@ -1,8 +1,9 @@
-"""Build the dual-axis causal attention event graph.
+"""Build one bounded dual-axis attention event graph per sample.
 
-One node is an exact ``(source, target, layer)`` attention event. Its feature is
-that layer's complete head profile. Relations encode layer continuation,
-causal relay, query membership and relay/depth diamonds.
+A node is an exact ``(source, target, layer)`` attention event. Its attribute is
+that layer's complete head profile. The graph keeps the strongest events for
+each target-layer pair and moves discarded retained mass into ``unresolved`` so
+row mass remains conserved.
 """
 
 from dataclasses import dataclass
@@ -33,6 +34,28 @@ class Events:
     def mass(self) -> torch.Tensor:
         return self.value.sum(dim=-1)
 
+    def select(self, index: torch.Tensor) -> "Events":
+        return Events(
+            source=self.source[index],
+            target=self.target[index],
+            layer=self.layer[index],
+            role=self.role[index],
+            lag=self.lag[index],
+            value=self.value[index],
+            observed=self.observed[index],
+        )
+
+    def to(self, device) -> "Events":
+        return Events(
+            source=self.source.to(device),
+            target=self.target.to(device),
+            layer=self.layer.to(device),
+            role=self.role.to(device),
+            lag=self.lag.to(device),
+            value=self.value.to(device),
+            observed=self.observed.to(device),
+        )
+
 
 @dataclass(frozen=True)
 class QueryGroups:
@@ -49,6 +72,14 @@ class QueryGroups:
         start = int(self.pointer[group].item())
         stop = int(self.pointer[group + 1].item())
         return self.events[start:stop]
+
+    def to(self, device) -> "QueryGroups":
+        return QueryGroups(
+            events=self.events.to(device),
+            pointer=self.pointer.to(device),
+            target=self.target.to(device),
+            layer=self.layer.to(device),
+        )
 
 
 @dataclass(frozen=True)
@@ -82,6 +113,27 @@ class EventGraph:
     @property
     def event_query(self) -> torch.Tensor:
         return self.events.target - self.response_start
+
+    def to(self, device) -> "EventGraph":
+        return EventGraph(
+            sample_id=self.sample_id,
+            source_id=self.source_id,
+            task_type=self.task_type,
+            response_start=self.response_start,
+            token_count=self.token_count,
+            response_count=self.response_count,
+            layer_count=self.layer_count,
+            head_count=self.head_count,
+            attention_floor=self.attention_floor,
+            events=self.events.to(device),
+            depth_edges=self.depth_edges.to(device),
+            relay_edges=self.relay_edges.to(device),
+            queries=self.queries.to(device),
+            diamonds=self.diamonds.to(device),
+            diagonal=self.diagonal.to(device),
+            unresolved=self.unresolved.to(device),
+            response_token_ids=self.response_token_ids.to(device),
+        )
 
     def check(self) -> "EventGraph":
         assert self.events.value.shape == (self.event_count, self.head_count)
@@ -214,7 +266,48 @@ def group_head_profiles(
     )
 
 
-def event_lookup(events: Events, token_count: int) -> dict[tuple[int, int, int], int]:
+def limit_events(
+    events: Events,
+    response_start: int,
+    response_count: int,
+    layer_count: int,
+    maximum_events: int,
+) -> tuple[Events, torch.Tensor]:
+    """Keep top-mass events per target-layer and return their discarded mass."""
+
+    discarded = events.value.new_zeros((response_count, layer_count, events.value.shape[-1]))
+    if not events.count:
+        return events, discarded
+
+    groups: dict[tuple[int, int], list[int]] = {}
+    targets = events.target.detach().cpu().tolist()
+    layers = events.layer.detach().cpu().tolist()
+    masses = events.mass.detach().cpu().tolist()
+    for index, key in enumerate(zip(targets, layers, strict=True)):
+        groups.setdefault(key, []).append(index)
+
+    keep_indices: list[int] = []
+    for members in groups.values():
+        members.sort(key=lambda index: masses[index], reverse=True)
+        keep_indices.extend(members[:maximum_events])
+    keep_indices.sort()
+
+    selected = torch.tensor(keep_indices, dtype=torch.long, device=events.value.device)
+    keep = torch.zeros(events.count, dtype=torch.bool, device=events.value.device)
+    keep[selected] = True
+    dropped = ~keep
+    if bool(dropped.any()):
+        row = (
+            (events.target[dropped] - response_start) * layer_count
+            + events.layer[dropped]
+        )
+        flat = discarded.view(response_count * layer_count, -1)
+        flat.index_add_(0, row, events.value[dropped])
+
+    return events.select(selected), discarded
+
+
+def event_lookup(events: Events) -> dict[tuple[int, int, int], int]:
     return {
         (int(source), int(target), int(layer)): index
         for index, (source, target, layer) in enumerate(
@@ -243,13 +336,19 @@ def build_depth_edges(events: Events, lookup: dict[tuple[int, int, int], int]) -
         if successor is not None:
             left.append(index)
             right.append(successor)
-    return torch.tensor([left, right], dtype=torch.long, device=events.value.device) if left else empty_index(2, events.value.device)
+    if not left:
+        return empty_index(2, events.value.device)
+    return torch.tensor([left, right], dtype=torch.long, device=events.value.device)
 
 
 def incoming_events(events: Events) -> dict[tuple[int, int], list[int]]:
     result: dict[tuple[int, int], list[int]] = {}
     for index, (target, layer) in enumerate(
-        zip(events.target.detach().cpu().tolist(), events.layer.detach().cpu().tolist(), strict=True)
+        zip(
+            events.target.detach().cpu().tolist(),
+            events.layer.detach().cpu().tolist(),
+            strict=True,
+        )
     ):
         result.setdefault((layer, target), []).append(index)
     return result
@@ -276,7 +375,9 @@ def build_relay_edges(
         left.extend(predecessors)
         right.extend([successor] * len(predecessors))
 
-    return torch.tensor([left, right], dtype=torch.long, device=events.value.device) if left else empty_index(2, events.value.device)
+    if not left:
+        return empty_index(2, events.value.device)
+    return torch.tensor([left, right], dtype=torch.long, device=events.value.device)
 
 
 def build_query_groups(events: Events, maximum_events: int) -> QueryGroups:
@@ -284,8 +385,8 @@ def build_query_groups(events: Events, maximum_events: int) -> QueryGroups:
     targets = events.target.detach().cpu().tolist()
     layers = events.layer.detach().cpu().tolist()
     masses = events.mass.detach().cpu().tolist()
-    for index, (target, layer) in enumerate(zip(targets, layers, strict=True)):
-        groups.setdefault((target, layer), []).append(index)
+    for index, key in enumerate(zip(targets, layers, strict=True)):
+        groups.setdefault(key, []).append(index)
 
     ordered_events: list[int] = []
     pointer = [0]
@@ -311,11 +412,13 @@ def build_diamonds(
     events: Events,
     relay_edges: torch.Tensor,
     lookup: dict[tuple[int, int, int], int],
+    maximum_per_query_layer: int,
 ) -> torch.Tensor:
-    rows = [[], [], [], []]
     sources = events.source.detach().cpu().tolist()
     targets = events.target.detach().cpu().tolist()
     layers = events.layer.detach().cpu().tolist()
+    masses = events.mass.detach().cpu().tolist()
+    candidates: dict[tuple[int, int], list[tuple[float, tuple[int, int, int, int]]]] = {}
 
     for predecessor, successor in relay_edges.T.detach().cpu().tolist():
         layer = layers[predecessor]
@@ -323,10 +426,22 @@ def build_diamonds(
         end = lookup.get((sources[successor], targets[successor], layer + 2))
         if depth_middle is None or end is None:
             continue
-        for row, event in enumerate((predecessor, depth_middle, successor, end)):
-            rows[row].append(event)
+        key = (targets[end], layers[end])
+        score = masses[predecessor] + masses[successor]
+        candidates.setdefault(key, []).append(
+            (score, (predecessor, depth_middle, successor, end))
+        )
 
-    return torch.tensor(rows, dtype=torch.long, device=events.value.device) if rows[0] else empty_index(4, events.value.device)
+    rows = [[], [], [], []]
+    for values in candidates.values():
+        values.sort(key=lambda item: item[0], reverse=True)
+        for _, diamond in values[:maximum_per_query_layer]:
+            for row, event in enumerate(diamond):
+                rows[row].append(event)
+
+    if not rows[0]:
+        return empty_index(4, events.value.device)
+    return torch.tensor(rows, dtype=torch.long, device=events.value.device)
 
 
 @torch.no_grad()
@@ -354,11 +469,29 @@ def build_graph(sample, config: GraphConfig | None = None) -> EventGraph:
         int(attention.response_idx),
         config.minimum_event_mass,
     )
-    lookup = event_lookup(events, int(attention.num_tokens))
+    events, discarded = limit_events(
+        events,
+        int(attention.response_idx),
+        int(attention.num_response_tokens),
+        int(attention.num_layers),
+        config.max_events_per_query_layer,
+    )
+    unresolved = (unresolved + discarded).clamp_max(1.0)
+
+    lookup = event_lookup(events)
     depth_edges = build_depth_edges(events, lookup)
-    relay_edges = build_relay_edges(events, int(attention.response_idx), config.max_relay_predecessors)
+    relay_edges = build_relay_edges(
+        events,
+        int(attention.response_idx),
+        config.max_relay_predecessors,
+    )
     queries = build_query_groups(events, config.max_query_events)
-    diamonds = build_diamonds(events, relay_edges, lookup)
+    diamonds = build_diamonds(
+        events,
+        relay_edges,
+        lookup,
+        config.max_diamonds_per_query_layer,
+    )
 
     return EventGraph(
         sample_id=str(sample.sample_id),
