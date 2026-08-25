@@ -1,48 +1,52 @@
 import torch
 
-from experiments.holoroute.graph import EventGraph, Events, QueryGroups
+from experiments.holoroute.graph import AttentionEdges, AttentionGraph
 
 
-def synthetic_graph(heads: int = 4) -> EventGraph:
-    source = torch.tensor([0, 0, 2, 2, 1, 1, 3, 2])
-    target = torch.tensor([2, 2, 3, 3, 3, 3, 4, 4])
-    layer = torch.tensor([0, 1, 1, 2, 1, 2, 2, 2])
-    generator = torch.Generator().manual_seed(7)
-    value = 0.02 + 0.25 * torch.rand((8, heads), generator=generator)
-    observed = torch.rand((8, heads), generator=generator) > 0.15
-    value = value * observed
-
-    events = Events(
-        source=source,
-        target=target,
-        layer=layer,
-        role=(source >= 2).long(),
-        lag=target - source,
-        value=value,
-        observed=observed,
-    )
-    queries = QueryGroups(
-        events=torch.tensor([0, 1, 2, 4, 3, 5, 6, 7]),
-        pointer=torch.tensor([0, 1, 2, 4, 6, 8]),
-        target=torch.tensor([2, 2, 3, 3, 4]),
-        layer=torch.tensor([0, 1, 1, 2, 2]),
-    )
-    return EventGraph(
+def synthetic_graph() -> AttentionGraph:
+    # Prompt tokens: 0,1. Response tokens: 2,3,4. Three layers, two heads.
+    source = torch.tensor([
+        0, 1, 0, 1,
+        0, 2, 1, 2, 3,
+        2, 3, 1, 3,
+    ])
+    target = torch.tensor([
+        2, 2, 3, 3,
+        2, 3, 3, 4, 4,
+        3, 4, 4, 4,
+    ])
+    layer = torch.tensor([
+        0, 0, 0, 0,
+        1, 1, 1, 1, 1,
+        2, 2, 2, 2,
+    ])
+    head = torch.tensor([
+        0, 1, 0, 1,
+        0, 0, 1, 0, 1,
+        0, 1, 0, 1,
+    ])
+    weight = torch.tensor([
+        0.55, 0.50, 0.40, 0.45,
+        0.35, 0.35, 0.30, 0.55, 0.50,
+        0.50, 0.55, 0.30, 0.40,
+    ])
+    pointer = torch.tensor([0, 4, 9, 13])
+    diagonal = torch.full((3, 3, 2), 0.25)
+    retained = torch.zeros_like(diagonal)
+    retained.index_put_((target - 2, layer, head), weight, accumulate=True)
+    unresolved = (1.0 - retained - diagonal).clamp_min(0.0)
+    return AttentionGraph(
         sample_id="synthetic",
         source_id="source",
         task_type="QA",
         response_start=2,
-        token_count=6,
-        response_count=4,
+        token_count=5,
+        response_count=3,
         layer_count=3,
-        head_count=heads,
+        head_count=2,
         attention_floor=0.01,
-        events=events,
-        depth_edges=torch.tensor([[0, 2, 4], [1, 3, 5]]),
-        relay_edges=torch.tensor([[0, 1, 2, 4], [2, 3, 6, 6]]),
-        queries=queries,
-        diamonds=torch.tensor([[0], [1], [2], [3]]),
-        diagonal=torch.full((4, 3, heads), 0.1),
-        unresolved=torch.full((4, 3, heads), 0.2),
-        response_token_ids=torch.tensor([10, 11, 12, 13]),
+        edges=AttentionEdges(source, target, layer, head, weight, pointer),
+        diagonal=diagonal,
+        unresolved=unresolved,
+        response_token_ids=torch.tensor([10, 11, 12]),
     ).check()
