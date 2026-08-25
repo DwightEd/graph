@@ -24,4 +24,4 @@ jobs:
           python -m pip install numpy scipy scikit-learn tqdm pytest
       - run: python -m compileall -q experiments/holoroute
       - run: bash -n experiments/holoroute/run.sh
-      - run: pytest -q experiments/holoroute/tests
+      - run: python -m pytest -q experiments/holoroute/tests
