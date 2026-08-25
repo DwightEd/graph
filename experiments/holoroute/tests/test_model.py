@@ -1,6 +1,13 @@
 import torch
 
-from experiments.holoroute import Flat1024, HoloRoute, HoloRouteConfig, build_pairs, score_graph, self_supervised_loss
+from experiments.holoroute import (
+    Flat1024,
+    HoloRoute,
+    HoloRouteConfig,
+    build_pairs,
+    score_graph,
+    self_supervised_loss,
+)
 from experiments.holoroute.baseline import flat_loss, score_flat
 from experiments.holoroute.config import ModelConfig
 from experiments.holoroute.tests.helpers import synthetic_graph
@@ -22,6 +29,8 @@ def test_graph_model_loss_and_token_residuals():
     graph = synthetic_graph()
     config = small_config()
     model = HoloRoute(graph.layer_count, graph.head_count, config.model)
+    assert model.encoder.head_pool.num_heads == config.model.head_attention_heads
+
     output = model(graph)
     assert output.state.shape == (graph.event_count, 32)
     assert output.predictions.value.shape == (graph.event_count, 4, graph.head_count)
