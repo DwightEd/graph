@@ -1,6 +1,4 @@
-"""Small frozen artifact helpers for HoloRoute."""
-
-from __future__ import annotations
+"""Artifact I/O at the boundary of the HoloRoute pipeline."""
 
 import hashlib
 import json
@@ -9,11 +7,13 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import torch
 
-CHECKPOINT_SCHEMA = "holoroute-checkpoint-v1"
-DENSITY_SCHEMA = "holoroute-density-v1"
-SCORE_SCHEMA = "holoroute-score-v1"
-EVALUATION_SCHEMA = "holoroute-evaluation-v1"
+CHECKPOINT_SCHEMA = "holoroute-checkpoint-v2"
+REFERENCE_SCHEMA = "holoroute-reference-v2"
+DENSITY_SCHEMA = REFERENCE_SCHEMA
+SCORE_SCHEMA = "holoroute-score-v2"
+EVALUATION_SCHEMA = "holoroute-evaluation-v2"
 
 
 def sha256(path) -> str:
@@ -39,6 +39,18 @@ def save_npz(path, **arrays) -> None:
 def load_npz(path) -> dict[str, np.ndarray]:
     with np.load(path, allow_pickle=False) as arrays:
         return {name: arrays[name].copy() for name in arrays.files}
+
+
+def save_checkpoint(path, payload: dict[str, object]) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".pt", delete=False) as handle:
+        temporary = Path(handle.name)
+    try:
+        torch.save(payload, temporary)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def write_json(path, payload) -> None:
