@@ -1,38 +1,55 @@
 import torch
 
-from experiments.holoroute.config import HoloRouteConfig, ModelConfig
-from experiments.holoroute.model import HoloRouteEncoder
-from experiments.holoroute.objectives import score_graph, self_supervised_loss
+from experiments.holoroute import Flat1024, HoloRoute, HoloRouteConfig, build_pairs, score_graph, self_supervised_loss
+from experiments.holoroute.baseline import flat_loss, score_flat
+from experiments.holoroute.config import ModelConfig
 from experiments.holoroute.tests.helpers import synthetic_graph
 
 
-def test_model_uses_event_path_depth_and_query_structure():
+def small_config() -> HoloRouteConfig:
+    return HoloRouteConfig(
+        model=ModelConfig(
+            hidden_dim=32,
+            head_layers=1,
+            head_attention_heads=4,
+            transport_rank=4,
+            message_layers=1,
+        )
+    )
+
+
+def test_graph_model_loss_and_token_residuals():
     graph = synthetic_graph()
-    config = HoloRouteConfig(model=ModelConfig(hidden_dim=32, head_encoder_heads=4, transport_rank=4))
-    model = HoloRouteEncoder(graph.num_layers, graph.num_heads, config.model)
+    config = small_config()
+    model = HoloRoute(graph.layer_count, graph.head_count, config.model)
     output = model(graph)
-    assert output.state.shape == (graph.num_events, 32)
-    assert output.event_prediction.shape == graph.event_head_value.shape
-    assert output.depth_coverage.any()
-    assert output.relay_coverage.any()
-    assert output.query_coverage.any()
-    assert output.holonomy_error.shape == (1,)
+    assert output.state.shape == (graph.event_count, 32)
+    assert output.predictions.value.shape == (graph.event_count, 4, graph.head_count)
+    assert output.coverage.any()
+    assert output.holonomy.shape == (1,)
 
-    no_relay = model(graph, relay_keep=torch.zeros(graph.relay_edge_index.shape[1], dtype=torch.bool))
-    assert not torch.allclose(output.state, no_relay.state)
-
-
-def test_self_supervised_loss_backpropagates_and_scores_locally():
-    graph = synthetic_graph()
-    config = HoloRouteConfig(model=ModelConfig(hidden_dim=32, head_encoder_heads=4, transport_rank=4))
-    model = HoloRouteEncoder(graph.num_layers, graph.num_heads, config.model)
     generator = torch.Generator().manual_seed(9)
-    loss = self_supervised_loss(model, graph, config, generator=generator)
-    assert torch.isfinite(loss.total)
-    loss.total.backward()
+    loss = self_supervised_loss(model, graph, config, generator)
+    assert torch.isfinite(loss)
+    loss.backward()
     assert any(parameter.grad is not None for parameter in model.parameters())
 
-    feature, coverage = score_graph(model, graph, config, seed=17)
-    assert feature.shape == (graph.num_response_tokens, 6)
-    assert coverage.shape == feature.shape
-    assert coverage[:, 0].sum() > 0
+    residuals = score_graph(model, graph, config, seed=17)
+    assert residuals.value.shape == (graph.response_count, 6)
+    assert residuals.coverage.shape == residuals.value.shape
+
+
+def test_flat_baseline_uses_same_layers_without_graph_edges():
+    graph = synthetic_graph()
+    config = small_config()
+    pairs = build_pairs(graph)
+    model = Flat1024(graph.layer_count, graph.head_count, hidden=32, blocks=1)
+
+    generator = torch.Generator().manual_seed(11)
+    loss = flat_loss(model, pairs, config, generator)
+    assert torch.isfinite(loss)
+    loss.backward()
+
+    residuals = score_flat(model, pairs, config, seed=19)
+    assert residuals.value.shape == (graph.response_count, 1)
+    assert residuals.coverage.shape == residuals.value.shape
