@@ -1,22 +1,17 @@
-"""HoloRoute: unsupervised learning on causal attention event graphs."""
+"""P-Cut: unsupervised prompt-provenance cuts on attention graphs."""
 
-from .baseline import Flat1024, build_pairs
-from .config import HoloRouteConfig
-from .detection import ConditionalReference, TokenResiduals, score_graph
-from .graph import EventGraph, build_graph
-from .learning import self_supervised_loss, train_model
-from .model import HoloRoute
+from .config import MethodConfig
+from .detection import ConditionalReference
+from .graph import AttentionGraph, build_graph
+from .pcut import PCutResult, compute_pcut, prompt_provenance, split_edges
 
 __all__ = [
+    "AttentionGraph",
     "ConditionalReference",
-    "EventGraph",
-    "Flat1024",
-    "HoloRoute",
-    "HoloRouteConfig",
-    "TokenResiduals",
+    "MethodConfig",
+    "PCutResult",
     "build_graph",
-    "build_pairs",
-    "score_graph",
-    "self_supervised_loss",
-    "train_model",
+    "compute_pcut",
+    "prompt_provenance",
+    "split_edges",
 ]
