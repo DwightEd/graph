@@ -1,27 +1,38 @@
-# HoloRoute
+# GroundedRoute
 
-HoloRoute is the active research implementation in this repository. It performs attention-only, unsupervised, token-level hallucination detection by learning normal structure on a multilayer causal attention event graph.
+GroundedRoute is the active representation-learning experiment in this
+repository. It learns one label-free embedding for every token from the exact
+typed attention graph, then freezes those embeddings before applying an
+independent unsupervised detector.
 
-The default branch has been consolidated around one method. Historical implementations are no longer kept as executable code on `main`; their hypotheses, results, and rejection decisions are recorded in [`docs/EXPERIMENT_HISTORY.md`](docs/EXPERIMENT_HISTORY.md). Historical branch refs are archival only and are not active development lines.
+HoloRoute remains in [`experiments/holoroute/`](experiments/holoroute/) as the
+masked event-reconstruction baseline. Its reconstruction residual is not the
+GroundedRoute representation or score.
 
 ## Method in one line
 
 ```text
 sparse internal attention
--> one event graph per prompt-response sample
--> self-supervised graph completion
--> position-conditioned one-class score
+-> one typed token graph per prompt-response sample
+-> conserved prompt / response-closed lineage
+-> causal exact-endpoint prediction
+-> frozen token embeddings
+-> embedding-only one-class detector
 -> token-level evaluation
 ```
 
-Each graph node is an exact `(source token, target token, layer)` attention event whose attribute is the complete head profile at that layer. The graph contains:
+The node is a token. Every retained attention trace remains an explicit
+`(source, target, layer, head, weight)` edge; layer/head identity is not averaged
+before message passing. A learned row-stochastic head transition propagates a
+conserved three-state lineage: prompt-origin, response-closed, and unresolved.
 
-- depth edges for the same token pair across adjacent Transformer layers;
-- causal relay edges for ordered paths `u -> s -> t`;
-- query groups containing all events entering one target-layer pair;
-- depth/relay diamonds used to audit transport composition.
+The same pipeline can retrain `real`, `weight_shuffle`, and
+`endpoint_rewire` variants under one frozen split, seed, budget, and detector.
+Control artifacts record their actual changed-edge fraction; endpoint rewiring
+matches only a coarse logarithmic lag bucket, not exact lag.
 
-See [`experiments/holoroute/METHOD.md`](experiments/holoroute/METHOD.md) and [`docs/RESEARCH_STATUS.md`](docs/RESEARCH_STATUS.md).
+See [`experiments/grounded_route/README.md`](experiments/grounded_route/README.md)
+and [`docs/RESEARCH_STATUS.md`](docs/RESEARCH_STATUS.md).
 
 ## Repository layout
 
@@ -30,49 +41,37 @@ cache.py                       canonical sparse attention cache
 formal_cache.py                adapter for formal PT attention caches
 research_dataset.py            shared data interface
 experiment_protocol.py         source-group and evaluation protocol
-experiments/holoroute/         active method, baseline, runners, and tests
+experiments/grounded_route/    active token-graph representation experiment
+experiments/holoroute/         masked reconstruction baseline
 docs/EXPERIMENT_HISTORY.md     prior experiments and recorded results
 docs/RESEARCH_STATUS.md        current claims, gates, and next experiments
 ```
 
 ## One-command QA run
 
-The server-specific runner uses the current RAGTruth attention cache paths:
-
-```bash
-cd /share/home/tm902089733300000/a903202310/lys/research/graph
-bash experiments/holoroute/run_qa.sh
-```
-
-The generic entry point is:
+The complete label-free training, encoding, detection, and post-hoc evaluation
+pipeline is:
 
 ```bash
 TRAIN_SPLIT=/path/to/attention/train \
 TEST_SPLIT=/path/to/attention/test \
-OUT=experiments/holoroute/outputs/qa \
-TASK=QA MODEL=holoroute DEVICE=cuda EPOCHS=8 \
-bash experiments/holoroute/run.sh
-```
-
-The Flat-1024 no-topology control uses the same all-layer, all-head values:
-
-```bash
-TRAIN_SPLIT=/path/to/attention/train \
-TEST_SPLIT=/path/to/attention/test \
-OUT=experiments/holoroute/outputs/flat_qa \
-TASK=QA MODEL=flat1024 DEVICE=cuda EPOCHS=8 \
-bash experiments/holoroute/run.sh
+VARIANT=real OUT=experiments/grounded_route/outputs/qa/real \
+TASK=QA DEVICE=cuda EPOCHS=8 \
+bash experiments/grounded_route/run.sh
 ```
 
 ## Outputs
 
 ```text
-model.pt
-reference.npz
-scores.npz
-evaluation/evaluation.json
-evaluation/position.csv
-evaluation/residuals.csv
+train_graph.json          label-free dataset selection
+model.pt                  causal token-graph encoder
+calibration/graphs/*.pt   calibration graph + node embeddings
+calibration/index.npz     detector-reference embeddings
+test/graphs/*.pt          per-sample graph + node embeddings
+test/index.npz            test response-node embeddings
+detector.npz              PCA-whitened kNN reference
+scores.npz                one scalar per response token
+evaluation.json           post-hoc metrics
 ```
 
 Training, calibration, and scoring do not read hallucination labels. Labels are opened only by the evaluation command after the score artifact has been frozen.
@@ -80,9 +79,11 @@ Training, calibration, and scoring do not read hallucination labels. Labels are 
 ## Tests
 
 ```bash
-python -m compileall -q experiments/holoroute
-bash -n experiments/holoroute/run.sh
-pytest -q experiments/holoroute/tests
+python -m compileall -q experiments/grounded_route
+bash -n experiments/grounded_route/run.sh
+pytest -q experiments/grounded_route/tests
 ```
 
-The current method is an implemented research prototype, not yet a validated SOTA result. The mandatory acceptance tests are documented in [`docs/RESEARCH_STATUS.md`](docs/RESEARCH_STATUS.md).
+The implementation is a research prototype, not a validated SOTA result. Its
+graph claim is conditional on the matched topology controls and held-out
+token-level results in [`docs/RESEARCH_STATUS.md`](docs/RESEARCH_STATUS.md).
