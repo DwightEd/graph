@@ -1,4 +1,4 @@
-"""Artifact I/O at the boundary of the HoloRoute pipeline."""
+"""Artifact I/O for P-Cut."""
 
 import hashlib
 import json
@@ -9,11 +9,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-CHECKPOINT_SCHEMA = "holoroute-checkpoint-v2"
-REFERENCE_SCHEMA = "holoroute-reference-v2"
-DENSITY_SCHEMA = REFERENCE_SCHEMA
-SCORE_SCHEMA = "holoroute-score-v2"
-EVALUATION_SCHEMA = "holoroute-evaluation-v2"
+CHECKPOINT_SCHEMA = "pcut-checkpoint-v1"
+REFERENCE_SCHEMA = "pcut-reference-v1"
+SCORE_SCHEMA = "pcut-score-v1"
+GRAPH_SCHEMA = "pcut-graph-v1"
+EVALUATION_SCHEMA = "pcut-evaluation-v1"
 
 
 def sha256(path) -> str:
