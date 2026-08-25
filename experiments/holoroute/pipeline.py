@@ -1,18 +1,16 @@
-"""Dataset-level training, calibration and scoring for HoloRoute."""
+"""Dataset-level reference fitting, scoring and graph-embedding export."""
 
 from dataclasses import dataclass
-import hashlib
 from pathlib import Path
-import random
+import re
 
 import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from experiment_protocol import canonical_source_group
-
 from .artifacts import (
     CHECKPOINT_SCHEMA,
+    GRAPH_SCHEMA,
     REFERENCE_SCHEMA,
     SCORE_SCHEMA,
     load_npz,
@@ -20,40 +18,18 @@ from .artifacts import (
     save_npz,
     sha256,
 )
-from .baseline import (
-    FLAT_CHECKPOINT_SCHEMA,
-    FLAT_MODEL_TYPE,
-    FLAT_RESIDUAL_NAMES,
-    Flat1024,
-    build_pairs,
-    flat_loss,
-    score_flat as score_flat_graph,
-)
-from .config import DetectionConfig, GraphConfig, HoloRouteConfig, LossConfig, ModelConfig, TrainConfig
+from .config import DetectionConfig, GraphConfig, MethodConfig, PCutConfig
 from .detection import (
     CONDITION_NAMES,
     RESIDUAL_NAMES,
     ConditionalReference,
-    ResidualReservoir,
-    TokenResiduals,
-    score_graph,
+    Reservoir,
     token_conditions,
 )
-from .graph import build_graph
-from .learning import sample_seed, train_model
-from .model import HoloRoute
+from .graph import AttentionGraph, build_graph
+from .pcut import PCutResult, compute_pcut
 
-HOLOROUTE_MODEL_TYPE = "holoroute"
-
-
-@dataclass(frozen=True)
-class SourceSplit:
-    fit: tuple[str, ...]
-    validation: tuple[str, ...]
-    calibration: tuple[str, ...]
-    fit_groups: tuple[str, ...]
-    validation_groups: tuple[str, ...]
-    calibration_groups: tuple[str, ...]
+MODEL_TYPE = "pcut"
 
 
 @dataclass(frozen=True)
@@ -93,343 +69,140 @@ def select_samples(dataset, task: str, limit: int | None) -> tuple[str, ...]:
     return tuple(selected)
 
 
-def source_order(group: str, seed: int) -> bytes:
-    return hashlib.sha256(f"holoroute\0{seed}\0{group}".encode()).digest()
-
-
-def split_sources(dataset, sample_ids: tuple[str, ...], config: TrainConfig) -> SourceSplit:
-    grouped: dict[str, list[str]] = {}
-    for sample_id in sample_ids:
-        sample = dataset[sample_id]
-        try:
-            grouped.setdefault(canonical_source_group(sample), []).append(sample_id)
-        finally:
-            sample.release_attention()
-    if len(grouped) < 3:
-        raise ValueError("training needs at least three independent source groups")
-
-    ordered = sorted(grouped, key=lambda group: source_order(group, config.seed))
-    validation_count = max(1, round(len(ordered) * config.validation_fraction))
-    calibration_count = max(1, round(len(ordered) * config.calibration_fraction))
-    while validation_count + calibration_count >= len(ordered):
-        if calibration_count > 1:
-            calibration_count -= 1
-        elif validation_count > 1:
-            validation_count -= 1
-        else:
-            raise ValueError("source groups cannot form three disjoint streams")
-
-    validation_groups = set(ordered[:validation_count])
-    calibration_groups = set(ordered[validation_count : validation_count + calibration_count])
-    fit_groups = set(ordered) - validation_groups - calibration_groups
-
-    def samples(groups: set[str]) -> tuple[str, ...]:
-        return tuple(
-            sample_id
-            for group, identifiers in grouped.items()
-            if group in groups
-            for sample_id in identifiers
-        )
-
-    return SourceSplit(
-        fit=samples(fit_groups),
-        validation=samples(validation_groups),
-        calibration=samples(calibration_groups),
-        fit_groups=tuple(sorted(fit_groups)),
-        validation_groups=tuple(sorted(validation_groups)),
-        calibration_groups=tuple(sorted(calibration_groups)),
-    )
-
-
-def config_from_dict(payload: dict[str, object]) -> HoloRouteConfig:
-    return HoloRouteConfig(
+def config_from_dict(payload: dict[str, object]) -> MethodConfig:
+    return MethodConfig(
         graph=GraphConfig(**payload["graph"]),
-        model=ModelConfig(**payload["model"]),
-        train=TrainConfig(**payload["train"]),
-        loss=LossConfig(**payload["loss"]),
+        pcut=PCutConfig(**payload["pcut"]),
         detection=DetectionConfig(**payload["detection"]),
     )
 
 
-def set_random_seed(seed: int) -> None:
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-
-
-def collect_reference(dataset, sample_ids, config, score_sample, description):
-    reservoir = ResidualReservoir(config.detection.reservoir_rows, config.train.seed + 73)
-    for sample_id in tqdm(sample_ids, desc=description, unit="sample"):
-        sample = dataset[sample_id]
-        try:
-            graph = build_graph(sample, config.graph)
-            if not graph.event_count:
-                continue
-            residuals = score_sample(graph, sample_id)
-            reservoir.add(
-                residual=residuals.value,
-                condition=token_conditions(graph),
-                task=np.repeat(str(sample.task_type or ""), graph.response_count),
-                coverage=residuals.coverage,
-            )
-        finally:
-            sample.release_attention()
-    calibration = reservoir.values()
-    reference = ConditionalReference.fit(
-        calibration["residual"],
-        calibration["condition"],
-        calibration["task"],
-        config.detection,
-    )
-    coverage = np.nanmean(calibration["coverage"], axis=0).astype(np.float32)
-    return reference, coverage
-
-
-def save_reference(path, reference, checkpoint_path, dataset, model_type, residual_names, coverage):
+def save_reference(path, reference, checkpoint_path, dataset) -> None:
     save_npz(
         path,
         schema=np.asarray(REFERENCE_SCHEMA),
-        model_type=np.asarray(model_type),
+        model_type=np.asarray(MODEL_TYPE),
         labels_included=np.asarray(False),
         checkpoint_path=np.asarray(str(Path(checkpoint_path).resolve())),
         checkpoint_sha256=np.asarray(sha256(checkpoint_path)),
         train_manifest_sha256=np.asarray(sha256(Path(dataset.root) / "manifest.json")),
-        residual_names=np.asarray(residual_names),
+        residual_names=np.asarray(RESIDUAL_NAMES),
         condition_names=np.asarray(CONDITION_NAMES),
-        calibration_coverage_mean=coverage,
         **reference.arrays(),
     )
 
 
-def load_reference(path, model_type: str):
-    arrays = load_npz(path)
+def load_method(checkpoint_path, reference_path):
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    if checkpoint["schema"] != CHECKPOINT_SCHEMA or checkpoint["model_type"] != MODEL_TYPE:
+        raise ValueError("unsupported P-Cut checkpoint")
+    config = config_from_dict(checkpoint["config"])
+    arrays = load_npz(reference_path)
     if str(arrays["schema"].item()) != REFERENCE_SCHEMA:
-        raise ValueError("unsupported HoloRoute reference")
-    if str(arrays["model_type"].item()) != model_type:
-        raise ValueError("reference and model type differ")
-    return ConditionalReference.from_arrays(arrays), arrays
+        raise ValueError("unsupported P-Cut reference")
+    if sha256(checkpoint_path) != str(arrays["checkpoint_sha256"].item()):
+        raise ValueError("reference was fitted for a different checkpoint")
+    return config, ConditionalReference.from_arrays(arrays), checkpoint
 
 
-def load_holoroute(checkpoint_path, device):
-    payload = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    if payload["schema"] != CHECKPOINT_SCHEMA or payload["model_type"] != HOLOROUTE_MODEL_TYPE:
-        raise ValueError("unsupported HoloRoute checkpoint")
-    config = config_from_dict(payload["config"])
-    model = HoloRoute(payload["layer_count"], payload["head_count"], config.model).to(device)
-    model.load_state_dict(payload["state_dict"])
-    return model, config, payload
-
-
-def load_flat(checkpoint_path, device):
-    payload = torch.load(checkpoint_path, map_location=device, weights_only=False)
-    if payload["schema"] != FLAT_CHECKPOINT_SCHEMA or payload["model_type"] != FLAT_MODEL_TYPE:
-        raise ValueError("unsupported Flat-1024 checkpoint")
-    config = config_from_dict(payload["config"])
-    model = Flat1024(
-        payload["layer_count"],
-        payload["head_count"],
-        hidden=payload["hidden"],
-    ).to(device)
-    model.load_state_dict(payload["state_dict"])
-    return model, config, payload
-
-
-def flat_validation_loss(model, dataset, sample_ids, config) -> float:
-    model.eval()
-    losses: list[float] = []
-    with torch.no_grad():
-        for sample_id in sample_ids:
-            sample = dataset[sample_id]
-            try:
-                pairs = build_pairs(build_graph(sample, config.graph))
-                if not pairs.count:
-                    continue
-                repeated = []
-                for mask_index in range(config.train.validation_masks):
-                    generator = torch.Generator(device=pairs.device)
-                    generator.manual_seed(sample_seed(config.train.seed, sample_id, 20_000 + mask_index))
-                    repeated.append(float(flat_loss(model, pairs, config, generator).item()))
-                losses.append(float(np.mean(repeated)))
-            finally:
-                sample.release_attention()
-    return float(np.mean(losses)) if losses else float("inf")
-
-
-def train_flat_model(model, dataset, split: SourceSplit, config: HoloRouteConfig):
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config.train.learning_rate,
-        weight_decay=config.train.weight_decay,
-    )
-    best_state = None
-    best_validation = float("inf")
-    history: list[dict[str, float]] = []
-
-    for epoch in range(config.train.epochs):
-        model.train()
-        order = list(split.fit)
-        random.Random(config.train.seed + epoch).shuffle(order)
-        losses: list[float] = []
-        for sample_id in tqdm(order, desc=f"Flat-1024 epoch {epoch + 1}", unit="sample"):
-            sample = dataset[sample_id]
-            try:
-                pairs = build_pairs(build_graph(sample, config.graph))
-                if not pairs.count:
-                    continue
-                generator = torch.Generator(device=pairs.device)
-                generator.manual_seed(sample_seed(config.train.seed, sample_id, epoch))
-                optimizer.zero_grad(set_to_none=True)
-                loss = flat_loss(model, pairs, config, generator)
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), config.train.gradient_clip)
-                optimizer.step()
-                losses.append(float(loss.item()))
-            finally:
-                sample.release_attention()
-
-        validation = flat_validation_loss(model, dataset, split.validation, config)
-        history.append(
-            {
-                "epoch": float(epoch + 1),
-                "train_loss": float(np.mean(losses)) if losses else float("inf"),
-                "validation_loss": validation,
-            }
-        )
-        if validation < best_validation:
-            best_validation = validation
-            best_state = {name: value.detach().cpu().clone() for name, value in model.state_dict().items()}
-
-    if best_state is None:
-        raise RuntimeError("flat training produced no pair tensors")
-    return best_state, history, best_validation
-
-
-def train_holoroute(dataset, checkpoint_path, reference_path, config, task="QA", limit=None):
+def fit_reference(
+    dataset,
+    checkpoint_path,
+    reference_path,
+    config: MethodConfig,
+    task: str = "QA",
+    limit: int | None = None,
+) -> dict[str, object]:
     require_split(dataset, "train")
-    split = split_sources(dataset, select_samples(dataset, task, limit), config.train)
-    layers = int(dataset.manifest["num_layers"])
-    heads = int(dataset.manifest["num_heads"])
-    device = torch.device(str(getattr(dataset, "device", "cpu")))
-    set_random_seed(config.train.seed)
-
-    model = HoloRoute(layers, heads, config.model).to(device)
-    training = train_model(model, dataset, split.fit, split.validation, config)
-    model.load_state_dict(training.state_dict)
-    parameter_count = sum(parameter.numel() for parameter in model.parameters())
+    sample_ids = select_samples(dataset, task, limit)
     save_checkpoint(
         checkpoint_path,
         {
             "schema": CHECKPOINT_SCHEMA,
-            "model_type": HOLOROUTE_MODEL_TYPE,
+            "model_type": MODEL_TYPE,
             "config": config.as_dict(),
-            "layer_count": layers,
-            "head_count": heads,
-            "state_dict": training.state_dict,
-            "history": training.history,
-            "fit_groups": split.fit_groups,
-            "validation_groups": split.validation_groups,
-            "calibration_groups": split.calibration_groups,
-            "parameter_count": parameter_count,
+            "labels_read": False,
         },
     )
 
-    reference, coverage = collect_reference(
-        dataset,
-        split.calibration,
-        config,
-        lambda graph, sample_id: score_graph(
-            model,
-            graph,
-            config,
-            sample_seed(config.train.seed + 991, sample_id),
-        ),
-        "calibrate HoloRoute",
+    reservoir = Reservoir(config.detection.reservoir_rows, config.pcut.seed)
+    for sample_id in tqdm(sample_ids, desc="fit P-Cut reference", unit="sample"):
+        sample = dataset[sample_id]
+        try:
+            graph = build_graph(sample, config.graph)
+            result = compute_pcut(graph, config.pcut)
+            reservoir.add(
+                residual=result.closure.cpu().numpy()[:, None],
+                condition=token_conditions(graph, result),
+                task=np.repeat(str(sample.task_type or ""), graph.response_count),
+            )
+        finally:
+            sample.release_attention()
+
+    rows = reservoir.values()
+    reference = ConditionalReference.fit(
+        rows["residual"],
+        rows["condition"],
+        rows["task"],
+        config.detection,
     )
-    save_reference(
-        reference_path,
-        reference,
-        checkpoint_path,
-        dataset,
-        HOLOROUTE_MODEL_TYPE,
-        RESIDUAL_NAMES,
-        coverage,
-    )
+    save_reference(reference_path, reference, checkpoint_path, dataset)
     return {
         "checkpoint": str(Path(checkpoint_path).resolve()),
         "reference": str(Path(reference_path).resolve()),
-        "best_validation_loss": training.best_validation_loss,
-        "parameter_count": parameter_count,
+        "samples": len(sample_ids),
+        "tokens": int(len(rows["residual"])),
         "labels_read": False,
     }
 
 
-def train_flat(dataset, checkpoint_path, reference_path, config, task="QA", limit=None, hidden=96):
-    require_split(dataset, "train")
-    split = split_sources(dataset, select_samples(dataset, task, limit), config.train)
-    layers = int(dataset.manifest["num_layers"])
-    heads = int(dataset.manifest["num_heads"])
-    device = torch.device(str(getattr(dataset, "device", "cpu")))
-    set_random_seed(config.train.seed)
+def safe_name(sample_id: str) -> str:
+    name = re.sub(r"[^A-Za-z0-9_.-]+", "_", sample_id)
+    return name or "sample"
 
-    model = Flat1024(layers, heads, hidden=hidden).to(device)
-    state, history, validation = train_flat_model(model, dataset, split, config)
-    model.load_state_dict(state)
-    parameter_count = sum(parameter.numel() for parameter in model.parameters())
-    save_checkpoint(
-        checkpoint_path,
-        {
-            "schema": FLAT_CHECKPOINT_SCHEMA,
-            "model_type": FLAT_MODEL_TYPE,
-            "config": config.as_dict(),
-            "layer_count": layers,
-            "head_count": heads,
-            "hidden": hidden,
-            "state_dict": state,
-            "history": history,
-            "fit_groups": split.fit_groups,
-            "validation_groups": split.validation_groups,
-            "calibration_groups": split.calibration_groups,
-            "parameter_count": parameter_count,
-        },
+
+def export_graph(path, graph: AttentionGraph, result: PCutResult) -> None:
+    parts = result.edge_parts
+    save_npz(
+        path,
+        schema=np.asarray(GRAPH_SCHEMA),
+        sample_id=np.asarray(graph.sample_id),
+        source_id=np.asarray(graph.source_id),
+        task_type=np.asarray(graph.task_type),
+        response_start=np.asarray(graph.response_start, dtype=np.int32),
+        token_count=np.asarray(graph.token_count, dtype=np.int32),
+        response_token_id=graph.response_token_ids.cpu().numpy().astype(np.int64),
+        edge_source=graph.edges.source.cpu().numpy().astype(np.int32),
+        edge_target=graph.edges.target.cpu().numpy().astype(np.int32),
+        edge_layer=graph.edges.layer.cpu().numpy().astype(np.int16),
+        edge_head=graph.edges.head.cpu().numpy().astype(np.int16),
+        edge_weight=graph.edges.weight.cpu().numpy().astype(np.float32),
+        edge_prompt_rooted=parts.prompt_rooted.cpu().numpy().astype(np.float32),
+        edge_response_closed=parts.response_closed.cpu().numpy().astype(np.float32),
+        edge_uncertain=parts.uncertain.cpu().numpy().astype(np.float32),
+        diagonal=graph.diagonal.cpu().numpy().astype(np.float16),
+        unresolved=graph.unresolved.cpu().numpy().astype(np.float16),
+        prompt_origin_lower=result.prompt_origin_lower.cpu().numpy().astype(np.float16),
+        prompt_origin_upper=result.prompt_origin_upper.cpu().numpy().astype(np.float16),
+        token_layer_embedding=result.token_layer_embedding.cpu().numpy().astype(np.float16),
+        token_embedding=result.token_embedding.cpu().numpy().astype(np.float16),
+        no_prompt_embedding=result.no_prompt_embedding.cpu().numpy().astype(np.float16),
+        no_closed_embedding=result.no_closed_embedding.cpu().numpy().astype(np.float16),
+        prompt_necessity=result.prompt_necessity.cpu().numpy().astype(np.float32),
+        response_closed_necessity=result.response_closed_necessity.cpu().numpy().astype(np.float32),
+        closure=result.closure.cpu().numpy().astype(np.float32),
     )
 
-    reference, coverage = collect_reference(
-        dataset,
-        split.calibration,
-        config,
-        lambda graph, sample_id: score_flat_graph(
-            model,
-            build_pairs(graph),
-            config,
-            sample_seed(config.train.seed + 991, sample_id),
-        ),
-        "calibrate Flat-1024",
-    )
-    save_reference(
-        reference_path,
-        reference,
-        checkpoint_path,
-        dataset,
-        FLAT_MODEL_TYPE,
-        FLAT_RESIDUAL_NAMES,
-        coverage,
-    )
-    return {
-        "checkpoint": str(Path(checkpoint_path).resolve()),
-        "reference": str(Path(reference_path).resolve()),
-        "best_validation_loss": validation,
-        "parameter_count": parameter_count,
-        "raw_feature_dim": layers * heads,
-        "labels_read": False,
-    }
 
-
-def make_score_rows(graph, residuals: TokenResiduals, reference: ConditionalReference) -> ScoreRows:
-    condition = token_conditions(graph)
+def make_score_rows(
+    graph: AttentionGraph,
+    result: PCutResult,
+    reference: ConditionalReference,
+) -> ScoreRows:
+    condition = token_conditions(graph, result)
     task = np.repeat(graph.task_type, graph.response_count)
-    score, standardized = reference.transform(residuals.value, condition, task)
+    residual = result.closure.cpu().numpy().astype(np.float32)[:, None]
+    score, standardized = reference.transform(residual, condition, task)
     tokens = graph.response_count
     return ScoreRows(
         sample_id=np.repeat(graph.sample_id, tokens),
@@ -437,16 +210,16 @@ def make_score_rows(graph, residuals: TokenResiduals, reference: ConditionalRefe
         task_type=task,
         token_index=np.arange(tokens, dtype=np.int32),
         response_length=np.full(tokens, tokens, dtype=np.int32),
-        response_token_id=graph.response_token_ids.detach().cpu().numpy().astype(np.int64),
+        response_token_id=graph.response_token_ids.cpu().numpy().astype(np.int64),
         score=score,
-        residual=residuals.value,
+        residual=residual,
         standardized=standardized,
-        coverage=residuals.coverage,
+        coverage=result.coverage.cpu().numpy().astype(np.float32)[:, None],
         condition=condition,
     )
 
 
-def merge_score_rows(rows: list[ScoreRows]) -> dict[str, np.ndarray]:
+def merge_rows(rows: list[ScoreRows]) -> dict[str, np.ndarray]:
     if not rows:
         raise RuntimeError("scoring produced no token rows")
     return {
@@ -455,116 +228,51 @@ def merge_score_rows(rows: list[ScoreRows]) -> dict[str, np.ndarray]:
     }
 
 
-def save_scores(path, arrays, dataset, checkpoint_path, reference_path, model_type, residual_names):
+def score_dataset(
+    dataset,
+    checkpoint_path,
+    reference_path,
+    output_path,
+    task: str = "QA",
+    limit: int | None = None,
+) -> dict[str, object]:
+    require_split(dataset, "test")
+    config, reference, checkpoint = load_method(checkpoint_path, reference_path)
+    rows: list[ScoreRows] = []
+    graph_dir = Path(output_path).parent / "graphs"
+    graph_dir.mkdir(parents=True, exist_ok=True)
+    sample_ids = select_samples(dataset, task, limit)
+
+    for sample_id in tqdm(sample_ids, desc="score P-Cut", unit="sample"):
+        sample = dataset[sample_id]
+        try:
+            graph = build_graph(sample, config.graph)
+            result = compute_pcut(graph, config.pcut)
+            rows.append(make_score_rows(graph, result, reference))
+            export_graph(graph_dir / f"{safe_name(sample_id)}.npz", graph, result)
+        finally:
+            sample.release_attention()
+
+    arrays = merge_rows(rows)
     save_npz(
-        path,
+        output_path,
         schema=np.asarray(SCORE_SCHEMA),
-        model_type=np.asarray(model_type),
+        model_type=np.asarray(MODEL_TYPE),
         labels_included=np.asarray(False),
         checkpoint_path=np.asarray(str(Path(checkpoint_path).resolve())),
         checkpoint_sha256=np.asarray(sha256(checkpoint_path)),
         reference_path=np.asarray(str(Path(reference_path).resolve())),
         reference_sha256=np.asarray(sha256(reference_path)),
         dataset_manifest_sha256=np.asarray(sha256(Path(dataset.root) / "manifest.json")),
-        residual_names=np.asarray(residual_names),
+        residual_names=np.asarray(RESIDUAL_NAMES),
         condition_names=np.asarray(CONDITION_NAMES),
         **arrays,
     )
-
-
-def score_dataset(dataset, config, reference, task, limit, description, score_sample):
-    rows: list[ScoreRows] = []
-    for sample_id in tqdm(select_samples(dataset, task, limit), desc=description, unit="sample"):
-        sample = dataset[sample_id]
-        try:
-            graph = build_graph(sample, config.graph)
-            if not graph.event_count:
-                continue
-            rows.append(make_score_rows(graph, score_sample(graph, sample_id), reference))
-        finally:
-            sample.release_attention()
-    return merge_score_rows(rows)
-
-
-def score_holoroute(dataset, checkpoint_path, reference_path, output_path, task="QA", limit=None):
-    require_split(dataset, "test")
-    model, config, checkpoint = load_holoroute(checkpoint_path, getattr(dataset, "device", "cpu"))
-    reference, reference_arrays = load_reference(reference_path, HOLOROUTE_MODEL_TYPE)
-    if sha256(checkpoint_path) != str(reference_arrays["checkpoint_sha256"].item()):
-        raise ValueError("reference was fitted for a different checkpoint")
-    if checkpoint["layer_count"] != int(dataset.manifest["num_layers"]):
-        raise ValueError("checkpoint and test data have different layers")
-    if checkpoint["head_count"] != int(dataset.manifest["num_heads"]):
-        raise ValueError("checkpoint and test data have different heads")
-
-    arrays = score_dataset(
-        dataset,
-        config,
-        reference,
-        task,
-        limit,
-        "score HoloRoute",
-        lambda graph, sample_id: score_graph(
-            model,
-            graph,
-            config,
-            sample_seed(config.train.seed + 1997, sample_id),
-        ),
-    )
-    save_scores(
-        output_path,
-        arrays,
-        dataset,
-        checkpoint_path,
-        reference_path,
-        HOLOROUTE_MODEL_TYPE,
-        RESIDUAL_NAMES,
-    )
     return {
         "scores": str(Path(output_path).resolve()),
-        "samples": len(set(arrays["sample_id"].astype(str).tolist())),
+        "graphs": str(graph_dir.resolve()),
+        "samples": len(sample_ids),
         "tokens": len(arrays["score"]),
         "labels_read": False,
-    }
-
-
-def score_flat(dataset, checkpoint_path, reference_path, output_path, task="QA", limit=None):
-    require_split(dataset, "test")
-    model, config, checkpoint = load_flat(checkpoint_path, getattr(dataset, "device", "cpu"))
-    reference, reference_arrays = load_reference(reference_path, FLAT_MODEL_TYPE)
-    if sha256(checkpoint_path) != str(reference_arrays["checkpoint_sha256"].item()):
-        raise ValueError("reference was fitted for a different checkpoint")
-    if checkpoint["layer_count"] != int(dataset.manifest["num_layers"]):
-        raise ValueError("checkpoint and test data have different layers")
-    if checkpoint["head_count"] != int(dataset.manifest["num_heads"]):
-        raise ValueError("checkpoint and test data have different heads")
-
-    arrays = score_dataset(
-        dataset,
-        config,
-        reference,
-        task,
-        limit,
-        "score Flat-1024",
-        lambda graph, sample_id: score_flat_graph(
-            model,
-            build_pairs(graph),
-            config,
-            sample_seed(config.train.seed + 1997, sample_id),
-        ),
-    )
-    save_scores(
-        output_path,
-        arrays,
-        dataset,
-        checkpoint_path,
-        reference_path,
-        FLAT_MODEL_TYPE,
-        FLAT_RESIDUAL_NAMES,
-    )
-    return {
-        "scores": str(Path(output_path).resolve()),
-        "samples": len(set(arrays["sample_id"].astype(str).tolist())),
-        "tokens": len(arrays["score"]),
-        "labels_read": False,
+        "config": checkpoint["config"],
     }
