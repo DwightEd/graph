@@ -1,9 +1,6 @@
-torch>=2.2,<2.9
-transformers==4.46.3
-accelerate>=0.26,<2
-tqdm>=4.66
-numpy>=1.26
-scipy>=1.10,<2
-scikit-learn>=1.5,<2
-matplotlib>=3.8,<4
-pytest>=8,<9
+numpy
+scipy
+scikit-learn
+torch
+tqdm
+pytest

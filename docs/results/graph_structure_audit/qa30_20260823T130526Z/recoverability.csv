@@ -1,4 +1,0 @@
-score,hallucination_minus_correct,ci_low,ci_high,conclusion
-recovery,0.00280024355550422,0.0008947781206257155,0.004074266218910478,correct_more_recoverable
-edge_recovery,0.003124599237766968,0.0005726383503931955,0.004497703117638172,correct_more_recoverable
-diagonal_recovery,-0.0002117833253861348,-0.0003214327111668705,-0.00010549394552515679,hallucination_more_recoverable
