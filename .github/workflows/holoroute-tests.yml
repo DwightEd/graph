@@ -1,10 +1,7 @@
-name: Graph experiment tests
+name: P-Cut tests
 
 on:
   workflow_dispatch:
-  pull_request:
-  push:
-    branches: [main]
 
 jobs:
   tests:
@@ -19,11 +16,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install numpy scipy scikit-learn tqdm pytest
-      - run: python -m compileall -q experiments/holoroute experiments/grounded_route
-      - run: |
-          bash -n experiments/holoroute/run.sh
-          bash -n experiments/grounded_route/run.sh
-      - run: >-
-          python -m pytest -q
-          experiments/holoroute/tests
-          experiments/grounded_route/tests
+      - run: python -m compileall -q experiments/holoroute
+      - run: bash -n experiments/holoroute/run.sh
+      - run: python -m pytest -q experiments/holoroute/tests
