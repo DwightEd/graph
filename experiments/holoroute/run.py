@@ -94,7 +94,11 @@ def main() -> None:
             arguments.limit,
         )
     else:
-        dataset = open_research_dataset(arguments.test, device=arguments.device)
+        dataset = open_research_dataset(
+            arguments.test,
+            device=arguments.device,
+            retain_embedded_labels=True,
+        )
         report = evaluate(
             dataset,
             arguments.scores,
