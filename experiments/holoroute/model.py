@@ -48,22 +48,27 @@ def scatter_sum(message: torch.Tensor, target: torch.Tensor, size: int) -> torch
 
 @dataclass(frozen=True)
 class Predictions:
-    value: torch.Tensor       # [event, view, head]
-    support: torch.Tensor     # [event, view, head]
+    value: torch.Tensor
+    support: torch.Tensor
 
 
 @dataclass(frozen=True)
 class ModelOutput:
     state: torch.Tensor
     predictions: Predictions
-    contexts: torch.Tensor    # [event, depth/relay/query, hidden]
-    coverage: torch.Tensor    # [event, depth/relay/query]
+    contexts: torch.Tensor
+    coverage: torch.Tensor
     holonomy: torch.Tensor
     holonomy_token: torch.Tensor
 
 
 class HeadEncoder(nn.Module):
-    """Encode the complete head profile of one attention event."""
+    """Encode an event's head set with learned seed queries.
+
+    Seed-to-head attention is linear in the number of heads. The previous
+    head-to-head Transformer materialized a square attention matrix for every
+    event and dominated GPU memory on long samples.
+    """
 
     def __init__(self, layers: int, heads: int, config: ModelConfig) -> None:
         super().__init__()
@@ -77,21 +82,24 @@ class HeadEncoder(nn.Module):
             nn.GELU(),
             nn.Linear(hidden, hidden),
         )
-        block = nn.TransformerEncoderLayer(
-            d_model=hidden,
+        self.seeds = nn.Parameter(torch.empty(2, hidden))
+        nn.init.normal_(self.seeds, std=0.02)
+        self.head_pool = nn.MultiheadAttention(
+            hidden,
             nhead=config.head_attention_heads,
-            dim_feedforward=4 * hidden,
             dropout=config.dropout,
             batch_first=True,
-            norm_first=True,
-            activation="gelu",
         )
-        self.head_attention = nn.TransformerEncoder(
-            block,
-            num_layers=config.head_layers,
-            enable_nested_tensor=False,
+        self.summary_blocks = nn.ModuleList(
+            nn.Sequential(
+                nn.LayerNorm(hidden),
+                nn.Linear(hidden, 4 * hidden),
+                nn.GELU(),
+                nn.Dropout(config.dropout),
+                nn.Linear(4 * hidden, hidden),
+            )
+            for _ in range(config.head_layers)
         )
-        self.pool = nn.Linear(hidden, 1)
         self.metadata = nn.Sequential(
             nn.Linear(4, hidden),
             nn.GELU(),
@@ -110,9 +118,12 @@ class HeadEncoder(nn.Module):
         tokens = self.value(torch.stack((torch.log1p(values), observed.float()), dim=-1))
         tokens = tokens + self.head_id(head)[None]
         tokens = tokens + self.layer_id(graph.events.layer)[:, None]
-        tokens = self.head_attention(tokens)
-        weight = torch.softmax(self.pool(tokens).squeeze(-1), dim=-1)
-        state = (tokens * weight[..., None]).sum(dim=1)
+
+        query = self.seeds[None].expand(len(tokens), -1, -1)
+        summary, _ = self.head_pool(query, tokens, tokens, need_weights=False)
+        state = summary.mean(dim=1)
+        for block in self.summary_blocks:
+            state = state + block(state)
 
         lag = torch.floor(torch.log2(graph.events.lag.float().clamp_min(1))).long()
         lag = lag.clamp_max(self.lag_id.num_embeddings - 1)
@@ -167,7 +178,7 @@ class Transport(nn.Module):
 
 
 class RelationMixer(nn.Module):
-    """Transport and aggregate all messages that enter the same event."""
+    """Transport and aggregate messages entering the same event."""
 
     def __init__(self, hidden: int, rank: int) -> None:
         super().__init__()
@@ -185,7 +196,10 @@ class RelationMixer(nn.Module):
         relation: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if not edges.shape[1]:
-            return state.new_zeros(state.shape), torch.zeros(len(state), dtype=torch.bool, device=state.device)
+            return (
+                state.new_zeros(state.shape),
+                torch.zeros(len(state), dtype=torch.bool, device=state.device),
+            )
         source, target = edges
         message = self.transport(state[source], state[target], relation)
         score = self.attention(torch.cat((message, state[target]), dim=-1)).squeeze(-1)
@@ -197,13 +211,13 @@ class RelationMixer(nn.Module):
 
 
 class QueryMixer(nn.Module):
-    """Predict each event from the other events in the same query-layer set."""
+    """Predict each event from the other events in its query-layer set."""
 
-    def __init__(self, hidden: int, dropout: float) -> None:
+    def __init__(self, hidden: int, attention_heads: int, dropout: float) -> None:
         super().__init__()
         self.attention = nn.MultiheadAttention(
             hidden,
-            num_heads=4,
+            num_heads=attention_heads,
             dropout=dropout,
             batch_first=True,
         )
@@ -227,21 +241,21 @@ class QueryMixer(nn.Module):
                     continue
                 query = state[target].view(1, 1, -1)
                 keys = state[sources].unsqueeze(0)
-                value, _ = self.attention(query, keys, keys)
+                value, _ = self.attention(query, keys, keys, need_weights=False)
                 context[target] = self.norm(value[0, 0])
                 coverage[target] = True
         return context, coverage
 
 
 class HoloRouteLayer(nn.Module):
-    """One readable HoloRoute message-passing layer."""
+    """One HoloRoute message-passing layer."""
 
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
         hidden = config.hidden_dim
         self.depth = RelationMixer(hidden, config.transport_rank)
         self.relay = RelationMixer(hidden, config.transport_rank)
-        self.query = QueryMixer(hidden, config.dropout)
+        self.query = QueryMixer(hidden, config.head_attention_heads, config.dropout)
         self.project = nn.ModuleList(nn.Linear(hidden, hidden) for _ in range(4))
         self.gate = nn.Sequential(
             nn.Linear(4 * hidden, hidden),
@@ -288,10 +302,20 @@ class HoloRouteLayer(nn.Module):
         contexts = torch.stack((depth, relay, query), dim=1)
         coverage = torch.stack((depth_coverage, relay_coverage, query_coverage), dim=1)
         components = torch.stack(
-            tuple(layer(value) for layer, value in zip(self.project, (state, depth, relay, query), strict=True)),
+            tuple(
+                projection(value)
+                for projection, value in zip(
+                    self.project,
+                    (state, depth, relay, query),
+                    strict=True,
+                )
+            ),
             dim=1,
         )
-        weight = torch.softmax(self.gate(torch.cat((state, depth, relay, query), dim=-1)), dim=-1)
+        weight = torch.softmax(
+            self.gate(torch.cat((state, depth, relay, query), dim=-1)),
+            dim=-1,
+        )
         state = (components * weight[..., None]).sum(dim=1)
         state = self.norm(state + self.update(state))
         return state, contexts, coverage
@@ -314,8 +338,12 @@ class HoloRoute(nn.Module):
         super().__init__()
         self.config = ModelConfig() if config is None else config
         self.encoder = HeadEncoder(layers, heads, self.config)
-        self.layers = nn.ModuleList(HoloRouteLayer(self.config) for _ in range(self.config.message_layers))
-        self.decoders = nn.ModuleList(EventDecoder(self.config.hidden_dim, heads) for _ in range(4))
+        self.layers = nn.ModuleList(
+            HoloRouteLayer(self.config) for _ in range(self.config.message_layers)
+        )
+        self.decoders = nn.ModuleList(
+            EventDecoder(self.config.hidden_dim, heads) for _ in range(4)
+        )
         self.curvature = nn.Sequential(
             nn.Linear(4, self.config.hidden_dim),
             nn.GELU(),
@@ -329,17 +357,36 @@ class HoloRoute(nn.Module):
         layer: HoloRouteLayer,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if not graph.diamonds.shape[1]:
-            return state.new_empty(0), torch.empty(0, dtype=torch.long, device=state.device)
+            return (
+                state.new_empty(0),
+                torch.empty(0, dtype=torch.long, device=state.device),
+            )
 
         start, depth_middle, relay_middle, end = graph.diamonds
         depth_relation = torch.full_like(start, DEPTH_RELATION)
         relay_a = 1 + graph.events.role[start]
         relay_b = 1 + graph.events.role[depth_middle]
 
-        relay_then_depth = layer.relay.transport(state[start], state[relay_middle], relay_a)
-        relay_then_depth = layer.depth.transport(relay_then_depth, state[end], depth_relation)
-        depth_then_relay = layer.depth.transport(state[start], state[depth_middle], depth_relation)
-        depth_then_relay = layer.relay.transport(depth_then_relay, state[end], relay_b)
+        relay_then_depth = layer.relay.transport(
+            state[start],
+            state[relay_middle],
+            relay_a,
+        )
+        relay_then_depth = layer.depth.transport(
+            relay_then_depth,
+            state[end],
+            depth_relation,
+        )
+        depth_then_relay = layer.depth.transport(
+            state[start],
+            state[depth_middle],
+            depth_relation,
+        )
+        depth_then_relay = layer.relay.transport(
+            depth_then_relay,
+            state[end],
+            relay_b,
+        )
 
         metadata = torch.stack(
             (
@@ -368,9 +415,19 @@ class HoloRoute(nn.Module):
         contexts = state.new_zeros((len(state), 3, state.shape[-1]))
         coverage = torch.zeros((len(state), 3), dtype=torch.bool, device=state.device)
         for layer in self.layers:
-            state, contexts, coverage = layer(state, graph, relay_keep, query_keep)
+            state, contexts, coverage = layer(
+                state,
+                graph,
+                relay_keep,
+                query_keep,
+            )
 
-        views = (state, contexts[:, DEPTH_CONTEXT], contexts[:, RELAY_CONTEXT], contexts[:, QUERY_CONTEXT])
+        views = (
+            state,
+            contexts[:, DEPTH_CONTEXT],
+            contexts[:, RELAY_CONTEXT],
+            contexts[:, QUERY_CONTEXT],
+        )
         value_prediction: list[torch.Tensor] = []
         support_prediction: list[torch.Tensor] = []
         for decoder, view in zip(self.decoders, views, strict=True):
@@ -378,7 +435,11 @@ class HoloRoute(nn.Module):
             value_prediction.append(value)
             support_prediction.append(support)
 
-        holonomy, holonomy_token = self.diamond_error(state, graph, self.layers[-1])
+        holonomy, holonomy_token = self.diamond_error(
+            state,
+            graph,
+            self.layers[-1],
+        )
         return ModelOutput(
             state=state,
             predictions=Predictions(
