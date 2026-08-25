@@ -1,7 +1,6 @@
-"""Command line interface for HoloRoute and flat-1024."""
+"""Command line interface for HoloRoute and Flat-1024."""
 
 import argparse
-import json
 from dataclasses import replace
 
 from research_dataset import open_research_dataset
@@ -44,6 +43,21 @@ def command_line() -> argparse.ArgumentParser:
     command.add_argument("--seed", type=int, default=20260825)
     command.add_argument("--device", default="cpu")
     return parser
+
+
+def print_report(command: str, report: dict[str, object]) -> None:
+    print(f"{command} completed")
+    for name in (
+        "checkpoint",
+        "reference",
+        "scores",
+        "best_validation_loss",
+        "parameter_count",
+        "samples",
+        "tokens",
+    ):
+        if name in report:
+            print(f"{name}: {report[name]}")
 
 
 def main() -> None:
@@ -106,7 +120,8 @@ def main() -> None:
             arguments.bootstrap,
             arguments.seed,
         )
-    print(json.dumps(report, indent=2, sort_keys=True))
+
+    print_report(arguments.command, report)
 
 
 if __name__ == "__main__":
