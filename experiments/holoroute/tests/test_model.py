@@ -19,6 +19,7 @@ def small_config() -> HoloRouteConfig:
             hidden_dim=32,
             head_layers=1,
             head_attention_heads=4,
+            head_pool_batch_size=2,
             transport_rank=4,
             message_layers=1,
         )
@@ -32,12 +33,14 @@ def test_graph_model_loss_and_token_residuals():
 
     model = HoloRoute(graph.layer_count, graph.head_count, config.model)
     assert model.encoder.head_pool.num_heads == config.model.head_attention_heads
+    assert model.encoder.pool_batch_size == 2
 
     output = model(graph)
     assert output.state.dtype == torch.float32
     assert output.state.shape == (graph.event_count, 32)
     assert output.predictions.value.shape == (graph.event_count, 4, graph.head_count)
     assert output.coverage.any()
+    assert output.coverage[:, 2].any()
     assert output.holonomy.shape == (1,)
 
     generator = torch.Generator().manual_seed(9)
