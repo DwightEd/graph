@@ -37,7 +37,7 @@ class TrainConfig:
     relay_drop_fraction: float = 0.15
     minimum_masked_events: int = 1
     validation_masks: int = 3
-    mixed_precision: bool = True
+    mixed_precision: bool = False
     seed: int = 20260825
 
 
