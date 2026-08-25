@@ -1,105 +1,69 @@
-"""Command line interface for HoloRoute and Flat-1024."""
+"""Command line interface for P-Cut."""
 
 import argparse
-from dataclasses import replace
 
 from research_dataset import open_research_dataset
 
-from .config import HoloRouteConfig
+from .config import MethodConfig
 from .evaluate import evaluate
-from .pipeline import score_flat, score_holoroute, train_flat, train_holoroute
+from .pipeline import fit_reference, score_dataset
 
 
 def command_line() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="HoloRoute attention event graph")
+    parser = argparse.ArgumentParser(description="Prompt-provenance cut detector")
     commands = parser.add_subparsers(dest="command", required=True)
 
-    for name in ("train", "flat-train"):
-        command = commands.add_parser(name)
-        command.add_argument("--train", required=True)
-        command.add_argument("--checkpoint", required=True)
-        command.add_argument("--reference", required=True)
-        command.add_argument("--task", default="QA")
-        command.add_argument("--limit", type=int)
-        command.add_argument("--epochs", type=int)
-        command.add_argument("--device", default="cpu")
-        command.add_argument("--hidden", type=int, default=96)
+    fit = commands.add_parser("fit")
+    fit.add_argument("--train", required=True)
+    fit.add_argument("--checkpoint", required=True)
+    fit.add_argument("--reference", required=True)
+    fit.add_argument("--task", default="QA")
+    fit.add_argument("--limit", type=int)
+    fit.add_argument("--device", default="cpu")
 
-    for name in ("score", "flat-score"):
-        command = commands.add_parser(name)
-        command.add_argument("--test", required=True)
-        command.add_argument("--checkpoint", required=True)
-        command.add_argument("--reference", required=True)
-        command.add_argument("--output", required=True)
-        command.add_argument("--task", default="QA")
-        command.add_argument("--limit", type=int)
-        command.add_argument("--device", default="cpu")
+    score = commands.add_parser("score")
+    score.add_argument("--test", required=True)
+    score.add_argument("--checkpoint", required=True)
+    score.add_argument("--reference", required=True)
+    score.add_argument("--output", required=True)
+    score.add_argument("--task", default="QA")
+    score.add_argument("--limit", type=int)
+    score.add_argument("--device", default="cpu")
 
-    command = commands.add_parser("evaluate")
-    command.add_argument("--test", required=True)
-    command.add_argument("--scores", required=True)
-    command.add_argument("--output", required=True)
-    command.add_argument("--bootstrap", type=int, default=500)
-    command.add_argument("--seed", type=int, default=20260825)
-    command.add_argument("--device", default="cpu")
+    evaluation = commands.add_parser("evaluate")
+    evaluation.add_argument("--test", required=True)
+    evaluation.add_argument("--scores", required=True)
+    evaluation.add_argument("--output", required=True)
+    evaluation.add_argument("--bootstrap", type=int, default=500)
+    evaluation.add_argument("--seed", type=int, default=20260826)
+    evaluation.add_argument("--device", default="cpu")
     return parser
 
 
 def print_report(command: str, report: dict[str, object]) -> None:
     print(f"{command} completed")
-    for name in (
-        "checkpoint",
-        "reference",
-        "scores",
-        "best_validation_loss",
-        "parameter_count",
-        "samples",
-        "tokens",
-    ):
+    for name in ("checkpoint", "reference", "scores", "graphs", "samples", "tokens"):
         if name in report:
             print(f"{name}: {report[name]}")
 
 
 def main() -> None:
     arguments = command_line().parse_args()
-    config = HoloRouteConfig()
-    if getattr(arguments, "epochs", None) is not None:
-        config = replace(config, train=replace(config.train, epochs=arguments.epochs))
+    config = MethodConfig()
 
-    if arguments.command == "train":
+    if arguments.command == "fit":
         dataset = open_research_dataset(arguments.train, device=arguments.device)
-        report = train_holoroute(
+        report = fit_reference(
             dataset,
             arguments.checkpoint,
             arguments.reference,
             config,
             arguments.task,
             arguments.limit,
-        )
-    elif arguments.command == "flat-train":
-        dataset = open_research_dataset(arguments.train, device=arguments.device)
-        report = train_flat(
-            dataset,
-            arguments.checkpoint,
-            arguments.reference,
-            config,
-            arguments.task,
-            arguments.limit,
-            arguments.hidden,
         )
     elif arguments.command == "score":
         dataset = open_research_dataset(arguments.test, device=arguments.device)
-        report = score_holoroute(
-            dataset,
-            arguments.checkpoint,
-            arguments.reference,
-            arguments.output,
-            arguments.task,
-            arguments.limit,
-        )
-    elif arguments.command == "flat-score":
-        dataset = open_research_dataset(arguments.test, device=arguments.device)
-        report = score_flat(
+        report = score_dataset(
             dataset,
             arguments.checkpoint,
             arguments.reference,
