@@ -1,5 +1,6 @@
 """Self-supervised graph views, losses and model training."""
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 import hashlib
 import random
@@ -34,6 +35,13 @@ class TrainingResult:
 def sample_seed(seed: int, sample_id: str, stream: int = 0) -> int:
     payload = f"{seed}\0{stream}\0{sample_id}".encode()
     return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big") % (2**63 - 1)
+
+
+def autocast_context(model: torch.nn.Module, enabled: bool):
+    device = next(model.parameters()).device
+    if device.type != "cuda" or not enabled:
+        return nullcontext()
+    return torch.autocast(device_type="cuda", dtype=torch.float16)
 
 
 def supported_events(graph: EventGraph) -> torch.Tensor:
@@ -79,9 +87,13 @@ def choose_relay_edges(
     edge_target = graph.relay_edges[1]
     for target in torch.unique(edge_target).tolist():
         edges = torch.nonzero(edge_target == target, as_tuple=False).flatten()
-        if len(edges) < 2 or torch.rand((), generator=generator, device=graph.device) >= fraction:
+        if len(edges) < 2:
             continue
-        dropped = edges[torch.randint(len(edges), (1,), generator=generator, device=graph.device)]
+        if torch.rand((), generator=generator, device=graph.device) >= fraction:
+            continue
+        dropped = edges[
+            torch.randint(len(edges), (1,), generator=generator, device=graph.device)
+        ]
         keep[dropped] = False
         targets[target] = True
     return keep, targets
@@ -146,7 +158,11 @@ def reconstruction_error(
         dim=-1,
         eps=1e-8,
     )
-    cosine = torch.where(observed.any(dim=-1), cosine.clamp_min(0.0), torch.zeros_like(cosine))
+    cosine = torch.where(
+        observed.any(dim=-1),
+        cosine.clamp_min(0.0),
+        torch.zeros_like(cosine),
+    )
 
     support = F.binary_cross_entropy_with_logits(
         predicted_support,
@@ -206,7 +222,11 @@ def self_supervised_loss(
     depth_loss = selected_mean(error[DEPTH], view.event_mask & output.coverage[:, 0])
     relay_loss = selected_mean(error[RELAY], view.relay_targets & output.coverage[:, 1])
     query_loss = selected_mean(error[QUERY], view.event_mask & output.coverage[:, 2])
-    holonomy_loss = output.holonomy.mean() if output.holonomy.numel() else event_loss.new_tensor(0.0)
+    holonomy_loss = (
+        output.holonomy.mean()
+        if output.holonomy.numel()
+        else event_loss.new_tensor(0.0)
+    )
     variance_loss = variance_regularizer(output.state)
 
     weight = config.loss
@@ -227,19 +247,24 @@ def validation_loss(
     config: HoloRouteConfig,
 ) -> float:
     model.eval()
+    device = next(model.parameters()).device
     values: list[float] = []
     with torch.no_grad():
         for sample_id in sample_ids:
             sample = dataset[sample_id]
             try:
-                graph = build_graph(sample, config.graph)
+                graph = build_graph(sample, config.graph).to(device)
                 if not graph.event_count:
                     continue
                 masks = []
                 for mask_index in range(config.train.validation_masks):
                     generator = torch.Generator(device=graph.device)
-                    generator.manual_seed(sample_seed(config.train.seed, sample_id, 10_000 + mask_index))
-                    masks.append(float(self_supervised_loss(model, graph, config, generator).item()))
+                    generator.manual_seed(
+                        sample_seed(config.train.seed, sample_id, 10_000 + mask_index)
+                    )
+                    with autocast_context(model, config.train.mixed_precision):
+                        loss = self_supervised_loss(model, graph, config, generator)
+                    masks.append(float(loss.float().item()))
                 values.append(float(np.mean(masks)))
             finally:
                 sample.release_attention()
@@ -258,6 +283,9 @@ def train_model(
         lr=config.train.learning_rate,
         weight_decay=config.train.weight_decay,
     )
+    device = next(model.parameters()).device
+    use_amp = device.type == "cuda" and config.train.mixed_precision
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     best_state: dict[str, torch.Tensor] | None = None
     best_validation = float("inf")
     history: list[dict[str, float]] = []
@@ -271,17 +299,25 @@ def train_model(
         for sample_id in tqdm(order, desc=f"HoloRoute epoch {epoch + 1}", unit="sample"):
             sample = dataset[sample_id]
             try:
-                graph = build_graph(sample, config.graph)
+                graph = build_graph(sample, config.graph).to(device)
                 if not graph.event_count:
                     continue
                 generator = torch.Generator(device=graph.device)
                 generator.manual_seed(sample_seed(config.train.seed, sample_id, epoch))
                 optimizer.zero_grad(set_to_none=True)
-                loss = self_supervised_loss(model, graph, config, generator)
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), config.train.gradient_clip)
-                optimizer.step()
-                losses.append(float(loss.item()))
+                with autocast_context(model, use_amp):
+                    loss = self_supervised_loss(model, graph, config, generator)
+
+                scaler.scale(loss).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(),
+                    config.train.gradient_clip,
+                )
+                scaler.step(optimizer)
+                scaler.update()
+                losses.append(float(loss.detach().float().item()))
+                del graph, loss
             finally:
                 sample.release_attention()
 
