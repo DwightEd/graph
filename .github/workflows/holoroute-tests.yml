@@ -1,11 +1,6 @@
 name: HoloRoute tests
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/holoroute-tests.yml"
   workflow_dispatch:
 
 jobs:
@@ -17,28 +12,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install
-        id: install
-        continue-on-error: true
-        run: |
+      - run: |
           python -m pip install --upgrade pip
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install numpy scipy scikit-learn tqdm pytest
-      - name: Compile
-        id: compile
-        continue-on-error: true
-        run: python -m compileall -q experiments/holoroute
-      - name: Shell
-        id: shell
-        continue-on-error: true
-        run: bash -n experiments/holoroute/run.sh
-      - name: Tests
-        id: tests
-        continue-on-error: true
-        run: pytest -q experiments/holoroute/tests
-      - name: Outcomes
-        run: |
-          echo "install=${{ steps.install.outcome }}"
-          echo "compile=${{ steps.compile.outcome }}"
-          echo "shell=${{ steps.shell.outcome }}"
-          echo "tests=${{ steps.tests.outcome }}"
+      - run: python -m compileall -q experiments/holoroute
+      - run: bash -n experiments/holoroute/run.sh
+      - run: pytest -q experiments/holoroute/tests
