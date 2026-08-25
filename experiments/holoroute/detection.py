@@ -7,7 +7,7 @@ import torch
 
 from .config import HoloRouteConfig
 from .graph import EventGraph
-from .learning import reconstruction_error
+from .learning import autocast_context, reconstruction_error
 from .model import DEPTH, EVENT, QUERY, RELAY, HoloRoute
 
 RESIDUAL_NAMES = (
@@ -170,12 +170,16 @@ class ConditionalReference:
     ) -> tuple[np.ndarray, np.ndarray]:
         values = fill_missing(residuals, self.fill)
         design = design_matrix(conditions, task, self.task_names)
-        standardized = ((values - design @ self.coefficient - self.median) / self.scale).astype(np.float32)
+        standardized = (
+            (values - design @ self.coefficient - self.median) / self.scale
+        ).astype(np.float32)
         standardized[:, ~self.active] = 0.0
         positive = np.maximum(standardized, 0.0)
         energy = np.einsum("nf,fg,ng->n", positive, self.precision, positive)
         rank = np.searchsorted(self.energy_reference, energy, side="left")
-        probability = (len(self.energy_reference) - rank + 1) / float(len(self.energy_reference) + 1)
+        probability = (
+            len(self.energy_reference) - rank + 1
+        ) / float(len(self.energy_reference) + 1)
         score = -np.log10(np.clip(probability, 1e-12, 1.0)).astype(np.float32)
         return score, standardized
 
@@ -223,9 +227,14 @@ def token_conditions(graph: EventGraph) -> np.ndarray:
         diamond_count = np.bincount(diamond_token, minlength=tokens).astype(np.float32)
 
     mass = graph.events.mass.detach().cpu().numpy().astype(np.float32)
-    observed = graph.events.observed.float().mean(dim=-1).detach().cpu().numpy().astype(np.float32)
+    observed = (
+        graph.events.observed.float().mean(dim=-1).detach().cpu().numpy().astype(np.float32)
+    )
     denominator = np.maximum(event_count, 1.0)
-    retained = np.bincount(event_token, weights=mass, minlength=tokens).astype(np.float32) / denominator
+    retained = (
+        np.bincount(event_token, weights=mass, minlength=tokens).astype(np.float32)
+        / denominator
+    )
     observed_fraction = (
         np.bincount(event_token, weights=observed, minlength=tokens).astype(np.float32)
         / denominator
@@ -300,7 +309,13 @@ def score_graph(
         observed = graph.events.observed.clone()
         values[mask] = 0.0
         observed[mask] = False
-        output = model(graph, values=values, observed=observed, query_keep=~mask)
+        with autocast_context(model, config.train.mixed_precision):
+            output = model(
+                graph,
+                values=values,
+                observed=observed,
+                query_keep=~mask,
+            )
 
         errors = tuple(
             reconstruction_error(
@@ -308,10 +323,12 @@ def score_graph(
                 output.predictions.support[:, index],
                 graph,
                 config,
-            )
+            ).float()
             for index in (EVENT, DEPTH, RELAY, QUERY)
         )
-        disagreement = (output.contexts[:, 0] - output.contexts[:, 1]).square().mean(dim=-1)
+        disagreement = (
+            output.contexts[:, 0] - output.contexts[:, 1]
+        ).square().mean(dim=-1).float()
         masks = (
             mask,
             mask & output.coverage[:, 0],
@@ -319,7 +336,9 @@ def score_graph(
             mask & output.coverage[:, 2],
             mask & output.coverage[:, 0] & output.coverage[:, 1],
         )
-        for column, (error, available) in enumerate(zip((*errors, disagreement), masks, strict=True)):
+        for column, (error, available) in enumerate(
+            zip((*errors, disagreement), masks, strict=True)
+        ):
             event_sum[available, column] += error[available]
             event_count[available, column] += 1.0
 
@@ -335,13 +354,19 @@ def score_graph(
         token_values.append(value)
         token_counts.append(coverage)
 
-    clean = model(graph)
+    with autocast_context(model, config.train.mixed_precision):
+        clean = model(graph)
     holonomy = graph.events.value.new_full((graph.response_count,), torch.nan)
     holonomy_count = graph.events.value.new_zeros(graph.response_count)
     if clean.holonomy.numel():
+        clean_holonomy = clean.holonomy.float()
         total = graph.events.value.new_zeros(graph.response_count)
-        total.index_add_(0, clean.holonomy_token, clean.holonomy)
-        holonomy_count.index_add_(0, clean.holonomy_token, torch.ones_like(clean.holonomy))
+        total.index_add_(0, clean.holonomy_token, clean_holonomy)
+        holonomy_count.index_add_(
+            0,
+            clean.holonomy_token,
+            torch.ones_like(clean_holonomy),
+        )
         available = holonomy_count > 0
         holonomy[available] = total[available] / holonomy_count[available]
     token_values.append(holonomy)
