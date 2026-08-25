@@ -1,7 +1,7 @@
-def test_readable_refactor_modules_import():
-    import experiments.holoroute.baseline
+def test_pcut_modules_import():
     import experiments.holoroute.detection
     import experiments.holoroute.evaluate
-    import experiments.holoroute.learning
+    import experiments.holoroute.graph
+    import experiments.holoroute.pcut
     import experiments.holoroute.pipeline
     import experiments.holoroute.run
