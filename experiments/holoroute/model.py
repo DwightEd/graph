@@ -29,14 +29,17 @@ RELATION_COUNT = 3
 
 
 def segment_softmax(score: torch.Tensor, target: torch.Tensor, size: int) -> torch.Tensor:
+    """Softmax over entries that share one destination index."""
+
     if not score.numel():
         return score
-    maximum = score.new_full((size,), -torch.inf)
-    maximum.scatter_reduce_(0, target, score, reduce="amax", include_self=True)
-    weight = torch.exp(score - maximum[target])
-    normalizer = score.new_zeros(size)
+    work = score.float()
+    maximum = work.new_full((size,), -torch.inf)
+    maximum.scatter_reduce_(0, target, work, reduce="amax", include_self=True)
+    weight = torch.exp(work - maximum[target])
+    normalizer = work.new_zeros(size)
     normalizer.index_add_(0, target, weight)
-    return weight / normalizer[target].clamp_min(1e-12)
+    return (weight / normalizer[target].clamp_min(1e-12)).to(score.dtype)
 
 
 def scatter_sum(message: torch.Tensor, target: torch.Tensor, size: int) -> torch.Tensor:
@@ -44,6 +47,37 @@ def scatter_sum(message: torch.Tensor, target: torch.Tensor, size: int) -> torch
     if message.numel():
         output.index_add_(0, target, message)
     return output
+
+
+def build_query_edges(
+    graph: EventGraph,
+    keep: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Create all leave-one-out source-to-target edges inside query groups.
+
+    The group structure is copied to CPU once, avoiding thousands of tiny CUDA
+    attention calls. The returned edge tensor is consumed by one vectorized
+    query aggregation operation.
+    """
+
+    members = graph.queries.events.detach().cpu().tolist()
+    pointer = graph.queries.pointer.detach().cpu().tolist()
+    available = None if keep is None else keep.detach().cpu().tolist()
+    sources: list[int] = []
+    targets: list[int] = []
+
+    for group in range(graph.queries.count):
+        current = members[pointer[group] : pointer[group + 1]]
+        source_events = current if available is None else [event for event in current if available[event]]
+        for target in current:
+            for source in source_events:
+                if source != target:
+                    sources.append(source)
+                    targets.append(target)
+
+    if not sources:
+        return torch.empty((2, 0), dtype=torch.long, device=graph.device)
+    return torch.tensor((sources, targets), dtype=torch.long, device=graph.device)
 
 
 @dataclass(frozen=True)
@@ -63,16 +97,12 @@ class ModelOutput:
 
 
 class HeadEncoder(nn.Module):
-    """Encode an event's head set with learned seed queries.
-
-    Seed-to-head attention is linear in the number of heads. The previous
-    head-to-head Transformer materialized a square attention matrix for every
-    event and dominated GPU memory on long samples.
-    """
+    """Encode an event's complete head profile with bounded-memory pooling."""
 
     def __init__(self, layers: int, heads: int, config: ModelConfig) -> None:
         super().__init__()
         hidden = config.hidden_dim
+        self.pool_batch_size = config.head_pool_batch_size
         self.head_id = nn.Embedding(heads, hidden)
         self.layer_id = nn.Embedding(layers, hidden)
         self.role_id = nn.Embedding(2, hidden)
@@ -107,6 +137,19 @@ class HeadEncoder(nn.Module):
         )
         self.norm = nn.LayerNorm(hidden)
 
+    def pool_heads(self, tokens: torch.Tensor) -> torch.Tensor:
+        """Pool event head sets in chunks below CUDA attention's batch limit."""
+
+        pooled: list[torch.Tensor] = []
+        for start in range(0, len(tokens), self.pool_batch_size):
+            current = tokens[start : start + self.pool_batch_size]
+            query = self.seeds[None].expand(len(current), -1, -1)
+            summary, _ = self.head_pool(query, current, current, need_weights=False)
+            pooled.append(summary.mean(dim=1))
+        if not pooled:
+            return tokens.new_empty((0, self.seeds.shape[-1]))
+        return torch.cat(pooled, dim=0)
+
     def forward(
         self,
         graph: EventGraph,
@@ -119,9 +162,7 @@ class HeadEncoder(nn.Module):
         tokens = tokens + self.head_id(head)[None]
         tokens = tokens + self.layer_id(graph.events.layer)[:, None]
 
-        query = self.seeds[None].expand(len(tokens), -1, -1)
-        summary, _ = self.head_pool(query, tokens, tokens, need_weights=False)
-        state = summary.mean(dim=1)
+        state = self.pool_heads(tokens)
         for block in self.summary_blocks:
             state = state + block(state)
 
@@ -211,39 +252,51 @@ class RelationMixer(nn.Module):
 
 
 class QueryMixer(nn.Module):
-    """Predict each event from the other events in its query-layer set."""
+    """Vectorized multi-head aggregation within query-layer source sets."""
 
     def __init__(self, hidden: int, attention_heads: int, dropout: float) -> None:
         super().__init__()
-        self.attention = nn.MultiheadAttention(
-            hidden,
-            num_heads=attention_heads,
-            dropout=dropout,
-            batch_first=True,
-        )
+        self.attention_heads = attention_heads
+        self.head_dim = hidden // attention_heads
+        self.scale = self.head_dim ** -0.5
+        self.query = nn.Linear(hidden, hidden, bias=False)
+        self.key = nn.Linear(hidden, hidden, bias=False)
+        self.value = nn.Linear(hidden, hidden, bias=False)
+        self.output = nn.Linear(hidden, hidden)
+        self.dropout = nn.Dropout(dropout)
         self.norm = nn.LayerNorm(hidden)
 
     def forward(
         self,
         state: torch.Tensor,
-        graph: EventGraph,
-        keep: torch.Tensor | None = None,
+        edges: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        context = state.new_zeros(state.shape)
-        coverage = torch.zeros(len(state), dtype=torch.bool, device=state.device)
+        if not edges.shape[1]:
+            return (
+                state.new_zeros(state.shape),
+                torch.zeros(len(state), dtype=torch.bool, device=state.device),
+            )
 
-        for group in range(graph.queries.count):
-            members = graph.queries.members(group)
-            available = members if keep is None else members[keep[members]]
-            for target in members:
-                sources = available[available != target]
-                if not len(sources):
-                    continue
-                query = state[target].view(1, 1, -1)
-                keys = state[sources].unsqueeze(0)
-                value, _ = self.attention(query, keys, keys, need_weights=False)
-                context[target] = self.norm(value[0, 0])
-                coverage[target] = True
+        source, target = edges
+        query = self.query(state[target]).reshape(-1, self.attention_heads, self.head_dim)
+        key = self.key(state[source]).reshape(-1, self.attention_heads, self.head_dim)
+        value = self.value(state[source]).reshape(-1, self.attention_heads, self.head_dim)
+
+        score = (query.float() * key.float()).sum(dim=-1) * self.scale
+        head = torch.arange(self.attention_heads, device=state.device)
+        segment = target[:, None] * self.attention_heads + head[None]
+        weight = segment_softmax(
+            score.reshape(-1),
+            segment.reshape(-1),
+            len(state) * self.attention_heads,
+        ).reshape(-1, self.attention_heads)
+        weight = self.dropout(weight).to(value.dtype)
+
+        message = (value * weight[..., None]).reshape(-1, state.shape[-1])
+        context = scatter_sum(message, target, len(state))
+        context = self.norm(self.output(context))
+        coverage = torch.zeros(len(state), dtype=torch.bool, device=state.device)
+        coverage[target] = True
         return context, coverage
 
 
@@ -275,8 +328,8 @@ class HoloRouteLayer(nn.Module):
         self,
         state: torch.Tensor,
         graph: EventGraph,
+        query_edges: torch.Tensor,
         relay_keep: torch.Tensor | None = None,
-        query_keep: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         depth_relation = torch.full(
             (graph.depth_edges.shape[1],),
@@ -297,7 +350,7 @@ class HoloRouteLayer(nn.Module):
         else:
             relay_relation = torch.empty(0, dtype=torch.long, device=state.device)
         relay, relay_coverage = self.relay(state, relay_edges, relay_relation)
-        query, query_coverage = self.query(state, graph, query_keep)
+        query, query_coverage = self.query(state, query_edges)
 
         contexts = torch.stack((depth, relay, query), dim=1)
         coverage = torch.stack((depth_coverage, relay_coverage, query_coverage), dim=1)
@@ -412,14 +465,15 @@ class HoloRoute(nn.Module):
         values = graph.events.value if values is None else values
         observed = graph.events.observed if observed is None else observed
         state = self.encoder(graph, values, observed)
+        query_edges = build_query_edges(graph, query_keep)
         contexts = state.new_zeros((len(state), 3, state.shape[-1]))
         coverage = torch.zeros((len(state), 3), dtype=torch.bool, device=state.device)
         for layer in self.layers:
             state, contexts, coverage = layer(
                 state,
                 graph,
+                query_edges,
                 relay_keep,
-                query_keep,
             )
 
         views = (
