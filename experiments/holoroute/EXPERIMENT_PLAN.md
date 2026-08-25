@@ -1,29 +1,39 @@
-# Experiment plan
+# P-Cut 实验计划
 
-## Primary comparison
+## 第一轮必须报告
+
+1. `closure` raw residual 和条件校准后的 final score；
+2. absolute / relative position baseline 与 Spearman；
+3. prompt necessity 与 response-closed necessity 的独立分布；
+4. provenance interval width、cut fallback 和 unresolved mass 覆盖；
+5. source-group bootstrap CI；
+6. 每样本导出的 token embeddings 与 edge P/R/Q partition。
+
+## 必做对照
 
 ```text
-flat1024 -> event-only -> +depth -> +query -> +relay -> +holonomy
+direct prompt mass / Lookback
+RR spectral residual
+旧 HoloRoute baseline result
+P-Cut closure
 ```
 
-Every comparison uses the same source split, complete-layer masking semantics,
-position conditioning and label-posthoc evaluation.
+下一步结构对照：
 
-## Required evidence
+```text
+equal-mass random cut
+matched exact-endpoint rewire
+no provenance propagation（只按 prompt/response role 切）
+head-identity shuffle
+layer-order shuffle
+```
 
-1. Full HoloRoute improves held-out reconstruction over `flat1024`.
-2. Full HoloRoute improves AUPRC over `flat1024` with paired source bootstrap.
-3. Depth and query modules each provide an increment over the preceding model.
-4. Real relay paths outperform a matched middle-token rewire.
-5. Holonomy provides an increment beyond depth and relay prediction.
-6. Score-position correlation stays far below the former cumulative rupture
-   baseline and the detector beats absolute and relative position.
+## 接受标准
 
-## Stop rules
+- P-Cut 必须超过 absolute-position baseline；
+- 必须超过 direct prompt/response ratio；
+- real endpoints 必须优于 matched rewire；
+- 分数不能主要由 removed mass、position、length 或 sparse fallback 解释；
+- QA、Summary、Data2txt 和多个模型上的方向必须可复现。
 
-- Full ~= flat1024: remove the graph contribution claim.
-- No depth increment: remove the multilayer transport claim.
-- No query increment: replace the query mixer with local encoding.
-- No relay/rewire increment: remove the causal-path branch.
-- No holonomy increment: keep the graph completion model and remove curvature
-  language.
+若这些条件不满足，就停止 response-closure 假设，而不是继续增加更多分数或神经模块。
