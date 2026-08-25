@@ -1,4 +1,4 @@
-"""Read labels only after token scores have been frozen."""
+"""Read labels only after P-Cut scores have been frozen."""
 
 import csv
 from pathlib import Path
@@ -77,17 +77,17 @@ def evaluate(
     score_path,
     output_dir,
     bootstrap_replicates: int = 500,
-    seed: int = 20260825,
+    seed: int = 20260826,
 ) -> dict[str, object]:
     arrays = load_npz(score_path)
     if str(arrays["schema"].item()) != SCORE_SCHEMA:
-        raise ValueError("unsupported HoloRoute score artifact")
+        raise ValueError("unsupported P-Cut score artifact")
     if bool(arrays["labels_included"].item()):
         raise ValueError("score artifact already contains labels")
     if sha256(Path(dataset.root) / "manifest.json") != str(arrays["dataset_manifest_sha256"].item()):
         raise ValueError("score artifact and test manifest differ")
     if sha256(arrays["checkpoint_path"].item()) != str(arrays["checkpoint_sha256"].item()):
-        raise ValueError("checkpoint changed after scoring")
+        raise ValueError("method file changed after scoring")
     if sha256(arrays["reference_path"].item()) != str(arrays["reference_sha256"].item()):
         raise ValueError("reference changed after scoring")
 
