@@ -28,10 +28,13 @@ def small_config() -> HoloRouteConfig:
 def test_graph_model_loss_and_token_residuals():
     graph = synthetic_graph()
     config = small_config()
+    assert config.train.mixed_precision is False
+
     model = HoloRoute(graph.layer_count, graph.head_count, config.model)
     assert model.encoder.head_pool.num_heads == config.model.head_attention_heads
 
     output = model(graph)
+    assert output.state.dtype == torch.float32
     assert output.state.shape == (graph.event_count, 32)
     assert output.predictions.value.shape == (graph.event_count, 4, graph.head_count)
     assert output.coverage.any()
