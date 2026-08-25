@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-OUT=${OUT:-"${ROOT}/experiments/holoroute/outputs/run"}
+OUT=${OUT:-"${ROOT}/experiments/holoroute/outputs/pcut"}
 PYTHON=${PYTHON:-python}
 DEVICE=${DEVICE:-cuda}
 TASK=${TASK:-QA}
-EPOCHS=${EPOCHS:-8}
 TRAIN_LIMIT=${TRAIN_LIMIT:-}
 TEST_LIMIT=${TEST_LIMIT:-}
-MODEL=${MODEL:-holoroute}
 
 if [ -z "${TRAIN_SPLIT}" ] || [ -z "${TEST_SPLIT}" ]; then
   echo "TRAIN_SPLIT and TEST_SPLIT must be set."
@@ -17,13 +15,6 @@ fi
 
 mkdir -p "${OUT}"
 cd "${ROOT}" || exit 1
-
-TRAIN_COMMAND=train
-SCORE_COMMAND=score
-if [ "${MODEL}" = "flat1024" ]; then
-  TRAIN_COMMAND=flat-train
-  SCORE_COMMAND=flat-score
-fi
 
 TRAIN_LIMIT_ARGUMENT=()
 TEST_LIMIT_ARGUMENT=()
@@ -35,21 +26,20 @@ if [ -n "${TEST_LIMIT}" ]; then
 fi
 
 echo
-echo "[1/3] Train ${MODEL}"
-"${PYTHON}" -m experiments.holoroute.run "${TRAIN_COMMAND}" \
+echo "[1/3] Fit P-Cut reference"
+"${PYTHON}" -m experiments.holoroute.run fit \
   --train "${TRAIN_SPLIT}" \
-  --checkpoint "${OUT}/model.pt" \
+  --checkpoint "${OUT}/method.pt" \
   --reference "${OUT}/reference.npz" \
   --task "${TASK}" \
-  --epochs "${EPOCHS}" \
   --device "${DEVICE}" \
   "${TRAIN_LIMIT_ARGUMENT[@]}" || exit $?
 
 echo
-echo "[2/3] Score ${MODEL}"
-"${PYTHON}" -m experiments.holoroute.run "${SCORE_COMMAND}" \
+echo "[2/3] Score P-Cut and export graph embeddings"
+"${PYTHON}" -m experiments.holoroute.run score \
   --test "${TEST_SPLIT}" \
-  --checkpoint "${OUT}/model.pt" \
+  --checkpoint "${OUT}/method.pt" \
   --reference "${OUT}/reference.npz" \
   --output "${OUT}/scores.npz" \
   --task "${TASK}" \
@@ -67,4 +57,5 @@ echo "[3/3] Evaluate"
 echo
 echo "Finished."
 echo "Output: ${OUT}"
+echo "Graphs: ${OUT}/graphs"
 echo "Metrics: ${OUT}/evaluation/evaluation.json"
