@@ -158,16 +158,19 @@ Z^{(L)}=T_L\cdots T_1B.
 ### 4.4 输出节点表征
 
 ```text
-full_final     有序全部层后的最终状态
-full_trace     每一层状态按顺序拼接
-reverse_final  反向层序后的最终状态
-reverse_trace  反向层序的完整轨迹
-last_layer     只应用最后一层
-layer_mean     每层单独作用于同一初始 basis 后取平均
-identity       不使用图，只保留初始 basis
+full_final      有序全部层后的最终状态
+full_trace      每一层状态按顺序拼接
+reverse_final   反向层序后的最终状态
+reverse_trace   反向层序的完整轨迹
+last_layer      只应用最后一层
+layer_mean      各层独立作用于同一初始 basis 后的单步 ensemble
+identity_final  不使用图的初始 basis
+identity_trace  将初始 basis 重复 L 次，维度与 full_trace 完全一致
 ```
 
 `full_trace` 是主要 token node embedding；所有 detector 只读取这些固定表征，不再读取边。
+
+`identity_trace` 与 `full_trace` 具有相同维度，避免把“图运输增益”和“输入维数更高”混在一起。`layer_mean` 只是单步 layer ensemble，不被表述为严格的等深静态 rollout；真正的层序证据主要来自 ordered 与 reverse 的同深比较。
 
 ## 5. 同一套评估
 
@@ -190,12 +193,13 @@ source-group bootstrap
 核心配对比较：
 
 ```text
-full_trace  - reverse_trace   层序是否重要
-full_final  - reverse_final   最终有序 composition 是否重要
-full_final  - last_layer      全部层是否优于单层
-full_final  - layer_mean      progressive composition 是否优于静态层平均
-full_trace  - full_final      完整轨迹是否优于最终状态
-full_trace  - identity        图运输是否提供超过位置 basis 的信息
+full_trace  - reverse_trace    同维、同深：层序是否重要
+full_final  - reverse_final    同维、同深：最终 composition 是否依赖层序
+full_final  - last_layer       全部层是否优于最后一层
+full_final  - layer_mean       有序多层结果是否优于单步 layer ensemble
+full_trace  - full_final       完整轨迹是否优于只保留最终状态
+full_trace  - identity_trace   同维：图运输是否超过位置 basis
+full_final  - identity_final   同维：最终流状态是否超过位置 basis
 ```
 
 ## 6. 判定与停止条件
@@ -205,11 +209,21 @@ full_trace  - identity        图运输是否提供超过位置 basis 的信息
 1. `full_trace` 或 `full_final` 的无监督结果接近或超过现有 GCN；
 2. linear readability 明显超过 position baseline；
 3. ordered flow 在 paired source bootstrap 中稳定优于 reverse order；
-4. all-layer flow 稳定优于 last-layer 和 layer-mean。
+4. all-layer flow 稳定优于 last-layer；
+5. flow 在同维比较中稳定优于 identity control。
 
 若 ordered flow 不优于这些控制，则停止 attention-only rollout。下一步应采集 `V/W_O/hidden state`，复现论文真正的 contribution operator，而不是继续加入 entropy、degree、closure 等手工特征。
 
-## 7. 代码入口
+## 7. 后续方法如何从验证结果生长
+
+本目录先做确定性的 operator audit，不先训练新的大网络。这样可以把问题拆清楚：
+
+- ordered flow 有信号：再学习 layer/head mixing，或用 normal-only / few-shot calibrator读取 flow trajectory；
+- ordered flow 只在监督 probe 中有信号：表示有效，one-class detector需要调整；
+- ordered flow 与 reverse、identity 相同：raw attention 不足，应采集 value、`W_O` 和 hidden state；
+- 真 contribution 可用后：再实现论文的 relevance-layout alignment，并比较 attention route、value-aware contribution 和 hidden-state route。
+
+## 8. 代码入口
 
 ```bash
 bash experiments/information_flow/run_qa.sh
