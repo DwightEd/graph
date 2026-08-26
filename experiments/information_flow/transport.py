@@ -16,7 +16,8 @@ class FlowViews:
     reverse_final: torch.Tensor
     last_layer: torch.Tensor
     layer_mean: torch.Tensor
-    identity: torch.Tensor
+    identity_trace: torch.Tensor
+    identity_final: torch.Tensor
     trajectory: torch.Tensor
 
     def embeddings(self) -> dict[str, torch.Tensor]:
@@ -27,7 +28,8 @@ class FlowViews:
             "reverse_final": self.reverse_final,
             "last_layer": self.last_layer,
             "layer_mean": self.layer_mean,
-            "identity": self.identity,
+            "identity_trace": self.identity_trace,
+            "identity_final": self.identity_final,
         }
 
 
@@ -121,6 +123,8 @@ def layer_mean_view(
     residual_weight: float,
     unresolved: str,
 ) -> torch.Tensor:
+    """Average one-step outputs of the individual layer operators."""
+
     states = [
         flow_step(
             graph,
@@ -171,6 +175,13 @@ def encode_views(graph, config: FlowConfig | None = None) -> FlowViews:
         config.unresolved,
     )
 
+    identity_final = initial[graph.response_start :]
+    identity_trace = identity_final[:, None, :].expand(
+        -1,
+        graph.layer_count,
+        -1,
+    ).reshape(graph.response_count, -1)
+
     return FlowViews(
         full_trace=full_trajectory.transpose(0, 1).reshape(graph.response_count, -1),
         full_final=full_state[graph.response_start :],
@@ -181,6 +192,7 @@ def encode_views(graph, config: FlowConfig | None = None) -> FlowViews:
         reverse_final=reverse_state[graph.response_start :],
         last_layer=last_layer,
         layer_mean=layer_mean,
-        identity=initial[graph.response_start :],
+        identity_trace=identity_trace,
+        identity_final=identity_final,
         trajectory=full_trajectory.transpose(0, 1),
     )
