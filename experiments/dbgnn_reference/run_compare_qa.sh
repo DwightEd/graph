@@ -6,6 +6,7 @@ TRAIN_INDEX=${GRAPH_OUT}/calibration/index.npz
 TEST_INDEX=${GRAPH_OUT}/test/index.npz
 TEST_SPLIT=/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/attention/llama31_8b/test
 BASE_OUT=${REPO}/experiments/dbgnn_reference/outputs/qa_compare
+RESUME=${RESUME:-0}
 
 cd "${REPO}" || exit 1
 
@@ -18,4 +19,5 @@ BASE_OUT="${BASE_OUT}" \
 DEVICE=cuda \
 EPOCHS=8 \
 DIAGNOSTIC_EPOCHS=20 \
+RESUME="${RESUME}" \
 bash experiments/dbgnn_reference/run_compare.sh
