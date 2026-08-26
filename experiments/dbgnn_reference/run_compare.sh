@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PYTHON=${PYTHON:-python}
 DEVICE=${DEVICE:-cuda}
 EPOCHS=${EPOCHS:-8}
 DIAGNOSTIC_EPOCHS=${DIAGNOSTIC_EPOCHS:-20}
 SEED=${SEED:-20260826}
+RESUME=${RESUME:-0}
 BASE_OUT=${BASE_OUT:-"${ROOT}/experiments/dbgnn_reference/outputs/compare"}
 
-if [[ -z "${TRAIN_INDEX:-}" || -z "${TEST_INDEX:-}" || -z "${TEST_SPLIT:-}" ]]; then
+if [ -z "${TRAIN_INDEX:-}" ] || [ -z "${TEST_INDEX:-}" ] || [ -z "${TEST_SPLIT:-}" ]; then
   echo "TRAIN_INDEX, TEST_INDEX and TEST_SPLIT must be set."
   exit 1
 fi
@@ -26,8 +25,9 @@ for RUN in "gcn:gcn:no_transition" "dbgnn_no_transition:dbgnn:no_transition" "db
   DEVICE="${DEVICE}" \
   EPOCHS="${EPOCHS}" \
   SEED="${SEED}" \
+  RESUME="${RESUME}" \
   EVALUATE=0 \
-  bash "${ROOT}/experiments/dbgnn_reference/run.sh"
+  bash "${ROOT}/experiments/dbgnn_reference/run.sh" || exit $?
 done
 
 "${PYTHON}" -m experiments.dbgnn_reference.diagnostics \
@@ -42,6 +42,6 @@ done
   --device "${DEVICE}" \
   --epochs "${DIAGNOSTIC_EPOCHS}" \
   --seeds "${SEED}" \
-  --seed "${SEED}"
+  --seed "${SEED}" || exit $?
 
 echo "Finished comparison: ${BASE_OUT}/diagnostics/report.json"
