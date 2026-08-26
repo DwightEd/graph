@@ -66,19 +66,21 @@ evaluation.json        labels opened here, after score freezing
 
 ## Export the compact node dataset
 
-After the GCN run, combine the calibration embeddings, test embeddings and
-aligned test labels into one shareable file:
+After the GCN run, combine the calibration/test embeddings and their binary
+node labels into one shareable file:
 
 ```bash
 SOURCE=experiments/dbgnn_reference/outputs/qa_compare/gcn \
+TRAIN_SPLIT=/path/to/RAGTruth/attention/llama31_8b/train \
 TEST_SPLIT=/path/to/RAGTruth/attention/llama31_8b/test \
 OUT=experiments/dbgnn_reference/outputs/gcn_node_data_qa.npz \
 bash experiments/dbgnn_reference/package_gcn_embeddings.sh
 ```
 
-The output contains only `calibration_embeddings`, `test_embeddings` and
-`test_labels`. See [GCN_NODE_EMBEDDING_BUNDLE.md](GCN_NODE_EMBEDDING_BUNDLE.md)
-for the array contract.
+The output concatenates the two encoded node sets and contains only
+`node_embeddings` and row-aligned binary `node_labels`. See
+[GCN_NODE_EMBEDDING_BUNDLE.md](GCN_NODE_EMBEDDING_BUNDLE.md) for the array
+contract.
 
 For the actual construction test, run the first-order GCN, causal DBGNN and the
 same DBGNN with only its high-order transitions removed. Labels open once,

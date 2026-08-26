@@ -57,16 +57,19 @@ def load_variants(paths: dict[str, str]) -> dict[str, EmbeddingTable]:
     }
 
 
-def load_labels(table: EmbeddingTable, test_root: str) -> np.ndarray:
+def load_labels(table: EmbeddingTable, split_root: str) -> np.ndarray:
+    """Load binary response-node labels for the rows present in ``table``."""
+
     dataset = open_research_dataset(
-        test_root,
+        split_root,
         device="cpu",
         retain_embedded_labels=True,
     )
-    label_store = dataset.prepare_evaluation_labels()
+    sample_ids = list(dict.fromkeys(table.sample_id.tolist()))
+    label_store = dataset.prepare_evaluation_labels(sample_ids)
     labels = np.empty(len(table.sample_id), dtype=np.int8)
 
-    for sample_id in dict.fromkeys(table.sample_id.tolist()):
+    for sample_id in sample_ids:
         rows = np.flatnonzero(table.sample_id == sample_id)
         sample = dataset[sample_id]
         try:

@@ -13,37 +13,44 @@ from experiments.grounded_route.evaluation.data import EmbeddingTable, load_labe
 def export_node_data(
     calibration_index: str | Path,
     test_index: str | Path,
+    calibration_split: str | Path,
     test_split: str | Path,
     output: str | Path,
 ) -> dict[str, int]:
-    """Combine frozen node embeddings and aligned test labels in one NPZ."""
+    """Combine frozen node embeddings and aligned binary labels in one NPZ."""
 
     calibration = EmbeddingTable.load(calibration_index)
     test = EmbeddingTable.load(test_index)
-    labels = load_labels(test, str(test_split)).astype(np.int8)
+    calibration_labels = load_labels(calibration, str(calibration_split)).astype(
+        np.int8
+    )
+    test_labels = load_labels(test, str(test_split)).astype(np.int8)
+    embeddings = np.concatenate((calibration.embedding, test.embedding)).astype(
+        np.float32
+    )
+    labels = np.concatenate((calibration_labels, test_labels)).astype(np.int8)
 
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
         output,
-        calibration_embeddings=calibration.embedding.astype(np.float32),
-        test_embeddings=test.embedding.astype(np.float32),
-        test_labels=labels,
+        node_embeddings=embeddings,
+        node_labels=labels,
     )
     return {
-        "calibration_nodes": len(calibration.embedding),
-        "test_nodes": len(test.embedding),
-        "positive_test_nodes": int(labels.sum()),
-        "embedding_dim": int(test.embedding.shape[1]),
+        "nodes": len(embeddings),
+        "positive_nodes": int(labels.sum()),
+        "embedding_dim": int(embeddings.shape[1]),
     }
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Pack GCN node embeddings and aligned test labels."
+        description="Pack GCN node embeddings and aligned binary node labels."
     )
     parser.add_argument("--calibration-index", required=True)
     parser.add_argument("--test-index", required=True)
+    parser.add_argument("--calibration-split", required=True)
     parser.add_argument("--test-split", required=True)
     parser.add_argument("--output", required=True)
     return parser.parse_args()
@@ -54,6 +61,7 @@ def main() -> None:
     report = export_node_data(
         args.calibration_index,
         args.test_index,
+        args.calibration_split,
         args.test_split,
         args.output,
     )

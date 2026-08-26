@@ -484,7 +484,7 @@ class ResearchDataset:
     def labels(self):
         return self.prepare_evaluation_labels()
 
-    def prepare_evaluation_labels(self):
+    def prepare_evaluation_labels(self, sample_ids=None):
         """Open the canonical sidecar label store for post-hoc evaluation."""
 
         return LabelStore(self)
@@ -692,12 +692,13 @@ class FormalResearchDataset:
     def sample_ids(self):
         return list(self.rows)
 
-    def prepare_evaluation_labels(self):
+    def prepare_evaluation_labels(self, sample_ids=None):
         """Finish embedded-label capture and return the evaluation label store."""
 
         if not self.retain_labels:
             raise RuntimeError("embedded labels were not retained for this dataset")
-        for sample_id in self.sample_ids:
+        selected = self.sample_ids if sample_ids is None else map(str, sample_ids)
+        for sample_id in selected:
             if sample_id in self._label_cache:
                 continue
             sample = self[sample_id]

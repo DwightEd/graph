@@ -16,7 +16,7 @@ def save_index(path, embeddings, sample_ids, token_indices):
     )
 
 
-def test_export_contains_only_embeddings_and_aligned_test_labels(
+def test_export_contains_only_embeddings_and_aligned_node_labels(
     tmp_path, monkeypatch
 ):
     calibration = tmp_path / "calibration.npz"
@@ -26,8 +26,10 @@ def test_export_contains_only_embeddings_and_aligned_test_labels(
     save_index(test, [[5, 6], [7, 8]], ["b", "a"], [1, 0])
 
     def aligned_labels(table, split_root):
-        assert split_root == "test-root"
-        labels = {("a", 0): 1, ("b", 1): 0}
+        labels = {
+            "calibration-root": {("c", 0): 1, ("c", 1): 0},
+            "test-root": {("a", 0): 1, ("b", 1): 0},
+        }[split_root]
         return np.asarray(
             [labels[key] for key in zip(table.sample_id, table.token_index)],
             dtype=np.int8,
@@ -35,27 +37,24 @@ def test_export_contains_only_embeddings_and_aligned_test_labels(
 
     monkeypatch.setattr(exporter, "load_labels", aligned_labels)
     report = exporter.export_node_data(
-        calibration, test, "test-root", output
+        calibration, test, "calibration-root", "test-root", output
     )
 
     with np.load(output, allow_pickle=False) as data:
         assert set(data.files) == {
-            "calibration_embeddings",
-            "test_embeddings",
-            "test_labels",
+            "node_embeddings",
+            "node_labels",
         }
         np.testing.assert_array_equal(
-            data["calibration_embeddings"], [[1, 2], [3, 4]]
+            data["node_embeddings"],
+            [[1, 2], [3, 4], [5, 6], [7, 8]],
         )
-        np.testing.assert_array_equal(data["test_embeddings"], [[5, 6], [7, 8]])
-        np.testing.assert_array_equal(data["test_labels"], [0, 1])
-        assert data["calibration_embeddings"].dtype == np.float32
-        assert data["test_embeddings"].dtype == np.float32
-        assert data["test_labels"].dtype == np.int8
+        np.testing.assert_array_equal(data["node_labels"], [1, 0, 0, 1])
+        assert data["node_embeddings"].dtype == np.float32
+        assert data["node_labels"].dtype == np.int8
 
     assert report == {
-        "calibration_nodes": 2,
-        "test_nodes": 2,
-        "positive_test_nodes": 1,
+        "nodes": 4,
+        "positive_nodes": 2,
         "embedding_dim": 2,
     }
