@@ -3,7 +3,7 @@
 REPO=/share/home/tm902089733300000/a903202310/lys/research/graph
 TRAIN_SPLIT=/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/attention/llama31_8b/train
 TEST_SPLIT=/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/attention/llama31_8b/test
-OUT=${REPO}/experiments/holoroute/outputs/pcut_qa
+OUT=${REPO}/experiments/holoroute/outputs/routing_fingerprint_qa
 
 cd "${REPO}" || exit 1
 
