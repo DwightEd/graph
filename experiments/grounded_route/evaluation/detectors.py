@@ -50,11 +50,18 @@ def reference_subset(values: np.ndarray, limit: int, seed: int) -> np.ndarray:
     return values[np.sort(index)]
 
 
+def has_variation(values: np.ndarray) -> bool:
+    return bool(np.max(np.ptp(values, axis=0)) > 1e-6)
+
+
 def score_pca_knn(
     calibration: np.ndarray,
     test: np.ndarray,
     config: DetectorConfig,
 ) -> np.ndarray:
+    if not has_variation(calibration):
+        return np.zeros(len(test), dtype=np.float32)
+
     scale = RobustScale.fit(calibration)
     reference = scale.transform(calibration)
     query = scale.transform(test)
@@ -81,6 +88,16 @@ def score_detectors(
         config.seeds[0],
     )
     test = np.asarray(test_embedding, dtype=np.float32)
+
+    if not has_variation(calibration):
+        zero = np.zeros(len(test), dtype=np.float32)
+        return {
+            "pca_knn": zero.copy(),
+            "isolation_forest": zero.copy(),
+            "lof": zero.copy(),
+            "autoencoder": zero.copy(),
+            "deep_svdd": zero.copy(),
+        }
 
     scores = {"pca_knn": score_pca_knn(calibration, test, config)}
     scale = RobustScale.fit(calibration)
