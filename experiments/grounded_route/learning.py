@@ -184,9 +184,8 @@ def matched_negative_sources(
     location = torch.searchsorted(observed, candidate_key)
     location = location.clamp_max(len(observed) - 1)
 
-    valid = width[:, None] > 0
-    valid &= observed[location] != candidate_key
-    valid &= valid.cumsum(dim=1) <= count
+    valid = (width[:, None] > 0) & (observed[location] != candidate_key)
+    valid = valid & (valid.cumsum(dim=1) <= count)
 
     edge = positive_edge[:, None].expand_as(candidate)[valid]
     return EndpointPairs(edge=edge, negative_source=candidate[valid])
