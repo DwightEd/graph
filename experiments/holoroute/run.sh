@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-OUT=${OUT:-"${ROOT}/experiments/holoroute/outputs/pcut"}
+OUT=${OUT:-"${ROOT}/experiments/holoroute/outputs/routing_fingerprint"}
 PYTHON=${PYTHON:-python}
 DEVICE=${DEVICE:-cuda}
 TASK=${TASK:-QA}
@@ -26,7 +26,7 @@ if [ -n "${TEST_LIMIT}" ]; then
 fi
 
 echo
-echo "[1/3] Fit P-Cut reference"
+echo "[1/3] Build train node features and fit normal subspace"
 "${PYTHON}" -m experiments.holoroute.run fit \
   --train "${TRAIN_SPLIT}" \
   --checkpoint "${OUT}/method.pt" \
@@ -36,7 +36,7 @@ echo "[1/3] Fit P-Cut reference"
   "${TRAIN_LIMIT_ARGUMENT[@]}" || exit $?
 
 echo
-echo "[2/3] Score P-Cut and export graph embeddings"
+echo "[2/3] Build test node features, score and export graphs"
 "${PYTHON}" -m experiments.holoroute.run score \
   --test "${TEST_SPLIT}" \
   --checkpoint "${OUT}/method.pt" \
