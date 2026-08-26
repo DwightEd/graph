@@ -35,9 +35,10 @@ COMPARISONS = {
     "ordered_trace_minus_reverse": ("full_trace", "reverse_trace"),
     "ordered_final_minus_reverse": ("full_final", "reverse_final"),
     "all_layers_minus_last_layer": ("full_final", "last_layer"),
-    "progressive_minus_layer_mean": ("full_final", "layer_mean"),
+    "ordered_final_minus_layer_ensemble": ("full_final", "layer_mean"),
     "trajectory_minus_final": ("full_trace", "full_final"),
-    "flow_minus_identity": ("full_trace", "identity"),
+    "flow_trace_minus_identity_trace": ("full_trace", "identity_trace"),
+    "flow_final_minus_identity_final": ("full_final", "identity_final"),
 }
 
 
