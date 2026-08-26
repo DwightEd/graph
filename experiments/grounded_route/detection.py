@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import warnings
 
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
@@ -69,6 +70,12 @@ class PCAWhitenedKNN:
         dimensions = min(maximum, int((singular > threshold).sum()))
 
         if dimensions == 0:
+            warnings.warn(
+                "Node embeddings collapsed to a constant reference; "
+                "PCA-kNN will emit a constant zero score.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
             basis = np.empty((0, values.shape[1]), dtype=np.float32)
             whitening = np.empty(0, dtype=np.float32)
             reference = np.empty((len(values), 0), dtype=np.float32)
