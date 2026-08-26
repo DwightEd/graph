@@ -4,3 +4,4 @@ def test_active_modules_import():
     import experiments.holoroute.graph
     import experiments.holoroute.pipeline
     import experiments.holoroute.run
+    import experiments.holoroute.supervised
