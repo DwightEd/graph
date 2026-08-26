@@ -1,4 +1,4 @@
-"""Command line interface for P-Cut."""
+"""Command line interface for structural attention node features."""
 
 import argparse
 
@@ -10,7 +10,7 @@ from .pipeline import fit_reference, score_dataset
 
 
 def command_line() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Prompt-provenance cut detector")
+    parser = argparse.ArgumentParser(description="Routing-fingerprint node detector")
     commands = parser.add_subparsers(dest="command", required=True)
 
     fit = commands.add_parser("fit")
@@ -42,7 +42,17 @@ def command_line() -> argparse.ArgumentParser:
 
 def print_report(command: str, report: dict[str, object]) -> None:
     print(f"{command} completed")
-    for name in ("checkpoint", "reference", "scores", "graphs", "samples", "tokens"):
+    for name in (
+        "checkpoint",
+        "reference",
+        "scores",
+        "graphs",
+        "samples",
+        "fit_tokens",
+        "calibration_tokens",
+        "tokens",
+        "feature_dim",
+    ):
         if name in report:
             print(f"{name}: {report[name]}")
 
