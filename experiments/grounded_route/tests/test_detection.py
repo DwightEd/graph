@@ -38,3 +38,18 @@ def test_detector_consumes_only_embedding_and_is_deterministic(tmp_path):
     restored = load_reference(path)
     assert isinstance(restored, PCAWhitenedKNN)
     assert np.allclose(score, restored.score(query))
+
+
+def test_constant_reference_produces_a_trivial_score_instead_of_crashing(tmp_path):
+    embedding = np.ones((40, 8), dtype=np.float32)
+    reference = fit(embedding, PCAKNNConfig(components=4, neighbors=5))
+
+    assert reference.collapsed
+    assert reference.basis.shape == (0, 8)
+    assert np.array_equal(reference.score(embedding[:3]), np.zeros(3, dtype=np.float32))
+
+    path = tmp_path / "constant_detector.npz"
+    save_reference(path, reference)
+    restored = load_reference(path)
+    assert restored.collapsed
+    assert np.array_equal(restored.score(embedding[:3]), np.zeros(3, dtype=np.float32))
