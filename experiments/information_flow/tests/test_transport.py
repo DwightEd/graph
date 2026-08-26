@@ -105,5 +105,9 @@ def test_ordered_flow_exports_matched_node_views():
     assert views.full_final.shape == (2, 8)
     assert views.reverse_trace.shape == (2, 16)
     assert views.trajectory.shape == (2, 2, 8)
+    assert views.identity_trace.shape == views.full_trace.shape
+    assert views.identity_final.shape == views.full_final.shape
+    assert torch.allclose(views.identity_trace[:, :8], views.identity_final)
+    assert torch.allclose(views.identity_trace[:, 8:], views.identity_final)
     assert not torch.allclose(views.full_final, views.reverse_final)
     assert not torch.allclose(views.full_trace[:, :8], views.full_trace[:, 8:])
