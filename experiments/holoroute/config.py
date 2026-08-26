@@ -1,4 +1,4 @@
-"""Configuration for prompt-provenance cuts."""
+"""Configuration for deterministic attention-graph node features."""
 
 from dataclasses import asdict, dataclass, field
 
@@ -11,25 +11,27 @@ class GraphConfig:
 
 
 @dataclass(frozen=True)
-class PCutConfig:
-    identity_dim: int = 16
-    head_projection_dim: int = 4
-    tail_layers: int = 8
-    epsilon: float = 1e-8
-    seed: int = 20260826
+class FeatureConfig:
+    source_basis_dim: int = 6
+    head_projection_dim: int = 8
+    projection_seed: int = 20260826
 
 
 @dataclass(frozen=True)
 class DetectionConfig:
-    reservoir_rows: int = 50_000
+    reservoir_rows: int = 12_000
+    calibration_fraction: float = 0.20
+    pca_components: int = 128
     ridge_alpha: float = 1e-3
     scale_floor: float = 1e-3
+    standardized_clip: float = 10.0
+    seed: int = 20260826
 
 
 @dataclass(frozen=True)
 class MethodConfig:
     graph: GraphConfig = field(default_factory=GraphConfig)
-    pcut: PCutConfig = field(default_factory=PCutConfig)
+    feature: FeatureConfig = field(default_factory=FeatureConfig)
     detection: DetectionConfig = field(default_factory=DetectionConfig)
 
     def as_dict(self) -> dict[str, object]:
