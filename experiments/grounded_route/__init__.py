@@ -3,6 +3,7 @@
 from .aggregation import RouteAggregator, RouteMoments, lag_bucket, route_moments
 from .config import (
     GRAPH_VARIANTS,
+    LEARNING_OBJECTIVES,
     GraphConfig,
     GroundedRouteConfig,
     InterventionConfig,
@@ -11,7 +12,15 @@ from .config import (
     TrainConfig,
 )
 from .graph import PROMPT, RESPONSE, TokenEdges, TokenGraph, build_graph
-from .learning import EndpointPairs, LossOutput, matched_negative_edges, self_supervised_loss
+from .learning import (
+    EndpointPairs,
+    LossOutput,
+    SelectedRows,
+    matched_negative_edges,
+    row_distribution_loss,
+    sample_route_rows,
+    self_supervised_loss,
+)
 from .lineage import HeadTransition, source_lineage, trace_lineage
 from .model import EncoderOutput, GroundedRouteEncoder
 
@@ -19,6 +28,7 @@ __all__ = [
     "EncoderOutput",
     "EndpointPairs",
     "GRAPH_VARIANTS",
+    "LEARNING_OBJECTIVES",
     "GraphConfig",
     "GroundedRouteConfig",
     "GroundedRouteEncoder",
@@ -31,13 +41,16 @@ __all__ = [
     "RESPONSE",
     "RouteAggregator",
     "RouteMoments",
+    "SelectedRows",
     "TokenEdges",
     "TokenGraph",
     "TrainConfig",
     "build_graph",
     "lag_bucket",
     "matched_negative_edges",
+    "row_distribution_loss",
     "route_moments",
+    "sample_route_rows",
     "self_supervised_loss",
     "source_lineage",
     "trace_lineage",

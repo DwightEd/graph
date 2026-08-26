@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 
 GRAPH_VARIANTS = ("real", "weight_shuffle", "endpoint_rewire")
 MESSAGE_MODES = ("neighbor", "row_local")
+LEARNING_OBJECTIVES = ("pairwise", "row_distribution")
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,8 @@ class ModelConfig:
 
 @dataclass(frozen=True)
 class LearningConfig:
+    objective: str = "row_distribution"
+    route_rows_per_graph: int = 256
     positive_edges_per_graph: int = 16_384
     negative_count: int = 4
     negative_attempt_factor: int = 4

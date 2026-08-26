@@ -19,7 +19,10 @@ jobs:
       - run: python -m compileall -q experiments/grounded_route
       - run: |
           bash -n experiments/grounded_route/run.sh
+          bash -n experiments/grounded_route/run_attention_row_qa.sh
           bash -n experiments/grounded_route/evaluation/run.sh
           bash -n experiments/grounded_route/evaluation/run_qa.sh
           bash -n experiments/grounded_route/evaluation/run_controls_qa.sh
+          bash -n experiments/grounded_route/evaluation/run_attention_row_qa.sh
+          bash -n experiments/grounded_route/evaluation/run_attention_row_controls_qa.sh
       - run: python -m pytest -q experiments/grounded_route/tests experiments/grounded_route/evaluation/tests

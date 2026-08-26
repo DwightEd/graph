@@ -1,65 +1,75 @@
 # GroundedRoute
 
-GroundedRoute 把一条 prompt-response 样本构造成带 layer/head 类型的因果 token 图，并把边与邻居信息聚合到每个 token 的 `node_embedding` 中。后续检测器只读取节点表征，不再读取邻接关系。
+GroundedRoute turns one prompt-response sample into a typed causal token graph
+and learns one label-free representation per token. Downstream detectors read
+only the saved `node_embedding`; they do not run another GNN.
 
-代码规范见 [`iclr/ENGINEERING_RULES.md`](iclr/ENGINEERING_RULES.md)。
+Coding rules for this project are fixed in
+[`iclr/ENGINEERING_RULES.md`](iclr/ENGINEERING_RULES.md).
 
-## 图
+## Current graph method
 
-```text
-node       prompt 或 response token
-edge       source token -> response token
-edge type  (layer, head)
-edge value retained attention weight
-```
-
-稀疏 cache 中未保存的边不会被当作零。每个 response row 保存 retained edge mass、self diagonal mass 和 unresolved mass，三者归一化后总和为 1。
-
-## 节点聚合
-
-每条边先把 source state、layer/head、source role、lag 和 lineage 编码为 message。attention weight 不再被重复编码，而是直接作为加权矩和总质量。
-
-对同一个 `(target, layer, head)`，聚合器分别计算 prompt-source 与 response-source 的：
+Each retained attention entry keeps:
 
 ```text
-weighted mean      邻居内容的中心
-weighted spread    邻居内容是否冲突或分散
-total mass         当前路由对该类 source 的依赖量
+source token
+target token
+Transformer layer
+attention head
+attention weight
 ```
 
-随后加入 diagonal self message 和 unresolved message，在 heads 间做 target-conditioned pooling，并用 GRU 更新 token state。全部 Transformer layers 处理完后得到：
+The current increment treats every `(target, layer, head)` attention row as a
+weighted source-set hyperedge. Prompt and response neighbours are aggregated
+separately with weighted mean, weighted spread and retained mass. Diagonal and
+unresolved sparse mass are kept as separate inputs. Heads are pooled after the
+row representation is formed, and token states are updated layer by layer.
 
-```python
-output.node_embedding      # [all_tokens, hidden_dim]
-output.response_embedding  # [response_tokens, hidden_dim]
-```
+The historical objective ranks one real endpoint against matched non-edges.
+The new attention-row experiment predicts the complete retained source
+distribution of a sampled row, with target probabilities proportional to the
+attention weights.
 
-核心代码：
+Detailed method description:
 
 ```text
-graph.py         attention cache -> TokenGraph
-lineage.py       prompt / response-closed / unresolved 路径来源
-aggregation.py   role-aware weighted moments
-model.py         多层 token 状态更新
-learning.py      无标签 endpoint prediction objective
-pipeline.py      build / fit / encode / detect
-evaluation/      node-only detector、probe 与构图控制
+iclr/ATTENTION_ROW_GRAPH.md
 ```
 
-## 自监督训练
+## Core files
 
-训练任务是从当前 token 之前的因果 prefix 区分真实 source endpoint 与 role/lag 匹配的 causal non-edge。它只用于学习节点表征，不是最终异常分数。
+```text
+graph.py          sparse attention -> typed token graph
+aggregation.py    prompt/response source-set moments
+lineage.py        prompt / response-closed / unresolved path state
+model.py          layer-wise token encoder
+learning.py       pairwise and row-distribution label-free objectives
+pipeline.py       build / fit / encode / detect
+evaluation/       node-only detectors, probes and construction controls
+```
 
-## 一键运行 QA
+## Existing averaged-GCN reference
+
+`experiments/dbgnn_reference/` contains the simple averaged first-order GCN and
+the order-2 DBGNN comparison. The GCN is a baseline, not the active
+layer/head-aware method.
+
+## Run the attention-row experiment
 
 ```bash
-bash experiments/grounded_route/run_qa.sh
+bash experiments/grounded_route/run_attention_row_qa.sh
 ```
 
-输出：
+Run the same node-only evaluation suite used for the GCN result:
+
+```bash
+bash experiments/grounded_route/evaluation/run_attention_row_qa.sh
+```
+
+Outputs:
 
 ```text
-experiments/grounded_route/outputs/qa/
+experiments/grounded_route/outputs/qa_attention_row/
 ├── model.pt
 ├── calibration/index.npz
 ├── calibration/graphs/*.pt
@@ -67,29 +77,29 @@ experiments/grounded_route/outputs/qa/
 ├── test/graphs/*.pt
 ├── detector.npz
 ├── scores.npz
-└── evaluation.json
+└── evaluation/report.json
 ```
 
-## 评估节点表征
+## Construction controls
 
-只使用已有 real embedding：
-
-```bash
-bash experiments/grounded_route/evaluation/run_qa.sh
-```
-
-完整构图控制：
-
-```bash
-bash experiments/grounded_route/evaluation/run_controls_qa.sh
-```
-
-控制含义：
+The full control run independently trains and encodes:
 
 ```text
-no_message       不读取 source node state
-endpoint_rewire  保留 role/layer/head/coarse lag，替换 exact source
-weight_shuffle   保留 endpoints 和 row mass，打乱 weight-endpoint pairing
+real
+no_message
+endpoint_rewire
+weight_shuffle
 ```
 
-无监督 detector 与监督 readability probe 都只读取 `node_embedding`。监督 probe 只用于判断表征中是否存在可读信号，不属于主方法。
+```bash
+bash experiments/grounded_route/evaluation/run_attention_row_controls_qa.sh
+```
+
+## Tests
+
+```bash
+python -m compileall -q experiments/grounded_route
+bash -n experiments/grounded_route/run.sh
+pytest -q experiments/grounded_route/tests
+pytest -q experiments/grounded_route/evaluation/tests
+```
