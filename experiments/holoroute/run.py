@@ -7,6 +7,7 @@ from research_dataset import open_research_dataset
 from .config import MethodConfig
 from .evaluate import evaluate
 from .pipeline import fit_reference, score_dataset
+from .supervised import fit_supervised_probe, score_supervised_probe
 
 
 def command_line() -> argparse.ArgumentParser:
@@ -30,6 +31,25 @@ def command_line() -> argparse.ArgumentParser:
     score.add_argument("--limit", type=int)
     score.add_argument("--device", default="cpu")
 
+    probe_fit = commands.add_parser("probe-fit")
+    probe_fit.add_argument("--train", required=True)
+    probe_fit.add_argument("--checkpoint", required=True)
+    probe_fit.add_argument("--reference", required=True)
+    probe_fit.add_argument("--probe", required=True)
+    probe_fit.add_argument("--task", default="QA")
+    probe_fit.add_argument("--limit", type=int)
+    probe_fit.add_argument("--device", default="cpu")
+
+    probe_score = commands.add_parser("probe-score")
+    probe_score.add_argument("--test", required=True)
+    probe_score.add_argument("--checkpoint", required=True)
+    probe_score.add_argument("--reference", required=True)
+    probe_score.add_argument("--probe", required=True)
+    probe_score.add_argument("--output", required=True)
+    probe_score.add_argument("--task", default="QA")
+    probe_score.add_argument("--limit", type=int)
+    probe_score.add_argument("--device", default="cpu")
+
     evaluation = commands.add_parser("evaluate")
     evaluation.add_argument("--test", required=True)
     evaluation.add_argument("--scores", required=True)
@@ -45,11 +65,14 @@ def print_report(command: str, report: dict[str, object]) -> None:
     for name in (
         "checkpoint",
         "reference",
+        "probe",
         "scores",
         "graphs",
         "samples",
         "fit_tokens",
         "calibration_tokens",
+        "positive_tokens",
+        "negative_tokens",
         "tokens",
         "feature_dim",
     ):
@@ -77,6 +100,31 @@ def main() -> None:
             dataset,
             arguments.checkpoint,
             arguments.reference,
+            arguments.output,
+            arguments.task,
+            arguments.limit,
+        )
+    elif arguments.command == "probe-fit":
+        dataset = open_research_dataset(
+            arguments.train,
+            device=arguments.device,
+            retain_embedded_labels=True,
+        )
+        report = fit_supervised_probe(
+            dataset,
+            arguments.checkpoint,
+            arguments.reference,
+            arguments.probe,
+            arguments.task,
+            arguments.limit,
+        )
+    elif arguments.command == "probe-score":
+        dataset = open_research_dataset(arguments.test, device=arguments.device)
+        report = score_supervised_probe(
+            dataset,
+            arguments.checkpoint,
+            arguments.reference,
+            arguments.probe,
             arguments.output,
             arguments.task,
             arguments.limit,
