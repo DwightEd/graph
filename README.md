@@ -43,6 +43,7 @@ research_dataset.py            shared data interface
 experiment_protocol.py         source-group and evaluation protocol
 experiments/grounded_route/    active token-graph representation experiment
   graph_effectiveness/         node-only detector/construction audit
+experiments/dbgnn_reference/   original-code order-2 DBGNN vs GCN reference
 experiments/holoroute/         masked reconstruction baseline
 docs/EXPERIMENT_HISTORY.md     prior experiments and recorded results
 docs/RESEARCH_STATUS.md        current claims, gates, and next experiments
@@ -82,6 +83,12 @@ encoded graph controls; it does not attach another GNN after the representation.
 
 Training, calibration, and scoring do not read hallucination labels. Labels are opened only by the evaluation command after the score artifact has been frozen.
 
+To test whether generic causal-walk lifting helps independently of
+GroundedRoute's mechanism, [`dbgnn_reference`](experiments/dbgnn_reference/)
+uses the paper authors' core `HO_GCN/GCN` code on the same saved token graphs.
+It exports the pre-classifier token state and compares order-2 DBGNN with a
+matched first-order GCN using embedding-only detectors.
+
 ## Tests
 
 ```bash
@@ -89,6 +96,9 @@ python -m compileall -q experiments/grounded_route
 bash -n experiments/grounded_route/run.sh
 pytest -q experiments/grounded_route/tests
 pytest -q experiments/grounded_route/graph_effectiveness/tests
+pytest -q experiments/dbgnn_reference/tests
+bash -n experiments/dbgnn_reference/run.sh \
+  experiments/dbgnn_reference/run_compare.sh
 ```
 
 The implementation is a research prototype, not a validated SOTA result. Its
