@@ -191,6 +191,23 @@ def matched_negative_sources(
     return EndpointPairs(edge=edge, negative_source=candidate[valid])
 
 
+def unique_row_candidates(
+    row: torch.Tensor,
+    source: torch.Tensor,
+    edge: torch.Tensor,
+    token_count: int,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Keep one occurrence of each negative source inside each sampled row."""
+
+    key = row * token_count + source
+    order = torch.argsort(key, stable=True)
+    sorted_key = key[order]
+    keep = torch.ones(len(order), dtype=torch.bool)
+    keep[1:] = sorted_key[1:] != sorted_key[:-1]
+    selected = order[keep]
+    return row[selected], source[selected], edge[selected]
+
+
 def matched_negative_edges(
     graph: TokenGraph,
     count: int,
@@ -326,20 +343,26 @@ def row_distribution_loss(
             dtype=torch.long,
         )
         row_lookup[positive_edge] = selected.row
-        negative_row = row_lookup[negatives.edge].to(device)
+        negative_row, negative_source, negative_edge = unique_row_candidates(
+            row_lookup[negatives.edge],
+            negatives.negative_source,
+            negatives.edge,
+            graph.token_count,
+        )
         negative_score = model.endpoint_score(
             output,
             graph,
-            negatives.negative_source,
-            graph.edges.target[negatives.edge],
-            graph.edges.layer[negatives.edge],
-            graph.edges.head[negatives.edge],
+            negative_source,
+            graph.edges.target[negative_edge],
+            graph.edges.layer[negative_edge],
+            graph.edges.head[negative_edge],
         )
         candidate_score = torch.cat((positive_score, negative_score))
-        candidate_row = torch.cat((positive_row, negative_row))
+        candidate_row = torch.cat((positive_row, negative_row.to(device)))
     else:
         candidate_score = positive_score
         candidate_row = positive_row
+        negative_source = torch.empty(0, dtype=torch.long)
 
     log_probability = segment_log_softmax(
         candidate_score,
@@ -359,7 +382,7 @@ def row_distribution_loss(
     )
     return (
         row_loss.mean(),
-        len(positive_edge) + negatives.count,
+        len(positive_edge) + len(negative_source),
         selected.count,
     )
 
