@@ -1,4 +1,4 @@
-"""Artifact I/O for P-Cut."""
+"""Artifact I/O for routing fingerprints."""
 
 import hashlib
 import json
@@ -9,11 +9,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-CHECKPOINT_SCHEMA = "pcut-checkpoint-v1"
-REFERENCE_SCHEMA = "pcut-reference-v1"
-SCORE_SCHEMA = "pcut-score-v1"
-GRAPH_SCHEMA = "pcut-graph-v1"
-EVALUATION_SCHEMA = "pcut-evaluation-v1"
+CHECKPOINT_SCHEMA = "routing-fingerprint-checkpoint-v1"
+REFERENCE_SCHEMA = "routing-fingerprint-reference-v1"
+SCORE_SCHEMA = "routing-fingerprint-score-v1"
+GRAPH_SCHEMA = "routing-fingerprint-graph-v1"
+EVALUATION_SCHEMA = "routing-fingerprint-evaluation-v1"
 
 
 def sha256(path) -> str:
