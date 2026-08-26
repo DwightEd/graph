@@ -45,6 +45,12 @@ if [ "${START_STAGE}" -le 1 ]; then
     --device "${DEVICE}" || exit $?
 fi
 
+if [ "${START_STAGE}" -le 3 ]; then
+  echo "Prepare checkpoint for PyTorch weights-only loading"
+  "${PYTHON}" -m experiments.dbgnn_reference.checkpoint \
+    --path "${OUT}/checkpoint.pt" || exit $?
+fi
+
 if [ "${START_STAGE}" -le 2 ]; then
   echo "[2/5] Export calibration node embeddings"
   "${PYTHON}" -m experiments.dbgnn_reference.run encode \
