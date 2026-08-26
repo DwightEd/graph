@@ -1,69 +1,83 @@
-# P-Cut 方法
+# Method: structural attention routing fingerprints
 
-## 1. 图
+## 1. 研究定位
 
-一条 prompt-response 样本构造一张 multiplex token graph。token 是节点；每条 retained attention incidence 保留 exact source、response target、layer、head 和 weight。未保存边只计入 row-level unresolved mass，不当作零。
+这不是最终的幻觉机制方法，而是一个清晰的图表征基线。它回答：在不训练 GNN、不定义多个手工异常分数的情况下，如何把 layer/head-aware attention 图直接变成逐 token 节点特征。
 
-## 2. Prompt provenance
+## 2. Multiplex token graph
 
-prompt token 的来源下界和上界都设为 1，response token 初始为 0。沿 layer 和 causal response edges 传播：
-
-\[
-\underline g_{t,h}^{\ell+1}
-=\sum_{p\in P}A_{t,p}^{\ell,h}
-+d_t^{\ell,h}\underline g_t^\ell
-+\sum_{j<t}A_{t,j}^{\ell,h}\underline g_j^\ell,
-\]
+一条样本是一张图。token 是节点，每条 retained attention incidence 保留：
 
 \[
-\overline g_{t,h}^{\ell+1}
-=\underline{\text{same retained terms}}
-+u_t^{\ell,h}.
+(s,t,l,h,A^{l,h}_{t,s}).
 \]
 
-这样 sparse cache 的未知质量形成 provenance 区间，而不是假零。
+未保存的 sparse entries 不当作零，而由每个 `(target, layer, head)` 的 unresolved mass 表示。
 
-## 3. Edge partition
+## 3. 固定结构基
 
-response-source edge `e=(j -> t,l,h)` 被精确拆成：
+对 response token `t` 和 channel `(l,h)`，将 prompt source 位置分布投影到固定 cosine basis：
 
 \[
-w_e^P=A_e\underline g_j^l,
-\qquad
-w_e^R=A_e(1-\overline g_j^l),
-\qquad
-w_e^Q=A_e(\overline g_j^l-\underline g_j^l).
+q^P_{t,l,h,k}=\sum_{s\in P}A^{l,h}_{t,s}\cos(\pi k x_s).
 \]
 
-它们分别表示至少可确认的 prompt-rooted mass、即使把未知质量全给 prompt 也无法追溯到 prompt 的 response-closed mass，以及不确定 mass。
-
-## 4. Matched cuts
-
-构造 full、no-prompt-rooted 和 no-response-closed 三个图视图。切割后对剩余 retained edges 在每个 `(target,layer,head)` 行内重新缩放，使 retained row mass 与 full view 相同。若某行没有可保留边，被删质量转入 unknown state，避免总质量变化成为捷径。
-
-## 5. Token representation
-
-每个 token 先获得固定的 deterministic identity embedding。attention 在每层、每 head 上传播这些身份表示；随后用固定 DCT-like head projection 压成 token-layer embedding：
-
-```text
-token_layer_embedding [response, layer, dimension]
-token_embedding       [response, dimension]
-```
-
-这不是训练得到的分类表示，而是 exact endpoint、layer、head 和路径共同决定的 routing-state embedding。
-
-## 6. 唯一主分数
-
-比较 full 表示与两种 cut 表示：
+将 response-history edge 按归一化 lag 投影：
 
 \[
-\Delta_t^P=d(z_t^F,z_t^{-P}),
-\qquad
-\Delta_t^R=d(z_t^F,z_t^{-R}),
+q^R_{t,l,h,k}=\sum_{j<t}A^{l,h}_{t,j}\cos(\pi k\,\mathrm{lag}_{j,t}).
 \]
+
+一跳邻居 provenance 使用真实二跳结构：
 
 \[
-C_t=\Delta_t^R-\Delta_t^P.
+q^I_{t,l,h,k}=\sum_{j<t}A^{l,h}_{t,j}q^P_{j,l-1,h,k}.
 \]
 
-高 `C_t` 表示 token 对 response-closed 路径的依赖超过 prompt-rooted 路径。train split 只用于拟合位置、长度、unresolved mass、provenance interval width 和 cut fallback 条件下的经验上尾；hallucination labels 不参与拟合。
+它表示当前 token 通过历史 response source 继承了怎样的 prompt source distribution。历史实验中，一跳 prompt provenance 明显强于直接 prompt ratio 和更长路径，因此第一版只保留一跳。
+
+每个 channel 的结构向量为：
+
+\[
+f_{t,l,h}=[q^P,q^R,q^I,d_{t,l,h},u_{t,l,h}].
+\]
+
+heads 使用一个固定、可复现的正交投影压缩到若干 modes；所有层按顺序保留。最终节点特征是：
+
+\[
+x_t=\operatorname{vec}_{l,m}(f_{t,l,m}).
+\]
+
+默认 32 层、6 个 source basis、8 个 head modes 时，节点维度为：
+
+\[
+32\times8\times(3\times6+2)=5120.
+\]
+
+## 4. 无监督节点检测
+
+训练数据只用于学习正常节点特征子空间：
+
+1. 回归掉 position、response length、unresolved mass 和 incoming-edge count；
+2. 用 median/MAD 做 robust standardization；
+3. 在 source-disjoint fit groups 上拟合 PCA；
+4. 在独立 calibration source groups 上建立残差能量经验分布。
+
+测试节点的主分数只有一个：
+
+\[
+E_t=\frac1D\|z_t-UU^\top z_t\|_2^2.
+\]
+
+Detector 不读取图边，不预测下一个 token，不做 masked reconstruction，也不联合多个命名残差。
+
+## 5. 必须回答的实验问题
+
+- 该结构节点特征是否超过 position baseline？
+- 是否超过只使用直接 prompt/history mass 的低维特征？
+- one-hop inherited prompt block 是否提供增量？
+- 保留 layer/head 结构是否超过 layer/head mean？
+- real endpoints 是否超过 matched endpoint rewiring？
+- 同一节点特征交给 PCA residual、kNN、LOF 时结果是否一致？
+
+只有这些问题得到正结果后，节点表示才值得作为后续机制创新的基础。
