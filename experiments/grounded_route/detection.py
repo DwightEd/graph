@@ -36,6 +36,10 @@ class PCAWhitenedKNN:
     reference: np.ndarray
     neighbors: int
 
+    @property
+    def collapsed(self) -> bool:
+        return self.basis.shape[0] == 0
+
     @classmethod
     def fit(
         cls,
@@ -43,11 +47,7 @@ class PCAWhitenedKNN:
         config: PCAKNNConfig | None = None,
     ) -> "PCAWhitenedKNN":
         config = PCAKNNConfig() if config is None else config
-        values = _embedding_matrix(embedding)
-        if len(values) < 2:
-            raise ValueError("PCA-kNN needs at least two reference embeddings")
-        if config.components < 1 or config.neighbors < 1 or config.max_reference < 2:
-            raise ValueError("PCA-kNN dimensions and reference sizes must be positive")
+        values = embedding_matrix(embedding)
 
         if len(values) > config.max_reference:
             random = np.random.default_rng(config.seed)
@@ -67,35 +67,41 @@ class PCAWhitenedKNN:
         maximum = min(config.components, len(values) - 1, values.shape[1])
         threshold = config.scale_floor * np.sqrt(len(values) - 1)
         dimensions = min(maximum, int((singular > threshold).sum()))
-        if not dimensions:
-            raise ValueError("PCA-kNN reference embeddings have no varying direction")
-        basis = right[:dimensions]
-        whitening = np.maximum(
-            singular[:dimensions] / np.sqrt(len(values) - 1),
-            config.scale_floor,
-        )
-        reference = (standardized @ basis.T) / whitening
+
+        if dimensions == 0:
+            basis = np.empty((0, values.shape[1]), dtype=np.float32)
+            whitening = np.empty(0, dtype=np.float32)
+            reference = np.empty((len(values), 0), dtype=np.float32)
+        else:
+            basis = right[:dimensions].astype(np.float32)
+            whitening = np.maximum(
+                singular[:dimensions] / np.sqrt(len(values) - 1),
+                config.scale_floor,
+            ).astype(np.float32)
+            reference = ((standardized @ basis.T) / whitening).astype(np.float32)
 
         return cls(
             median=median.astype(np.float32),
             scale=scale.astype(np.float32),
-            basis=basis.astype(np.float32),
-            whitening=whitening.astype(np.float32),
-            reference=reference.astype(np.float32),
+            basis=basis,
+            whitening=whitening,
+            reference=reference,
             neighbors=min(int(config.neighbors), len(values)),
         )
 
     def transform(self, embedding: np.ndarray) -> np.ndarray:
-        values = _embedding_matrix(embedding)
-        if values.shape[1] != len(self.median):
-            raise ValueError("embedding dimension differs from the fitted reference")
+        values = embedding_matrix(embedding)
         standardized = (values - self.median) / self.scale
         return ((standardized @ self.basis.T) / self.whitening).astype(np.float32)
 
     def score(self, embedding: np.ndarray) -> np.ndarray:
         """Return one mean-neighbor distance for every input node."""
 
-        query = self.transform(embedding)
+        values = embedding_matrix(embedding)
+        if self.collapsed:
+            return np.zeros(len(values), dtype=np.float32)
+
+        query = self.transform(values)
         neighbors = NearestNeighbors(
             n_neighbors=self.neighbors,
             metric="euclidean",
@@ -111,6 +117,7 @@ class PCAWhitenedKNN:
             "whitening": self.whitening,
             "reference": self.reference,
             "neighbors": np.asarray(self.neighbors, dtype=np.int32),
+            "collapsed": np.asarray(self.collapsed),
         }
 
     @classmethod
@@ -145,17 +152,11 @@ def save_reference(path: str | Path, reference: PCAWhitenedKNN, **metadata) -> N
 
 def load_reference(path: str | Path) -> PCAWhitenedKNN:
     arrays = load_npz(path)
-    if (
-        str(arrays["schema"].item()) != REFERENCE_SCHEMA
-        or int(arrays["version"].item()) != REFERENCE_VERSION
-        or bool(arrays["labels_included"].item())
-    ):
-        raise ValueError("unsupported PCA-kNN reference artifact")
     return PCAWhitenedKNN.from_arrays(arrays)
 
 
-def _embedding_matrix(value: np.ndarray) -> np.ndarray:
+def embedding_matrix(value: np.ndarray) -> np.ndarray:
     matrix = np.asarray(value, dtype=np.float64)
-    if matrix.ndim != 2 or not matrix.shape[1] or not np.isfinite(matrix).all():
-        raise ValueError("embedding must be a finite [node, dimension] matrix")
+    if matrix.ndim != 2:
+        raise ValueError("embedding must be a [node, dimension] matrix")
     return matrix
