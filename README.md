@@ -42,6 +42,7 @@ formal_cache.py                adapter for formal PT attention caches
 research_dataset.py            shared data interface
 experiment_protocol.py         source-group and evaluation protocol
 experiments/grounded_route/    active token-graph representation experiment
+  graph_effectiveness/         node-only detector/construction audit
 experiments/holoroute/         masked reconstruction baseline
 docs/EXPERIMENT_HISTORY.md     prior experiments and recorded results
 docs/RESEARCH_STATUS.md        current claims, gates, and next experiments
@@ -74,6 +75,11 @@ scores.npz                one scalar per response token
 evaluation.json           post-hoc metrics
 ```
 
+The saved `node_embedding` is already the output of typed message passing. The
+[`graph_effectiveness`](experiments/grounded_route/graph_effectiveness/)
+subpackage tests it with node-only unsupervised detectors and separately
+encoded graph controls; it does not attach another GNN after the representation.
+
 Training, calibration, and scoring do not read hallucination labels. Labels are opened only by the evaluation command after the score artifact has been frozen.
 
 ## Tests
@@ -82,6 +88,7 @@ Training, calibration, and scoring do not read hallucination labels. Labels are 
 python -m compileall -q experiments/grounded_route
 bash -n experiments/grounded_route/run.sh
 pytest -q experiments/grounded_route/tests
+pytest -q experiments/grounded_route/graph_effectiveness/tests
 ```
 
 The implementation is a research prototype, not a validated SOTA result. Its

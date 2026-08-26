@@ -257,7 +257,14 @@ class GroundedRouteEncoder(nn.Module):
             edges.source,
             edges.head,
         )
-        return self.propagate_edges(graph, state, edges, provenance, layer)
+        return self.propagate_edges(
+            graph,
+            state,
+            edges,
+            provenance,
+            transition[layer],
+            layer,
+        )
 
     def propagate_edges(
         self,
@@ -265,13 +272,14 @@ class GroundedRouteEncoder(nn.Module):
         state: torch.Tensor,
         edges,
         provenance: torch.Tensor,
+        transition: torch.Tensor,
         layer: int,
     ) -> torch.Tensor:
         """Update token states from one device-resident layer slice."""
 
         hidden = state.shape[-1]
         cells = state.new_zeros((graph.response_count, graph.head_count, hidden))
-        if edges.count:
+        if self.config.message_mode == "neighbor" and edges.count:
             source = edges.source
             target = edges.target - graph.response_start
             head = edges.head
@@ -294,9 +302,24 @@ class GroundedRouteEncoder(nn.Module):
             ).view(graph.response_count, graph.head_count, hidden)
 
         response_state = state[graph.response_start :]
-        self_value = self.self_message(response_state)[:, None, :]
         diagonal = graph.diagonal[:, layer].to(device=state.device)
         unresolved = graph.unresolved[:, layer].to(device=state.device)
+        if self.config.message_mode == "row_local":
+            retained = 1.0 - diagonal - unresolved
+            uniform_lineage = state.new_full(
+                (LINEAGE_STATES,),
+                1.0 / LINEAGE_STATES,
+            )
+            message = response_state[:, None] + self.layer_id.weight[layer]
+            message = message + self.head_id.weight[None]
+            message = message + (transition @ self.head_id.weight)[None]
+            message = message + self.source_role.weight.mean(dim=0)
+            message = message + self.lag_id.weight.mean(dim=0)
+            message = message + self.lineage(uniform_lineage)
+            message = message + self.edge_value(torch.log1p(retained)[..., None])
+            cells = self.edge_message(message) * retained[..., None]
+
+        self_value = self.self_message(response_state)[:, None, :]
         cells = cells + diagonal[..., None] * self_value
         cells = cells + (
             unresolved[..., None]
@@ -330,7 +353,14 @@ class GroundedRouteEncoder(nn.Module):
             layer,
             edges,
         )
-        state = self.propagate_edges(graph, state, edges, provenance, layer)
+        state = self.propagate_edges(
+            graph,
+            state,
+            edges,
+            provenance,
+            transition,
+            layer,
+        )
         return state, current_lineage
 
     def shifted_prefix(self, response_embedding: torch.Tensor) -> torch.Tensor:

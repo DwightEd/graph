@@ -45,6 +45,7 @@ from .config import (
     GroundedRouteConfig,
     InterventionConfig,
     LearningConfig,
+    MESSAGE_MODES,
     ModelConfig,
     TrainConfig,
 )
@@ -53,6 +54,30 @@ from .detection import PCAKNNConfig, fit as fit_detector, save_reference
 from .graph import build_graph
 from .learning import self_supervised_loss
 from .model import GroundedRouteEncoder
+
+
+ENCODER_IMPLEMENTATION_FILES = (
+    "artifacts.py",
+    "config.py",
+    "controls.py",
+    "graph.py",
+    "learning.py",
+    "model.py",
+    "pipeline.py",
+)
+
+
+def implementation_sha256() -> str:
+    """Bind a checkpoint to the exact encoder implementation used to fit it."""
+
+    digest = hashlib.sha256()
+    package = Path(__file__).resolve().parent
+    for name in ENCODER_IMPLEMENTATION_FILES:
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update((package / name).read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
 
 
 def build(
@@ -94,6 +119,7 @@ def fit(
     train_config: TrainConfig | None = None,
     variant: str = "real",
     minimum_changed_fraction: float = 0.01,
+    message_mode: str = "neighbor",
 ) -> dict[str, object]:
     """Fit the causal endpoint encoder on source-disjoint unlabeled streams."""
 
@@ -105,6 +131,7 @@ def fit(
     split = source_split(dataset, spec.sample_ids, train_config)
     config = GroundedRouteConfig(
         graph=GraphConfig(**spec.graph_config),
+        model=ModelConfig(message_mode=message_mode),
         train=train_config,
         intervention=InterventionConfig(
             variant=variant,
@@ -215,6 +242,7 @@ def fit(
             "history": history,
             "best_validation_loss": best_validation,
             "parameter_count": parameter_count,
+            "implementation_sha256": implementation_sha256(),
             "graph_spec_sha256": sha256(spec_path),
             "fit_sample_ids": split["fit_sample_ids"],
             "validation_sample_ids": split["validation_sample_ids"],
@@ -224,6 +252,7 @@ def fit(
             "calibration_source_ids": split["calibration_source_ids"],
             "train_source_ids": train_sources,
             "variant": config.intervention.variant,
+            "message_mode": config.model.message_mode,
             "changed_fraction": actual_changed_fraction,
             "changed_edges": changed_edges,
             "variant_edges": variant_edges,
@@ -235,7 +264,9 @@ def fit(
         "train_loss": history[-1]["train_loss"],
         "best_validation_loss": best_validation,
         "parameter_count": parameter_count,
+        "implementation_sha256": implementation_sha256(),
         "variant": config.intervention.variant,
+        "message_mode": config.model.message_mode,
         "changed_fraction": actual_changed_fraction,
         "labels_read": False,
     }
@@ -249,6 +280,7 @@ def encode(
     scope: str,
     device="cpu",
     variant: str | None = None,
+    message_mode: str | None = None,
 ) -> dict[str, object]:
     """Save one self-contained encoded token graph per selected sample."""
 
@@ -256,11 +288,14 @@ def encode(
     dataset = open_spec_dataset(spec, "cpu")
     checkpoint = load_checkpoint(checkpoint_path, map_location="cpu")
     validate_checkpoint_geometry(spec, checkpoint)
+    validate_checkpoint_implementation(checkpoint)
     model, config = restore_model(checkpoint, device)
     if config.graph != GraphConfig(**spec.graph_config):
         raise ValueError("checkpoint and graph spec use different graph construction")
     if variant is not None and variant != config.intervention.variant:
         raise ValueError("requested variant differs from the checkpoint variant")
+    if message_mode is not None and message_mode != config.model.message_mode:
+        raise ValueError("requested message mode differs from the checkpoint")
 
     if scope == "calibration":
         if spec.split != "train" or sha256(spec_path) != checkpoint["graph_spec_sha256"]:
@@ -325,6 +360,7 @@ def encode(
     metadata: dict[str, object] = {
         "dataset_manifest_sha256": spec.dataset_manifest_sha256,
         "checkpoint_sha256": sha256(checkpoint_path),
+        "implementation_sha256": checkpoint["implementation_sha256"],
         "graph_spec_sha256": sha256(spec_path),
         "split": spec.split,
         "scope": scope,
@@ -332,6 +368,7 @@ def encode(
         "encoded_graph_paths": graph_paths,
         "encoded_graph_sha256": graph_sha256,
         "variant": config.intervention.variant,
+        "message_mode": config.model.message_mode,
         "changed_fraction": actual_changed_fraction,
     }
     if audit is not None:
@@ -362,6 +399,7 @@ def encode(
         "nodes": len(index.sample_id),
         "edges": edge_count,
         "variant": config.intervention.variant,
+        "message_mode": config.model.message_mode,
         "changed_fraction": actual_changed_fraction,
         "labels_read": False,
     }
@@ -388,6 +426,9 @@ def detect(
     variant = scalar_text(calibration_meta, "variant")
     if variant != scalar_text(test_meta, "variant"):
         raise ValueError("calibration and test embeddings use different variants")
+    message_mode = artifact_message_mode(calibration_meta)
+    if message_mode != artifact_message_mode(test_meta):
+        raise ValueError("calibration and test embeddings use different message modes")
     calibration_changed_fraction = scalar_number(
         calibration_meta,
         "changed_fraction",
@@ -409,6 +450,7 @@ def detect(
         checkpoint_sha256=checkpoint_hash,
         calibration_embedding_sha256=sha256(calibration_index_path),
         variant=variant,
+        message_mode=message_mode,
         changed_fraction=calibration_changed_fraction,
     )
     score = reference.score(test.embedding)
@@ -418,6 +460,7 @@ def detect(
         score,
         model_type="grounded_route",
         variant=variant,
+        message_mode=message_mode,
         changed_fraction=test_changed_fraction,
         calibration_changed_fraction=calibration_changed_fraction,
         dataset_manifest_sha256=sha256_text(
@@ -438,6 +481,7 @@ def detect(
         "samples": len(set(test.sample_id.tolist())),
         "nodes": len(score),
         "variant": variant,
+        "message_mode": message_mode,
         "changed_fraction": test_changed_fraction,
         "labels_read": False,
     }
@@ -543,6 +587,8 @@ def restore_model(checkpoint, device):
     )
     if str(checkpoint["variant"]) != config.intervention.variant:
         raise ValueError("checkpoint variant differs from its frozen configuration")
+    if str(checkpoint.get("message_mode", "neighbor")) != config.model.message_mode:
+        raise ValueError("checkpoint message mode differs from its frozen configuration")
     model = GroundedRouteEncoder(
         int(checkpoint["layer_count"]),
         int(checkpoint["head_count"]),
@@ -550,6 +596,14 @@ def restore_model(checkpoint, device):
     ).to(device)
     model.load_state_dict(checkpoint["state_dict"])
     return model, config
+
+
+def validate_checkpoint_implementation(checkpoint) -> None:
+    expected = checkpoint.get("implementation_sha256")
+    if expected is None:
+        raise ValueError("checkpoint does not record its encoder implementation")
+    if str(expected) != implementation_sha256():
+        raise ValueError("checkpoint encoder implementation differs from current code")
 
 
 def graph_generator(device, seed: int, sample_id: str, stream):
@@ -573,7 +627,13 @@ def controlled_graph(graph, config: GroundedRouteConfig):
         endpoint_rewire_passes=config.intervention.endpoint_rewire_passes,
     )
     if variant == "weight_shuffle":
-        changed = int((controlled.edges.weight != graph.edges.weight).sum().item())
+        # The audit observes float16 sidecars, so count only persisted changes.
+        changed = int(
+            (
+                controlled.edges.weight.to(torch.float16)
+                != graph.edges.weight.to(torch.float16)
+            ).sum().item()
+        )
     elif variant == "endpoint_rewire":
         changed = int((controlled.edges.source != graph.edges.source).sum().item())
     else:
@@ -628,6 +688,17 @@ def scalar_number(mapping, name: str) -> float:
     if value.ndim != 0 or not np.issubdtype(value.dtype, np.number):
         raise ValueError(f"artifact field {name!r} must be a scalar number")
     return float(value.item())
+
+
+def artifact_message_mode(metadata) -> str:
+    mode = (
+        scalar_text(metadata, "message_mode")
+        if "message_mode" in metadata
+        else "neighbor"
+    )
+    if mode not in MESSAGE_MODES:
+        raise ValueError(f"artifact message_mode must be one of {MESSAGE_MODES}")
+    return mode
 
 
 def set_random_seed(seed: int) -> None:

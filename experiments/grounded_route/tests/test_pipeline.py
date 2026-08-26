@@ -6,7 +6,13 @@ import pytest
 
 from experiments.grounded_route.config import TrainConfig
 from experiments.grounded_route import pipeline
-from experiments.grounded_route.artifacts import GraphSpec, load_scores
+from experiments.grounded_route.artifacts import (
+    GraphSpec,
+    load_checkpoint,
+    load_embedding_index,
+    load_scores,
+)
+from experiments.grounded_route.run import command_line
 from experiments.grounded_route.tests.helpers import make_graph
 
 
@@ -94,6 +100,35 @@ def test_checkpoint_geometry_must_match_the_graph_spec():
             pipeline.validate_checkpoint_geometry(spec, checkpoint)
 
 
+def test_checkpoint_must_bind_the_current_encoder_implementation():
+    pipeline.validate_checkpoint_implementation(
+        {"implementation_sha256": pipeline.implementation_sha256()}
+    )
+    with pytest.raises(ValueError, match="implementation differs"):
+        pipeline.validate_checkpoint_implementation(
+            {"implementation_sha256": "0" * 64}
+        )
+
+
+def test_message_mode_cli_defaults_to_neighbor_and_accepts_row_local():
+    default = command_line().parse_args(
+        ["fit", "--spec", "train.json", "--checkpoint", "model.pt"]
+    )
+    controlled = command_line().parse_args(
+        [
+            "fit",
+            "--spec",
+            "train.json",
+            "--checkpoint",
+            "model.pt",
+            "--message-mode",
+            "row_local",
+        ]
+    )
+    assert default.message_mode == "neighbor"
+    assert controlled.message_mode == "row_local"
+
+
 class SentinelSample:
     def __init__(self, dataset, sample_id: str, source_id: str):
         self.dataset = dataset
@@ -168,7 +203,7 @@ def test_build_fit_encode_detect_handoff_never_opens_labels(tmp_path, monkeypatc
     scores = tmp_path / "scores.npz"
 
     pipeline.build(train.root, train_spec)
-    pipeline.fit(
+    fit_report = pipeline.fit(
         train_spec,
         checkpoint,
         train_config=TrainConfig(
@@ -178,14 +213,28 @@ def test_build_fit_encode_detect_handoff_never_opens_labels(tmp_path, monkeypatc
             seed=41,
         ),
     )
+    frozen_checkpoint = load_checkpoint(checkpoint)
+    assert fit_report["message_mode"] == "neighbor"
+    assert frozen_checkpoint["message_mode"] == "neighbor"
+    assert frozen_checkpoint["config"]["model"]["message_mode"] == "neighbor"
+    assert frozen_checkpoint["implementation_sha256"] == pipeline.implementation_sha256()
+    assert len(frozen_checkpoint["implementation_sha256"]) == 64
+
     pipeline.encode(
         train_spec,
         checkpoint,
         calibration,
         scope="calibration",
+        message_mode="neighbor",
     )
     pipeline.build(test.root, test_spec)
-    pipeline.encode(test_spec, checkpoint, encoded_test, scope="all")
+    pipeline.encode(
+        test_spec,
+        checkpoint,
+        encoded_test,
+        scope="all",
+        message_mode="neighbor",
+    )
     report = pipeline.detect(
         calibration / "index.npz",
         encoded_test / "index.npz",
@@ -193,11 +242,18 @@ def test_build_fit_encode_detect_handoff_never_opens_labels(tmp_path, monkeypatc
         scores,
     )
 
+    _, calibration_metadata = load_embedding_index(calibration / "index.npz")
+    _, test_metadata = load_embedding_index(encoded_test / "index.npz")
     frozen = load_scores(scores)
     assert report["labels_read"] is False
     assert report["variant"] == "real"
     assert not bool(frozen["labels_included"].item())
     assert frozen["variant"].item() == "real"
+    assert calibration_metadata["message_mode"].item() == "neighbor"
+    assert test_metadata["message_mode"].item() == "neighbor"
+    assert calibration_metadata["implementation_sha256"].item() == pipeline.implementation_sha256()
+    assert test_metadata["implementation_sha256"].item() == pipeline.implementation_sha256()
+    assert frozen["message_mode"].item() == "neighbor"
     assert float(frozen["changed_fraction"].item()) == 0.0
     assert "embedding" not in frozen
     assert train.label_accesses == 0

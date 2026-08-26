@@ -1,0 +1,30 @@
+name: GroundedRoute graph-effectiveness tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "experiment_protocol.py"
+      - "research_dataset.py"
+      - "experiments/grounded_route/**"
+      - ".github/workflows/grounded-route-graph-effectiveness-tests.yml"
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install numpy scipy scikit-learn tqdm pytest
+      - run: python -m compileall -q experiments/grounded_route
+      - run: bash -n experiments/grounded_route/run.sh
+      - run: bash -n experiments/grounded_route/graph_effectiveness/run.sh
+      - run: bash -n experiments/grounded_route/graph_effectiveness/run_controls_qa.sh
+      - run: python -m pytest -q experiments/grounded_route/tests experiments/grounded_route/graph_effectiveness/tests

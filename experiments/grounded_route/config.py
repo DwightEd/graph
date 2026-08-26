@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 
 
 GRAPH_VARIANTS = ("real", "weight_shuffle", "endpoint_rewire")
+MESSAGE_MODES = ("neighbor", "row_local")
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,11 @@ class ModelConfig:
     lag_buckets: int = 12
     dropout: float = 0.1
     head_transition_identity_bias: float = 2.0
+    message_mode: str = "neighbor"
+
+    def __post_init__(self) -> None:
+        if self.message_mode not in MESSAGE_MODES:
+            raise ValueError(f"message_mode must be one of {MESSAGE_MODES}")
 
 
 @dataclass(frozen=True)

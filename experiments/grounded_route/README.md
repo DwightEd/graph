@@ -120,6 +120,8 @@ evaluate.py    labels opened after score freezing
 run.py         command-line interface
 run.sh         complete experiment
 controls.py    matched endpoint and weight interventions
+graph_effectiveness/
+               saved-node-embedding detector and construction audit
 ```
 
 The same `fit -> encode -> detect` path supports three frozen graph variants:
@@ -141,6 +143,16 @@ The two controls are applied deterministically per sample:
 If the real graph does not outperform these controls after retraining and with
 the same detector, the exact-endpoint/multi-hop claim must be removed.
 
+`message_mode` is an orthogonal encoder control. The default `neighbor` mode
+uses the exact source-node messages above. `row_local` replaces them with one
+parameter-matched pseudo-message per `(target, layer, head)`: it keeps retained,
+diagonal, and unresolved row mass and reuses the same edge MLP, head pooling,
+GRU, and source-independent learned head correspondence, but never reads source
+state, endpoint identity, source lag, or source lineage. Exact endpoints remain
+only as the self-supervised training target.
+Thus `real + row_local` tests whether neighbor aggregation adds value beyond
+the token's own attention-row dynamics.
+
 ## Run
 
 From the repository root:
@@ -149,7 +161,8 @@ From the repository root:
 TRAIN_SPLIT=/path/to/attention/train \
 TEST_SPLIT=/path/to/attention/test \
 VARIANT=real OUT=experiments/grounded_route/outputs/qa/real \
-TASK=QA DEVICE=cuda EPOCHS=8 \
+MESSAGE_MODE=neighbor TASK=QA DEVICE=cuda EPOCHS=8 \
+SEED=20260825 \
 bash experiments/grounded_route/run.sh
 ```
 
@@ -161,18 +174,20 @@ python -m experiments.grounded_route.run build \
 
 python -m experiments.grounded_route.run fit \
   --spec train_graph.json --checkpoint model.pt \
-  --variant real --device cuda
+  --variant real --message-mode neighbor --device cuda
 
 python -m experiments.grounded_route.run encode \
   --spec train_graph.json --checkpoint model.pt \
-  --scope calibration --output calibration --variant real --device cuda
+  --scope calibration --output calibration --variant real \
+  --message-mode neighbor --device cuda
 
 python -m experiments.grounded_route.run build \
   --data /path/to/test --output test_graph.json --task QA
 
 python -m experiments.grounded_route.run encode \
   --spec test_graph.json --checkpoint model.pt \
-  --scope all --output test --variant real --device cuda
+  --scope all --output test --variant real \
+  --message-mode neighbor --device cuda
 
 python -m experiments.grounded_route.run detect \
   --calibration calibration/index.npz --test test/index.npz \
@@ -206,6 +221,26 @@ one layer of edges to the compute device at a time. Training checkpoints each
 layer step, so device-side edge activations scale with the largest layer rather
 than the whole graph. Preserving every retained endpoint still requires
 \(O(E)\) host memory; this is the explicit cost of avoiding top-k pruning.
+
+## Audit the final node representation
+
+Message passing is part of GroundedRouteEncoder, so downstream detection reads
+only the saved `node_embedding`. The isolated
+[`graph_effectiveness/`](graph_effectiveness/) module benchmarks multiple
+node-only unsupervised detectors, measures a source-grouped supervised
+readability ceiling, and compares separately trained/encoded graph variants.
+
+```bash
+CALIBRATION_INDEX=/path/to/real/calibration/index.npz \
+GRAPH_INDEX=/path/to/real/test/index.npz \
+TEST_SPLIT=/path/to/attention/test \
+OUT=/path/to/real/graph_effectiveness \
+DEVICE=cuda \
+bash experiments/grounded_route/graph_effectiveness/run.sh
+```
+
+Saved edges are used only for integrity and encoder-mechanism checks in that
+module; no downstream detector performs a second graph aggregation.
 
 ## Research status
 

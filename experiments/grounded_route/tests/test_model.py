@@ -14,7 +14,7 @@ from experiments.grounded_route.tests.helpers import (
 )
 
 
-def make_model(graph):
+def make_model(graph, *, message_mode="neighbor"):
     model = GroundedRouteEncoder(
         graph.layer_count,
         graph.head_count,
@@ -24,6 +24,7 @@ def make_model(graph):
             lag_buckets=8,
             dropout=0.0,
             head_transition_identity_bias=2.0,
+            message_mode=message_mode,
         ),
     )
     return model.eval()
@@ -203,6 +204,124 @@ def test_matched_endpoint_change_affects_only_causal_descendants():
         rtol=1e-5,
     )
     assert not torch.allclose(original[first_changed_target:], changed[first_changed_target:])
+
+
+def test_row_local_does_not_read_rewired_endpoint_identity():
+    torch.manual_seed(13)
+    graph = make_rewirable_graph()
+    rewired = rewire_endpoints_keep_roles(
+        graph,
+        torch.Generator().manual_seed(13),
+        passes=1,
+    )
+    assert not torch.equal(graph.edges.source, rewired.edges.source)
+
+    model = make_model(graph, message_mode="row_local")
+    original = model.encode(graph)
+    changed = model.encode(rewired)
+    assert torch.allclose(
+        original.node_embedding,
+        changed.node_embedding,
+        atol=1e-6,
+        rtol=1e-5,
+    )
+    assert torch.allclose(
+        original.prefix_state,
+        changed.prefix_state,
+        atol=1e-6,
+        rtol=1e-5,
+    )
+
+
+def test_row_local_responds_to_its_own_attention_row_mass():
+    torch.manual_seed(17)
+    graph = make_graph()
+    response_index = 3
+    target = graph.response_start + response_index
+    layer = 0
+    head = 0
+    selected = (
+        (graph.edges.target == target)
+        & (graph.edges.layer == layer)
+        & (graph.edges.head == head)
+    )
+    edge = int(torch.nonzero(selected, as_tuple=False)[0].item())
+    delta = 0.02
+    weight = graph.edges.weight.clone()
+    weight[edge] += delta
+    unresolved = graph.unresolved.clone()
+    unresolved[response_index, layer, head] -= delta
+    changed = replace(
+        graph,
+        edges=TokenEdges(
+            source=graph.edges.source,
+            target=graph.edges.target,
+            layer=graph.edges.layer,
+            head=graph.edges.head,
+            weight=weight,
+        ),
+        unresolved=unresolved,
+    ).check()
+
+    model = make_model(graph, message_mode="row_local")
+    original = model.encode(graph).response_embedding
+    updated = model.encode(changed).response_embedding
+    assert not torch.allclose(original[response_index], updated[response_index])
+    keep = torch.arange(graph.response_count) != response_index
+    assert torch.allclose(original[keep], updated[keep], atol=1e-6, rtol=1e-5)
+
+
+def test_row_local_is_causal_and_capacity_matched_to_neighbor():
+    torch.manual_seed(19)
+    graph = make_graph()
+    neighbor = make_model(graph, message_mode="neighbor")
+    torch.manual_seed(19)
+    row_local = make_model(graph, message_mode="row_local")
+    assert {
+        name: tuple(value.shape)
+        for name, value in neighbor.state_dict().items()
+    } == {
+        name: tuple(value.shape)
+        for name, value in row_local.state_dict().items()
+    }
+    assert sum(parameter.numel() for parameter in neighbor.parameters()) == sum(
+        parameter.numel() for parameter in row_local.parameters()
+    )
+    for name, value in neighbor.state_dict().items():
+        assert torch.equal(value, row_local.state_dict()[name])
+
+    full = row_local.encode(graph)
+    for count in (1, 3, graph.response_count - 1):
+        prefix = row_local.encode(graph.truncate_response(count))
+        assert torch.allclose(
+            full.response_embedding[:count],
+            prefix.response_embedding,
+            atol=1e-6,
+            rtol=1e-5,
+        )
+        assert torch.allclose(
+            full.prefix_state[:count],
+            prefix.prefix_state,
+            atol=1e-6,
+            rtol=1e-5,
+        )
+
+    row_local.train()
+    objective = self_supervised_loss(
+        row_local,
+        graph,
+        LearningConfig(
+            positive_edges_per_graph=3,
+            negative_count=2,
+            negative_attempt_factor=8,
+            variance_weight=0.05,
+        ),
+        torch.Generator().manual_seed(23),
+    )
+    assert objective.pair_count > 0
+    objective.loss.backward()
+    assert row_local.edge_message[1].weight.grad is not None
+    assert row_local.head_transition.logit.grad is not None
 
 
 def test_route_negatives_match_role_lag_and_causality_without_observed_edges():

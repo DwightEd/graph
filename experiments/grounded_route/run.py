@@ -6,7 +6,7 @@ import argparse
 
 from research_dataset import open_research_dataset
 
-from .config import GRAPH_VARIANTS, TrainConfig
+from .config import GRAPH_VARIANTS, MESSAGE_MODES, TrainConfig
 from .detection import PCAKNNConfig
 from .evaluate import evaluate
 from .pipeline import build, detect, encode, fit
@@ -34,6 +34,7 @@ def command_line() -> argparse.ArgumentParser:
     command.add_argument("--validation-fraction", type=float, default=0.15)
     command.add_argument("--detector-fraction", type=float, default=0.20)
     command.add_argument("--variant", choices=GRAPH_VARIANTS, default="real")
+    command.add_argument("--message-mode", choices=MESSAGE_MODES, default="neighbor")
     command.add_argument("--minimum-changed-fraction", type=float, default=0.01)
     command.add_argument("--seed", type=int, default=20260825)
     command.add_argument("--device", default="cpu")
@@ -45,6 +46,7 @@ def command_line() -> argparse.ArgumentParser:
     command.add_argument("--output", required=True)
     command.add_argument("--device", default="cpu")
     command.add_argument("--variant", choices=GRAPH_VARIANTS)
+    command.add_argument("--message-mode", choices=MESSAGE_MODES)
 
     command = commands.add_parser("detect")
     command.add_argument("--calibration", required=True)
@@ -91,6 +93,7 @@ def main() -> None:
             ),
             variant=arguments.variant,
             minimum_changed_fraction=arguments.minimum_changed_fraction,
+            message_mode=arguments.message_mode,
         )
     elif arguments.command == "encode":
         report = encode(
@@ -100,6 +103,7 @@ def main() -> None:
             scope=arguments.scope,
             device=arguments.device,
             variant=arguments.variant,
+            message_mode=arguments.message_mode,
         )
     elif arguments.command == "detect":
         report = detect(
@@ -145,6 +149,7 @@ def print_report(command: str, report: dict[str, object]) -> None:
         "best_validation_loss",
         "parameter_count",
         "variant",
+        "message_mode",
         "changed_fraction",
         "auroc",
         "auprc",
