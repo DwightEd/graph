@@ -1,5 +1,6 @@
-"""Grounded-route token graph representation learning."""
+"""GroundedRoute token graph representation learning."""
 
+from .aggregation import RouteAggregator, RouteMoments, lag_bucket, route_moments
 from .config import (
     GRAPH_VARIANTS,
     GraphConfig,
@@ -11,7 +12,8 @@ from .config import (
 )
 from .graph import PROMPT, RESPONSE, TokenEdges, TokenGraph, build_graph
 from .learning import EndpointPairs, LossOutput, matched_negative_edges, self_supervised_loss
-from .model import EncoderOutput, GroundedRouteEncoder, HeadTransition, trace_lineage
+from .lineage import HeadTransition, source_lineage, trace_lineage
+from .model import EncoderOutput, GroundedRouteEncoder
 
 __all__ = [
     "EncoderOutput",
@@ -27,11 +29,16 @@ __all__ = [
     "ModelConfig",
     "PROMPT",
     "RESPONSE",
+    "RouteAggregator",
+    "RouteMoments",
     "TokenEdges",
     "TokenGraph",
     "TrainConfig",
     "build_graph",
+    "lag_bucket",
     "matched_negative_edges",
+    "route_moments",
     "self_supervised_loss",
+    "source_lineage",
     "trace_lineage",
 ]

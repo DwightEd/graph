@@ -1,251 +1,95 @@
 # GroundedRoute
 
-GroundedRoute is an attention-only, label-free representation prototype for
-token-level hallucination research. It produces one reusable embedding for
-every prompt and response token, preserves the exact retained attention
-endpoints and all layer/head identities, and applies a separate one-class
-detector only after representation learning.
+GroundedRoute 把一条 prompt-response 样本构造成带 layer/head 类型的因果 token 图，并把边与邻居信息聚合到每个 token 的 `node_embedding` 中。后续检测器只读取节点表征，不再读取邻接关系。
 
-It is not a masked graph autoencoder. Its self-supervised task predicts the
-source endpoint of a retained attention edge from the causal prefix before the
-current attention row is observed.
+代码规范见 [`iclr/ENGINEERING_RULES.md`](iclr/ENGINEERING_RULES.md)。
 
-## Method
-
-One prompt-response sample becomes a typed causal token graph:
+## 图
 
 ```text
-node       token position
+node       prompt 或 response token
 edge       source token -> response token
 edge type  (layer, head)
 edge value retained attention weight
 ```
 
-The sparse cache retains all 32 x 32 layer/head identities. Missing edges stay
-censored below the cache floor; they are not converted into observed zeros.
-Prompt-query rows are unavailable and are never fabricated.
+稀疏 cache 中未保存的边不会被当作零。每个 response row 保存 retained edge mass、self diagonal mass 和 unresolved mass，三者归一化后总和为 1。
 
-The model first propagates a conserved three-state path lineage through the
-graph:
+## 节点聚合
 
-```text
-P  prompt-origin path mass
-C  response-closed path mass
-U  unresolved/censored path mass
-```
+每条边先把 source state、layer/head、source role、lag 和 lineage 编码为 message。attention weight 不再被重复编码，而是直接作为加权矩和总质量。
 
-For head correspondence between adjacent layers,
-
-\[
-B_l[h,h'] = \operatorname{softmax}_{h'} \beta_l[h,h'].
-\]
-
-If \(\pi_{s,l-1,h'}\) is the source lineage, the current-head source
-lineage is
-
-\[
-\bar\pi_{s,l,h}=\sum_{h'}B_l[h,h']\pi_{s,l-1,h'}.
-\]
-
-After the cache-tolerance correction, each response row conserves normalized
-retained, diagonal, and unresolved mass:
-
-\[
-\pi_{t,l,h}=
-\sum_{p\in P}\tilde a_{tp}^{lh}e_P+
-\sum_{s\in R_{<t}}\tilde a_{ts}^{lh}\bar\pi_{s,l,h}+
-\tilde d_t^{lh}\bar\pi_{t,l,h}+u_t^{lh}e_U,
-\qquad
-\sum_s\tilde a_{ts}^{lh}+\tilde d_t^{lh}+u_t^{lh}=1.
-\]
-
-Thus an RR edge can carry prompt-origin mass instead of being treated as
-automatically ungrounded. This lineage is injected into the typed edge message;
-it is not a collection of post-hoc scalar features.
-
-For response token `t`, the endpoint predictor uses only `G_<t` to distinguish
-an observed source from role- and lag-matched causal non-edges. After observing
-the current row, the encoder updates the token state through its exact typed
-neighbors. The resulting `node_embedding[N,D]` is the method output; endpoint
-loss is a self-supervised training objective rather than the anomaly score.
-
-For each retained endpoint \(s^+\), training samples causal non-edges \(s^-\)
-with the same source role and logarithmic lag bucket. With
-
-\[
-\ell_\theta(s\mid t,l,h)=\frac{q_{t,l,h}^{\mathsf T}k_s}{\sqrt D},
-\]
-
-the implemented normalized route loss is
-
-\[
-\mathcal L_{route}=
-\frac{\sum_e a_e\,
-\operatorname{softplus}\!\left(
-\ell_\theta(s_e^-)-\ell_\theta(s_e^+)\right)}
-{\sum_e a_e}.
-\]
-
-The query \(q_t\) is computed from a right-shifted recurrent prefix state, so
-it cannot read token \(t\)'s current attention row. The current candidate
-edge's weight is used only as the loss weight and is not an endpoint-score
-input. Once a row is observed, its retained weights do enter later node
-embeddings through both `log1p(weight)` edge-value encoding and multiplicative
-message weighting. The anomaly score is not this loss; it is computed later
-from the frozen embedding.
-
-The first detector is intentionally simple and independent of graph features:
+对同一个 `(target, layer, head)`，聚合器分别计算 prompt-source 与 response-source 的：
 
 ```text
-calibration node embeddings
--> median/MAD normalization
--> whitened PCA
--> k-nearest-neighbor distance
--> one scalar per response token
+weighted mean      邻居内容的中心
+weighted spread    邻居内容是否冲突或分散
+total mass         当前路由对该类 source 的依赖量
 ```
 
-It reads only learned embeddings. It does not read token position, degree,
-attention statistics, lineage, or hallucination labels.
+随后加入 diagonal self message 和 unresolved message，在 heads 间做 target-conditioned pooling，并用 GRU 更新 token state。全部 Transformer layers 处理完后得到：
 
-## Code map
+```python
+output.node_embedding      # [all_tokens, hidden_dim]
+output.response_embedding  # [response_tokens, hidden_dim]
+```
+
+核心代码：
 
 ```text
-graph.py       canonical sparse attention -> typed TokenGraph
-model.py       TokenGraph -> one embedding per token
-learning.py    causal endpoint prediction objective
-artifacts.py   graph spec, checkpoint, encoded graph and score contracts
-detection.py   PCA-whitened kNN
-pipeline.py    build, fit, encode and detect orchestration
-evaluate.py    labels opened after score freezing
-run.py         command-line interface
-run.sh         complete experiment
-controls.py    matched endpoint and weight interventions
-graph_effectiveness/
-               saved-node-embedding detector and construction audit
+graph.py         attention cache -> TokenGraph
+lineage.py       prompt / response-closed / unresolved 路径来源
+aggregation.py   role-aware weighted moments
+model.py         多层 token 状态更新
+learning.py      无标签 endpoint prediction objective
+pipeline.py      build / fit / encode / detect
+evaluation/      node-only detector、probe 与构图控制
 ```
 
-The same `fit -> encode -> detect` path supports three frozen graph variants:
-`real`, `weight_shuffle`, and `endpoint_rewire`. Every variant uses the same
-source split, seed, model capacity, optimization budget, and embedding-only
-detector. Its checkpoint, embedding index, and score record the variant and the
-actual changed-edge fraction; a control is rejected when its aggregate change
-falls below the configured minimum.
+## 自监督训练
 
-The two controls are applied deterministically per sample:
+训练任务是从当前 token 之前的因果 prefix 区分真实 source endpoint 与 role/lag 匹配的 causal non-edge。它只用于学习节点表征，不是最终异常分数。
 
-- `shuffle_weights_keep_endpoints` keeps endpoints, support, row mass, role
-  mass, and each group weight multiset while changing which endpoint receives
-  a strong edge;
-- `rewire_endpoints_keep_roles` performs causal degree-preserving double swaps
-  within layer/head/role/coarse-log-lag strata while weights stay in their
-  original rows. It preserves only the logarithmic lag bucket, not exact lag.
-
-If the real graph does not outperform these controls after retraining and with
-the same detector, the exact-endpoint/multi-hop claim must be removed.
-
-`message_mode` is an orthogonal encoder control. The default `neighbor` mode
-uses the exact source-node messages above. `row_local` replaces them with one
-parameter-matched pseudo-message per `(target, layer, head)`: it keeps retained,
-diagonal, and unresolved row mass and reuses the same edge MLP, head pooling,
-GRU, and source-independent learned head correspondence, but never reads source
-state, endpoint identity, source lag, or source lineage. Exact endpoints remain
-only as the self-supervised training target.
-Thus `real + row_local` tests whether neighbor aggregation adds value beyond
-the token's own attention-row dynamics.
-
-## Run
-
-From the repository root:
+## 一键运行 QA
 
 ```bash
-TRAIN_SPLIT=/path/to/attention/train \
-TEST_SPLIT=/path/to/attention/test \
-VARIANT=real OUT=experiments/grounded_route/outputs/qa/real \
-MESSAGE_MODE=neighbor TASK=QA DEVICE=cuda EPOCHS=8 \
-SEED=20260825 \
-bash experiments/grounded_route/run.sh
+bash experiments/grounded_route/run_qa.sh
 ```
 
-The explicit stages are also available:
-
-```bash
-python -m experiments.grounded_route.run build \
-  --data /path/to/train --output train_graph.json --task QA
-
-python -m experiments.grounded_route.run fit \
-  --spec train_graph.json --checkpoint model.pt \
-  --variant real --message-mode neighbor --device cuda
-
-python -m experiments.grounded_route.run encode \
-  --spec train_graph.json --checkpoint model.pt \
-  --scope calibration --output calibration --variant real \
-  --message-mode neighbor --device cuda
-
-python -m experiments.grounded_route.run build \
-  --data /path/to/test --output test_graph.json --task QA
-
-python -m experiments.grounded_route.run encode \
-  --spec test_graph.json --checkpoint model.pt \
-  --scope all --output test --variant real \
-  --message-mode neighbor --device cuda
-
-python -m experiments.grounded_route.run detect \
-  --calibration calibration/index.npz --test test/index.npz \
-  --reference detector.npz --scores scores.npz
-
-python -m experiments.grounded_route.run evaluate \
-  --test /path/to/test --scores scores.npz --output evaluation.json
-```
-
-## Artifacts
+输出：
 
 ```text
-train_graph.json          lightweight data selection; no copied training graph
-model.pt                  encoder checkpoint and source-disjoint split
-calibration/graphs/*.pt   calibration graph + node embeddings
-calibration/index.npz     calibration response-node embeddings
-test/graphs/*.pt          self-contained encoded token graphs
-test/index.npz            merged response-node embeddings
-detector.npz              frozen PCA-kNN reference
-scores.npz                one label-free scalar per response token
-evaluation.json           post-hoc AUROC/AUPRC and source bootstrap
+experiments/grounded_route/outputs/qa/
+├── model.pt
+├── calibration/index.npz
+├── calibration/graphs/*.pt
+├── test/index.npz
+├── test/graphs/*.pt
+├── detector.npz
+├── scores.npz
+└── evaluation.json
 ```
 
-Each encoded graph contains `node_embedding[N,D]`, typed endpoints,
-`diagonal[R,L,H]`, `unresolved[R,L,H]`, and the single interpretable lineage
-tensor `[R,L,H,3]`. It does not contain labels or a collection of detector
-residuals. Each index records the SHA-256 of every referenced graph sidecar.
+## 评估节点表征
 
-The implementation keeps the full sparse topology on CPU and transfers only
-one layer of edges to the compute device at a time. Training checkpoints each
-layer step, so device-side edge activations scale with the largest layer rather
-than the whole graph. Preserving every retained endpoint still requires
-\(O(E)\) host memory; this is the explicit cost of avoiding top-k pruning.
-
-## Audit the final node representation
-
-Message passing is part of GroundedRouteEncoder, so downstream detection reads
-only the saved `node_embedding`. The isolated
-[`graph_effectiveness/`](graph_effectiveness/) module benchmarks multiple
-node-only unsupervised detectors, measures a source-grouped supervised
-readability ceiling, and compares separately trained/encoded graph variants.
+只使用已有 real embedding：
 
 ```bash
-CALIBRATION_INDEX=/path/to/real/calibration/index.npz \
-GRAPH_INDEX=/path/to/real/test/index.npz \
-TEST_SPLIT=/path/to/attention/test \
-OUT=/path/to/real/graph_effectiveness \
-DEVICE=cuda \
-bash experiments/grounded_route/graph_effectiveness/run.sh
+bash experiments/grounded_route/evaluation/run_qa.sh
 ```
 
-Saved edges are used only for integrity and encoder-mechanism checks in that
-module; no downstream detector performs a second graph aggregation.
+完整构图控制：
 
-## Research status
+```bash
+bash experiments/grounded_route/evaluation/run_controls_qa.sh
+```
 
-This implementation establishes a clean representation-learning and artifact
-boundary. It does not yet establish that kNN distance detects a stable error
-attractor, nor does it make a SOTA claim. That question requires real-data
-comparisons, matched endpoint interventions, multiple seeds, and separate QA,
-Summary, and Data2txt evaluation.
+控制含义：
+
+```text
+no_message       不读取 source node state
+endpoint_rewire  保留 role/layer/head/coarse lag，替换 exact source
+weight_shuffle   保留 endpoints 和 row mass，打乱 weight-endpoint pairing
+```
+
+无监督 detector 与监督 readability probe 都只读取 `node_embedding`。监督 probe 只用于判断表征中是否存在可读信号，不属于主方法。

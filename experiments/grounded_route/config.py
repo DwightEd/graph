@@ -1,7 +1,6 @@
-"""Configuration for the grounded-route token graph encoder."""
+"""Configuration for GroundedRoute."""
 
 from dataclasses import asdict, dataclass, field
-
 
 GRAPH_VARIANTS = ("real", "weight_shuffle", "endpoint_rewire")
 MESSAGE_MODES = ("neighbor", "row_local")
@@ -21,10 +20,6 @@ class ModelConfig:
     dropout: float = 0.1
     head_transition_identity_bias: float = 2.0
     message_mode: str = "neighbor"
-
-    def __post_init__(self) -> None:
-        if self.message_mode not in MESSAGE_MODES:
-            raise ValueError(f"message_mode must be one of {MESSAGE_MODES}")
 
 
 @dataclass(frozen=True)
@@ -51,14 +46,6 @@ class InterventionConfig:
     variant: str = "real"
     minimum_changed_fraction: float = 0.01
     endpoint_rewire_passes: int = 4
-
-    def __post_init__(self) -> None:
-        if self.variant not in GRAPH_VARIANTS:
-            raise ValueError(f"variant must be one of {GRAPH_VARIANTS}")
-        if not 0.0 <= self.minimum_changed_fraction <= 1.0:
-            raise ValueError("minimum_changed_fraction must be in [0,1]")
-        if self.endpoint_rewire_passes < 1:
-            raise ValueError("endpoint_rewire_passes must be positive")
 
 
 @dataclass(frozen=True)
