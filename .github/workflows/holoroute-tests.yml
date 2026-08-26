@@ -1,4 +1,4 @@
-name: P-Cut tests
+name: Routing fingerprint tests
 
 on:
   workflow_dispatch:
