@@ -1,6 +1,7 @@
-"""Dataset-level reference fitting, scoring and graph-embedding export."""
+"""Fit a normal node-feature subspace, score tokens and export graph data."""
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 import re
 
@@ -18,18 +19,18 @@ from .artifacts import (
     save_npz,
     sha256,
 )
-from .config import DetectionConfig, GraphConfig, MethodConfig, PCutConfig
+from .config import DetectionConfig, FeatureConfig, GraphConfig, MethodConfig
 from .detection import (
     CONDITION_NAMES,
     RESIDUAL_NAMES,
-    ConditionalReference,
     Reservoir,
+    SubspaceReference,
     token_conditions,
 )
+from .features import RoutingFeatures, build_node_features
 from .graph import AttentionGraph, build_graph
-from .pcut import PCutResult, compute_pcut
 
-MODEL_TYPE = "pcut"
+MODEL_TYPE = "routing_fingerprint"
 
 
 @dataclass(frozen=True)
@@ -62,17 +63,36 @@ def select_samples(dataset, task: str, limit: int | None) -> tuple[str, ...]:
                 selected.append(str(sample_id))
         finally:
             sample.release_attention()
-    if limit is not None:
-        selected = selected[: int(limit)]
-    if not selected:
-        raise ValueError("no samples match the requested task")
-    return tuple(selected)
+    return tuple(selected[:limit] if limit is not None else selected)
+
+
+def calibration_groups(
+    dataset,
+    sample_ids: tuple[str, ...],
+    fraction: float,
+    seed: int,
+) -> set[str]:
+    groups: set[str] = set()
+    for sample_id in sample_ids:
+        sample = dataset[sample_id]
+        try:
+            groups.add(str(sample.source_id or sample_id))
+        finally:
+            sample.release_attention()
+    ordered = sorted(
+        groups,
+        key=lambda value: hashlib.sha256(f"{seed}\0{value}".encode()).digest(),
+    )
+    if len(ordered) < 2:
+        raise ValueError("reference fitting needs at least two source groups")
+    count = min(max(int(round(len(ordered) * fraction)), 1), len(ordered) - 1)
+    return set(ordered[:count])
 
 
 def config_from_dict(payload: dict[str, object]) -> MethodConfig:
     return MethodConfig(
         graph=GraphConfig(**payload["graph"]),
-        pcut=PCutConfig(**payload["pcut"]),
+        feature=FeatureConfig(**payload["feature"]),
         detection=DetectionConfig(**payload["detection"]),
     )
 
@@ -95,14 +115,26 @@ def save_reference(path, reference, checkpoint_path, dataset) -> None:
 def load_method(checkpoint_path, reference_path):
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     if checkpoint["schema"] != CHECKPOINT_SCHEMA or checkpoint["model_type"] != MODEL_TYPE:
-        raise ValueError("unsupported P-Cut checkpoint")
+        raise ValueError("unsupported routing-fingerprint checkpoint")
     config = config_from_dict(checkpoint["config"])
     arrays = load_npz(reference_path)
     if str(arrays["schema"].item()) != REFERENCE_SCHEMA:
-        raise ValueError("unsupported P-Cut reference")
+        raise ValueError("unsupported routing-fingerprint reference")
     if sha256(checkpoint_path) != str(arrays["checkpoint_sha256"].item()):
         raise ValueError("reference was fitted for a different checkpoint")
-    return config, ConditionalReference.from_arrays(arrays), checkpoint
+    return config, SubspaceReference.from_arrays(arrays), checkpoint
+
+
+def add_reference_rows(
+    reservoir: Reservoir,
+    graph: AttentionGraph,
+    features: RoutingFeatures,
+) -> None:
+    reservoir.add(
+        feature=features.node.cpu().numpy().astype(np.float32),
+        condition=token_conditions(graph),
+        task=np.repeat(graph.task_type, graph.response_count),
+    )
 
 
 def fit_reference(
@@ -115,54 +147,70 @@ def fit_reference(
 ) -> dict[str, object]:
     require_split(dataset, "train")
     sample_ids = select_samples(dataset, task, limit)
+    fit_rows = Reservoir(config.detection.reservoir_rows, config.detection.seed)
+    calibration_rows = Reservoir(
+        config.detection.reservoir_rows,
+        config.detection.seed + 1,
+    )
+    feature_dim = None
+    held_out_groups = calibration_groups(
+        dataset,
+        sample_ids,
+        config.detection.calibration_fraction,
+        config.detection.seed,
+    )
+
+    for sample_id in tqdm(sample_ids, desc="build train node features", unit="sample"):
+        sample = dataset[sample_id]
+        try:
+            graph = build_graph(sample, config.graph)
+            features = build_node_features(graph, config.feature)
+            feature_dim = features.node.shape[1]
+            group = graph.source_id or graph.sample_id
+            destination = calibration_rows if group in held_out_groups else fit_rows
+            add_reference_rows(destination, graph, features)
+        finally:
+            sample.release_attention()
+
+    fit = fit_rows.values()
+    calibration = calibration_rows.values()
+    reference = SubspaceReference.fit(
+        fit["feature"],
+        fit["condition"],
+        fit["task"],
+        config.detection,
+    ).calibrate(
+        calibration["feature"],
+        calibration["condition"],
+        calibration["task"],
+    )
     save_checkpoint(
         checkpoint_path,
         {
             "schema": CHECKPOINT_SCHEMA,
             "model_type": MODEL_TYPE,
             "config": config.as_dict(),
+            "feature_dim": int(feature_dim),
             "labels_read": False,
         },
-    )
-
-    reservoir = Reservoir(config.detection.reservoir_rows, config.pcut.seed)
-    for sample_id in tqdm(sample_ids, desc="fit P-Cut reference", unit="sample"):
-        sample = dataset[sample_id]
-        try:
-            graph = build_graph(sample, config.graph)
-            result = compute_pcut(graph, config.pcut)
-            reservoir.add(
-                residual=result.closure.cpu().numpy()[:, None],
-                condition=token_conditions(graph, result),
-                task=np.repeat(str(sample.task_type or ""), graph.response_count),
-            )
-        finally:
-            sample.release_attention()
-
-    rows = reservoir.values()
-    reference = ConditionalReference.fit(
-        rows["residual"],
-        rows["condition"],
-        rows["task"],
-        config.detection,
     )
     save_reference(reference_path, reference, checkpoint_path, dataset)
     return {
         "checkpoint": str(Path(checkpoint_path).resolve()),
         "reference": str(Path(reference_path).resolve()),
         "samples": len(sample_ids),
-        "tokens": int(len(rows["residual"])),
+        "fit_tokens": int(len(fit["feature"])),
+        "calibration_tokens": int(len(calibration["feature"])),
+        "feature_dim": int(feature_dim),
         "labels_read": False,
     }
 
 
 def safe_name(sample_id: str) -> str:
-    name = re.sub(r"[^A-Za-z0-9_.-]+", "_", sample_id)
-    return name or "sample"
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", sample_id) or "sample"
 
 
-def export_graph(path, graph: AttentionGraph, result: PCutResult) -> None:
-    parts = result.edge_parts
+def export_graph(path, graph: AttentionGraph, features: RoutingFeatures) -> None:
     save_npz(
         path,
         schema=np.asarray(GRAPH_SCHEMA),
@@ -177,32 +225,25 @@ def export_graph(path, graph: AttentionGraph, result: PCutResult) -> None:
         edge_layer=graph.edges.layer.cpu().numpy().astype(np.int16),
         edge_head=graph.edges.head.cpu().numpy().astype(np.int16),
         edge_weight=graph.edges.weight.cpu().numpy().astype(np.float32),
-        edge_prompt_rooted=parts.prompt_rooted.cpu().numpy().astype(np.float32),
-        edge_response_closed=parts.response_closed.cpu().numpy().astype(np.float32),
-        edge_uncertain=parts.uncertain.cpu().numpy().astype(np.float32),
         diagonal=graph.diagonal.cpu().numpy().astype(np.float16),
         unresolved=graph.unresolved.cpu().numpy().astype(np.float16),
-        prompt_origin_lower=result.prompt_origin_lower.cpu().numpy().astype(np.float16),
-        prompt_origin_upper=result.prompt_origin_upper.cpu().numpy().astype(np.float16),
-        token_layer_embedding=result.token_layer_embedding.cpu().numpy().astype(np.float16),
-        token_embedding=result.token_embedding.cpu().numpy().astype(np.float16),
-        no_prompt_embedding=result.no_prompt_embedding.cpu().numpy().astype(np.float16),
-        no_closed_embedding=result.no_closed_embedding.cpu().numpy().astype(np.float16),
-        prompt_necessity=result.prompt_necessity.cpu().numpy().astype(np.float32),
-        response_closed_necessity=result.response_closed_necessity.cpu().numpy().astype(np.float32),
-        closure=result.closure.cpu().numpy().astype(np.float32),
+        token_layer_feature=features.token_layer.cpu().numpy().astype(np.float16),
+        node_feature=features.node.cpu().numpy().astype(np.float16),
     )
 
 
 def make_score_rows(
     graph: AttentionGraph,
-    result: PCutResult,
-    reference: ConditionalReference,
+    features: RoutingFeatures,
+    reference: SubspaceReference,
 ) -> ScoreRows:
-    condition = token_conditions(graph, result)
+    condition = token_conditions(graph)
     task = np.repeat(graph.task_type, graph.response_count)
-    residual = result.closure.cpu().numpy().astype(np.float32)[:, None]
-    score, standardized = reference.transform(residual, condition, task)
+    score, energy = reference.transform(
+        features.node.cpu().numpy().astype(np.float32),
+        condition,
+        task,
+    )
     tokens = graph.response_count
     return ScoreRows(
         sample_id=np.repeat(graph.sample_id, tokens),
@@ -212,9 +253,9 @@ def make_score_rows(
         response_length=np.full(tokens, tokens, dtype=np.int32),
         response_token_id=graph.response_token_ids.cpu().numpy().astype(np.int64),
         score=score,
-        residual=residual,
-        standardized=standardized,
-        coverage=result.coverage.cpu().numpy().astype(np.float32)[:, None],
+        residual=energy,
+        standardized=energy,
+        coverage=np.ones((tokens, 1), dtype=np.float32),
         condition=condition,
     )
 
@@ -243,13 +284,13 @@ def score_dataset(
     graph_dir.mkdir(parents=True, exist_ok=True)
     sample_ids = select_samples(dataset, task, limit)
 
-    for sample_id in tqdm(sample_ids, desc="score P-Cut", unit="sample"):
+    for sample_id in tqdm(sample_ids, desc="score node features", unit="sample"):
         sample = dataset[sample_id]
         try:
             graph = build_graph(sample, config.graph)
-            result = compute_pcut(graph, config.pcut)
-            rows.append(make_score_rows(graph, result, reference))
-            export_graph(graph_dir / f"{safe_name(sample_id)}.npz", graph, result)
+            features = build_node_features(graph, config.feature)
+            rows.append(make_score_rows(graph, features, reference))
+            export_graph(graph_dir / f"{safe_name(sample_id)}.npz", graph, features)
         finally:
             sample.release_attention()
 
