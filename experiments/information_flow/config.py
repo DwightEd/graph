@@ -10,7 +10,8 @@ VIEW_NAMES = (
     "reverse_final",
     "last_layer",
     "layer_mean",
-    "identity",
+    "identity_trace",
+    "identity_final",
 )
 
 
