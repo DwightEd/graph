@@ -11,7 +11,13 @@ TEST_LIMIT=${TEST_LIMIT:-}
 
 cd "${REPO}" || exit 1
 mkdir -p "${OUT}"
-printf "attention_row\nrow_distribution\n" > "${OUT}/method.txt"
+{
+  echo "method=attention_row"
+  echo "objective=row_distribution"
+  echo "epochs=${EPOCHS}"
+  echo "seed=${SEED}"
+  echo "commit=$(git rev-parse HEAD)"
+} > "${OUT}/method.txt"
 
 CUDA_VISIBLE_DEVICES=0 \
 PYTHON=python \
