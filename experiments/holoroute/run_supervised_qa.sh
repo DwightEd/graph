@@ -35,27 +35,35 @@ if [ ! -f "${BASE_OUT}/method.pt" ] || [ ! -f "${BASE_OUT}/reference.npz" ]; the
 fi
 
 echo
-echo "[1/3] Fit a labeled linear probe on the same node features"
-CUDA_VISIBLE_DEVICES=0 "${PYTHON}" -m experiments.holoroute.run probe-fit \
-  --train "${TRAIN_SPLIT}" \
-  --checkpoint "${BASE_OUT}/method.pt" \
-  --reference "${BASE_OUT}/reference.npz" \
-  --probe "${OUT}/probe.npz" \
-  --task QA \
-  --device "${DEVICE}" \
-  "${TRAIN_LIMIT_ARGUMENT[@]}" || exit $?
+if [ -f "${OUT}/probe.npz" ]; then
+  echo "[1/3] Reuse the existing labeled linear probe"
+else
+  echo "[1/3] Fit a labeled linear probe on the same node features"
+  CUDA_VISIBLE_DEVICES=0 "${PYTHON}" -m experiments.holoroute.run probe-fit \
+    --train "${TRAIN_SPLIT}" \
+    --checkpoint "${BASE_OUT}/method.pt" \
+    --reference "${BASE_OUT}/reference.npz" \
+    --probe "${OUT}/probe.npz" \
+    --task QA \
+    --device "${DEVICE}" \
+    "${TRAIN_LIMIT_ARGUMENT[@]}" || exit $?
+fi
 
 echo
-echo "[2/3] Score test nodes with the labeled linear probe"
-CUDA_VISIBLE_DEVICES=0 "${PYTHON}" -m experiments.holoroute.run probe-score \
-  --test "${TEST_SPLIT}" \
-  --checkpoint "${BASE_OUT}/method.pt" \
-  --reference "${BASE_OUT}/reference.npz" \
-  --probe "${OUT}/probe.npz" \
-  --output "${OUT}/scores.npz" \
-  --task QA \
-  --device "${DEVICE}" \
-  "${TEST_LIMIT_ARGUMENT[@]}" || exit $?
+if [ -f "${OUT}/scores.npz" ]; then
+  echo "[2/3] Reuse the existing test-node scores"
+else
+  echo "[2/3] Score test nodes with the labeled linear probe"
+  CUDA_VISIBLE_DEVICES=0 "${PYTHON}" -m experiments.holoroute.run probe-score \
+    --test "${TEST_SPLIT}" \
+    --checkpoint "${BASE_OUT}/method.pt" \
+    --reference "${BASE_OUT}/reference.npz" \
+    --probe "${OUT}/probe.npz" \
+    --output "${OUT}/scores.npz" \
+    --task QA \
+    --device "${DEVICE}" \
+    "${TEST_LIMIT_ARGUMENT[@]}" || exit $?
+fi
 
 echo
 echo "[3/3] Evaluate the labeled probe"

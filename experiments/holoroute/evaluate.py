@@ -10,6 +10,9 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from .artifacts import EVALUATION_SCHEMA, SCORE_SCHEMA, load_npz, sha256, write_json
 
 
+SUPERVISED_MODEL_TYPE = "routing_fingerprint_linear_probe"
+
+
 def metrics(label: np.ndarray, score: np.ndarray) -> dict[str, float | None]:
     if not len(label) or np.unique(label).size < 2:
         return {"auroc": None, "auprc": None}
@@ -55,12 +58,15 @@ def source_bootstrap(
 
 
 def response_labels(label_store, sample, count: int) -> np.ndarray:
-    if hasattr(label_store, "response_labels"):
-        return label_store.response_labels(sample).cpu().numpy().astype(np.int8)
-    label = np.zeros(count, dtype=np.int8)
-    for start, stop in label_store.positive_runs(sample.sample_id, response_count=count):
-        label[start:stop] = 1
-    return label
+    if hasattr(label_store, "positive_runs"):
+        label = np.zeros(count, dtype=np.int8)
+        for start, stop in label_store.positive_runs(
+            sample.sample_id,
+            response_count=count,
+        ):
+            label[start:stop] = 1
+        return label
+    return label_store.response_labels(sample).cpu().numpy().astype(np.int8)
 
 
 def write_csv(path: Path, rows: list[dict[str, object]]) -> None:
@@ -70,6 +76,41 @@ def write_csv(path: Path, rows: list[dict[str, object]]) -> None:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
+
+
+def validate_score_provenance(arrays: dict[str, np.ndarray]) -> None:
+    if sha256(arrays["checkpoint_path"].item()) != str(arrays["checkpoint_sha256"].item()):
+        raise ValueError("method file changed after scoring")
+    if sha256(arrays["reference_path"].item()) != str(arrays["reference_sha256"].item()):
+        raise ValueError("reference changed after scoring")
+
+
+def validate_score_rows(dataset, arrays: dict[str, np.ndarray]) -> None:
+    sample_id = arrays["sample_id"].astype(str)
+    for current_id in dict.fromkeys(sample_id.tolist()):
+        selected = np.flatnonzero(sample_id == current_id)
+        sample = dataset[current_id]
+        try:
+            if not np.all(arrays["source_id"][selected].astype(str) == str(sample.source_id)):
+                raise ValueError("score rows and source IDs differ")
+            if not np.array_equal(
+                arrays["token_index"][selected],
+                np.arange(len(selected), dtype=arrays["token_index"].dtype),
+            ):
+                raise ValueError("score rows are not a complete response sequence")
+            if not np.all(arrays["response_length"][selected] == len(selected)):
+                raise ValueError("score rows and response lengths differ")
+            attention = sample.attention()
+            expected = (
+                attention.token_ids[attention.response_idx :]
+                .cpu()
+                .numpy()
+                .astype(np.int64)
+            )
+            if not np.array_equal(expected, arrays["response_token_id"][selected]):
+                raise ValueError("score rows and response tokens differ")
+        finally:
+            sample.release_attention()
 
 
 def evaluate(
@@ -84,12 +125,8 @@ def evaluate(
         raise ValueError("unsupported P-Cut score artifact")
     if bool(arrays["labels_included"].item()):
         raise ValueError("score artifact already contains labels")
-    if sha256(Path(dataset.root) / "manifest.json") != str(arrays["dataset_manifest_sha256"].item()):
-        raise ValueError("score artifact and test manifest differ")
-    if sha256(arrays["checkpoint_path"].item()) != str(arrays["checkpoint_sha256"].item()):
-        raise ValueError("method file changed after scoring")
-    if sha256(arrays["reference_path"].item()) != str(arrays["reference_sha256"].item()):
-        raise ValueError("reference changed after scoring")
+    validate_score_provenance(arrays)
+    validate_score_rows(dataset, arrays)
 
     sample_id = arrays["sample_id"].astype(str)
     labels = np.empty(len(sample_id), dtype=np.int8)
@@ -98,10 +135,6 @@ def evaluate(
         selected = np.flatnonzero(sample_id == current_id)
         sample = dataset[current_id]
         try:
-            attention = sample.attention()
-            expected = attention.token_ids[attention.response_idx :].cpu().numpy().astype(np.int64)
-            if not np.array_equal(expected, arrays["response_token_id"][selected]):
-                raise ValueError("score rows and response tokens differ")
             current = response_labels(label_store, sample, len(selected))
             if len(current) != len(selected):
                 raise ValueError("score rows and labels differ")
@@ -153,11 +186,22 @@ def evaluate(
     write_csv(output_dir / "position.csv", position_rows)
     write_csv(output_dir / "residuals.csv", residual_rows)
 
+    labels_used_to_fit_model = bool(
+        arrays.get(
+            "labels_used_to_fit_model",
+            np.asarray(str(arrays["model_type"].item()) == SUPERVISED_MODEL_TYPE),
+        ).item()
+    )
     report = {
         "schema": EVALUATION_SCHEMA,
         "model_type": str(arrays["model_type"].item()),
         "labels_read": True,
-        "labels_used_during": "posthoc_evaluation_only",
+        "labels_used_to_fit_model": labels_used_to_fit_model,
+        "labels_used_during": (
+            "train_probe_fit_and_posthoc_test_evaluation"
+            if labels_used_to_fit_model
+            else "posthoc_evaluation_only"
+        ),
         "samples": len(set(sample_id.tolist())),
         "tokens": len(labels),
         "positive_tokens": int(labels.sum()),

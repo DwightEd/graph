@@ -228,6 +228,7 @@ def score_supervised_probe(
         schema=np.asarray(SCORE_SCHEMA),
         model_type=np.asarray(MODEL_TYPE),
         labels_included=np.asarray(False),
+        labels_used_to_fit_model=np.asarray(True),
         checkpoint_path=np.asarray(str(Path(checkpoint_path).resolve())),
         checkpoint_sha256=np.asarray(sha256(checkpoint_path)),
         reference_path=np.asarray(str(Path(reference_path).resolve())),

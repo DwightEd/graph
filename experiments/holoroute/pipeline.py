@@ -304,7 +304,6 @@ def score_dataset(
         checkpoint_sha256=np.asarray(sha256(checkpoint_path)),
         reference_path=np.asarray(str(Path(reference_path).resolve())),
         reference_sha256=np.asarray(sha256(reference_path)),
-        dataset_manifest_sha256=np.asarray(sha256(Path(dataset.root) / "manifest.json")),
         residual_names=np.asarray(RESIDUAL_NAMES),
         condition_names=np.asarray(CONDITION_NAMES),
         **arrays,
