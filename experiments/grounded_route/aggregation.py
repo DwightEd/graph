@@ -50,6 +50,7 @@ def route_moments(
     mean = first / denominator
     variance = (second / denominator - mean.square()).clamp_min(0.0)
     spread = torch.sqrt(variance + 1e-8)
+    spread = torch.where(mass[:, None] > 0, spread, torch.zeros_like(spread))
 
     shape = (response_count, head_count, ROLE_COUNT)
     return RouteMoments(
