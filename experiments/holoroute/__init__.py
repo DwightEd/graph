@@ -1,17 +1,15 @@
-"""P-Cut: unsupervised prompt-provenance cuts on attention graphs."""
+"""Structural attention graph features and unsupervised node detection."""
 
 from .config import MethodConfig
-from .detection import ConditionalReference
+from .detection import SubspaceReference
+from .features import RoutingFeatures, build_node_features
 from .graph import AttentionGraph, build_graph
-from .pcut import PCutResult, compute_pcut, prompt_provenance, split_edges
 
 __all__ = [
     "AttentionGraph",
-    "ConditionalReference",
     "MethodConfig",
-    "PCutResult",
+    "RoutingFeatures",
+    "SubspaceReference",
     "build_graph",
-    "compute_pcut",
-    "prompt_provenance",
-    "split_edges",
+    "build_node_features",
 ]
