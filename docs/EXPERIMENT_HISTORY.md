@@ -1,6 +1,9 @@
 # Experiment history and decisions
 
-This document preserves the main experiments that preceded HoloRoute. Historical code was removed during repository consolidation; the numbers below are retained so rejected hypotheses are not silently repeated.
+This document preserves the main experiments that preceded the current
+ordered endpoint-layout experiment. Historical code was removed during
+repository consolidation; the numbers below are retained so rejected
+hypotheses are not silently repeated.
 
 The results were produced at different stages, scopes, tasks, and sample counts. They should not be compared as one leaderboard. Labels were used for post-hoc evaluation unless otherwise stated.
 
@@ -145,18 +148,66 @@ The audit that directly motivated HoloRoute measured held-out structural predict
 
 **Decision.** The active architecture is built around depth continuation and query source coalitions. Relay and holonomy remain conditional modules that must show incremental detection value.
 
-## 9. Current HoloRoute status
+## 9. Historical HoloRoute status
 
-HoloRoute is implemented as a neural, attention-only, unsupervised event-graph model. It has not yet been established as SOTA and no final full QA benchmark is recorded here.
+HoloRoute was implemented as a neural, attention-only event-graph model. It
+did not establish a final full QA benchmark and is no longer the active
+experiment. Its masked reconstruction result remains a baseline rather than
+evidence that hallucinations are structurally anomalous.
 
-Mandatory comparisons before making a graph contribution claim:
+## 10. P-Cut closure falsification
 
-1. HoloRoute versus Flat-1024 under the same source split, masking, parameter budget, calibration, and evaluation;
-2. event-only -> depth -> depth+query -> +relay -> +holonomy incremental chain;
-3. real relay paths versus matched middle-token rewiring;
-4. score-position Spearman and position-only baselines;
-5. source-cluster bootstrap confidence intervals;
-6. QA, Summary, and Data2txt results on multiple seeds.
+P-Cut compared the same token under full, no-prompt and no-response-closed
+graph views. The preregistered claim was that a high closure score indicates a
+token that can run on response history without prompt evidence.
+
+The frozen full-QA evaluation contained 30,470 tokens:
+
+| Quantity | AUROC | AUPRC |
+|---|---:|---:|
+| raw closure | 0.4209 | 0.0734 |
+| conditionally calibrated closure | 0.4210 | 0.0730 |
+| absolute position | 0.6171 | 0.1129 |
+| relative position | 0.6066 | 0.0949 |
+
+**Decision.** The preregistered direction failed. Test-label direction
+flipping and renaming are forbidden. Route cuts and closure are not part of
+the current implementation.
+
+## 11. GroundedRoute and directed route hypergraph
+
+GroundedRoute consolidated the graph contract around token nodes, typed
+`(source,target,layer,head,weight)` edges, separate diagonal mass and explicit
+unresolved mass. Its neural encoder predicts clean attention-row endpoints and
+exports frozen 64D token embeddings for label-free PCA-kNN detection.
+
+The directed route hypergraph then made each `(target,layer,head)` row an
+explicit source-to-hyperedge-to-target computation and added deterministic
+ordered P/R/U provenance plus mass-conserving incidence/head corruption. No
+formal QA result for either active representation is recorded here.
+
+## 12. Current ordered endpoint-layout experiment
+
+The current experiment adds a full token-endpoint attention-transport target:
+
+\[
+Q^L=T_L\cdots T_1Q^0,
+\]
+
+with retained-attention token endpoints and one absorbing sparse-cache sink. It is trained
+from corrupted graph input against the clean layout. The loss separately
+models unresolved mass, self mass and the conditional non-self endpoint shape
+to reduce direct sink/self shortcuts.
+
+This change is materially different from P-Cut: it performs no graph cuts,
+computes no closure score and assumes no correctness direction for prompt or
+response mass. It is also not a replication of value-aware Information Flow;
+the current cache provides attention only.
+
+**Status.** Implementation and synthetic invariance tests exist. Detection
+value has not been established. The first required comparison is local-only,
+local + P/R/U, local + endpoint and all objectives under one frozen source
+split, followed by a reverse endpoint-target control and matched-endpoint controls.
 
 ## Historical branches represented by this record
 

@@ -1,106 +1,142 @@
 # Current research status
 
-## Active hypothesis
+## Active question
 
-GroundedRoute tests whether token-level attention routing contains reusable
-structure beyond prompt/response mass and position. The concrete hypothesis is
-that response tokens differ in how much prompt-origin routing survives through
-response relays, and that exact source endpoints help identify this structure.
+The active experiment asks whether a label-free neural graph encoder benefits
+from reconstructing the exact endpoint distribution induced by composing
+sparse attention transitions in Transformer layer order.
 
-This is not yet evidence that hallucinations form a stable error attractor. The
-current detector only tests whether the learned token embedding is useful for
-label-free one-class detection.
+This is narrower than factual grounding. The available cache contains
+attention rows, token boundaries, diagonal mass and unresolved sparse-cache
+mass. It does not contain hidden states, per-head OV messages, FFN outputs or
+prompt-query rows.
 
-## Active graph
+## Active implementation
 
-One prompt-response sample produces one independent `TokenGraph`:
+`experiments/directed_route_hypergraph/` is the current experiment. One sample
+produces one causal typed graph:
 
 ```text
 node: token
-edge: (source, target, layer, head, retained weight)
-mass: retained + diagonal + unresolved = 1 per response/layer/head row
+edge: (source, response target, layer, head, retained weight)
+row: retained + diagonal + unresolved = 1
 ```
 
-Prompt-query rows are unavailable and are not fabricated. No top-k pruning or
-layer/head averaging occurs at the graph boundary.
+The neural encoder receives a mass-conserving corrupted graph and is trained
+against three clean, label-free targets:
 
-## Active model
+1. local retained endpoint + SELF + UNRESOLVED row distributions;
+2. layer-ordered prompt/response/unresolved trajectories;
+3. a final layer-ordered distribution over token endpoints retained by the
+   attention proxy plus an absorbing unresolved sink.
 
-GroundedRoute contains:
+The endpoint objective is factorized into sink mass, self mass conditional on
+resolved transport, and log-candidate-normalized non-self endpoint shape. This
+reduces the direct unresolved/self shortcut of one categorical loss; it does
+not rule out position or length shortcuts.
 
-- a row-stochastic learned correspondence between heads in adjacent layers;
-- conserved prompt-origin, response-closed, and unresolved lineage;
-- layer-ordered, head-aware messages along exact source endpoints;
-- a right-shifted prefix state that predicts the next retained endpoint;
-- one frozen embedding per token;
-- a PCA-whitened kNN detector that reads only response-token embeddings.
+The encoder still outputs one 64D vector per token. PCA-whitened kNN is fitted
+only on source-disjoint unlabeled calibration embeddings. Test labels are
+opened only after scores are saved.
 
-The encoder is trained without hallucination labels. It does not use masked
-reconstruction, and its endpoint prediction loss is not reused as the anomaly
-score.
+## Relation to Information Flow
 
-## Required controls
+The active endpoint target uses the same algebraic idea of multiplying
+non-commuting layer transitions. It is not the contribution layout from
+*Information Flow Reveals When to Trust Language Models*:
 
-All representation variants must freeze the same `z[token,d]` artifact and use
-the same downstream detector:
+- paper edge weights depend on hidden states, `W_V`, `W_O`, residual output and
+  ALTI-style vector attribution;
+- active edge weights are raw retained attention plus a fixed residual proxy;
+- paper features use neural reranker/SHAP relevance and a supervised XGBoost
+  calibrator;
+- the active encoder is neural and label-free, followed by one-class kNN.
 
-1. local layer-head representation without endpoints;
-2. causal sequence representation without attention endpoints;
-3. full token graph;
-4. endpoint-fixed weight shuffle;
-5. role/degree/coarse-log-lag-matched endpoint rewire.
+The permitted name is `layer-ordered attention transport endpoint layout`.
+The code must not call it functional contribution, causal information flow or
+grounding.
 
-The endpoint control does not preserve exact lag. All three active variants
-(`real`, `weight_shuffle`, and `endpoint_rewire`) must use the same frozen
-source split, seed, training budget, and detector. Control checkpoints, indices,
-and scores record the actual changed-edge fraction and reject an ineffective
-intervention below the configured threshold.
+## Rejected closure branch
 
-HoloRoute and Flat-1024 remain reconstruction baselines, but they do not replace
-the causal-sequence control.
+The previous P-Cut closure hypothesis is not active. Its frozen full-QA result
+was AUROC `0.4209` and AUPRC `0.0734`, below position baselines. The current
+implementation contains no full/no-prompt/no-response cuts, no closure score
+and no post-hoc direction reversal.
 
 ## Evidence currently available
 
-The code path, artifacts, and synthetic invariance tests are implemented. No
-full GroundedRoute RAGTruth result is recorded yet. Historical HoloRoute gains
-do not validate the new token representation.
+Implemented synthetic tests establish:
 
-## Required acceptance gates
+- non-negative row mass and unresolved-sink conservation;
+- actual layer-order sensitivity on a non-commuting graph;
+- exact prompt endpoint identity;
+- future-response and truncated-prefix invariance;
+- causal masking in the endpoint pointer decoder;
+- balanced layout-loss batching invariance and gradient flow;
+- existing typed-graph, corruption and label-boundary invariants.
 
-A graph contribution is allowed only when all of the following are reported:
+No full RAGTruth ordered-layout result is recorded. These tests establish
+implementation consistency, not detection validity.
 
-1. full and truncated-prefix encodings are numerically equivalent;
-2. changing current/future rows cannot change the current route prediction;
-3. mathematical edge-storage permutations leave embeddings unchanged;
-4. the full graph improves token AUPRC over the causal-sequence control;
-5. real endpoints outperform degree/role/lag-matched rewiring;
-6. real source-weight assignment outperforms endpoint-fixed weight shuffle;
-7. all variants use the same source-disjoint fit/calibration/test protocol and
-   the same frozen embedding detector;
-8. paired source-group bootstrap is reported over at least five seeds;
-9. QA, Summary, and Data2txt are evaluated separately.
+## Required ablations
+
+Use the same source split, budget and downstream detector for:
+
+1. local row only;
+2. local + P/R/U;
+3. local + endpoint layout;
+4. all three objectives;
+5. correct layer order versus reverse, shuffled and last-layer layouts;
+6. real endpoints versus matched endpoint rewire and weight shuffle;
+7. full encoder versus position-only and self+unresolved decoders;
+8. neural embeddings versus the deterministic endpoint layout itself;
+9. residual proxy values `0`, `0.5`, `1`, `2`;
+10. a small value-aware cache subset versus attention-only layout.
+
+Report target reconstruction as an unlabeled diagnostic. Select no loss weight,
+layer order, score direction or detector hyperparameter using test labels.
+
+## Acceptance gates
+
+A layer-ordered endpoint-flow claim requires all of the following:
+
+1. local + endpoint improves held-out clean-layout reconstruction over local
+   only without increasing position predictability;
+2. correct order outperforms reverse/shuffled order under matched capacity;
+3. real endpoints outperform role/lag/mass-matched rewiring;
+4. non-self endpoint loss cannot be matched by position-only or
+   self+unresolved controls;
+5. token AUPRC improves over GroundedRoute, direct endpoint layout and
+   position controls on source-disjoint test groups;
+6. source bootstrap and at least five seeds support the gain;
+7. QA, Summary and Data2txt are reported separately;
+8. a value-aware subset shows that the attention proxy has adequate endpoint
+   overlap or faithful route-token deletion effects.
 
 ## Stop rules
 
 ```text
-graph ~= causal sequence   -> remove the graph contribution claim
-real ~= endpoint rewire    -> remove exact-endpoint and relay-path claims
-real ~= weight shuffle     -> remove the strong-edge landing claim
-graph ~= role-only         -> method is a prompt/response routing summary
-prefix test fails          -> remove online/causal language
-position dominates         -> reject the detector regardless of raw AUROC
+ordered ~= reverse          -> remove the layer-order contribution claim
+real ~= endpoint rewire     -> remove exact-endpoint/topology claims
+layout ~= position-only     -> endpoint target is a positional shortcut
+layout dominated by sink    -> reject the target or recollect denser caches
+attention != value-aware    -> call it rollout only; do not scale the claim
+embedding ~= direct layout  -> remove neural graph-encoder novelty claim
+no AUPRC gain               -> retain as representation audit, not detector
 ```
 
 ## Next experiment
 
-Run the full QA representation pipeline from one frozen commit:
+Run one frozen QA matrix before adding another module:
 
-```bash
-bash experiments/grounded_route/run.sh
+```text
+FLOW_WEIGHT=0   LAYOUT_WEIGHT=0
+FLOW_WEIGHT=.5  LAYOUT_WEIGHT=0
+FLOW_WEIGHT=0   LAYOUT_WEIGHT=.25
+FLOW_WEIGHT=.5  LAYOUT_WEIGHT=.25
 ```
 
-Then run the implemented weight-shuffle and endpoint-rewire controls with the
-same split, encoder capacity, training budget, and PCA-kNN detector. The
-causal-sequence baseline remains a required addition before making a graph
-contribution claim. Archive the graph specs, checkpoint, embedding indices,
-scores, evaluation, and commit SHA before changing the method.
+Archive checkpoints, graph sidecars, embedding indices, scores, evaluation,
+commit SHA and the exact source split for every cell. Then run reverse endpoint-target,
+endpoint-rewire and position-only controls. Do not infer effectiveness from
+the implementation tests alone.

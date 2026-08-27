@@ -21,9 +21,15 @@ class ModelConfig:
 @dataclass(frozen=True)
 class LearningConfig:
     rows_per_graph: int = 256
+    layout_rows_per_batch: int = 64
+    layout_min_mass: float = 1e-4
+    layout_max_elements: int = 8_000_000
+    layout_max_work_elements: int = 250_000_000
+    layout_order: str = "ordered"
     incidence_dropout: float = 0.15
     head_dropout: float = 0.05
     flow_weight: float = 0.5
+    layout_weight: float = 0.25
     variance_weight: float = 0.05
 
 

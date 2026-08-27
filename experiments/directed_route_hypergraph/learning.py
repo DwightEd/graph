@@ -10,6 +10,7 @@ from experiments.grounded_route.graph import TokenGraph
 from .config import LearningConfig
 from .corruption import corrupt_graph
 from .flow import ordered_flow
+from .layout import ordered_endpoint_layout
 from .model import DirectedRouteHypergraphEncoder, EncoderOutput
 
 
@@ -57,13 +58,35 @@ class RowLoss:
 
 
 @dataclass(frozen=True)
+class LayoutLoss:
+    """Balanced complete endpoint-layout reconstruction objective."""
+
+    loss: torch.Tensor
+    sink: torch.Tensor
+    self_mass: torch.Tensor
+    external_endpoint: torch.Tensor
+    candidate_count: int
+    row_count: int
+    self_row_count: int
+    external_row_count: int
+
+
+@dataclass(frozen=True)
 class LossOutput:
     loss: torch.Tensor
     row: torch.Tensor
     flow: torch.Tensor
+    layout: torch.Tensor
+    layout_sink: torch.Tensor
+    layout_self: torch.Tensor
+    layout_external: torch.Tensor
     variance: torch.Tensor
     candidate_count: int
     row_count: int
+    layout_candidate_count: int
+    layout_row_count: int
+    layout_self_row_count: int
+    layout_external_row_count: int
 
 
 def cpu_generator(generator: torch.Generator) -> torch.Generator:
@@ -238,6 +261,174 @@ def flow_consistency_loss(
     ).sum(dim=-1).mean()
 
 
+def endpoint_layout_loss(
+    model: DirectedRouteHypergraphEncoder,
+    output: EncoderOutput,
+    clean_graph: TokenGraph,
+    *,
+    rows_per_batch: int = 64,
+    min_mass: float = 1e-4,
+    max_elements: int = 8_000_000,
+    max_work_elements: int = 250_000_000,
+    layer_order: tuple[int, ...] | None = None,
+) -> LayoutLoss:
+    """Recover the clean full-path endpoint layout from a student graph.
+
+    The target is the layer-ordered attention-flow proxy over exact endpoints,
+    not a hallucination label and not an OV-aware contribution layout.
+    """
+
+    if rows_per_batch < 1:
+        raise ValueError("layout rows_per_batch must be positive")
+    if not 0.0 < min_mass < 1.0:
+        raise ValueError("layout min_mass must be between zero and one")
+    element_count = clean_graph.response_count * (clean_graph.token_count + 1)
+    if max_elements < 1:
+        raise ValueError("layout max_elements must be positive")
+    if element_count > max_elements:
+        raise ValueError(
+            "endpoint layout exceeds layout_max_elements; increase the explicit "
+            "limit or set layout_weight=0"
+        )
+    if max_work_elements < 1:
+        raise ValueError("layout max_work_elements must be positive")
+    response_relay_edges = int(
+        (clean_graph.edges.source >= clean_graph.response_start).sum().item()
+    )
+    work_element_count = (clean_graph.token_count + 1) * (
+        clean_graph.layer_count * clean_graph.response_count
+        + response_relay_edges
+    )
+    if work_element_count > max_work_elements:
+        raise ValueError(
+            f"endpoint relay work estimate {work_element_count} exceeds "
+            f"layout_max_work_elements={max_work_elements}; profile the longest "
+            "samples before increasing the limit or set layout_weight=0"
+        )
+    target = ordered_endpoint_layout(
+        clean_graph,
+        residual_weight=model.config.residual_weight,
+        layer_order=layer_order,
+    ).distribution.to(
+        device=output.response_embedding.device,
+        dtype=output.response_embedding.dtype,
+    )
+    if target.shape != (
+        clean_graph.response_count,
+        clean_graph.token_count + 1,
+    ):
+        raise ValueError("endpoint layout has invalid dimensions")
+    if not torch.isfinite(target).all() or not torch.allclose(
+        target.sum(dim=1),
+        torch.ones(clean_graph.response_count, device=target.device, dtype=target.dtype),
+        atol=2e-5,
+        rtol=2e-5,
+    ):
+        raise ValueError("endpoint layout must contain finite probability rows")
+
+    zero = output.response_embedding.sum() * 0.0
+    sink_total = zero
+    self_total = zero
+    external_total = zero
+    self_rows = 0
+    external_rows = 0
+    layout_key = model.layout_key(output.node_embedding)
+    for start in range(0, clean_graph.response_count, rows_per_batch):
+        stop = min(start + rows_per_batch, clean_graph.response_count)
+        response_index = torch.arange(start, stop, device=target.device)
+        logits = model.endpoint_layout_logits(
+            output,
+            clean_graph,
+            response_index,
+            key=layout_key,
+        )
+        token_logits = logits[:, :-1]
+        target_block = target[start:stop]
+        target_token = clean_graph.response_start + response_index
+
+        all_normalizer = torch.logsumexp(logits, dim=1)
+        token_normalizer = torch.logsumexp(token_logits, dim=1)
+        sink_log_probability = logits[:, -1] - all_normalizer
+        known_log_probability = token_normalizer - all_normalizer
+        sink_mass = target_block[:, -1]
+        sink_total = sink_total - (
+            sink_mass * sink_log_probability
+            + (1.0 - sink_mass) * known_log_probability
+        ).sum()
+
+        known_mass = 1.0 - sink_mass
+        self_mass = target_block[
+            torch.arange(stop - start, device=target.device),
+            target_token,
+        ]
+        known = known_mass > min_mass
+        if bool(known.any()):
+            token_log_probability = token_logits - token_normalizer[:, None]
+            self_log_probability = token_log_probability[
+                torch.arange(stop - start, device=target.device),
+                target_token,
+            ]
+            external_logits = token_logits.clone()
+            external_logits[
+                torch.arange(stop - start, device=target.device),
+                target_token,
+            ] = torch.finfo(token_logits.dtype).min
+            external_log_probability = (
+                torch.logsumexp(external_logits, dim=1) - token_normalizer
+            )
+            conditional_self = (self_mass / known_mass.clamp_min(min_mass)).clamp(0, 1)
+            self_total = self_total - (
+                conditional_self[known] * self_log_probability[known]
+                + (1.0 - conditional_self[known])
+                * external_log_probability[known]
+            ).sum()
+            self_rows += int(known.sum().item())
+
+            external_mass = known_mass - self_mass
+            external = external_mass > min_mass
+            if bool(external.any()):
+                external_target = target_block[:, :-1].clone()
+                external_target[
+                    torch.arange(stop - start, device=target.device),
+                    target_token,
+                ] = 0.0
+                external_target = external_target / external_mass.clamp_min(
+                    min_mass
+                )[:, None]
+                conditional_external_log_probability = F.log_softmax(
+                    external_logits,
+                    dim=1,
+                )
+                external_energy = -(
+                    external_target[external]
+                    * conditional_external_log_probability[external]
+                ).sum(dim=1)
+                external_candidates = target_token[external].float().clamp_min(2.0)
+                external_total = external_total + (
+                    external_energy / external_candidates.log()
+                ).sum()
+                external_rows += int(external.sum().item())
+
+    row_count = clean_graph.response_count
+    sink_loss = sink_total / max(row_count, 1)
+    self_loss = self_total / max(self_rows, 1)
+    external_loss = external_total / max(external_rows, 1)
+    candidate_count = sum(
+        clean_graph.response_start + response + 2
+        for response in range(row_count)
+    )
+    return LayoutLoss(
+        loss=sink_loss + self_loss + external_loss,
+        sink=sink_loss,
+        self_mass=self_loss,
+        external_endpoint=external_loss,
+        candidate_count=candidate_count,
+        row_count=row_count,
+        self_row_count=self_rows,
+        external_row_count=external_rows,
+    )
+
+
 def self_supervised_loss(
     model: DirectedRouteHypergraphEncoder,
     graph: TokenGraph,
@@ -260,18 +451,62 @@ def self_supervised_loss(
     )
     output = model(student_graph, return_layer_input=True)
     row = row_distribution_loss(model, output, graph, selected)
-    flow = flow_consistency_loss(output, graph, model.config.residual_weight)
+    if config.flow_weight < 0 or config.layout_weight < 0:
+        raise ValueError("flow_weight and layout_weight must be non-negative")
+    zero = output.response_embedding.sum() * 0.0
+    flow = (
+        flow_consistency_loss(output, graph, model.config.residual_weight)
+        if config.flow_weight > 0
+        else zero
+    )
+    if config.layout_order == "ordered":
+        layout_order = None
+    elif config.layout_order == "reverse":
+        layout_order = tuple(reversed(range(graph.layer_count)))
+    else:
+        raise ValueError("layout_order must be 'ordered' or 'reverse'")
+    if config.layout_weight > 0:
+        layout = endpoint_layout_loss(
+            model,
+            output,
+            graph,
+            rows_per_batch=config.layout_rows_per_batch,
+            min_mass=config.layout_min_mass,
+            max_elements=config.layout_max_elements,
+            max_work_elements=config.layout_max_work_elements,
+            layer_order=layout_order,
+        )
+    else:
+        layout = LayoutLoss(
+            loss=zero,
+            sink=zero,
+            self_mass=zero,
+            external_endpoint=zero,
+            candidate_count=0,
+            row_count=0,
+            self_row_count=0,
+            external_row_count=0,
+        )
     variance = variance_regularizer(output.response_embedding)
     loss = (
         row.loss
         + config.flow_weight * flow
+        + config.layout_weight * layout.loss
         + config.variance_weight * variance
     )
     return LossOutput(
         loss=loss,
         row=row.loss,
         flow=flow,
+        layout=layout.loss,
+        layout_sink=layout.sink,
+        layout_self=layout.self_mass,
+        layout_external=layout.external_endpoint,
         variance=variance,
         candidate_count=row.candidate_count,
         row_count=row.row_count,
+        layout_candidate_count=layout.candidate_count,
+        layout_row_count=layout.row_count,
+        layout_self_row_count=layout.self_row_count,
+        layout_external_row_count=layout.external_row_count,
     )

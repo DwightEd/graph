@@ -1,10 +1,13 @@
 from dataclasses import replace
+from unittest.mock import patch
 
+import pytest
 import torch
 
 from experiments.directed_route_hypergraph.config import LearningConfig, ModelConfig
 from experiments.directed_route_hypergraph.learning import (
     SelectedRows,
+    endpoint_layout_loss,
     row_candidates,
     row_distribution_loss,
     sample_rows,
@@ -90,9 +93,21 @@ def test_self_supervised_objective_backpropagates_without_labels_or_nonedges():
     assert torch.isfinite(output.loss)
     assert float(output.row.detach()) > 0
     assert float(output.flow.detach()) > 0
+    assert float(output.layout.detach()) > 0
+    assert torch.allclose(
+        output.layout,
+        output.layout_sink + output.layout_self + output.layout_external,
+    )
+    assert output.layout_row_count == graph.response_count
+    assert output.layout_self_row_count == graph.response_count
+    assert output.layout_external_row_count == graph.response_count
+    assert output.layout_candidate_count > output.layout_row_count
     assert model.route_query[-1].weight.grad is not None
     assert model.bucket_key.grad is not None
     assert model.flow_readout[-1].weight.grad is not None
+    assert model.layout_query[-1].weight.grad is not None
+    assert model.layout_key[-1].weight.grad is not None
+    assert model.layout_unresolved_key.grad is not None
     assert model.source_to_hyperedge.source_projection[0][-1].weight.grad is not None
 
 
@@ -112,3 +127,95 @@ def test_empty_retained_row_still_has_self_and_unresolved_likelihood():
     assert float(objective.loss.detach()) > 0
     objective.loss.backward()
     assert model.bucket_key.grad is not None
+
+
+def test_balanced_endpoint_layout_loss_is_batching_invariant():
+    torch.manual_seed(19)
+    graph = make_graph()
+    model = make_model(graph).eval()
+    output = model(graph)
+
+    one = endpoint_layout_loss(model, output, graph, rows_per_batch=1)
+    all_rows = endpoint_layout_loss(model, output, graph, rows_per_batch=10_000)
+
+    assert torch.allclose(one.loss, all_rows.loss, atol=1e-6, rtol=1e-6)
+    assert torch.allclose(one.sink, all_rows.sink, atol=1e-6, rtol=1e-6)
+    assert torch.allclose(one.self_mass, all_rows.self_mass, atol=1e-6, rtol=1e-6)
+    assert torch.allclose(
+        one.external_endpoint,
+        all_rows.external_endpoint,
+        atol=1e-6,
+        rtol=1e-6,
+    )
+    assert one.candidate_count == all_rows.candidate_count
+    assert one.row_count == graph.response_count
+    assert one.self_row_count == graph.response_count
+    assert one.external_row_count == graph.response_count
+
+
+def test_endpoint_layout_loss_alone_updates_encoder_and_layout_decoder():
+    torch.manual_seed(29)
+    graph = make_graph()
+    model = make_model(graph).train()
+    output = model(graph)
+    objective = endpoint_layout_loss(model, output, graph, rows_per_batch=3)
+
+    objective.loss.backward()
+
+    encoder_gradient = model.source_to_hyperedge.source_projection[0][-1].weight.grad
+    query_gradient = model.layout_query[-1].weight.grad
+    key_gradient = model.layout_key[-1].weight.grad
+    assert encoder_gradient is not None and bool(encoder_gradient.abs().sum() > 0)
+    assert query_gradient is not None and bool(query_gradient.abs().sum() > 0)
+    assert key_gradient is not None and bool(key_gradient.abs().sum() > 0)
+
+
+def test_zero_flow_and_layout_weights_bypass_both_teacher_targets():
+    torch.manual_seed(31)
+    graph = make_graph()
+    model = make_model(graph).train()
+    config = LearningConfig(flow_weight=0.0, layout_weight=0.0)
+    with patch(
+        "experiments.directed_route_hypergraph.learning.ordered_flow",
+        side_effect=AssertionError("flow teacher must be bypassed"),
+    ), patch(
+        "experiments.directed_route_hypergraph.learning.ordered_endpoint_layout",
+        side_effect=AssertionError("layout teacher must be bypassed"),
+    ):
+        output = self_supervised_loss(
+            model,
+            graph,
+            config,
+            torch.Generator().manual_seed(37),
+        )
+    output.loss.backward()
+
+    assert output.flow.item() == 0.0
+    assert output.layout.item() == 0.0
+    assert output.layout_row_count == 0
+    assert output.layout_self_row_count == 0
+    assert output.layout_external_row_count == 0
+    assert model.flow_readout[-1].weight.grad is None
+    assert model.layout_query[-1].weight.grad is None
+    assert model.layout_key[-1].weight.grad is None
+
+
+def test_endpoint_layout_limit_fails_before_allocating_an_oversized_target():
+    graph = make_graph()
+    model = make_model(graph).eval()
+    output = model(graph)
+
+    with pytest.raises(ValueError, match="layout_max_elements"):
+        endpoint_layout_loss(model, output, graph, max_elements=1)
+
+
+def test_endpoint_layout_relay_work_limit_fails_before_teacher_rollout():
+    graph = make_graph()
+    model = make_model(graph).eval()
+    output = model(graph)
+
+    with patch(
+        "experiments.directed_route_hypergraph.learning.ordered_endpoint_layout",
+        side_effect=AssertionError("teacher must not run above the work limit"),
+    ), pytest.raises(ValueError, match="layout_max_work_elements"):
+        endpoint_layout_loss(model, output, graph, max_work_elements=1)

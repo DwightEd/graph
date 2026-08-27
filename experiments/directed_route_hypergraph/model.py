@@ -271,7 +271,19 @@ class DirectedRouteHypergraphEncoder(nn.Module):
         self.route_role = nn.Embedding(2, hidden)
         self.route_lag = nn.Embedding(self.config.lag_buckets, hidden)
         self.bucket_key = nn.Parameter(torch.empty(2, hidden))
+        self.layout_query = nn.Sequential(
+            nn.LayerNorm(hidden),
+            nn.Linear(hidden, hidden),
+            nn.GELU(),
+            nn.Linear(hidden, hidden, bias=False),
+        )
+        self.layout_key = nn.Sequential(
+            nn.LayerNorm(hidden),
+            nn.Linear(hidden, hidden, bias=False),
+        )
+        self.layout_unresolved_key = nn.Parameter(torch.empty(hidden))
         nn.init.normal_(self.bucket_key, std=0.02)
+        nn.init.normal_(self.layout_unresolved_key, std=0.02)
 
     def initial_nodes(self, graph: TokenGraph) -> torch.Tensor:
         hidden = self.config.hidden_dim
@@ -388,6 +400,48 @@ class DirectedRouteHypergraphEncoder(nn.Module):
 
     def encode(self, graph: TokenGraph) -> EncoderOutput:
         return self(graph)
+
+    def endpoint_layout_logits(
+        self,
+        output: EncoderOutput,
+        graph: TokenGraph,
+        response_index: torch.Tensor,
+        *,
+        key: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Predict complete ordered-flow endpoints for selected responses.
+
+        Future response endpoints receive the minimum finite logit.  The last
+        column is reserved for unresolved sparse-cache mass.
+        """
+
+        device = output.node_embedding.device
+        response_index = response_index.to(device=device, dtype=torch.long)
+        if response_index.ndim != 1:
+            raise ValueError("response_index must be one-dimensional")
+        if len(response_index) and bool(
+            ((response_index < 0) | (response_index >= graph.response_count)).any()
+        ):
+            raise ValueError("response_index is outside the graph")
+
+        query = self.layout_query(output.response_embedding[response_index])
+        if key is None:
+            key = self.layout_key(output.node_embedding)
+        elif key.shape != output.node_embedding.shape:
+            raise ValueError("precomputed layout keys have invalid dimensions")
+        token_logits = query @ key.transpose(0, 1)
+        token_logits = token_logits / math.sqrt(self.config.hidden_dim)
+        source = torch.arange(graph.token_count, device=device)
+        target = graph.response_start + response_index
+        future = source[None] > target[:, None]
+        token_logits = token_logits.masked_fill(
+            future,
+            torch.finfo(token_logits.dtype).min,
+        )
+        unresolved = (
+            query * self.layout_unresolved_key.to(dtype=query.dtype)
+        ).sum(dim=-1, keepdim=True) / math.sqrt(self.config.hidden_dim)
+        return torch.cat((token_logits, unresolved), dim=1)
 
     def route_query_state(
         self,

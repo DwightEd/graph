@@ -5,6 +5,8 @@
 ## 1. 仓库和版本
 
 - 只维护一个正式实现，不再出现 `v2`、`new`、`final` 等并行版本。
+- 当前正式实验入口是 `experiments/directed_route_hypergraph/run_qa.sh`；
+  GroundedRoute、Information Flow 与 HoloRoute 只作为基线、控制或历史记录。
 - 正式代码直接进入 `main`；不交付 patch，不依赖 `gh`，不留下长期实验分支。
 - 旧方法如果已被结果否定，只保留结果、结论和必要的复现实验说明，删除重复代码。
 - 一个概念只保留一个入口。例如 detector、evaluation、pipeline 不同时存在两套同义文件。
@@ -27,7 +29,13 @@
 - 未保存的稀疏 attention 是“低于阈值”，不是观测到的零；使用 `unresolved` 质量表示。
 - 邻居状态和边属性必须在图编码阶段聚合进节点。最终 detector 只读取 `node_embedding`，不再运行第二个 GNN。
 - 聚合不能只做未归一化求和。至少要区分注意力质量与邻居内容，并避免节点度数直接决定向量尺度。
-- 当前正式聚合使用 prompt/response 两条路由流的加权均值、加权离散度和总质量，再融合 self diagonal 与 unresolved 信息。
+- 当前正式聚合将 `(target,layer,head)` 作为有向 row hyperedge，使用
+  P/R-conditioned slots、head pooling 和 layer-ordered GRU 更新节点。
+- ordered endpoint target 可以在形成单层 transition 时固定平均 heads，
+  但原始边、local row loss 和 encoder message passing 必须继续保留 head identity；
+  该 target 只能称为 attention transport proxy。
+- unresolved sink 与 self endpoint 必须和 non-self endpoint shape 分开建模，
+  降低深层 rollout 只学习缺失质量或 self identity 的捷径；位置/长度仍需独立控制。
 - 精确 endpoint、edge weight 与 endpoint 的配对、以及邻居消息是否有用，必须通过独立构图控制实验验证。
 
 ## 4. 无监督与标签边界
@@ -60,6 +68,7 @@
 - 对照至少包含：`no_message`、`endpoint_rewire`、`weight_shuffle`。
 - 相同 detector、相同训练预算、相同 seed 和相同 token 行用于成对比较。
 - 无效结果同样写入实验记录，防止以后换名重复运行。
+- 已失败的 P-Cut closure 不得通过新 encoder、翻转方向或改名重新成为主分数。
 
 ## 6. Shell 与运行入口
 
@@ -90,6 +99,7 @@
 [ ] 文件名能否直接对应研究步骤？
 [ ] 核心函数是否短、清楚、没有不必要的防御分支？
 [ ] layer/head 和 exact endpoint 是否被保留？
+[ ] ordered target 是否对比 reverse/last-layer，且没有被 sink/self 支配？
 [ ] 邻居信息是否已经进入 node_embedding？
 [ ] detector 是否只读取 node_embedding？
 [ ] 是否提供 source-disjoint、位置基线和构图控制？

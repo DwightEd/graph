@@ -41,7 +41,7 @@ from .config import LearningConfig, ModelConfig, TrainConfig
 from .learning import self_supervised_loss
 from .model import DirectedRouteHypergraphEncoder
 
-METHOD = "directed_route_hypergraph_flow_dae"
+METHOD = "directed_route_hypergraph_ordered_layout"
 
 
 def fit(
@@ -92,6 +92,12 @@ def fit(
         losses = []
         row_losses = []
         flow_losses = []
+        layout_losses = []
+        layout_sink_losses = []
+        layout_self_losses = []
+        layout_external_losses = []
+        layout_self_coverages = []
+        layout_external_coverages = []
         variance_losses = []
         for sample_id in tqdm(order, desc=f"fit epoch {epoch + 1}", unit="sample"):
             graph = load_graph(
@@ -118,6 +124,19 @@ def fit(
             losses.append(float(output.loss.detach().item()))
             row_losses.append(float(output.row.detach().item()))
             flow_losses.append(float(output.flow.detach().item()))
+            layout_losses.append(float(output.layout.detach().item()))
+            layout_sink_losses.append(float(output.layout_sink.detach().item()))
+            layout_self_losses.append(float(output.layout_self.detach().item()))
+            layout_external_losses.append(
+                float(output.layout_external.detach().item())
+            )
+            denominator = max(graph.response_count, 1)
+            layout_self_coverages.append(
+                output.layout_self_row_count / denominator
+            )
+            layout_external_coverages.append(
+                output.layout_external_row_count / denominator
+            )
             variance_losses.append(float(output.variance.detach().item()))
 
         validation = validation_epoch(
@@ -135,10 +154,28 @@ def fit(
             "train_loss": float(np.mean(losses)),
             "train_row_loss": float(np.mean(row_losses)),
             "train_flow_loss": float(np.mean(flow_losses)),
+            "train_layout_loss": float(np.mean(layout_losses)),
+            "train_layout_sink_loss": float(np.mean(layout_sink_losses)),
+            "train_layout_self_loss": float(np.mean(layout_self_losses)),
+            "train_layout_external_loss": float(np.mean(layout_external_losses)),
+            "train_layout_self_coverage": float(np.mean(layout_self_coverages)),
+            "train_layout_external_coverage": float(
+                np.mean(layout_external_coverages)
+            ),
             "train_variance_loss": float(np.mean(variance_losses)),
             "validation_loss": validation["loss"],
             "validation_row_loss": validation["row"],
             "validation_flow_loss": validation["flow"],
+            "validation_layout_loss": validation["layout"],
+            "validation_layout_sink_loss": validation["layout_sink"],
+            "validation_layout_self_loss": validation["layout_self"],
+            "validation_layout_external_loss": validation["layout_external"],
+            "validation_layout_self_coverage": validation[
+                "layout_self_coverage"
+            ],
+            "validation_layout_external_coverage": validation[
+                "layout_external_coverage"
+            ],
             "validation_variance_loss": validation["variance"],
         }
         history.append(row)
@@ -457,7 +494,21 @@ def validation_epoch(
     device,
 ) -> dict[str, float]:
     model.eval()
-    values = {name: [] for name in ("loss", "row", "flow", "variance")}
+    values = {
+        name: []
+        for name in (
+            "loss",
+            "row",
+            "flow",
+            "layout",
+            "layout_sink",
+            "layout_self",
+            "layout_external",
+            "layout_self_coverage",
+            "layout_external_coverage",
+            "variance",
+        )
+    }
     with torch.no_grad():
         for sample_id in sample_ids:
             graph = load_graph(
@@ -478,12 +529,25 @@ def validation_epoch(
             values["loss"].append(float(output.loss.item()))
             values["row"].append(float(output.row.item()))
             values["flow"].append(float(output.flow.item()))
+            values["layout"].append(float(output.layout.item()))
+            values["layout_sink"].append(float(output.layout_sink.item()))
+            values["layout_self"].append(float(output.layout_self.item()))
+            values["layout_external"].append(float(output.layout_external.item()))
+            denominator = max(graph.response_count, 1)
+            values["layout_self_coverage"].append(
+                output.layout_self_row_count / denominator
+            )
+            values["layout_external_coverage"].append(
+                output.layout_external_row_count / denominator
+            )
             values["variance"].append(float(output.variance.item()))
     return {name: float(np.mean(current)) for name, current in values.items()}
 
 
 def restore_model(checkpoint_path, device):
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    if str(checkpoint.get("method", "")) != METHOD:
+        raise ValueError("checkpoint belongs to a different method")
     model = DirectedRouteHypergraphEncoder(
         int(checkpoint["layer_count"]),
         int(checkpoint["head_count"]),

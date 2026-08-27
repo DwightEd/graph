@@ -1,48 +1,76 @@
-# Directed Route Hypergraph
+# Directed Route Hypergraph + Ordered Endpoint Layout
 
-本目录检验一个可反证的假设：上下文幻觉可能不是“关注历史 token 太多”，而是生成路径逐层从 prompt-origin routing 转向 response-closed self-conditioning。方法把确定性的跨层路径流作为结构 teacher，再训练一个去噪有向超图编码器；最终仍输出每个 token 一个 64 维神经表征。P 只表示路径追溯到某个 prompt token，不表示该 token 与问题相关或构成有效证据。
+当前实验研究一个受限问题：稀疏 attention 中按 Transformer 层序组合的真实 source endpoint，能否为 token-level hallucination detection 提供比局部 row 或三态 provenance 更有用的无标签表征。
 
-当前缓存只有稀疏 attention，因此本文档始终使用 **routing provenance**，不把它称为 functional contribution。
-
-## 与 Information Flow 方法的关系
-
-`Information Flow Reveals When to Trust Language Models` 对每层真实 (W_V/W_O)、hidden state 和 residual 计算 source contribution，再按 Transformer layer 顺序相乘 contribution matrices。它的 attribution 算子不训练新 encoder，但完整系统还使用 neural reranker、SHAP 和 correctness-label XGBoost。
-
-本目录迁移的是“逐层有序路径组合”，没有声称复现论文的 OV contribution。现有缓存缺少 hidden state、(W_V/W_O) 和 residual stream，只能构造 attention-only 近似。显式 `residual_weight` 是预注册 proxy，不是真实 residual attribution。
-
-## 1. 质量守恒的有序路径 teacher
-
-一条保留 incidence 为
-
-\[
-(s,t,l,h,a_{t,s}^{l,h}),\qquad s<t.
-\]
-
-每个 token 的路径来源为三态分布：
+方法由两部分组成：
 
 ```text
-P  prompt-origin
-R  response-origin / response-closed
-U  unresolved because of sparse-cache censoring
+deterministic teachers
+  local attention rows
+  + ordered P/R/U provenance
+  + ordered token-endpoint layout
+                  |
+                  v
+corrupted graph -> neural directed-hypergraph encoder -> 64D token embedding
+                                                        -> PCA-kNN score
 ```
 
-初始 prompt token 为 `(1,0,0)`，response token 为 `(0,1,0)`。对 row `e=(t,l,h)`：
+最后的 encoder 和 detector 都不读取 hallucination label。这里的“无标签”不等于“没有神经网络”：`SourceToHyperedge`、slot attention、head pooling、GRU 和三个 decoder 都通过反向传播训练。
+
+## 与 Information Flow Reveals When to Trust Language Models 的关系
+
+论文先在冻结 LLM 上计算每层 value-aware contribution：
+
+\[
+a_{j\to i}^{(l)}
+=
+\mathbf 1[j=i]x_i
++\sum_h W_O^{l,h}A_{ij}^{l,h}W_V^{l,h}x_j,
+\]
+
+再用 ALTI 风格距离归一化得到 \(C^{(l)}\)，并按真实层序组合：
+
+\[
+C^{\mathrm{total}}=C^{(L)}\cdots C^{(1)}.
+\]
+
+它的信息流抽取本身不训练新 encoder，但完整 trust detector 并不只是“简单算几个特征”：论文还使用 Qwen3 reranker、SHAP relevance，构造 9 个 RBO、2 个 concentration 和 1 个 relevance 特征，最后用 correctness labels 训练 XGBoost。
+
+本实现只迁移层序路径代数，不复现论文的 functional contribution。现有 cache 没有 hidden state、\(W_V/W_O\)、真实 residual message 或 prompt-query rows，所以代码和论文中统一称为 **layer-ordered attention transport endpoint layout**，而不是 Information Flow、causal contribution 或真实 grounding。
+
+## 1. Exact typed graph
+
+一个样本是一张独立 `TokenGraph`：
+
+```text
+node: token
+edge: (source, response target, layer, head, retained attention weight)
+row mass: retained + diagonal + unresolved = 1
+```
+
+构图前不平均 layer/head，不把 cache 没保存的边当作零。prompt-query rows 不可用，因此 prompt token 在跨层 transport 中保持 identity endpoint。
+
+## 2. P/R/U ordered provenance
+
+每个 token 的来源是：
+
+```text
+P  path starts at a prompt token
+R  path remains response-origin / response-closed
+U  path has entered unresolved cached mass
+```
+
+对 response row \((t,l,h)\)：
 
 \[
 \rho_{t,h}^{l}
 =
 \sum_{s<t}a_{t,s}^{l,h}\pi_s^{l-1}
 +d_{t,h}^{l}\pi_t^{l-1}
-+u_{t,h}^{l}(0,0,1).
++u_{t,h}^{l}e_U.
 \]
 
-构图保证
-
-\[
-\sum_{s<t}a_{t,s}^{l,h}+d_{t,h}^{l}+u_{t,h}^{l}=1,
-\]
-
-所以每个 `head_flow[t,l,h]` 也严格和为 1。跨层 token state 使用 head-uniform merge 和显式 residual proxy：
+head-uniform attention state 与显式 residual proxy \(\alpha\) 合并：
 
 \[
 \pi_t^l=
@@ -50,144 +78,133 @@ U  unresolved because of sparse-cache censoring
 {\alpha+1}.
 \]
 
-prompt-query rows没有缓存，因此 prompt states 始终固定。实现位于 `flow.py`，保存的机制张量为 `[response, layer, head, P/R/U]`。
+P 只表示路径能追溯到某个 prompt token，不表示该 token 与问题相关或提供了事实证据。
 
-这个算子不训练参数。它与 contribution-matrix product 的共同点是 layer 顺序不可交换；不同点是边权只有 attention，不含 OV 或真实 residual contribution。
+## 3. Ordered endpoint layout
 
-## 2. Provenance-aware node -> hyperedge -> node
+P/R/U 是完整 endpoint layout 的粗粒化。新目标保留每个 token endpoint，并增加一个 unresolved sink \(\bot\)。设 \(Q_t^0\) 为 response token 自身的 one-hot endpoint。每层先用该层全部 typed edges 组成 head-uniform attention transition，再加入 residual proxy：
 
-每个 `(target,layer,head)` 是一个有向 row hyperedge：
+\[
+Q_t^l
+=
+\frac{
+\alpha Q_t^{l-1}
++H^{-1}\sum_h
+\left(
+\sum_{s<t}a_{t,s}^{l,h}Q_s^{l-1}
++d_{t,h}^lQ_t^{l-1}
++u_{t,h}^le_{\bot}
+\right)
+}{\alpha+1}.
+\]
+
+最终 \(Q_t^L\in\Delta^{N}\) 等于 retained-attention proxy 中所有合法 layer-ordered paths 的权重乘积之和。实现只保存 response layouts，prompt endpoint 使用隐式 one-hot，因此内存为 \(O(RN)\)；response-to-response transport 使用 sparse-dense multiplication，不构造 edge-by-endpoint 三维张量。`layout_rows_per_batch` 只切分 pointer decoder，不切分 teacher rollout。`layout_max_elements` 限制 dense target；`layout_max_work_elements` 在 rollout 前限制代理工作量 \((N+1)(LR+E_{RR})\)。
+
+unresolved 是吸收式记账：路径一旦进入 cache 未解析质量，就不再假装能恢复到某个已知 endpoint。它不是无效信息或 hallucination 类别。
+
+## 4. 降低 sink/self 捷径的平衡目标
+
+深层 rollout 容易被 unresolved sink 或 residual self endpoint 支配。代码没有把所有列直接塞进一个 categorical CE，而是把 layout loss 分解为：
+
+1. resolved 与 unresolved 的二项质量；
+2. resolved 内 self 与 non-self 的二项质量；
+3. non-self 条件下的 exact endpoint distribution。
+
+\[
+\mathcal L_{layout}
+=
+\mathcal L_{sink}
++\mathcal L_{self\mid resolved}
++\mathcal L_{endpoint\mid nonself}.
+\]
+
+第三项按 token row 平衡，并除以可选 non-self endpoints 数量的对数，减弱回答长度造成的 CE 尺度增长。它不会因为 \(\bot\) 或 self mass 很大而直接消失。质量小于 `layout_min_mass` 的条件项跳过，但其上层二项质量仍被训练。这种分解降低单一 sink/self 分类捷径，不保证排除 position/length shortcut，因此三项 loss 和 eligible-row coverage 都单独记录。
+
+训练时 student 只看 incidence/head 被遮蔽并守恒转入 unresolved 的图；local row、P/R/U trajectory 和 endpoint layout target 都来自干净图：
+
+\[
+\mathcal L
+=
+\mathcal L_{row}
++\lambda_f\mathcal L_{flow}
++\lambda_q\mathcal L_{layout}
++\lambda_v\mathcal L_{variance}.
+\]
+
+local row 保留 layer/head，P/R/U 监督每层 trajectory，endpoint layout 监督 retained-attention proxy 内最终全路径的 source identity。三者包含嵌套信息，因此必须通过 `layout_weight=0`、`flow_weight=0` 等消融证明 endpoint 目标有独立价值。权重为零时对应 teacher 和 decoder loss 会真正 bypass，不计算 rollout。
+
+## 5. Neural directed hypergraph student
+
+每个 `(target, layer, head)` 是显式有向超边：
 
 ```text
 source token -> attention-row hyperedge -> target token
 ```
 
-编码器保留四个 16 维槽：
+模型保留四个 16D route-conditioned slots：P1/P2/R1/R2。response source 若已继承 prompt provenance，仍向 P slots 输送质量；它不会被直接 source role 错算为 response closure。slot 名称不等于数学纯 factorization，必须靠 route gating/head/endpoint controls 验证。
 
-```text
-P1/P2  prompt-origin-conditioned learned source-set summaries
-R1/R2  response-closed-conditioned learned source-set summaries
-```
+最终四槽展平为 64D token embedding。PCA-whitened kNN 仍是当前 label-free detector，因此新实现只是表征目标优化，还没有真实 QA 结果证明检测更强。
 
-这里按完整路径来源给消息加权，而不是按 source token 的直接角色分流。一个 response source 只要它本身承载 prompt provenance，就继续给 P-conditioned slots 提供质量；这避免把 `prompt -> earlier response -> current response` relay 全部错算成 response closure。
+## 6. 为什么没有重新启用 P-Cut
 
-这些槽不是数学上纯净的 P/R factorization：初始 node state、layer/head context 和 GRU recurrence 会被共享保留。准确说法是 route-conditioned slots；其纯度必须通过 zero-route gating 和 slot intervention 另行验证。
+历史 P-Cut 使用相同 token 的 full/no-prompt/no-response 三视图和 closure score。全量 QA 的冻结方向结果为 AUROC `0.4209`、AUPRC `0.0734`，低于位置基线；记录明确禁止通过翻转方向或换名重新包装。
 
-对 incidence 的两条可解析质量为
+当前改动不做 route cut，不计算 closure，也不把 prompt mass 预设为正确性方向。ordered endpoint layout 只是干净图的连续全路径重构目标；是否改善下游检测必须重新实验，不能从设计推出。
 
-\[
-w_{e,s}^{P}=a_{e,s}\pi_{s,P}^{l-1},\qquad
-w_{e,s}^{R}=a_{e,s}\pi_{s,R}^{l-1}.
-\]
-
-每个 route 内用 learned slot attention 聚合非线性 source messages，attention weight 只作为 prior。聚合后的内容乘回 route mass；diagonal 也按 target 的 P/R provenance 拆分。由 retained paths、diagonal 和当前 row censoring 共同产生的 U mass 以独立 learned message 注入。随后同一 target 的 heads 做 learned pooling，四个 GRU 沿 layer depth 更新 target node。
-
-因此该模型不是邻居向量的简单累加。解析 teacher 不训练，而 `SourceToHyperedge`、slot queries、head pooling、GRU、row decoder 和 flow decoder 都是可训练神经网络。
-
-## 3. 守恒式去噪训练
-
-训练时只使用符合缓存观测模型的 corruption：
-
-- 随机隐藏 retained incidence；
-- 随机隐藏完整 `(layer, head)` channel；
-- 被隐藏的质量原样转入对应 row 的 `unresolved`；
-- 不重连 endpoint，不改变 diagonal，row 总质量仍为 1。
-
-`endpoint_rewire` 和 `weight_shuffle` 只作为独立训练的 null controls，不能作为增强。
-
-student 编码受扰动图，但目标来自干净图：
-
-\[
-\mathcal L=
-\mathcal L_{row}
-+\lambda_f\mathcal L_{flow}
-+\lambda_v\mathcal L_{variance}.
-\]
-
-`row` 目标在干净图给定的 retained support、SELF 和 UNRESOLVED 候选上恢复质量分配；它不制造 censored non-edge negatives，但也不能证明模型学会了发现未给定的 endpoint support。`flow` 目标从每层 post-update node state 解码干净的 \((P,R,U)\) ordered-flow trajectory：
-
-\[
-\mathcal L_{flow}
-=-\frac1{TL}\sum_{t,l}\pi_{t}^{l,*}
-\log\operatorname{softmax}(g(x_{t,l})).
-\]
-
-hallucination labels 不进入 encoder、early stopping 或 detector fitting。去噪重构误差也不作为 hallucination score；一个稳定错误 attractor 可能同样容易重构。
-
-## 4. 导出与检测
-
-最后四槽展平并归一化：
-
-\[
-z_t=\operatorname{LayerNorm}
-(P1\Vert P2\Vert R1\Vert R2)\in\mathbb R^{64}.
-\]
-
-下游只读取冻结的 64D `node_embedding`：
-
-```text
-64D node embedding -> robust scaling -> PCA whitening -> mean kNN distance
-```
-
-calibration 与 test 按 `source_id` 隔离。test labels 在 token scores 保存之后才打开，用于 AUROC/AUPRC 和 source bootstrap。
-
-每样本 `graphs/*.pt` 还保存 exact typed edges、diagonal、unresolved 和解析式 `[R,L,H,3]` path flow，供机制审计；这些 sidecar 不进入 detector。
-
-## 5. 一键运行 QA
+## 7. 运行
 
 ```bash
-cd /share/home/tm902089733300000/a903202310/lys/research/graph
-git pull --ff-only origin main
 bash experiments/directed_route_hypergraph/run_qa.sh
 ```
 
 小规模 smoke test：
 
 ```bash
-EPOCHS=1 \
-TRAIN_LIMIT=32 \
-TEST_LIMIT=16 \
+EPOCHS=1 TRAIN_LIMIT=32 TEST_LIMIT=16 \
 OUT=experiments/directed_route_hypergraph/outputs/smoke \
 bash experiments/directed_route_hypergraph/run_qa.sh
 ```
 
-默认去噪参数可从环境覆盖：
+默认关键参数：
 
 ```text
 INCIDENCE_DROPOUT=0.15
 HEAD_DROPOUT=0.05
 FLOW_WEIGHT=0.5
+LAYOUT_WEIGHT=0.25
+LAYOUT_ROWS_PER_BATCH=64
+LAYOUT_MIN_MASS=0.0001
+LAYOUT_MAX_ELEMENTS=8000000
+LAYOUT_MAX_WORK_ELEMENTS=250000000
+LAYOUT_ORDER=ordered
 RESIDUAL_WEIGHT=1.0
 ```
 
-设 `INCIDENCE_DROPOUT=0 HEAD_DROPOUT=0 FLOW_WEIGHT=0` 可得到同一实现中的 row-only ablation。
-
-## 6. 已实现对照、后续对照与停止条件
-
-当前一键入口已经支持：
+最小目标消融：
 
 ```text
-row-only          INCIDENCE_DROPOUT=0 HEAD_DROPOUT=0 FLOW_WEIGHT=0
-no_message        VARIANT=no_message
-endpoint_rewire   VARIANT=endpoint_rewire
-weight_shuffle    VARIANT=weight_shuffle
-residual alpha    RESIDUAL_WEIGHT=0/0.5/1/2 分别训练
+local only        FLOW_WEIGHT=0 LAYOUT_WEIGHT=0
+local + P/R/U     FLOW_WEIGHT=0.5 LAYOUT_WEIGHT=0
+local + endpoint  FLOW_WEIGHT=0 LAYOUT_WEIGHT=0.25
+all objectives    FLOW_WEIGHT=0.5 LAYOUT_WEIGHT=0.25
+reverse endpoint target   LAYOUT_ORDER=reverse
 ```
 
-正式机制结论前仍需接入同一 evaluator 的 `ordered vs reverse`、one-step、position/length、deterministic-flow-only controls；当前代码和结果不能暗示这些对照已经完成。
+默认输出目录包含 `FLOW_WEIGHT`、`LAYOUT_WEIGHT`、`RESIDUAL_WEIGHT`、order、variant 和 seed，目标消融不会静默覆盖彼此；其他配置变体可用 `RUN_NAME` 或 `OUT` 显式隔离。
 
-若未来 ordered 不优于 reverse、real 不优于 endpoint-rewire/weight-shuffle，结果随 residual proxy 大幅变化，或信号主要由位置、长度、unresolved mass 解释，就不能把增益归因于真实跨层路径。此时应停止增加 GNN 容量，转而采集 OV/residual caches。
+## 8. 解释边界与必须实验
 
-## 解释边界
+当前实现是 post-hoc same-token routing representation，不是论文的 trust-before-next-token estimator。首个 response token 所需的 prompt 最后一行没有缓存，因此代码不伪造 next-token 对齐。
 
-当前实现是 post-hoc same-token routing representation，不是论文的 trust-before-next-token estimator。首个 response token 的生成前状态需要 prompt 最后一行，而当前缓存没有 prompt-query row。
+正式机制结论前至少需要：
 
-现有数据不能验证：
+- ordered layout 对比 reverse endpoint target、last-layer 和 layer-mean controls；
+- `LAYOUT_ORDER=reverse` 只反转 endpoint teacher；encoder 和 P/R/U teacher 保持正序；
+- real endpoint 对比 role/lag/mass-matched rewire 与 weight shuffle；
+- neural embedding 对比直接 endpoint layout detector；
+- `local / flow / layout` 完整目标消融；
+- position-only、self+unresolved、response length 和 retained coverage controls；
+- 小规模重新采集 value-aware contribution，比较 endpoint JSD/RBO 与 route-token 删除后的 logit drop；
+- QA、Summary、Data2txt 分任务、多个 seed、source bootstrap。
 
-- token 内容冲突；当前节点初态只有角色与位置，token IDs 不进入 encoder；
-- attention route 对 logits 的真实功能贡献；
-- FFN parametric memory 与 prompt-origin routing 的竞争；
-- value/residual message 的语义冲突、谱熵或有效秩；
-- 某条 route 对错误输出的因果作用。
-
-这些主张需要补采 per-head OV message、attention/FFN 前后 residual、logit attribution，并加入 activation patching 或 head/endpoint intervention。
+如果正确层序不优于 reverse，real endpoint 不优于 rewire，layout 目标只预测 position/self/unresolved，或 attention-only layout 与 value-aware contribution 明显不一致，就不能把增益归因于跨层信息流。此时应停止增加 encoder 容量，转而补采 hidden/OV/residual caches。

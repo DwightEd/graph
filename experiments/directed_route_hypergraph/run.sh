@@ -6,13 +6,20 @@ DEVICE=${DEVICE:-cuda}
 TASK=${TASK:-QA}
 EPOCHS=${EPOCHS:-8}
 ROWS_PER_GRAPH=${ROWS_PER_GRAPH:-256}
+LAYOUT_ROWS_PER_BATCH=${LAYOUT_ROWS_PER_BATCH:-64}
+LAYOUT_MIN_MASS=${LAYOUT_MIN_MASS:-0.0001}
+LAYOUT_MAX_ELEMENTS=${LAYOUT_MAX_ELEMENTS:-8000000}
+LAYOUT_MAX_WORK_ELEMENTS=${LAYOUT_MAX_WORK_ELEMENTS:-250000000}
+LAYOUT_ORDER=${LAYOUT_ORDER:-ordered}
 INCIDENCE_DROPOUT=${INCIDENCE_DROPOUT:-0.15}
 HEAD_DROPOUT=${HEAD_DROPOUT:-0.05}
 FLOW_WEIGHT=${FLOW_WEIGHT:-0.5}
+LAYOUT_WEIGHT=${LAYOUT_WEIGHT:-0.25}
 RESIDUAL_WEIGHT=${RESIDUAL_WEIGHT:-1.0}
 VARIANT=${VARIANT:-real}
 SEED=${SEED:-20260827}
-OUT=${OUT:-${ROOT}/experiments/directed_route_hypergraph/outputs/${TASK,,}/flow_dae_${VARIANT}_seed${SEED}}
+RUN_NAME=${RUN_NAME:-${LAYOUT_ORDER}_layout_${VARIANT}_fw${FLOW_WEIGHT}_lw${LAYOUT_WEIGHT}_rw${RESIDUAL_WEIGHT}_seed${SEED}}
+OUT=${OUT:-${ROOT}/experiments/directed_route_hypergraph/outputs/${TASK,,}/${RUN_NAME}}
 TRAIN_LIMIT=${TRAIN_LIMIT:-}
 TEST_LIMIT=${TEST_LIMIT:-}
 EVALUATE=${EVALUATE:-1}
@@ -42,8 +49,14 @@ run_stage "[1/5] Fit label-free directed hypergraph encoder" \
   --train "${TRAIN_SPLIT}" --checkpoint "${OUT}/model.pt" \
   --task "${TASK}" --epochs "${EPOCHS}" \
   --rows-per-graph "${ROWS_PER_GRAPH}" --variant "${VARIANT}" \
+  --layout-rows-per-batch "${LAYOUT_ROWS_PER_BATCH}" \
+  --layout-min-mass "${LAYOUT_MIN_MASS}" \
+  --layout-max-elements "${LAYOUT_MAX_ELEMENTS}" \
+  --layout-max-work-elements "${LAYOUT_MAX_WORK_ELEMENTS}" \
+  --layout-order "${LAYOUT_ORDER}" \
   --incidence-dropout "${INCIDENCE_DROPOUT}" \
   --head-dropout "${HEAD_DROPOUT}" --flow-weight "${FLOW_WEIGHT}" \
+  --layout-weight "${LAYOUT_WEIGHT}" \
   --residual-weight "${RESIDUAL_WEIGHT}" \
   --seed "${SEED}" --device "${DEVICE}" "${TRAIN_LIMIT_ARGUMENT[@]}"
 

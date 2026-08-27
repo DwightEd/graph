@@ -20,9 +20,23 @@ def command_line() -> argparse.ArgumentParser:
     command.add_argument("--limit", type=int)
     command.add_argument("--epochs", type=int, default=8)
     command.add_argument("--rows-per-graph", type=int, default=256)
+    command.add_argument("--layout-rows-per-batch", type=int, default=64)
+    command.add_argument("--layout-min-mass", type=float, default=1e-4)
+    command.add_argument("--layout-max-elements", type=int, default=8_000_000)
+    command.add_argument(
+        "--layout-max-work-elements",
+        type=int,
+        default=250_000_000,
+    )
+    command.add_argument(
+        "--layout-order",
+        choices=("ordered", "reverse"),
+        default="ordered",
+    )
     command.add_argument("--incidence-dropout", type=float, default=0.15)
     command.add_argument("--head-dropout", type=float, default=0.05)
     command.add_argument("--flow-weight", type=float, default=0.5)
+    command.add_argument("--layout-weight", type=float, default=0.25)
     command.add_argument("--residual-weight", type=float, default=1.0)
     command.add_argument("--variant", choices=GRAPH_VARIANTS, default="real")
     command.add_argument("--seed", type=int, default=20260827)
@@ -69,9 +83,15 @@ def main() -> None:
             model_config=ModelConfig(residual_weight=arguments.residual_weight),
             learning_config=LearningConfig(
                 rows_per_graph=arguments.rows_per_graph,
+                layout_rows_per_batch=arguments.layout_rows_per_batch,
+                layout_min_mass=arguments.layout_min_mass,
+                layout_max_elements=arguments.layout_max_elements,
+                layout_max_work_elements=arguments.layout_max_work_elements,
+                layout_order=arguments.layout_order,
                 incidence_dropout=arguments.incidence_dropout,
                 head_dropout=arguments.head_dropout,
                 flow_weight=arguments.flow_weight,
+                layout_weight=arguments.layout_weight,
             ),
             train_config=TrainConfig(epochs=arguments.epochs, seed=arguments.seed),
         )
