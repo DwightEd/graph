@@ -1,1 +1,1 @@
-"""Tests for the information-flow audit."""
+"""Tests for information-flow transport."""

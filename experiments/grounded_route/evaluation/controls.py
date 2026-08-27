@@ -1,11 +1,8 @@
-"""Compare real and controlled constructions with the same readers."""
+"""Compare one reference embedding with aligned alternatives."""
 
 import numpy as np
 
 from .metrics import paired_delta
-
-
-CONTROL_NAMES = ("no_message", "endpoint_rewire", "weight_shuffle")
 
 
 def control_deltas(
@@ -17,9 +14,10 @@ def control_deltas(
     seed: int,
 ) -> dict[str, object]:
     report = {}
-    for control in CONTROL_NAMES:
-        if control not in unsupervised_scores:
+    for control in unsupervised_scores:
+        if control == "real":
             continue
+
         unsupervised = {}
         for detector, real_score in unsupervised_scores["real"].items():
             unsupervised[detector] = paired_delta(
@@ -33,12 +31,10 @@ def control_deltas(
 
         supervised = {}
         for reader in ("linear_node", "node_mlp"):
-            real_name = f"{reader}__real"
-            control_name = f"{reader}__{control}"
             supervised[reader] = paired_delta(
                 label,
-                probe_scores[real_name],
-                probe_scores[control_name],
+                probe_scores[f"{reader}__real"],
+                probe_scores[f"{reader}__{control}"],
                 source_id,
                 replicates,
                 seed,

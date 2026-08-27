@@ -1,17 +1,17 @@
-# Information Flow coding contract
+# Information-flow experiment contract
 
-修改本目录前先读取：
+Before changing this directory, follow:
 
 ```text
 experiments/grounded_route/iclr/ENGINEERING_RULES.md
 ```
 
-本实验额外遵守以下边界：
+Additional rules for this experiment:
 
-- 原论文的 value/residual-aware contribution 与本目录的 attention-only proxy 必须明确区分；
-- 不把未保存的 sparse attention 当作零；
-- 不根据 test label 选择层序、方向、视图或 detector；
-- `extract.py` 不读取标签；
-- downstream reader 只读取固定的节点表征；
-- 先验证 ordered all-layer flow，再考虑加入新的神经网络；
-- 若 ordered flow 不优于 last-layer、layer-mean、reverse-order 和 identity 控制，应停止该 attention-only 假设，而不是增加手工分数。
+- do not call raw attention a functional contribution;
+- keep the frozen GCN embedding and flow transport separate in saved artifacts;
+- preserve exact layer/head/endpoint structure until transport;
+- do not introduce hand-written hallucination features;
+- keep all downstream readers node-only;
+- compare every new representation with the same GCN rows and the same evaluator;
+- value-aware claims require new caches containing OV contributions or residual states.

@@ -16,7 +16,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install numpy scipy scikit-learn tqdm pytest
-      - run: python -m compileall -q experiments/grounded_route
+      - run: |
+          python -m compileall -q experiments/grounded_route
+          python -m compileall -q experiments/information_flow
       - run: |
           bash -n experiments/grounded_route/run.sh
           bash -n experiments/grounded_route/run_attention_row_qa.sh
@@ -25,4 +27,9 @@ jobs:
           bash -n experiments/grounded_route/evaluation/run_controls_qa.sh
           bash -n experiments/grounded_route/evaluation/run_attention_row_qa.sh
           bash -n experiments/grounded_route/evaluation/run_attention_row_controls_qa.sh
-      - run: python -m pytest -q experiments/grounded_route/tests experiments/grounded_route/evaluation/tests
+          bash -n experiments/information_flow/run_qa.sh
+      - run: |
+          python -m pytest -q \
+            experiments/grounded_route/tests \
+            experiments/grounded_route/evaluation/tests \
+            experiments/information_flow/tests

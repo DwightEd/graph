@@ -1,113 +1,86 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import torch
 
-from experiments.information_flow.config import FlowConfig
-from experiments.information_flow.transport import attention_output, encode_views
+from experiments.information_flow.transport import flow_embedding
 
 
 @dataclass(frozen=True)
-class Edges:
-    source: torch.Tensor
-    target: torch.Tensor
-    layer: torch.Tensor
-    head: torch.Tensor
-    weight: torch.Tensor
-
-    @property
-    def count(self):
-        return int(self.source.numel())
-
-    def select(self, mask):
-        return Edges(
-            self.source[mask],
-            self.target[mask],
-            self.layer[mask],
-            self.head[mask],
-            self.weight[mask],
-        )
-
-    def to(self, device):
-        return Edges(
-            self.source.to(device),
-            self.target.to(device),
-            self.layer.to(device),
-            self.head.to(device),
-            self.weight.to(device),
-        )
-
-
-@dataclass(frozen=True)
-class TinyGraph:
+class Graph:
     response_start: int
-    token_count: int
-    response_count: int
     layer_count: int
     head_count: int
-    edges: Edges
+    token_ids: torch.Tensor
+    node_embedding: torch.Tensor
+    edge_index: torch.Tensor
+    edge_layer: torch.Tensor
+    edge_head: torch.Tensor
+    edge_weight: torch.Tensor
     diagonal: torch.Tensor
     unresolved: torch.Tensor
 
-    @property
-    def device(self):
-        return self.diagonal.device
 
-    def layer_edges(self, layer, device=None):
-        edges = self.edges.select(self.edges.layer == layer)
-        return edges if device is None else edges.to(device)
-
-
-def make_graph():
-    edges = Edges(
-        source=torch.tensor([0, 0, 1, 0, 1]),
-        target=torch.tensor([1, 2, 2, 1, 2]),
-        layer=torch.tensor([0, 0, 0, 1, 1]),
-        head=torch.zeros(5, dtype=torch.long),
-        weight=torch.tensor([0.5, 0.2, 0.3, 0.1, 0.7]),
-    )
-    diagonal = torch.tensor(
-        [
-            [[0.3], [0.6]],
-            [[0.2], [0.1]],
-        ]
-    )
-    unresolved = torch.tensor(
-        [
-            [[0.2], [0.3]],
-            [[0.3], [0.2]],
-        ]
-    )
-    return TinyGraph(1, 3, 2, 2, 1, edges, diagonal, unresolved)
-
-
-def test_attention_output_matches_dense_transport():
-    graph = make_graph()
-    state = torch.eye(3)
-    output = attention_output(graph, state, 0, "self")
-
-    expected = torch.tensor(
-        [
-            [0.5, 0.5, 0.0],
-            [0.2, 0.3, 0.5],
-        ]
-    )
-    assert torch.allclose(output, expected, atol=1e-6)
-
-
-def test_ordered_flow_exports_matched_node_views():
-    graph = make_graph()
-    views = encode_views(
-        graph,
-        FlowConfig(sketch_dim=8, residual_weight=1.0, unresolved="self"),
+def one_edge_graph():
+    return Graph(
+        response_start=1,
+        layer_count=1,
+        head_count=1,
+        token_ids=torch.tensor([10, 11]),
+        node_embedding=torch.tensor([[1.0, 0.0], [0.0, 1.0]]),
+        edge_index=torch.tensor([[0], [1]]),
+        edge_layer=torch.tensor([0]),
+        edge_head=torch.tensor([0]),
+        edge_weight=torch.tensor([0.75]),
+        diagonal=torch.tensor([[[0.25]]]),
+        unresolved=torch.zeros(1, 1, 1),
     )
 
-    assert views.full_trace.shape == (2, 16)
-    assert views.full_final.shape == (2, 8)
-    assert views.reverse_trace.shape == (2, 16)
-    assert views.trajectory.shape == (2, 2, 8)
-    assert views.identity_trace.shape == views.full_trace.shape
-    assert views.identity_final.shape == views.full_final.shape
-    assert torch.allclose(views.identity_trace[:, :8], views.identity_final)
-    assert torch.allclose(views.identity_trace[:, 8:], views.identity_final)
-    assert not torch.allclose(views.full_final, views.reverse_final)
-    assert not torch.allclose(views.full_trace[:, :8], views.full_trace[:, 8:])
+
+def test_mean_transport_matches_row_weighted_state():
+    output = flow_embedding(one_edge_graph(), mode="mean", checkpoints=1)
+    expected = torch.tensor([[0.0, 1.0, 0.75, 0.25]])
+    assert torch.allclose(output.embedding, expected)
+    assert output.trajectory.shape == (1, 1, 2)
+
+
+def test_sketch_keeps_head_identity():
+    graph = Graph(
+        response_start=1,
+        layer_count=1,
+        head_count=2,
+        token_ids=torch.tensor([10, 11]),
+        node_embedding=torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+        edge_index=torch.tensor([[0, 0], [1, 1]]),
+        edge_layer=torch.tensor([0, 0]),
+        edge_head=torch.tensor([0, 1]),
+        edge_weight=torch.tensor([1.0, 0.0]),
+        diagonal=torch.zeros(1, 1, 2),
+        unresolved=torch.tensor([[[0.0, 1.0]]]),
+    )
+    swapped = replace(graph, edge_head=torch.tensor([1, 0]))
+    first = flow_embedding(graph, mode="sketch", checkpoints=1, seed=3)
+    second = flow_embedding(swapped, mode="sketch", checkpoints=1, seed=3)
+    assert not torch.allclose(first.embedding, second.embedding)
+
+
+def test_future_target_does_not_change_earlier_response_node():
+    graph = Graph(
+        response_start=1,
+        layer_count=2,
+        head_count=1,
+        token_ids=torch.tensor([10, 11, 12]),
+        node_embedding=torch.eye(3),
+        edge_index=torch.tensor([[0, 0, 1, 0], [1, 2, 2, 1]]),
+        edge_layer=torch.tensor([0, 0, 0, 1]),
+        edge_head=torch.zeros(4, dtype=torch.long),
+        edge_weight=torch.tensor([1.0, 0.5, 0.5, 1.0]),
+        diagonal=torch.zeros(2, 2, 1),
+        unresolved=torch.zeros(2, 2, 1),
+    )
+    changed_weight = graph.edge_weight.clone()
+    changed_weight[1:3] = torch.tensor([0.9, 0.1])
+    changed = replace(graph, edge_weight=changed_weight)
+    first = flow_embedding(graph, mode="mean", checkpoints=2)
+    second = flow_embedding(changed, mode="mean", checkpoints=2)
+    assert torch.allclose(first.embedding[0], second.embedding[0])
+    assert not torch.allclose(first.embedding[1], second.embedding[1])
