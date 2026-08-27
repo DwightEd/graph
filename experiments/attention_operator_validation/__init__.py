@@ -1,5 +1,9 @@
 """Pair-specific attention operator-code mechanism validation."""
 
+from . import corrections as _corrections
+
+_corrections.install()
+
 from .features import OPERATOR_MODES, extract_answer_features
 from .operators import (
     OperatorGeometry,
