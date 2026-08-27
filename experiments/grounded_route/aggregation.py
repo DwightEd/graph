@@ -40,15 +40,24 @@ def route_moments(
 
     mass = weight.new_zeros(group_count)
     first = message.new_zeros((group_count, hidden))
-    second = message.new_zeros((group_count, hidden))
 
     mass.index_add_(0, group, weight)
     first.index_add_(0, group, message * weight[:, None])
-    second.index_add_(0, group, message.square() * weight[:, None])
 
     denominator = mass.clamp_min(1e-8)[:, None]
     mean = first / denominator
-    variance = (second / denominator - mean.square()).clamp_min(0.0)
+    # A second centered pass avoids the catastrophic cancellation in
+    # E[x^2] - E[x]^2 when a route has very small spread.  Besides being more
+    # accurate, this keeps causal-prefix encodings stable when a backend picks
+    # a different accumulation kernel for a different graph size.
+    centered_second = message.new_zeros((group_count, hidden))
+    centered = message - mean[group]
+    centered_second.index_add_(
+        0,
+        group,
+        centered.square() * weight[:, None],
+    )
+    variance = (centered_second / denominator).clamp_min(0.0)
     spread = torch.sqrt(variance + 1e-8)
     spread = torch.where(mass[:, None] > 0, spread, torch.zeros_like(spread))
 
