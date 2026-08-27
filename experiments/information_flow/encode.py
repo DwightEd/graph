@@ -37,6 +37,8 @@ def encode_bundle(
 ) -> dict[str, object]:
     bundle = load_bundle(source_index)
     records = bundle.records if limit is None else bundle.records[:limit]
+    if not records:
+        raise ValueError("source index selected no graphs")
     output_dir = Path(output_dir)
     graph_dir = output_dir / "graphs"
     graph_dir.mkdir(parents=True, exist_ok=True)
@@ -86,7 +88,7 @@ def encode_bundle(
         response_length=np.concatenate(response_lengths),
         response_token_id=np.concatenate(response_token_ids),
         embedding=np.concatenate(embeddings),
-        method=np.asarray("gcn_information_flow_sketch"),
+        method=np.asarray(f"gcn_base_route_delta_{mode}"),
         head_mode=np.asarray(mode),
         checkpoints=np.asarray(checkpoints, dtype=np.int32),
         seed=np.asarray(seed, dtype=np.int64),

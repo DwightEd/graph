@@ -7,10 +7,10 @@ evaluate a frozen score artifact.
 
 from __future__ import annotations
 
-from dataclasses import asdict
 import hashlib
-from pathlib import Path
 import random
+from dataclasses import asdict
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -41,20 +41,20 @@ from .artifacts import (
     sha256,
 )
 from .config import (
+    MESSAGE_MODES,
     GraphConfig,
     GroundedRouteConfig,
     InterventionConfig,
     LearningConfig,
-    MESSAGE_MODES,
     ModelConfig,
     TrainConfig,
 )
 from .controls import apply_variant
-from .detection import PCAKNNConfig, fit as fit_detector, save_reference
+from .detection import PCAKNNConfig, save_reference
+from .detection import fit as fit_detector
 from .graph import build_graph
 from .learning import self_supervised_loss
 from .model import GroundedRouteEncoder
-
 
 ENCODER_IMPLEMENTATION_FILES = (
     "artifacts.py",
@@ -636,6 +636,8 @@ def controlled_graph(graph, config: GroundedRouteConfig):
         )
     elif variant == "endpoint_rewire":
         changed = int((controlled.edges.source != graph.edges.source).sum().item())
+    elif variant == "no_message":
+        changed = graph.edge_count
     else:
         changed = 0
     return controlled, changed, graph.edge_count

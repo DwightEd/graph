@@ -9,14 +9,11 @@ from torch.utils.checkpoint import checkpoint
 
 from experiments.grounded_route.aggregation import lag_bucket
 from experiments.grounded_route.graph import TokenGraph
-from experiments.grounded_route.lineage import (
-    LINEAGE_STATES,
-    HeadTransition,
-    lineage_layer,
-)
+from experiments.grounded_route.lineage import LINEAGE_STATES, UNRESOLVED
 from experiments.grounded_route.model import sinusoidal_position
 
 from .config import ModelConfig
+from .flow import flow_step, initial_flow
 from .hypergraph import DirectedLayerHypergraph, layer_hypergraph
 
 
@@ -25,6 +22,7 @@ class EncoderOutput:
     node_embedding: torch.Tensor
     response_embedding: torch.Tensor
     lineage: torch.Tensor
+    flow_logits: torch.Tensor
     layer_input: torch.Tensor | None = None
 
 
@@ -46,7 +44,7 @@ def segment_softmax(
 
 
 class SourceToHyperedge(nn.Module):
-    """Pool each source role with two independent attention-slot queries."""
+    """Pool prompt-rooted and response-closed path mass into paired slots."""
 
     def __init__(self, layers: int, heads: int, config: ModelConfig) -> None:
         super().__init__()
@@ -68,11 +66,8 @@ class SourceToHyperedge(nn.Module):
             )
             for _ in range(2)
         )
-        self.lineage_value = nn.Linear(
-            LINEAGE_STATES,
-            slots * slot_dim,
-            bias=False,
-        )
+        self.source_role = nn.Embedding(2, hidden)
+        self.lineage_value = nn.Linear(LINEAGE_STATES, hidden, bias=False)
         self.message_norm = nn.LayerNorm(slot_dim)
         self.slot_key = nn.Linear(slot_dim, slot_dim, bias=False)
         self.slot_value = nn.Linear(slot_dim, slot_dim, bias=False)
@@ -89,6 +84,8 @@ class SourceToHyperedge(nn.Module):
         node_state: torch.Tensor,
         view: DirectedLayerHypergraph,
         provenance: torch.Tensor,
+        target_provenance: torch.Tensor,
+        head_flow: torch.Tensor,
     ) -> torch.Tensor:
         config = self.config
         edge_count = view.incidence_count
@@ -96,12 +93,17 @@ class SourceToHyperedge(nn.Module):
         local_slot = torch.arange(config.slots_per_role, device=device)
 
         message = node_state.new_zeros(
-            (edge_count, config.slots_per_role, config.slot_dim)
+            (edge_count, config.slot_count, config.slot_dim)
         )
         source = node_state[view.source].flatten(1)
         lineage = self.lineage_value(provenance).view(
             edge_count,
-            config.slots_per_role,
+            config.slot_count,
+            config.slot_dim,
+        )
+        source_role = self.source_role(view.role).view(
+            edge_count,
+            config.slot_count,
             config.slot_dim,
         )
         layer_slot = self.layer_id.weight[view.layer].view(
@@ -118,35 +120,37 @@ class SourceToHyperedge(nn.Module):
             lag_bucket(target - view.source, config.lag_buckets)
         ).view(edge_count, config.slot_count, config.slot_dim)
 
-        for role in range(2):
-            selected = view.role == role
-            route_slot = role * config.slots_per_role + local_slot
-            projected = self.source_projection[role](source[selected]).view(
-                -1,
+        for route in range(2):
+            route_slot = route * config.slots_per_role + local_slot
+            projected = self.source_projection[route](source).view(
+                edge_count,
                 config.slots_per_role,
                 config.slot_dim,
             )
-            message[selected] = (
+            message[:, route_slot] = (
                 projected
-                + lineage[selected]
+                + lineage[:, route_slot]
+                + source_role[:, route_slot]
                 + layer_slot[route_slot][None]
-                + head_slot[selected][:, route_slot]
-                + lag_slot[selected][:, route_slot]
+                + head_slot[:, route_slot]
+                + lag_slot[:, route_slot]
             )
 
         message = self.message_norm(message)
-        query = self.slot_query[view.role]
+        query = self.slot_query.reshape(config.slot_count, config.slot_dim)[None]
         logit = (self.slot_key(message) * query).sum(dim=-1)
         logit = logit / math.sqrt(config.slot_dim)
-        logit = logit + view.weight.clamp_min(1e-12).log()[:, None]
+        route_weight = view.weight[:, None] * provenance[:, :2]
+        slot_weight = route_weight.repeat_interleave(config.slots_per_role, dim=1)
+        logit = logit + slot_weight.clamp_min(1e-12).log()
 
-        global_slot = view.role[:, None] * config.slots_per_role + local_slot[None]
-        group = view.hyperedge[:, None] * config.slot_count + global_slot
+        global_slot = torch.arange(config.slot_count, device=device)
+        group = view.hyperedge[:, None] * config.slot_count + global_slot[None]
         attention = segment_softmax(
             logit.flatten(),
             group.flatten(),
             view.hyperedge_count * config.slot_count,
-        ).view(edge_count, config.slots_per_role)
+        ).view(edge_count, config.slot_count)
 
         hyperedge = node_state.new_zeros(
             (view.hyperedge_count * config.slot_count, config.slot_dim)
@@ -162,20 +166,21 @@ class SourceToHyperedge(nn.Module):
             config.slot_dim,
         )
 
-        role_mass = view.weight.new_zeros((view.hyperedge_count, 2))
-        role_mass.index_put_(
-            (view.hyperedge, view.role),
-            view.weight,
-            accumulate=True,
-        )
-        slot_mass = role_mass.repeat_interleave(config.slots_per_role, dim=1)
+        route_mass = view.weight.new_zeros((view.hyperedge_count, 2))
+        route_mass.index_add_(0, view.hyperedge, route_weight)
+        slot_mass = route_mass.repeat_interleave(config.slots_per_role, dim=1)
         hyperedge = hyperedge * slot_mass[..., None]
 
         target_state = node_state[view.target]
-        hyperedge = hyperedge + view.diagonal[:, None, None] * self.self_message(
+        diagonal_route = view.diagonal[:, None] * target_provenance[:, :2]
+        diagonal_slot = diagonal_route.repeat_interleave(
+            config.slots_per_role,
+            dim=1,
+        )
+        hyperedge = hyperedge + diagonal_slot[..., None] * self.self_message(
             target_state
         )
-        hyperedge = hyperedge + view.unresolved[:, None, None] * (
+        hyperedge = hyperedge + head_flow[:, UNRESOLVED, None, None] * (
             self.unresolved_message[view.layer, view.head]
         )
         hyperedge = hyperedge + layer_slot[None] + self.head_id(view.head).view(
@@ -246,14 +251,13 @@ class DirectedRouteHypergraphEncoder(nn.Module):
         nn.init.normal_(self.prompt_role, std=0.02)
         nn.init.normal_(self.response_role, std=0.02)
 
-        self.head_transition = HeadTransition(
-            layers,
-            heads,
-            self.config.head_transition_identity_bias,
-        )
         self.source_to_hyperedge = SourceToHyperedge(layers, heads, self.config)
         self.hyperedge_to_target = HyperedgeToTarget(self.config)
         self.output_norm = nn.LayerNorm(hidden)
+        self.flow_readout = nn.Sequential(
+            nn.LayerNorm(hidden),
+            nn.Linear(hidden, LINEAGE_STATES),
+        )
         self.route_query = nn.Sequential(
             nn.LayerNorm(hidden),
             nn.Linear(hidden, hidden),
@@ -289,46 +293,49 @@ class DirectedRouteHypergraphEncoder(nn.Module):
         self,
         graph: TokenGraph,
         state: torch.Tensor,
-        previous_lineage: torch.Tensor,
-        transition: torch.Tensor,
+        token_flow: torch.Tensor,
         layer: int,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Consume one Transformer layer without retaining duplicate edge copies."""
 
         edges = graph.layer_edges(layer, state.device)
-        current_lineage, provenance = lineage_layer(
+        route = flow_step(
             graph,
-            None if layer == 0 else previous_lineage,
-            transition,
+            token_flow,
             layer,
-            edges,
+            residual_weight=self.config.residual_weight,
+            edges=edges,
         )
         view = layer_hypergraph(graph, layer, state.device, edges)
-        hyperedge = self.source_to_hyperedge(state, view, provenance)
+        hyperedge = self.source_to_hyperedge(
+            state,
+            view,
+            route.provenance,
+            token_flow[view.target],
+            route.head_flow.reshape(view.hyperedge_count, LINEAGE_STATES),
+        )
         updated = self.hyperedge_to_target(
             state[graph.response_start :],
             hyperedge,
             graph.head_count,
         )
         state = torch.cat((state[: graph.response_start], updated), dim=0)
-        return state, current_lineage
+        return state, route.token_state, route.head_flow
 
     def apply_layer(
         self,
         graph: TokenGraph,
         state: torch.Tensor,
-        previous_lineage: torch.Tensor,
-        transition: torch.Tensor,
+        token_flow: torch.Tensor,
         layer: int,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Checkpoint edge-sized activations while fitting full-depth graphs."""
 
-        def step(current_state, current_lineage, current_transition):
+        def step(current_state, current_flow):
             return self.layer_step(
                 graph,
                 current_state,
-                current_lineage,
-                current_transition,
+                current_flow,
                 layer,
             )
 
@@ -336,12 +343,11 @@ class DirectedRouteHypergraphEncoder(nn.Module):
             return checkpoint(
                 step,
                 state,
-                previous_lineage,
-                transition,
+                token_flow,
                 use_reentrant=False,
                 preserve_rng_state=True,
             )
-        return step(state, previous_lineage, transition)
+        return step(state, token_flow)
 
     def forward(
         self,
@@ -349,25 +355,25 @@ class DirectedRouteHypergraphEncoder(nn.Module):
         return_layer_input: bool = False,
     ) -> EncoderOutput:
         graph = graph.canonicalize()
-        transition = self.head_transition()
         state = self.initial_nodes(graph)
-        previous_lineage = state.new_zeros(
-            (graph.response_count, graph.head_count, LINEAGE_STATES)
-        )
+        token_flow = initial_flow(graph).to(state.device, dtype=state.dtype)
         lineage_history = []
+        flow_logits = []
         layer_inputs = []
 
         for layer in range(graph.layer_count):
             if return_layer_input:
                 layer_inputs.append(state)
-            state, previous_lineage = self.apply_layer(
+            state, token_flow, head_flow = self.apply_layer(
                 graph,
                 state,
-                previous_lineage,
-                transition[layer],
+                token_flow,
                 layer,
             )
-            lineage_history.append(previous_lineage)
+            lineage_history.append(head_flow)
+            flow_logits.append(
+                self.flow_readout(state[graph.response_start :].flatten(1))
+            )
 
         flat_state = state.flatten(1)
         node_embedding = self.output_norm(flat_state)
@@ -376,6 +382,7 @@ class DirectedRouteHypergraphEncoder(nn.Module):
             node_embedding=node_embedding,
             response_embedding=node_embedding[graph.response_start :],
             lineage=torch.stack(lineage_history, dim=1),
+            flow_logits=torch.stack(flow_logits, dim=1),
             layer_input=layer_input,
         )
 

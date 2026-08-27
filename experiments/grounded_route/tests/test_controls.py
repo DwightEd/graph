@@ -10,6 +10,7 @@ from experiments.grounded_route.config import (
 )
 from experiments.grounded_route.controls import (
     lag_bucket,
+    remove_messages,
     rewire_endpoints_keep_roles,
     shuffle_weights_keep_endpoints,
     source_role,
@@ -56,6 +57,20 @@ def grouped_weight_multisets(graph):
         )
         groups.setdefault(key, []).append(float(graph.edges.weight[index]))
     return {key: sorted(value) for key, value in groups.items()}
+
+
+def test_no_message_moves_retained_mass_to_unresolved():
+    graph = make_graph()
+    removed = remove_messages(graph)
+
+    assert removed.edge_count == 0
+    assert torch.equal(removed.diagonal, graph.diagonal)
+    assert torch.allclose(
+        removed.diagonal + removed.unresolved,
+        torch.ones_like(removed.diagonal),
+        atol=1e-6,
+        rtol=1e-6,
+    )
 
 
 def test_weight_shuffle_keeps_endpoints_support_and_all_row_nuisances():
@@ -120,6 +135,7 @@ def test_endpoint_double_swap_preserves_roles_degrees_weights_and_causality():
 @pytest.mark.parametrize(
     ("variant", "graph"),
     (
+        ("no_message", make_graph()),
         ("weight_shuffle", make_weight_shuffle_graph()),
         ("endpoint_rewire", make_rewirable_graph()),
     ),

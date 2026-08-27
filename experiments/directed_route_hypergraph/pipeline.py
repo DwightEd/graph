@@ -41,7 +41,7 @@ from .config import LearningConfig, ModelConfig, TrainConfig
 from .learning import self_supervised_loss
 from .model import DirectedRouteHypergraphEncoder
 
-METHOD = "directed_route_hypergraph"
+METHOD = "directed_route_hypergraph_flow_dae"
 
 
 def fit(
@@ -90,6 +90,9 @@ def fit(
         order = list(split["fit_sample_ids"])
         random.Random(train_config.seed + epoch).shuffle(order)
         losses = []
+        row_losses = []
+        flow_losses = []
+        variance_losses = []
         for sample_id in tqdm(order, desc=f"fit epoch {epoch + 1}", unit="sample"):
             graph = load_graph(
                 dataset,
@@ -113,6 +116,9 @@ def fit(
             )
             optimizer.step()
             losses.append(float(output.loss.detach().item()))
+            row_losses.append(float(output.row.detach().item()))
+            flow_losses.append(float(output.flow.detach().item()))
+            variance_losses.append(float(output.variance.detach().item()))
 
         validation = validation_epoch(
             model,
@@ -127,11 +133,17 @@ def fit(
         row = {
             "epoch": epoch + 1,
             "train_loss": float(np.mean(losses)),
-            "validation_loss": validation,
+            "train_row_loss": float(np.mean(row_losses)),
+            "train_flow_loss": float(np.mean(flow_losses)),
+            "train_variance_loss": float(np.mean(variance_losses)),
+            "validation_loss": validation["loss"],
+            "validation_row_loss": validation["row"],
+            "validation_flow_loss": validation["flow"],
+            "validation_variance_loss": validation["variance"],
         }
         history.append(row)
-        if validation < best_validation:
-            best_validation = validation
+        if validation["loss"] < best_validation:
+            best_validation = validation["loss"]
             best_state = {
                 name: value.detach().cpu().clone()
                 for name, value in model.state_dict().items()
@@ -443,9 +455,9 @@ def validation_epoch(
     learning_config,
     train_config,
     device,
-) -> float:
+) -> dict[str, float]:
     model.eval()
-    values = []
+    values = {name: [] for name in ("loss", "row", "flow", "variance")}
     with torch.no_grad():
         for sample_id in sample_ids:
             graph = load_graph(
@@ -463,8 +475,11 @@ def validation_epoch(
                 learning_config,
                 generator,
             )
-            values.append(float(output.loss.item()))
-    return float(np.mean(values))
+            values["loss"].append(float(output.loss.item()))
+            values["row"].append(float(output.row.item()))
+            values["flow"].append(float(output.flow.item()))
+            values["variance"].append(float(output.variance.item()))
+    return {name: float(np.mean(current)) for name, current in values.items()}
 
 
 def restore_model(checkpoint_path, device):

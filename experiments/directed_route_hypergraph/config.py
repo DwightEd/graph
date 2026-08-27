@@ -11,7 +11,7 @@ class ModelConfig:
     edge_hidden_dim: int = 64
     lag_buckets: int = 12
     dropout: float = 0.1
-    head_transition_identity_bias: float = 2.0
+    residual_weight: float = 1.0
 
     @property
     def hidden_dim(self) -> int:
@@ -21,6 +21,9 @@ class ModelConfig:
 @dataclass(frozen=True)
 class LearningConfig:
     rows_per_graph: int = 256
+    incidence_dropout: float = 0.15
+    head_dropout: float = 0.05
+    flow_weight: float = 0.5
     variance_weight: float = 0.05
 
 

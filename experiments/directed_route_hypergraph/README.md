@@ -1,191 +1,139 @@
 # Directed Route Hypergraph
 
-本目录检验一个明确而可反证的假设：在生成每个 response token 时，模型并不是只依赖一个无类型的邻域，而是在 Transformer 的不同 layer/head 中，在两类路由之间动态分配注意力质量：
+本目录检验一个可反证的假设：上下文幻觉可能不是“关注历史 token 太多”，而是生成路径逐层从 prompt-origin routing 转向 response-closed self-conditioning。方法把确定性的跨层路径流作为结构 teacher，再训练一个去噪有向超图编码器；最终仍输出每个 token 一个 64 维神经表征。P 只表示路径追溯到某个 prompt token，不表示该 token 与问题相关或构成有效证据。
 
-```text
-prompt route     从问题、检索上下文和约束条件读取证据
-response route   从已经生成的 response 读取并延续当前生成状态
-```
+当前缓存只有稀疏 attention，因此本文档始终使用 **routing provenance**，不把它称为 functional contribution。
 
-上下文幻觉可能对应 prompt route 减弱、response route 逐步闭合并稳定自我强化。但当前输入只有稀疏 attention 权重，所以这里检验的是 **attention routing signature**，不是 Transformer 的完整 functional information flow。只有真实图显著优于保持边际统计的构图 controls，才能说明具体端点、权重配对和邻居传播确实有用。
+## 与 Information Flow 方法的关系
 
-## 图与张量
+`Information Flow Reveals When to Trust Language Models` 对每层真实 (W_V/W_O)、hidden state 和 residual 计算 source contribution，再按 Transformer layer 顺序相乘 contribution matrices。它的 attribution 算子不训练新 encoder，但完整系统还使用 neural reranker、SHAP 和 correctness-label XGBoost。
 
-一条 prompt-response 样本是一张因果 token 图。每条保留的 attention incidence 为
+本目录迁移的是“逐层有序路径组合”，没有声称复现论文的 OV contribution。现有缓存缺少 hidden state、(W_V/W_O) 和 residual stream，只能构造 attention-only 近似。显式 `residual_weight` 是预注册 proxy，不是真实 residual attribution。
+
+## 1. 质量守恒的有序路径 teacher
+
+一条保留 incidence 为
 
 \[
-(s,t,l,h,a_{t,s}^{l,h}),\qquad s<t,
+(s,t,l,h,a_{t,s}^{l,h}),\qquad s<t.
 \]
 
-其中 `s` 是 source token，`t` 是 response target token，`l` 是 Transformer layer，`h` 是 attention head。构图前不平均 layer 或 head。
-
-对每个 row
-
-\[
-e=(t,l,h),
-\]
-
-创建一个有方向的 attention-row hyperedge。计算路径严格为
+每个 token 的路径来源为三态分布：
 
 ```text
-source token node
-    -> (target, layer, head) row hyperedge
-    -> target token node
+P  prompt-origin
+R  response-origin / response-closed
+U  unresolved because of sparse-cache censoring
 ```
 
-实现中的主要张量为：
-
-```text
-source       [I]          incidence 的 source token
-hyperedge    [I]          incidence 所属 row
-weight       [I]          retained attention weight
-role         [I]          prompt / response source
-target       [R]          每个 row 的 target token
-head         [R]          每个 row 的 head
-diagonal     [R]          self-attention mass
-unresolved   [R]          稀疏缓存未保留的 censored mass
-node_state   [N, 4, 16]   token 的四槽状态
-hyperedge    [R, 4, 16]   row hyperedge 的四槽状态
-```
-
-`I` 是保留 incidence 数，`R=response_tokens × heads`，`N` 是 token 数。
-
-## 四个 route slots
-
-每个 token 保留四个 16 维槽，最终恰好得到 64 维表示：
-
-```text
-slot P1, P2   prompt-source set 的两个独立 learned summaries
-slot R1, R2   response-source set 的两个独立 learned summaries
-```
-
-P1/P2 或 R1/R2 没有预先指定“实体”“数字”等手工语义。每个角色使用两个独立 slot query，使同一 attention row 可以保留两种互补的 source coalition，而不是把所有邻居压成一个均值。slot 的实际功能必须通过 slot ablation、端点干预和可视化后验解释，不能从名字直接宣称。
-
-## Node -> hyperedge -> target
-
-### 1. Source node 到 row hyperedge
-
-对 incidence \(s\to e\)，先构造带类型的 source message：
+初始 prompt token 为 `(1,0,0)`，response token 为 `(0,1,0)`。对 row `e=(t,l,h)`：
 
 \[
-m_{e,s,k}=\phi_{r(s),k}
-\left(
-x_s,\;l,\;h,\;\operatorname{bucket}(t-s),\;\operatorname{lineage}_{s\to e}
-\right),
-\]
-
-其中 \(k\) 是该 source role 的两个 slots 之一。row 内不是直接求和，而是使用 attention weight 作为 learned slot attention 的先验：
-
-\[
-\beta_{e,s,k}
+\rho_{t,h}^{l}
 =
-\operatorname{softmax}_{s\in S_e^{r}}
-\left(
-\frac{q_{r,k}^{\top}K m_{e,s,k}}{\sqrt d}
-+\log(a_{t,s}^{l,h})
-\right).
+\sum_{s<t}a_{t,s}^{l,h}\pi_s^{l-1}
++d_{t,h}^{l}\pi_t^{l-1}
++u_{t,h}^{l}(0,0,1).
 \]
 
-归一化后的内容和该角色的真实 retained mass 分开计算：
+构图保证
 
 \[
-\mu_{e,k}=\sum_{s\in S_e^r}\beta_{e,s,k}V m_{e,s,k},
-\qquad
-M_e^r=\sum_{s\in S_e^r}a_{t,s}^{l,h},
+\sum_{s<t}a_{t,s}^{l,h}+d_{t,h}^{l}+u_{t,h}^{l}=1,
 \]
+
+所以每个 `head_flow[t,l,h]` 也严格和为 1。跨层 token state 使用 head-uniform merge 和显式 residual proxy：
 
 \[
-z_{e,k}=M_e^r\mu_{e,k}
-+d_e\,\phi_{\mathrm{self}}(x_t)
-+u_e\,b_{l,h,k}.
+\pi_t^l=
+\frac{\alpha\pi_t^{l-1}+H^{-1}\sum_h\rho_{t,h}^{l}}
+{\alpha+1}.
 \]
 
-这里 \(d_e\) 是 diagonal mass，\(u_e\) 是 unresolved mass。先对邻居内容做归一化、再乘回 route mass，可以避免节点度数直接决定表示尺度，同时不丢失 prompt/response 使用量。
+prompt-query rows没有缓存，因此 prompt states 始终固定。实现位于 `flow.py`，保存的机制张量为 `[response, layer, head, P/R/U]`。
 
-### 2. Row hyperedge 到 target node
+这个算子不训练参数。它与 contribution-matrix product 的共同点是 layer 顺序不可交换；不同点是边权只有 attention，不含 OV 或真实 residual contribution。
 
-同一 target 和 layer 下的 heads 仍然分开形成 row states，然后按 slot 做 learned head pooling：
+## 2. Provenance-aware node -> hyperedge -> node
+
+每个 `(target,layer,head)` 是一个有向 row hyperedge：
+
+```text
+source token -> attention-row hyperedge -> target token
+```
+
+编码器保留四个 16 维槽：
+
+```text
+P1/P2  prompt-origin-conditioned learned source-set summaries
+R1/R2  response-closed-conditioned learned source-set summaries
+```
+
+这里按完整路径来源给消息加权，而不是按 source token 的直接角色分流。一个 response source 只要它本身承载 prompt provenance，就继续给 P-conditioned slots 提供质量；这避免把 `prompt -> earlier response -> current response` relay 全部错算成 response closure。
+
+这些槽不是数学上纯净的 P/R factorization：初始 node state、layer/head context 和 GRU recurrence 会被共享保留。准确说法是 route-conditioned slots；其纯度必须通过 zero-route gating 和 slot intervention 另行验证。
+
+对 incidence 的两条可解析质量为
 
 \[
-\gamma_{t,l,h,k}
-=
-\operatorname{softmax}_{h}
-\left[
-w^{\top}\tanh(Qx_{t,l-1,k}+Kz_{t,l,h,k})
-\right],
+w_{e,s}^{P}=a_{e,s}\pi_{s,P}^{l-1},\qquad
+w_{e,s}^{R}=a_{e,s}\pi_{s,R}^{l-1}.
 \]
+
+每个 route 内用 learned slot attention 聚合非线性 source messages，attention weight 只作为 prior。聚合后的内容乘回 route mass；diagonal 也按 target 的 P/R provenance 拆分。由 retained paths、diagonal 和当前 row censoring 共同产生的 U mass 以独立 learned message 注入。随后同一 target 的 heads 做 learned pooling，四个 GRU 沿 layer depth 更新 target node。
+
+因此该模型不是邻居向量的简单累加。解析 teacher 不训练，而 `SourceToHyperedge`、slot queries、head pooling、GRU、row decoder 和 flow decoder 都是可训练神经网络。
+
+## 3. 守恒式去噪训练
+
+训练时只使用符合缓存观测模型的 corruption：
+
+- 随机隐藏 retained incidence；
+- 随机隐藏完整 `(layer, head)` channel；
+- 被隐藏的质量原样转入对应 row 的 `unresolved`；
+- 不重连 endpoint，不改变 diagonal，row 总质量仍为 1。
+
+`endpoint_rewire` 和 `weight_shuffle` 只作为独立训练的 null controls，不能作为增强。
+
+student 编码受扰动图，但目标来自干净图：
 
 \[
-c_{t,l,k}=\sum_h\gamma_{t,l,h,k}z_{t,l,h,k},
-\qquad
-x_{t,l,k}=\operatorname{GRU}_k(c_{t,l,k},x_{t,l-1,k}).
+\mathcal L=
+\mathcal L_{row}
++\lambda_f\mathcal L_{flow}
++\lambda_v\mathcal L_{variance}.
 \]
 
-这一步沿 Transformer depth 依次更新 response nodes。因此，该编码器不是普通的邻居特征累加：它包含 source-role 分流、多个 source-set slots、row-level hyperedges、head-specific pooling、mass 保留和 layer-wise recurrent update。
-
-训练时每个完整 layer step 使用 non-reentrant activation checkpointing。反向传播会重算该层，避免同时保留 32 层中所有 incidence-sized message 激活；同一层的 edge tensors 在 lineage 与 hyperedge 构造间复用。编码阶段处于 `eval/no_grad`，不会产生重算开销。
-
-## Censoring-aware 守恒 row 目标
-
-稀疏缓存未保存的 attention 只表示低于缓存阈值，不能当作真实零边，也不能自动当作负样本。对 row \(e=(t,l,h)\)，目标分布保留三部分：
+`row` 目标在干净图给定的 retained support、SELF 和 UNRESOLVED 候选上恢复质量分配；它不制造 censored non-edge negatives，但也不能证明模型学会了发现未给定的 endpoint support。`flow` 目标从每层 post-update node state 解码干净的 \((P,R,U)\) ordered-flow trajectory：
 
 \[
-q_e(s)=a_{t,s}^{l,h}\quad(s\in E_e),
-\qquad
-q_e(\mathrm{self})=d_e,
-\qquad
-q_e(\mathrm{unresolved})=u_e,
+\mathcal L_{flow}
+=-\frac1{TL}\sum_{t,l}\pi_{t}^{l,*}
+\log\operatorname{softmax}(g(x_{t,l})).
 \]
 
-并满足 row 质量守恒：
+hallucination labels 不进入 encoder、early stopping 或 detector fitting。去噪重构误差也不作为 hallucination score；一个稳定错误 attractor 可能同样容易重构。
 
-\[
-\sum_{s\in E_e}q_e(s)+d_e+u_e=1.
-\]
+## 4. 导出与检测
 
-encoder 使用进入当前 layer 前的 node states，对已知 retained support 中的 endpoints、self bucket 和 unresolved bucket 评分，并在同一个 row 内归一化：
-
-\[
-\mathcal L_{\mathrm{row}}
-=-
-\frac{1}{|\mathcal R|}
-\sum_{e\in\mathcal R}
-\left[
-\sum_{s\in E_e}a_{t,s}^{l,h}\log p_e(s)
-+d_e\log p_e(\mathrm{self})
-+u_e\log p_e(\mathrm{unresolved})
-\right].
-\]
-
-训练不读取 hallucination labels。这个目标学习的是**给定 retained support 后的质量分配**，要求表示保留可观测 row 的相对端点质量以及 self/unresolved 质量结构；它不把 censored endpoints 伪造为可靠负例，也不把 retained weights 重新归一化后丢掉 self/unresolved mass。由于候选集合本身包含真实 retained support，该目标不能单独证明模型学会了预测哪些 endpoint 应当存在。
-
-## 节点表征与无监督检测
-
-最后一层的四槽状态被展平并归一化：
+最后四槽展平并归一化：
 
 \[
 z_t=\operatorname{LayerNorm}
-\left[
-x_{t,L,P1}\Vert x_{t,L,P2}\Vert
-x_{t,L,R1}\Vert x_{t,L,R2}
-\right]\in\mathbb R^{64}.
+(P1\Vert P2\Vert R1\Vert R2)\in\mathbb R^{64}.
 \]
 
-`encode` 阶段为每个 token 保存一个 64 维 `node_embedding`。下游 detector 不再读取边或执行第二个 GNN：
+下游只读取冻结的 64D `node_embedding`：
 
 ```text
-64D node_embedding
-    -> median/MAD normalization
-    -> PCA whitening
-    -> mean kNN distance
-    -> token anomaly score
+64D node embedding -> robust scaling -> PCA whitening -> mean kNN distance
 ```
 
-PCA-kNN 只在 source-disjoint 的无标签 calibration embeddings 上拟合。hallucination labels 在分数保存后才用于 AUROC、AUPRC 和 source bootstrap 评价。
+calibration 与 test 按 `source_id` 隔离。test labels 在 token scores 保存之后才打开，用于 AUROC/AUPRC 和 source bootstrap。
 
-## 运行
+每样本 `graphs/*.pt` 还保存 exact typed edges、diagonal、unresolved 和解析式 `[R,L,H,3]` path flow，供机制审计；这些 sidecar 不进入 detector。
 
-服务器 QA 全流程：
+## 5. 一键运行 QA
 
 ```bash
 cd /share/home/tm902089733300000/a903202310/lys/research/graph
@@ -193,62 +141,53 @@ git pull --ff-only origin main
 bash experiments/directed_route_hypergraph/run_qa.sh
 ```
 
-默认执行：
+小规模 smoke test：
 
-```text
-fit label-free encoder
-encode calibration nodes
-encode test nodes
-fit PCA-kNN and freeze scores
-open labels for post-hoc evaluation
+```bash
+EPOCHS=1 \
+TRAIN_LIMIT=32 \
+TEST_LIMIT=16 \
+OUT=experiments/directed_route_hypergraph/outputs/smoke \
+bash experiments/directed_route_hypergraph/run_qa.sh
 ```
 
-默认输出目录（不同 variant/seed 自动隔离）：
+默认去噪参数可从环境覆盖：
 
 ```text
-experiments/directed_route_hypergraph/outputs/qa/real_seed20260827/
-├── model.pt
-├── calibration/index.npz
-├── calibration/graphs/*.pt
-├── test/index.npz
-├── test/graphs/*.pt
-├── detector.npz
-├── scores.npz
-└── evaluation.json
+INCIDENCE_DROPOUT=0.15
+HEAD_DROPOUT=0.05
+FLOW_WEIGHT=0.5
+RESIDUAL_WEIGHT=1.0
 ```
 
-## 必要 controls
+设 `INCIDENCE_DROPOUT=0 HEAD_DROPOUT=0 FLOW_WEIGHT=0` 可得到同一实现中的 row-only ablation。
 
-单个 real run 不能证明 hypergraph 有效。正式结论至少需要在相同 source split、seed、训练预算和 node-only detector 下比较：
+## 6. 已实现对照、后续对照与停止条件
+
+当前一键入口已经支持：
 
 ```text
-first-order GCN       普通 pairwise graph 基线
-no-message            只保留节点自身状态
-endpoint-rewire       保持 layer/head/role/lag/degree/row mass，破坏真实 source
-weight-shuffle        保持 endpoints 与 row mass，破坏 weight-endpoint 配对
-layer-head-average    构图前平均 layer/head
-role-merged           合并 prompt 与 response source sets
-one-slot-per-role     检验两个 learned slots 是否必要
-retained-only loss    去掉 self/unresolved 守恒目标
-position-only/no-pos  排除位置捷径
+row-only          INCIDENCE_DROPOUT=0 HEAD_DROPOUT=0 FLOW_WEIGHT=0
+no_message        VARIANT=no_message
+endpoint_rewire   VARIANT=endpoint_rewire
+weight_shuffle    VARIANT=weight_shuffle
+residual alpha    RESIDUAL_WEIGHT=0/0.5/1/2 分别训练
 ```
 
-应使用 paired source bootstrap 报告 `real - control` 的 AUROC/AUPRC 区间。若 endpoint rewiring、weight shuffling 或 no-message 不降低结果，就不能把增益归因于真实 hypergraph topology。
+正式机制结论前仍需接入同一 evaluator 的 `ordered vs reverse`、one-step、position/length、deterministic-flow-only controls；当前代码和结果不能暗示这些对照已经完成。
 
-## Attention-only 的解释边界
+若未来 ordered 不优于 reverse、real 不优于 endpoint-rewire/weight-shuffle，结果随 residual proxy 大幅变化，或信号主要由位置、长度、unresolved mass 解释，就不能把增益归因于真实跨层路径。此时应停止增加 GNN 容量，转而采集 OV/residual caches。
 
-当前缓存不含每个 head 的 value/output contribution、FFN output 和 residual-stream change。真实 head message 更接近
+## 解释边界
 
-\[
-a_{t,s}^{l,h}W_O^{l,h}W_V^{l,h}h_{s,l-1},
-\]
+当前实现是 post-hoc same-token routing representation，不是论文的 trust-before-next-token estimator。首个 response token 的生成前状态需要 prompt 最后一行，而当前缓存没有 prompt-query row。
 
-而本方法只能观察其中的 \(a_{t,s}^{l,h}\)。因此：
+现有数据不能验证：
 
-- 可以声称学习了 attention routing representation；
-- 可以检验 prompt/response route、端点和权重配对是否具有检测信号；
-- 不能把 attention edge 直接称为语义贡献或 functional information flow；
-- 不能仅凭 head attention 较大断言该 head 因果决定了输出；
-- 若要研究 prompt evidence 与 FFN parametric memory 的竞争，必须额外缓存 OV outputs、attention/FFN 前后 residual，或执行 activation intervention。
+- token 内容冲突；当前节点初态只有角色与位置，token IDs 不进入 encoder；
+- attention route 对 logits 的真实功能贡献；
+- FFN parametric memory 与 prompt-origin routing 的竞争；
+- value/residual message 的语义冲突、谱熵或有效秩；
+- 某条 route 对错误输出的因果作用。
 
-这个限制与 [Attention is not Explanation](https://aclanthology.org/N19-1357/)、[Information Flow Routes](https://aclanthology.org/2024.emnlp-main.965/) 和 [ReDeEP](https://arxiv.org/abs/2410.11414) 的结论一致。prompt/response 分流受到 [Lookback Lens](https://aclanthology.org/2024.emnlp-main.84/) 启发；保留 head identity 和必要干预受到 [Retrieval Head](https://arxiv.org/abs/2404.15574) 支持；方法主张必须通过结构必要性、干扰不变性和因果可编辑性三重验证，这一标准来自 [Grounding latent algorithm routing](https://arxiv.org/abs/2607.24471)。
+这些主张需要补采 per-head OV message、attention/FFN 前后 residual、logit attribution，并加入 activation patching 或 head/endpoint intervention。

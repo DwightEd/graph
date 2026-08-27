@@ -2,7 +2,12 @@ from dataclasses import dataclass, replace
 
 import torch
 
-from experiments.information_flow.transport import flow_embedding
+from experiments.information_flow.basis import source_basis
+from experiments.information_flow.transport import (
+    flow_embedding,
+    sketch_tables,
+    transport_layer,
+)
 
 
 @dataclass(frozen=True)
@@ -58,9 +63,37 @@ def test_sketch_keeps_head_identity():
         unresolved=torch.tensor([[[0.0, 1.0]]]),
     )
     swapped = replace(graph, edge_head=torch.tensor([1, 0]))
-    first = flow_embedding(graph, mode="sketch", checkpoints=1, seed=3)
-    second = flow_embedding(swapped, mode="sketch", checkpoints=1, seed=3)
-    assert not torch.allclose(first.embedding, second.embedding)
+    state = source_basis(2, 1, 2)
+    permutation = torch.tensor([[0, 1], [0, 1]])
+    sign = torch.tensor([[1.0, 1.0], [-1.0, 1.0]])
+    first = transport_layer(graph, state, 0, permutation, sign, "sketch")
+    second = transport_layer(swapped, state, 0, permutation, sign, "sketch")
+    assert not torch.allclose(first, second)
+
+
+def test_self_only_rows_are_identity_and_prompt_never_drifts():
+    graph = replace(
+        one_edge_graph(),
+        edge_index=torch.empty((2, 0), dtype=torch.long),
+        edge_layer=torch.empty(0, dtype=torch.long),
+        edge_head=torch.empty(0, dtype=torch.long),
+        edge_weight=torch.empty(0),
+        diagonal=torch.ones(1, 1, 1),
+    )
+    state = source_basis(2, 1, 2)
+    permutation, sign = sketch_tables(1, 1, 2, 19, state.device)
+    updated = transport_layer(
+        graph,
+        state,
+        0,
+        permutation[0],
+        sign[0],
+        "sketch",
+    )
+
+    assert torch.equal(updated, state)
+    output = flow_embedding(graph, mode="sketch", checkpoints=1, seed=19)
+    assert torch.equal(output.trajectory[:, 0], state[1:])
 
 
 def test_future_target_does_not_change_earlier_response_node():

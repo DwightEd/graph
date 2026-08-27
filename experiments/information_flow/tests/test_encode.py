@@ -60,7 +60,12 @@ def test_encode_bundle_saves_row_aligned_node_data(tmp_path, monkeypatch):
     bundle = type("Bundle", (), {"records": (Record(graph),)})()
     monkeypatch.setattr(encode, "load_bundle", lambda _: bundle)
 
-    report = encode.encode_bundle("source.npz", tmp_path, mode="mean")
+    report = encode.encode_bundle(
+        "source.npz",
+        tmp_path,
+        mode="mean",
+        checkpoints=1,
+    )
     with np.load(tmp_path / "index.npz", allow_pickle=False) as data:
         assert data["embedding"].shape == (1, 4)
         assert data["sample_id"].tolist() == ["sample"]

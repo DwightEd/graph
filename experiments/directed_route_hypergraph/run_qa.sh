@@ -9,7 +9,7 @@ TASK=${TASK:-QA}
 VARIANT=${VARIANT:-real}
 SEED=${SEED:-20260827}
 CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
-OUT=${OUT:-${REPO}/experiments/directed_route_hypergraph/outputs/${TASK,,}/${VARIANT}_seed${SEED}}
+OUT=${OUT:-${REPO}/experiments/directed_route_hypergraph/outputs/${TASK,,}/flow_dae_${VARIANT}_seed${SEED}}
 
 cd "${REPO}" || exit 1
 
@@ -22,6 +22,10 @@ TASK="${TASK}" \
 DEVICE="${DEVICE}" \
 EPOCHS=${EPOCHS:-8} \
 ROWS_PER_GRAPH=${ROWS_PER_GRAPH:-256} \
+INCIDENCE_DROPOUT=${INCIDENCE_DROPOUT:-0.15} \
+HEAD_DROPOUT=${HEAD_DROPOUT:-0.05} \
+FLOW_WEIGHT=${FLOW_WEIGHT:-0.5} \
+RESIDUAL_WEIGHT=${RESIDUAL_WEIGHT:-1.0} \
 VARIANT="${VARIANT}" \
 SEED="${SEED}" \
 TRAIN_LIMIT=${TRAIN_LIMIT:-} \

@@ -7,7 +7,7 @@ from .encode import encode_bundle
 
 def command_line() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Compose typed attention flow over frozen GCN node states"
+        description="Append identity-preserving route deltas to frozen GCN nodes"
     )
     parser.add_argument("--source-index", required=True)
     parser.add_argument("--output", required=True)

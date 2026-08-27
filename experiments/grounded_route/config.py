@@ -2,7 +2,7 @@
 
 from dataclasses import asdict, dataclass, field
 
-GRAPH_VARIANTS = ("real", "weight_shuffle", "endpoint_rewire")
+GRAPH_VARIANTS = ("real", "no_message", "weight_shuffle", "endpoint_rewire")
 MESSAGE_MODES = ("neighbor", "row_local")
 LEARNING_OBJECTIVES = ("pairwise", "row_distribution")
 

@@ -89,8 +89,10 @@ def test_self_supervised_objective_backpropagates_without_labels_or_nonedges():
     assert output.candidate_count == graph.edge_count + 2 * total
     assert torch.isfinite(output.loss)
     assert float(output.row.detach()) > 0
+    assert float(output.flow.detach()) > 0
     assert model.route_query[-1].weight.grad is not None
     assert model.bucket_key.grad is not None
+    assert model.flow_readout[-1].weight.grad is not None
     assert model.source_to_hyperedge.source_projection[0][-1].weight.grad is not None
 
 

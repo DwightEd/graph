@@ -20,6 +20,10 @@ def command_line() -> argparse.ArgumentParser:
     command.add_argument("--limit", type=int)
     command.add_argument("--epochs", type=int, default=8)
     command.add_argument("--rows-per-graph", type=int, default=256)
+    command.add_argument("--incidence-dropout", type=float, default=0.15)
+    command.add_argument("--head-dropout", type=float, default=0.05)
+    command.add_argument("--flow-weight", type=float, default=0.5)
+    command.add_argument("--residual-weight", type=float, default=1.0)
     command.add_argument("--variant", choices=GRAPH_VARIANTS, default="real")
     command.add_argument("--seed", type=int, default=20260827)
     command.add_argument("--device", default="cpu")
@@ -62,8 +66,13 @@ def main() -> None:
             limit=arguments.limit,
             device=arguments.device,
             variant=arguments.variant,
-            model_config=ModelConfig(),
-            learning_config=LearningConfig(rows_per_graph=arguments.rows_per_graph),
+            model_config=ModelConfig(residual_weight=arguments.residual_weight),
+            learning_config=LearningConfig(
+                rows_per_graph=arguments.rows_per_graph,
+                incidence_dropout=arguments.incidence_dropout,
+                head_dropout=arguments.head_dropout,
+                flow_weight=arguments.flow_weight,
+            ),
             train_config=TrainConfig(epochs=arguments.epochs, seed=arguments.seed),
         )
     elif arguments.command == "encode":

@@ -5,6 +5,7 @@ mass untouched.  They operate only on the retained directed attention edges.
 """
 
 from dataclasses import replace
+from itertools import pairwise
 
 import torch
 
@@ -30,6 +31,28 @@ def with_edges(graph: TokenGraph, *, source=None, weight=None) -> TokenGraph:
         weight=edges.weight if weight is None else weight,
     )
     return replace(graph, edges=changed).check()
+
+
+def remove_messages(graph: TokenGraph) -> TokenGraph:
+    """Remove every retained incidence and preserve its mass as unresolved."""
+
+    retained = torch.zeros_like(graph.unresolved)
+    if graph.edge_count:
+        device = retained.device
+        retained.index_put_(
+            (
+                graph.edge_response_target.to(device),
+                graph.edges.layer.to(device),
+                graph.edges.head.to(device),
+            ),
+            graph.edges.weight.to(device=device, dtype=retained.dtype),
+            accumulate=True,
+        )
+    return replace(
+        graph,
+        edges=graph.edges.select(slice(0, 0)),
+        unresolved=graph.unresolved + retained,
+    ).check().canonicalize()
 
 
 def group_index(key: torch.Tensor) -> tuple[torch.Tensor, list[int]]:
@@ -161,7 +184,7 @@ def rewire_endpoints_keep_roles(
     used = torch.zeros(edges.count, dtype=torch.bool, device=source.device)
 
     for _ in range(int(passes)):
-        for start, stop in zip(offsets[:-1], offsets[1:], strict=True):
+        for start, stop in pairwise(offsets):
             members = group_order[start:stop]
             members = members[~used[members]]
             if len(members) < 2:
@@ -220,6 +243,8 @@ def apply_variant(
 
     if variant == "real":
         return graph
+    if variant == "no_message":
+        return remove_messages(graph)
     if variant == "weight_shuffle":
         return shuffle_weights_keep_endpoints(graph, generator)
     if variant == "endpoint_rewire":

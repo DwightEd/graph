@@ -1,23 +1,28 @@
-"""Layer-wise transport sketches built from typed attention graphs."""
+"""Identity-preserving ordered route transport over frozen token graphs."""
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 
 import torch
+
+from .basis import source_basis
 
 
 @dataclass(frozen=True)
 class FlowOutput:
+    """Keep the frozen GCN base separate from route-only snapshots."""
+
     embedding: torch.Tensor
     trajectory: torch.Tensor
 
 
 def checkpoint_layers(layer_count: int, count: int) -> tuple[int, ...]:
-    steps = {
-        max(1, round(layer_count * fraction / count))
-        for fraction in range(1, count + 1)
-    }
-    return tuple(sorted(steps))
+    if not 1 <= count <= layer_count:
+        raise ValueError("checkpoints must be between 1 and layer_count")
+    return tuple(
+        round(step * layer_count / count)
+        for step in range(1, count + 1)
+    )
 
 
 def sketch_tables(
@@ -42,67 +47,59 @@ def sketch_tables(
     return permutation.to(device), sign.to(device=device, dtype=torch.float32)
 
 
-def layer_slices(edge_layer: torch.Tensor, layer_count: int) -> tuple[int, ...]:
-    counts = torch.bincount(edge_layer.cpu(), minlength=layer_count)
-    return (0, *counts.cumsum(0).tolist())
-
-
-def transform_heads(
-    state: torch.Tensor,
+def transform_delta(
+    delta: torch.Tensor,
+    head: torch.Tensor,
     permutation: torch.Tensor,
     sign: torch.Tensor,
     mode: str,
 ) -> torch.Tensor:
     if mode == "mean":
-        return state[:, None].expand(-1, len(permutation), -1)
-    return state[:, permutation] * sign[None]
+        return delta
+    if mode != "sketch":
+        raise ValueError("mode must be 'sketch' or 'mean'")
+    return delta.gather(1, permutation[head]) * sign[head]
 
 
 def transport_layer(
     graph,
     state: torch.Tensor,
     layer: int,
-    start: int,
-    stop: int,
     permutation: torch.Tensor,
     sign: torch.Tensor,
     mode: str,
 ) -> torch.Tensor:
+    """Transport only off-diagonal increments; self-only rows are identity."""
+
     device = state.device
-    heads = graph.head_count
-    responses = graph.token_ids.numel() - graph.response_start
+    response_count = len(graph.token_ids) - graph.response_start
     dimension = state.shape[1]
-    transformed = transform_heads(state, permutation, sign, mode)
+    selected = graph.edge_layer == layer
+    source = graph.edge_index[0, selected].to(device)
+    target = graph.edge_index[1, selected].to(device)
+    head = graph.edge_head[selected].to(device)
+    weight = graph.edge_weight[selected].to(device=device, dtype=state.dtype)
 
-    cells = state.new_zeros((responses * heads, dimension))
-    mass = state.new_zeros(responses * heads)
-    if stop > start:
-        source = graph.edge_index[0, start:stop].to(device)
-        target = graph.edge_index[1, start:stop].to(device) - graph.response_start
-        head = graph.edge_head[start:stop].to(device)
-        weight = graph.edge_weight[start:stop].to(device=device, dtype=state.dtype)
-        group = target * heads + head
-        message = transformed[source, head]
-        cells.index_add_(0, group, message * weight[:, None])
-        mass.index_add_(0, group, weight)
+    head_delta = state.new_zeros(
+        (response_count * graph.head_count, dimension)
+    )
+    if len(source):
+        delta = state[source] - state[target]
+        delta = transform_delta(delta, head, permutation, sign, mode)
+        group = (target - graph.response_start) * graph.head_count + head
+        head_delta.index_add_(0, group, weight[:, None] * delta)
 
-    cells = cells.reshape(responses, heads, dimension)
-    mass = mass.reshape(responses, heads)
-    self_mass = (
-        graph.diagonal[:, layer] + graph.unresolved[:, layer]
-    ).to(device=device, dtype=state.dtype)
-    cells = cells + self_mass[..., None] * transformed[graph.response_start :]
-    mass = mass + self_mass
-    head_state = cells / mass.clamp_min(1e-8)[..., None]
-
+    head_delta = head_delta.view(
+        response_count,
+        graph.head_count,
+        dimension,
+    )
     if mode == "mean":
-        response_state = head_state.mean(dim=1)
-        prompt_state = state[: graph.response_start]
+        update = head_delta.mean(dim=1)
     else:
-        scale = math.sqrt(heads)
-        response_state = head_state.sum(dim=1) / scale
-        prompt_state = transformed[: graph.response_start].sum(dim=1) / scale
-    return torch.cat((prompt_state, response_state), dim=0)
+        update = head_delta.sum(dim=1) / math.sqrt(graph.head_count)
+    response_state = state[graph.response_start :] + update
+    return torch.cat((state[: graph.response_start], response_state), dim=0)
 
 
 def flow_embedding(
@@ -113,17 +110,30 @@ def flow_embedding(
     seed: int = 20260827,
     device: str | torch.device = "cpu",
 ) -> FlowOutput:
-    """Compose typed attention transport and keep a few depth snapshots."""
+    """Compose ordered route deltas from a graph-independent source basis.
+
+    The frozen GCN embedding is retained only as the base output channel.  It
+    is never used as the layer-zero route state because it already aggregates
+    all Transformer layers.
+    """
 
     device = torch.device(device)
-    state = graph.node_embedding.to(device=device, dtype=torch.float32)
-    base = state[graph.response_start :].clone()
+    base = graph.node_embedding[graph.response_start :].to(
+        device=device,
+        dtype=torch.float32,
+    )
+    dimension = int(base.shape[1])
+    state = source_basis(
+        len(graph.token_ids),
+        graph.response_start,
+        dimension,
+        device=device,
+    )
     layers = checkpoint_layers(graph.layer_count, checkpoints)
-    offsets = layer_slices(graph.edge_layer, graph.layer_count)
     permutation, sign = sketch_tables(
         graph.layer_count,
         graph.head_count,
-        state.shape[1],
+        dimension,
         seed,
         device,
     )
@@ -134,8 +144,6 @@ def flow_embedding(
             graph,
             state,
             layer,
-            offsets[layer],
-            offsets[layer + 1],
             permutation[layer],
             sign[layer],
             mode,

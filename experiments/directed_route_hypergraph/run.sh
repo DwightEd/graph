@@ -6,9 +6,13 @@ DEVICE=${DEVICE:-cuda}
 TASK=${TASK:-QA}
 EPOCHS=${EPOCHS:-8}
 ROWS_PER_GRAPH=${ROWS_PER_GRAPH:-256}
+INCIDENCE_DROPOUT=${INCIDENCE_DROPOUT:-0.15}
+HEAD_DROPOUT=${HEAD_DROPOUT:-0.05}
+FLOW_WEIGHT=${FLOW_WEIGHT:-0.5}
+RESIDUAL_WEIGHT=${RESIDUAL_WEIGHT:-1.0}
 VARIANT=${VARIANT:-real}
 SEED=${SEED:-20260827}
-OUT=${OUT:-${ROOT}/experiments/directed_route_hypergraph/outputs/${TASK,,}/${VARIANT}_seed${SEED}}
+OUT=${OUT:-${ROOT}/experiments/directed_route_hypergraph/outputs/${TASK,,}/flow_dae_${VARIANT}_seed${SEED}}
 TRAIN_LIMIT=${TRAIN_LIMIT:-}
 TEST_LIMIT=${TEST_LIMIT:-}
 EVALUATE=${EVALUATE:-1}
@@ -38,6 +42,9 @@ run_stage "[1/5] Fit label-free directed hypergraph encoder" \
   --train "${TRAIN_SPLIT}" --checkpoint "${OUT}/model.pt" \
   --task "${TASK}" --epochs "${EPOCHS}" \
   --rows-per-graph "${ROWS_PER_GRAPH}" --variant "${VARIANT}" \
+  --incidence-dropout "${INCIDENCE_DROPOUT}" \
+  --head-dropout "${HEAD_DROPOUT}" --flow-weight "${FLOW_WEIGHT}" \
+  --residual-weight "${RESIDUAL_WEIGHT}" \
   --seed "${SEED}" --device "${DEVICE}" "${TRAIN_LIMIT_ARGUMENT[@]}"
 
 run_stage "[2/5] Export calibration node embeddings" \

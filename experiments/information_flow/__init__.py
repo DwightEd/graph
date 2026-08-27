@@ -1,4 +1,4 @@
-"""Layer-wise information-flow representations for attention graphs."""
+"""Layer-wise route-delta representations for attention graphs."""
 
 from .transport import FlowOutput, flow_embedding
 

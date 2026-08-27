@@ -8,6 +8,8 @@ import torch.nn.functional as F
 from experiments.grounded_route.graph import TokenGraph
 
 from .config import LearningConfig
+from .corruption import corrupt_graph
+from .flow import ordered_flow
 from .model import DirectedRouteHypergraphEncoder, EncoderOutput
 
 
@@ -58,6 +60,7 @@ class RowLoss:
 class LossOutput:
     loss: torch.Tensor
     row: torch.Tensor
+    flow: torch.Tensor
     variance: torch.Tensor
     candidate_count: int
     row_count: int
@@ -216,26 +219,58 @@ def variance_regularizer(embedding: torch.Tensor) -> torch.Tensor:
     return F.relu(1.0 - standard_deviation).mean()
 
 
+def flow_consistency_loss(
+    output: EncoderOutput,
+    clean_graph: TokenGraph,
+    residual_weight: float,
+) -> torch.Tensor:
+    """Recover clean ordered P/R/U path flow from the student graph."""
+
+    target = ordered_flow(
+        clean_graph,
+        residual_weight=residual_weight,
+    ).token_trace.to(
+        device=output.flow_logits.device,
+        dtype=output.flow_logits.dtype,
+    )
+    return -(
+        target.detach() * F.log_softmax(output.flow_logits, dim=-1)
+    ).sum(dim=-1).mean()
+
+
 def self_supervised_loss(
     model: DirectedRouteHypergraphEncoder,
     graph: TokenGraph,
     config: LearningConfig | None = None,
     generator: torch.Generator | None = None,
 ) -> LossOutput:
-    """Fit conditional row mass and regularize the final node geometry."""
+    """Denoise clean row mass and ordered path flow without labels."""
 
     config = LearningConfig() if config is None else config
     if generator is None:
         generator = torch.Generator().manual_seed(0)
 
-    output = model(graph, return_layer_input=True)
+    # Keep the supervised row subset matched when corruption rates are ablated.
     selected = sample_rows(graph, config.rows_per_graph, generator)
+    student_graph = corrupt_graph(
+        graph,
+        incidence_dropout=config.incidence_dropout,
+        head_dropout=config.head_dropout,
+        generator=generator,
+    )
+    output = model(student_graph, return_layer_input=True)
     row = row_distribution_loss(model, output, graph, selected)
+    flow = flow_consistency_loss(output, graph, model.config.residual_weight)
     variance = variance_regularizer(output.response_embedding)
-    loss = row.loss + config.variance_weight * variance
+    loss = (
+        row.loss
+        + config.flow_weight * flow
+        + config.variance_weight * variance
+    )
     return LossOutput(
         loss=loss,
         row=row.loss,
+        flow=flow,
         variance=variance,
         candidate_count=row.candidate_count,
         row_count=row.row_count,

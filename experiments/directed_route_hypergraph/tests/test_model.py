@@ -56,6 +56,17 @@ def test_encoder_returns_64_dimensions_and_both_message_stages_receive_gradient(
         4,
         16,
     )
+    assert output.flow_logits.shape == (
+        graph.response_count,
+        graph.layer_count,
+        3,
+    )
+    assert torch.allclose(
+        output.lineage.sum(dim=-1),
+        torch.ones_like(output.lineage[..., 0]),
+        atol=1e-6,
+        rtol=1e-6,
+    )
 
     coefficient = torch.arange(1, 65, dtype=output.response_embedding.dtype)
     (output.response_embedding * coefficient).sum().backward()
