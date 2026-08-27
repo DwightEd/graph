@@ -11,7 +11,12 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from experiment_protocol import canonical_source_group, scalar_text, sha256_text
+from experiment_protocol import (
+    canonical_source_group,
+    dataset_manifest_sha256,
+    scalar_text,
+    sha256_text,
+)
 from experiments.grounded_route.artifacts import (
     EncodedTokenGraph,
     load_embedding_index,
@@ -345,6 +350,9 @@ def encode(
     graph_dir = output_dir / "graphs"
     graph_dir.mkdir(parents=True, exist_ok=True)
     chunks = []
+    graph_sample_ids = []
+    graph_paths = []
+    graph_hashes = []
     edge_count = 0
 
     model.eval()
@@ -362,21 +370,46 @@ def encode(
             )
             output = model.encode(graph)
             encoded = EncodedTokenGraph.from_output(graph, output)
-            save_encoded_graph(graph_dir / f"{number:08d}.pt", encoded)
+            relative_path = Path("graphs") / f"{number:08d}.pt"
+            graph_path = output_dir / relative_path
+            save_encoded_graph(graph_path, encoded)
             chunks.append(embedding_chunk(encoded))
+            graph_sample_ids.append(encoded.sample_id)
+            graph_paths.append(relative_path.as_posix())
+            graph_hashes.append(sha256(graph_path))
             edge_count += graph.edge_count
 
     index = concatenate_embedding_chunks(chunks)
     index_path = output_dir / "index.npz"
-    save_embedding_index(
-        index_path,
-        index,
-        method=METHOD,
-        scope=scope,
-        variant=str(checkpoint["variant"]),
-        checkpoint_sha256=checkpoint_hash,
-        source_ids=tuple(sorted(source_ids)),
-    )
+    metadata = {
+        "method": METHOD,
+        "split": dataset_split,
+        "scope": scope,
+        "variant": str(checkpoint["variant"]),
+        "checkpoint_sha256": checkpoint_hash,
+        "dataset_manifest_sha256": dataset_manifest_sha256(dataset),
+        "source_ids": tuple(sorted(source_ids)),
+        "encoded_graph_sample_ids": graph_sample_ids,
+        "encoded_graph_paths": graph_paths,
+        "encoded_graph_sha256": graph_hashes,
+    }
+    if scope == "calibration":
+        metadata.update(
+            calibration_sample_ids=tuple(sample_ids),
+            calibration_source_ids=tuple(sorted(source_ids)),
+        )
+    else:
+        metadata.update(
+            audit_scope=(
+                "complete_split"
+                if set(sample_ids) == set(map(str, dataset.sample_ids))
+                else "selected_samples"
+            ),
+            reserved_source_ids=tuple(checkpoint["train_source_ids"]),
+            test_source_ids=tuple(sorted(source_ids)),
+            test_sample_ids=tuple(sample_ids),
+        )
+    save_embedding_index(index_path, index, **metadata)
     return {
         "embeddings": str(index_path.resolve()),
         "samples": len(sample_ids),
