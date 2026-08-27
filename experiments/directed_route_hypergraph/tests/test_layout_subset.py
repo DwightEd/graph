@@ -99,6 +99,8 @@ def test_pipeline_skips_only_layout_when_even_one_exact_row_exceeds_budget():
             layout_rows_per_graph=graph.response_count,
             layout_max_elements=1,
             layout_max_work_elements=1,
+            flow_weight=0.5,
+            layout_weight=0.25,
         ),
         torch.Generator().manual_seed(83),
     )
@@ -106,5 +108,5 @@ def test_pipeline_skips_only_layout_when_even_one_exact_row_exceeds_budget():
     assert torch.isfinite(output.loss)
     assert output.layout.item() == 0.0
     assert output.layout_row_count == 0
-    assert output.row_count > 0
+    assert output.pair_count > 0
     assert output.flow.item() > 0.0

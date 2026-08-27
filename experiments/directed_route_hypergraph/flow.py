@@ -12,6 +12,9 @@ from experiments.grounded_route.lineage import (
     UNRESOLVED,
 )
 
+MASKED = LINEAGE_STATES
+STUDENT_LINEAGE_STATES = LINEAGE_STATES + 1
+
 
 @dataclass(frozen=True)
 class FlowStep:
@@ -39,6 +42,14 @@ def initial_flow(graph: TokenGraph) -> torch.Tensor:
     return state
 
 
+def initial_student_flow(graph: TokenGraph) -> torch.Tensor:
+    """Add a private MASK state without changing the public P/R/U contract."""
+
+    state = initial_flow(graph)
+    masked = state.new_zeros((graph.token_count, 1))
+    return torch.cat((state, masked), dim=-1)
+
+
 def flow_step(
     graph: TokenGraph,
     token_state: torch.Tensor,
@@ -46,6 +57,7 @@ def flow_step(
     *,
     residual_weight: float = 1.0,
     edges: TokenEdges | None = None,
+    masked_mass: torch.Tensor | None = None,
 ) -> FlowStep:
     """Apply one typed attention layer without learning a head transition.
 
@@ -59,11 +71,19 @@ def flow_step(
         raise ValueError("residual_weight must be non-negative")
 
     device = token_state.device
+    state_count = int(token_state.shape[-1])
+    expected_states = (
+        STUDENT_LINEAGE_STATES if masked_mass is not None else LINEAGE_STATES
+    )
+    if state_count != expected_states:
+        raise ValueError("token flow has incompatible lineage dimensions")
+    if masked_mass is not None and masked_mass.shape != graph.unresolved.shape:
+        raise ValueError("masked mass must be [R,L,H]")
     if edges is None:
         edges = graph.layer_edges(layer, device)
     provenance = token_state[edges.source]
     head_flow = token_state.new_zeros(
-        (graph.response_count, graph.head_count, LINEAGE_STATES)
+        (graph.response_count, graph.head_count, state_count)
     )
 
     if edges.count:
@@ -71,7 +91,7 @@ def flow_step(
             (edges.target - graph.response_start) * graph.head_count
             + edges.head
         )
-        head_flow.view(-1, LINEAGE_STATES).index_add_(
+        head_flow.view(-1, state_count).index_add_(
             0,
             group,
             provenance * edges.weight[:, None],
@@ -90,6 +110,12 @@ def flow_step(
     head_flow[..., UNRESOLVED] = (
         head_flow[..., UNRESOLVED] + unresolved
     )
+    if masked_mass is not None:
+        masked = masked_mass[:, layer].to(
+            device=device,
+            dtype=token_state.dtype,
+        )
+        head_flow[..., MASKED] = head_flow[..., MASKED] + masked
 
     attention_state = head_flow.mean(dim=1)
     next_response = (

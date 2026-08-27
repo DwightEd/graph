@@ -20,6 +20,7 @@ class DirectedLayerHypergraph:
     head: torch.Tensor
     diagonal: torch.Tensor
     unresolved: torch.Tensor
+    masked: torch.Tensor
 
     @property
     def incidence_count(self) -> int:
@@ -44,6 +45,7 @@ def layer_hypergraph(
     layer: int,
     device: str | torch.device,
     edges: TokenEdges | None = None,
+    masked_mass: torch.Tensor | None = None,
 ) -> DirectedLayerHypergraph:
     """Build the explicit row-hyperedge view without copying the whole graph."""
 
@@ -56,6 +58,12 @@ def layer_hypergraph(
     hyperedge = (
         (edges.target - graph.response_start) * graph.head_count + edges.head
     )
+    if masked_mass is None:
+        masked = torch.zeros_like(graph.unresolved[:, layer]).to(device)
+    else:
+        if masked_mass.shape != graph.unresolved.shape:
+            raise ValueError("masked mass must be [R,L,H]")
+        masked = masked_mass[:, layer].to(device)
     return DirectedLayerHypergraph(
         layer=int(layer),
         source=edges.source,
@@ -66,4 +74,5 @@ def layer_hypergraph(
         head=hyperedge_head.reshape(-1),
         diagonal=graph.diagonal[:, layer].to(device).reshape(-1),
         unresolved=graph.unresolved[:, layer].to(device).reshape(-1),
+        masked=masked.reshape(-1),
     )

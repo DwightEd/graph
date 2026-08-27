@@ -13,17 +13,26 @@ from experiments.grounded_route.lineage import LINEAGE_STATES, UNRESOLVED
 from experiments.grounded_route.model import sinusoidal_position
 
 from .config import ModelConfig
-from .flow import flow_step, initial_flow
+from .flow import (
+    MASKED,
+    STUDENT_LINEAGE_STATES,
+    flow_step,
+    initial_student_flow,
+)
 from .hypergraph import DirectedLayerHypergraph, layer_hypergraph
+from .posterior import PosteriorOutput, VariationalRoutePosterior, deterministic_posterior
 
 
 @dataclass(frozen=True)
 class EncoderOutput:
     node_embedding: torch.Tensor
     response_embedding: torch.Tensor
+    decoder_embedding: torch.Tensor
+    decoder_response_embedding: torch.Tensor
+    posterior_mean: torch.Tensor
+    posterior_log_variance: torch.Tensor
     lineage: torch.Tensor
     flow_logits: torch.Tensor
-    layer_input: torch.Tensor | None = None
 
 
 def segment_softmax(
@@ -67,7 +76,11 @@ class SourceToHyperedge(nn.Module):
             for _ in range(2)
         )
         self.source_role = nn.Embedding(2, hidden)
-        self.lineage_value = nn.Linear(LINEAGE_STATES, hidden, bias=False)
+        self.lineage_value = nn.Linear(
+            STUDENT_LINEAGE_STATES,
+            hidden,
+            bias=False,
+        )
         self.message_norm = nn.LayerNorm(slot_dim)
         self.slot_key = nn.Linear(slot_dim, slot_dim, bias=False)
         self.slot_value = nn.Linear(slot_dim, slot_dim, bias=False)
@@ -76,8 +89,12 @@ class SourceToHyperedge(nn.Module):
         self.unresolved_message = nn.Parameter(
             torch.empty(layers, heads, config.slot_count, slot_dim)
         )
+        self.masked_message = nn.Parameter(
+            torch.empty(layers, heads, config.slot_count, slot_dim)
+        )
         nn.init.normal_(self.slot_query, std=0.02)
         nn.init.normal_(self.unresolved_message, std=0.02)
+        nn.init.normal_(self.masked_message, std=0.02)
 
     def forward(
         self,
@@ -183,6 +200,9 @@ class SourceToHyperedge(nn.Module):
         hyperedge = hyperedge + head_flow[:, UNRESOLVED, None, None] * (
             self.unresolved_message[view.layer, view.head]
         )
+        hyperedge = hyperedge + head_flow[:, MASKED, None, None] * (
+            self.masked_message[view.layer, view.head]
+        )
         hyperedge = hyperedge + layer_slot[None] + self.head_id(view.head).view(
             view.hyperedge_count,
             config.slot_count,
@@ -242,6 +262,12 @@ class DirectedRouteHypergraphEncoder(nn.Module):
     ) -> None:
         super().__init__()
         self.config = ModelConfig() if config is None else config
+        if self.config.latent_mode not in {"deterministic", "vae"}:
+            raise ValueError("latent_mode must be 'deterministic' or 'vae'")
+        if self.config.vae_export not in {"mean", "mean_logvar"}:
+            raise ValueError("vae_export must be 'mean' or 'mean_logvar'")
+        if self.config.posterior_logvar_min >= self.config.posterior_logvar_max:
+            raise ValueError("posterior log-variance bounds are invalid")
         self.layer_count = int(layers)
         self.head_count = int(heads)
         hidden = self.config.hidden_dim
@@ -253,7 +279,16 @@ class DirectedRouteHypergraphEncoder(nn.Module):
 
         self.source_to_hyperedge = SourceToHyperedge(layers, heads, self.config)
         self.hyperedge_to_target = HyperedgeToTarget(self.config)
-        self.output_norm = nn.LayerNorm(hidden)
+        self.posterior = (
+            VariationalRoutePosterior(
+                hidden,
+                export=self.config.vae_export,
+                logvar_min=self.config.posterior_logvar_min,
+                logvar_max=self.config.posterior_logvar_max,
+            )
+            if self.config.latent_mode == "vae"
+            else None
+        )
         self.flow_readout = nn.Sequential(
             nn.LayerNorm(hidden),
             nn.Linear(hidden, LINEAGE_STATES),
@@ -270,7 +305,6 @@ class DirectedRouteHypergraphEncoder(nn.Module):
         )
         self.route_role = nn.Embedding(2, hidden)
         self.route_lag = nn.Embedding(self.config.lag_buckets, hidden)
-        self.bucket_key = nn.Parameter(torch.empty(2, hidden))
         self.layout_query = nn.Sequential(
             nn.LayerNorm(hidden),
             nn.Linear(hidden, hidden),
@@ -282,7 +316,6 @@ class DirectedRouteHypergraphEncoder(nn.Module):
             nn.Linear(hidden, hidden, bias=False),
         )
         self.layout_unresolved_key = nn.Parameter(torch.empty(hidden))
-        nn.init.normal_(self.bucket_key, std=0.02)
         nn.init.normal_(self.layout_unresolved_key, std=0.02)
 
     def initial_nodes(self, graph: TokenGraph) -> torch.Tensor:
@@ -307,6 +340,7 @@ class DirectedRouteHypergraphEncoder(nn.Module):
         state: torch.Tensor,
         token_flow: torch.Tensor,
         layer: int,
+        masked_mass: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Consume one Transformer layer without retaining duplicate edge copies."""
 
@@ -317,14 +351,24 @@ class DirectedRouteHypergraphEncoder(nn.Module):
             layer,
             residual_weight=self.config.residual_weight,
             edges=edges,
+            masked_mass=masked_mass,
         )
-        view = layer_hypergraph(graph, layer, state.device, edges)
+        view = layer_hypergraph(
+            graph,
+            layer,
+            state.device,
+            edges,
+            masked_mass=masked_mass,
+        )
         hyperedge = self.source_to_hyperedge(
             state,
             view,
             route.provenance,
             token_flow[view.target],
-            route.head_flow.reshape(view.hyperedge_count, LINEAGE_STATES),
+            route.head_flow.reshape(
+                view.hyperedge_count,
+                STUDENT_LINEAGE_STATES,
+            ),
         )
         updated = self.hyperedge_to_target(
             state[graph.response_start :],
@@ -340,6 +384,7 @@ class DirectedRouteHypergraphEncoder(nn.Module):
         state: torch.Tensor,
         token_flow: torch.Tensor,
         layer: int,
+        masked_mass: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Checkpoint edge-sized activations while fitting full-depth graphs."""
 
@@ -349,6 +394,7 @@ class DirectedRouteHypergraphEncoder(nn.Module):
                 current_state,
                 current_flow,
                 layer,
+                masked_mass,
             )
 
         if self.training and torch.is_grad_enabled():
@@ -364,38 +410,77 @@ class DirectedRouteHypergraphEncoder(nn.Module):
     def forward(
         self,
         graph: TokenGraph,
-        return_layer_input: bool = False,
+        masked_mass: torch.Tensor | None = None,
     ) -> EncoderOutput:
         graph = graph.canonicalize()
+        if masked_mass is None:
+            masked_mass = torch.zeros_like(graph.unresolved)
+        elif masked_mass.shape != graph.unresolved.shape:
+            raise ValueError("masked mass must be [R,L,H]")
+        masked_mass = masked_mass.to(graph.device, dtype=graph.diagonal.dtype)
         state = self.initial_nodes(graph)
-        token_flow = initial_flow(graph).to(state.device, dtype=state.dtype)
+        token_flow = initial_student_flow(graph).to(
+            state.device,
+            dtype=state.dtype,
+        )
         lineage_history = []
         flow_logits = []
-        layer_inputs = []
 
         for layer in range(graph.layer_count):
-            if return_layer_input:
-                layer_inputs.append(state)
             state, token_flow, head_flow = self.apply_layer(
                 graph,
                 state,
                 token_flow,
                 layer,
+                masked_mass,
             )
-            lineage_history.append(head_flow)
+            lineage_history.append(head_flow[..., :LINEAGE_STATES])
             flow_logits.append(
                 self.flow_readout(state[graph.response_start :].flatten(1))
             )
 
         flat_state = state.flatten(1)
-        node_embedding = self.output_norm(flat_state)
-        layer_input = torch.stack(layer_inputs) if return_layer_input else None
+        if self.posterior is None:
+            posterior = deterministic_posterior(flat_state)
+        else:
+            response = self.posterior(flat_state[graph.response_start :])
+            prompt = flat_state[: graph.response_start]
+            prompt_log_variance = torch.zeros_like(prompt)
+            posterior_mean = torch.cat((prompt, response.mean), dim=0)
+            posterior_log_variance = torch.cat(
+                (prompt_log_variance, response.log_variance),
+                dim=0,
+            )
+            exported_embedding = (
+                posterior_mean
+                if self.config.vae_export == "mean"
+                else torch.cat(
+                    (posterior_mean, posterior_log_variance),
+                    dim=-1,
+                )
+            )
+            posterior = PosteriorOutput(
+                decoder_embedding=torch.cat(
+                    (prompt, response.decoder_embedding),
+                    dim=0,
+                ),
+                exported_embedding=exported_embedding,
+                mean=posterior_mean,
+                log_variance=posterior_log_variance,
+            )
         return EncoderOutput(
-            node_embedding=node_embedding,
-            response_embedding=node_embedding[graph.response_start :],
+            node_embedding=posterior.exported_embedding,
+            response_embedding=posterior.exported_embedding[
+                graph.response_start :
+            ],
+            decoder_embedding=posterior.decoder_embedding,
+            decoder_response_embedding=posterior.decoder_embedding[
+                graph.response_start :
+            ],
+            posterior_mean=posterior.mean,
+            posterior_log_variance=posterior.log_variance,
             lineage=torch.stack(lineage_history, dim=1),
             flow_logits=torch.stack(flow_logits, dim=1),
-            layer_input=layer_input,
         )
 
     def encode(self, graph: TokenGraph) -> EncoderOutput:
@@ -415,7 +500,7 @@ class DirectedRouteHypergraphEncoder(nn.Module):
         column is reserved for unresolved sparse-cache mass.
         """
 
-        device = output.node_embedding.device
+        device = output.decoder_embedding.device
         response_index = response_index.to(device=device, dtype=torch.long)
         if response_index.ndim != 1:
             raise ValueError("response_index must be one-dimensional")
@@ -424,10 +509,12 @@ class DirectedRouteHypergraphEncoder(nn.Module):
         ):
             raise ValueError("response_index is outside the graph")
 
-        query = self.layout_query(output.response_embedding[response_index])
+        query = self.layout_query(
+            output.decoder_response_embedding[response_index]
+        )
         if key is None:
-            key = self.layout_key(output.node_embedding)
-        elif key.shape != output.node_embedding.shape:
+            key = self.layout_key(output.decoder_embedding)
+        elif key.shape != output.decoder_embedding.shape:
             raise ValueError("precomputed layout keys have invalid dimensions")
         token_logits = query @ key.transpose(0, 1)
         token_logits = token_logits / math.sqrt(self.config.hidden_dim)
@@ -443,20 +530,6 @@ class DirectedRouteHypergraphEncoder(nn.Module):
         ).sum(dim=-1, keepdim=True) / math.sqrt(self.config.hidden_dim)
         return torch.cat((token_logits, unresolved), dim=1)
 
-    def route_query_state(
-        self,
-        output: EncoderOutput,
-        target: torch.Tensor,
-        layer: torch.Tensor,
-        head: torch.Tensor,
-    ) -> torch.Tensor:
-        if output.layer_input is None:
-            raise ValueError("row scoring requires return_layer_input=True")
-        target_state = output.layer_input[layer, target].flatten(1)
-        layer_context = self.source_to_hyperedge.layer_id(layer)
-        head_context = self.source_to_hyperedge.head_id(head)
-        return self.route_query(target_state + layer_context + head_context)
-
     def endpoint_score(
         self,
         output: EncoderOutput,
@@ -466,37 +539,20 @@ class DirectedRouteHypergraphEncoder(nn.Module):
         layer: torch.Tensor,
         head: torch.Tensor,
     ) -> torch.Tensor:
-        device = output.node_embedding.device
+        device = output.decoder_embedding.device
         source = source.to(device)
         target = target.to(device)
         layer = layer.to(device)
         head = head.to(device)
-        query = self.route_query_state(output, target, layer, head)
-        source_state = output.layer_input[layer, source].flatten(1)
+        query = self.route_query(
+            output.decoder_embedding[target]
+            + self.source_to_hyperedge.layer_id(layer)
+            + self.source_to_hyperedge.head_id(head)
+        )
+        source_state = output.decoder_embedding[source]
         role = (source >= graph.response_start).long()
         lag = lag_bucket(target - source, self.config.lag_buckets)
         key = self.route_key(
             source_state + self.route_role(role) + self.route_lag(lag)
         )
         return (query * key).sum(dim=-1) / math.sqrt(self.config.hidden_dim)
-
-    def bucket_score(
-        self,
-        output: EncoderOutput,
-        graph: TokenGraph,
-        target: torch.Tensor,
-        layer: torch.Tensor,
-        head: torch.Tensor,
-        bucket: str,
-    ) -> torch.Tensor:
-        if bucket not in {"self", "unresolved"}:
-            raise ValueError("bucket must be 'self' or 'unresolved'")
-        device = output.node_embedding.device
-        target = target.to(device)
-        layer = layer.to(device)
-        head = head.to(device)
-        query = self.route_query_state(output, target, layer, head)
-        bucket_index = 0 if bucket == "self" else 1
-        return (query * self.bucket_key[bucket_index]).sum(dim=-1) / math.sqrt(
-            self.config.hidden_dim
-        )

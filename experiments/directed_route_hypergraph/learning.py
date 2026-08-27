@@ -1,11 +1,13 @@
-"""Censored attention-row mass modeling without fabricated non-edge labels."""
+"""Label-free recovery of genuinely withheld typed route endpoints."""
 
 from dataclasses import dataclass
+import math
 
 import torch
 import torch.nn.functional as F
 
 from experiments.grounded_route.graph import TokenGraph
+from experiments.grounded_route.learning import EndpointPairs, matched_negative_edges
 
 from .config import LearningConfig
 from .corruption import corrupt_graph
@@ -15,46 +17,16 @@ from .model import DirectedRouteHypergraphEncoder, EncoderOutput
 
 
 @dataclass(frozen=True)
-class SelectedRows:
-    """Canonical ``(layer, head, response target)`` row identifiers."""
-
-    row: torch.Tensor
-
-    @property
-    def count(self) -> int:
-        return int(self.row.numel())
-
-
-@dataclass(frozen=True)
-class RowCandidates:
-    """All retained endpoints plus SELF and UNRESOLVED for selected rows."""
-
-    source: torch.Tensor
-    endpoint_row: torch.Tensor
-    target: torch.Tensor
-    layer: torch.Tensor
-    head: torch.Tensor
-    group: torch.Tensor
-    weight: torch.Tensor
-
-    @property
-    def endpoint_count(self) -> int:
-        return int(self.source.numel())
-
-    @property
-    def count(self) -> int:
-        return int(self.weight.numel())
-
-    @property
-    def row_count(self) -> int:
-        return int(self.target.numel())
-
-
-@dataclass(frozen=True)
-class RowLoss:
+class EndpointLoss:
     loss: torch.Tensor
-    candidate_count: int
-    row_count: int
+    pair_count: int
+    heldout_edge_count: int
+
+
+@dataclass(frozen=True)
+class KLLoss:
+    loss: torch.Tensor
+    raw: torch.Tensor
 
 
 @dataclass(frozen=True)
@@ -74,15 +46,25 @@ class LayoutLoss:
 @dataclass(frozen=True)
 class LossOutput:
     loss: torch.Tensor
-    row: torch.Tensor
+    endpoint: torch.Tensor
     flow: torch.Tensor
     layout: torch.Tensor
     layout_sink: torch.Tensor
     layout_self: torch.Tensor
     layout_external: torch.Tensor
     variance: torch.Tensor
-    candidate_count: int
-    row_count: int
+    kl: torch.Tensor
+    raw_kl: torch.Tensor
+    pair_count: int
+    heldout_edge_count: int
+    masked_edge_count: int
+    masked_mass_total: float
+    masked_row_fraction: float
+    native_unresolved_mass_mean: float
+    masked_mass_mean: float
+    effective_kl_weight: float
+    active_latent_dimensions: int
+    posterior_logvar_mean: float
     layout_candidate_count: int
     layout_row_count: int
     layout_self_row_count: int
@@ -95,144 +77,72 @@ def cpu_generator(generator: torch.Generator) -> torch.Generator:
     return torch.Generator().manual_seed(generator.initial_seed())
 
 
-def sample_rows(
+def sample_held_out_endpoints(
     graph: TokenGraph,
-    limit: int,
+    config: LearningConfig,
     generator: torch.Generator,
-) -> SelectedRows:
-    """Uniformly sample from all ``R * L * H`` rows, including empty rows."""
+) -> EndpointPairs:
+    """Reuse the role/lag-matched causal non-edge sampler from GroundedRoute."""
 
-    total = graph.response_count * graph.layer_count * graph.head_count
-    count = min(max(int(limit), 0), total)
-    if count == total:
-        row = torch.arange(total, dtype=torch.long)
-    else:
-        row = torch.randperm(total, generator=cpu_generator(generator))[:count]
-        row = row.sort().values
-    return SelectedRows(row=row)
-
-
-def edge_rows(graph: TokenGraph) -> torch.Tensor:
-    """Return canonical global row IDs for retained incidences."""
-
-    return (
-        (graph.edges.layer * graph.head_count + graph.edges.head)
-        * graph.response_count
-        + graph.edge_response_target
+    if config.positive_edges_per_graph < 0:
+        raise ValueError("positive_edges_per_graph must be non-negative")
+    if not 0.0 <= config.holdout_fraction <= 1.0:
+        raise ValueError("holdout_fraction must be in [0, 1]")
+    if config.negative_count < 1:
+        raise ValueError("negative_count must be positive")
+    if config.negative_attempt_factor < 1:
+        raise ValueError("negative_attempt_factor must be positive")
+    fraction_budget = math.ceil(graph.edge_count * config.holdout_fraction)
+    budget = min(config.positive_edges_per_graph, fraction_budget)
+    return matched_negative_edges(
+        graph,
+        config.negative_count,
+        generator,
+        attempt_factor=config.negative_attempt_factor,
+        positive_edges_per_graph=budget,
     )
 
 
-def row_candidates(graph: TokenGraph, selected: SelectedRows) -> RowCandidates:
-    """Materialize the exact censored categorical target for selected rows."""
-
-    device = graph.device
-    # TokenGraph keeps sparse endpoints on CPU and dense row mass on graph.device.
-    row = selected.row
-    channel = torch.div(row, graph.response_count, rounding_mode="floor")
-    response = row.remainder(graph.response_count)
-    layer = torch.div(channel, graph.head_count, rounding_mode="floor")
-    head = channel.remainder(graph.head_count)
-    target = graph.response_start + response
-
-    retained_row = edge_rows(graph)
-    location = torch.searchsorted(row, retained_row)
-    lookup = location.clamp_max(max(selected.count - 1, 0))
-    keep = location < selected.count
-    if selected.count:
-        keep &= row[lookup] == retained_row
-
-    endpoint_row = location[keep].to(device)
-    source = graph.edges.source[keep].to(device)
-    endpoint_weight = graph.edges.weight[keep].to(device)
-    local_row = torch.arange(selected.count, device=device)
-    response_device = response.to(device)
-    layer_device = layer.to(device)
-    head_device = head.to(device)
-    self_weight = graph.diagonal[
-        response_device,
-        layer_device,
-        head_device,
-    ]
-    unresolved_weight = graph.unresolved[
-        response_device,
-        layer_device,
-        head_device,
-    ]
-
-    return RowCandidates(
-        source=source,
-        endpoint_row=endpoint_row,
-        target=target.to(device),
-        layer=layer_device,
-        head=head_device,
-        group=torch.cat((endpoint_row, local_row, local_row)),
-        weight=torch.cat((endpoint_weight, self_weight, unresolved_weight)),
-    )
-
-
-def segment_log_softmax(
-    score: torch.Tensor,
-    group: torch.Tensor,
-    group_count: int,
-) -> torch.Tensor:
-    """Compute a log softmax independently inside every selected row."""
-
-    maximum = score.new_full((group_count,), -torch.inf)
-    maximum.scatter_reduce_(0, group, score, reduce="amax", include_self=True)
-    shifted = score - maximum[group]
-    normalizer = score.new_zeros(group_count)
-    normalizer.index_add_(0, group, shifted.exp())
-    return shifted - normalizer[group].clamp_min(1e-12).log()
-
-
-def row_distribution_loss(
+def held_out_endpoint_loss(
     model: DirectedRouteHypergraphEncoder,
     output: EncoderOutput,
-    graph: TokenGraph,
-    selected: SelectedRows,
-) -> RowLoss:
-    """Rank mass on known retained support and two buckets from pre-consume state."""
+    clean_graph: TokenGraph,
+    pairs: EndpointPairs,
+) -> EndpointLoss:
+    """Rank each withheld endpoint above its matched causal non-edge."""
 
-    candidates = row_candidates(graph, selected)
-    if not selected.count:
-        zero = output.response_embedding.sum() * 0.0
-        return RowLoss(zero, 0, 0)
+    heldout_edge_count = int(torch.unique(pairs.edge).numel())
+    if not pairs.count:
+        zero = output.decoder_response_embedding.sum() * 0.0
+        return EndpointLoss(zero, 0, 0)
 
-    endpoint_target = candidates.target[candidates.endpoint_row]
-    endpoint_layer = candidates.layer[candidates.endpoint_row]
-    endpoint_head = candidates.head[candidates.endpoint_row]
-    endpoint_score = model.endpoint_score(
+    edge = pairs.edge
+    target = clean_graph.edges.target[edge]
+    layer = clean_graph.edges.layer[edge]
+    head = clean_graph.edges.head[edge]
+    positive_score = model.endpoint_score(
         output,
-        graph,
-        candidates.source,
-        endpoint_target,
-        endpoint_layer,
-        endpoint_head,
+        clean_graph,
+        clean_graph.edges.source[edge],
+        target,
+        layer,
+        head,
     )
-    self_score = model.bucket_score(
+    negative_score = model.endpoint_score(
         output,
-        graph,
-        candidates.target,
-        candidates.layer,
-        candidates.head,
-        "self",
+        clean_graph,
+        pairs.negative_source,
+        target,
+        layer,
+        head,
     )
-    unresolved_score = model.bucket_score(
-        output,
-        graph,
-        candidates.target,
-        candidates.layer,
-        candidates.head,
-        "unresolved",
+    weight = clean_graph.edges.weight[edge].to(
+        device=positive_score.device,
+        dtype=positive_score.dtype,
     )
-    score = torch.cat((endpoint_score, self_score, unresolved_score))
-    log_probability = segment_log_softmax(
-        score,
-        candidates.group,
-        selected.count,
-    )
-    loss = -(candidates.weight * log_probability).sum() / selected.count
-    return RowLoss(loss, candidates.count, selected.count)
+    loss = (weight * F.softplus(negative_score - positive_score)).sum()
+    loss = loss / weight.sum().clamp_min(1e-12)
+    return EndpointLoss(loss, pairs.count, heldout_edge_count)
 
 
 def variance_regularizer(embedding: torch.Tensor) -> torch.Tensor:
@@ -240,6 +150,28 @@ def variance_regularizer(embedding: torch.Tensor) -> torch.Tensor:
         return embedding.sum() * 0.0
     standard_deviation = embedding.var(dim=0, unbiased=False).add(1e-4).sqrt()
     return F.relu(1.0 - standard_deviation).mean()
+
+
+def variational_kl(
+    output: EncoderOutput,
+    response_start: int,
+    free_bits: float,
+) -> KLLoss:
+    """Return response-only Gaussian KL with per-dimension free bits."""
+
+    if free_bits < 0:
+        raise ValueError("kl_free_bits must be non-negative")
+    mean = output.posterior_mean[response_start:]
+    log_variance = output.posterior_log_variance[response_start:]
+    if not len(mean):
+        zero = output.decoder_embedding.sum() * 0.0
+        return KLLoss(zero, zero)
+    element = 0.5 * (
+        mean.square() + log_variance.exp() - 1.0 - log_variance
+    )
+    raw = element.mean()
+    loss = element.mean(dim=0).clamp_min(float(free_bits)).mean()
+    return KLLoss(loss, raw)
 
 
 def flow_consistency_loss(
@@ -443,7 +375,7 @@ def endpoint_layout_loss(
     external_total = zero
     self_rows = 0
     external_rows = 0
-    layout_key = model.layout_key(output.node_embedding)
+    layout_key = model.layout_key(output.decoder_embedding)
     for start in range(0, len(response_index), rows_per_batch):
         stop = min(start + rows_per_batch, len(response_index))
         current_index = response_index[start:stop]
@@ -536,40 +468,56 @@ def self_supervised_loss(
     graph: TokenGraph,
     config: LearningConfig | None = None,
     generator: torch.Generator | None = None,
+    kl_weight: float | None = None,
 ) -> LossOutput:
-    """Denoise clean row mass and ordered path flow without labels."""
+    """Recover masked endpoints and optional clean-route auxiliaries."""
 
     config = LearningConfig() if config is None else config
     if generator is None:
         generator = torch.Generator().manual_seed(0)
+    if any(
+        weight < 0
+        for weight in (
+            config.flow_weight,
+            config.layout_weight,
+            config.variance_weight,
+            config.kl_weight,
+        )
+    ):
+        raise ValueError("loss weights must be non-negative")
+    if config.kl_free_bits < 0:
+        raise ValueError("kl_free_bits must be non-negative")
+    effective_kl_weight = config.kl_weight if kl_weight is None else kl_weight
+    if effective_kl_weight < 0:
+        raise ValueError("effective KL weight must be non-negative")
 
-    # Keep the supervised row subset matched when corruption rates are ablated.
-    selected = sample_rows(graph, config.rows_per_graph, generator)
-    student_graph = corrupt_graph(
-        graph,
+    clean_graph = graph.canonicalize()
+    pairs = sample_held_out_endpoints(clean_graph, config, generator)
+    forced_edge = torch.unique(pairs.edge)
+    corruption = corrupt_graph(
+        clean_graph,
         incidence_dropout=config.incidence_dropout,
         head_dropout=config.head_dropout,
         generator=generator,
+        forced_edge=forced_edge,
     )
-    output = model(student_graph, return_layer_input=True)
-    row = row_distribution_loss(model, output, graph, selected)
-    if config.flow_weight < 0 or config.layout_weight < 0:
-        raise ValueError("flow_weight and layout_weight must be non-negative")
-    zero = output.response_embedding.sum() * 0.0
+    output = model(corruption.graph, masked_mass=corruption.masked_mass)
+    endpoint = held_out_endpoint_loss(model, output, clean_graph, pairs)
+    zero = output.decoder_response_embedding.sum() * 0.0
     flow = (
-        flow_consistency_loss(output, graph, model.config.residual_weight)
+        flow_consistency_loss(output, clean_graph, model.config.residual_weight)
         if config.flow_weight > 0
         else zero
     )
     if config.layout_order == "ordered":
         layout_order = None
     elif config.layout_order == "reverse":
-        layout_order = tuple(reversed(range(graph.layer_count)))
+        layout_order = tuple(reversed(range(clean_graph.layer_count)))
     else:
         raise ValueError("layout_order must be 'ordered' or 'reverse'")
     if config.layout_weight > 0:
         layout_rows = sample_layout_rows(
-            graph,
+            clean_graph,
             config.layout_rows_per_graph,
             generator,
             max_elements=config.layout_max_elements,
@@ -579,7 +527,7 @@ def self_supervised_loss(
         layout = endpoint_layout_loss(
             model,
             output,
-            graph,
+            clean_graph,
             response_index=layout_rows,
             rows_per_batch=config.layout_rows_per_batch,
             min_mass=config.layout_min_mass,
@@ -589,24 +537,58 @@ def self_supervised_loss(
         )
     else:
         layout = _empty_layout_loss(output)
-    variance = variance_regularizer(output.response_embedding)
+    variance = variance_regularizer(
+        output.posterior_mean[clean_graph.response_start :]
+    )
+    if model.config.latent_mode == "vae":
+        kl = variational_kl(
+            output,
+            clean_graph.response_start,
+            config.kl_free_bits,
+        )
+    else:
+        kl = KLLoss(zero, zero)
+        effective_kl_weight = 0.0
     loss = (
-        row.loss
+        endpoint.loss
         + config.flow_weight * flow
         + config.layout_weight * layout.loss
         + config.variance_weight * variance
+        + effective_kl_weight * kl.loss
     )
+    masked_rows = int(torch.count_nonzero(corruption.masked_mass).item())
+    response_mean = output.posterior_mean[clean_graph.response_start :]
+    active_latent_dimensions = (
+        int((response_mean.var(dim=0, unbiased=False) > 1e-2).sum().item())
+        if len(response_mean) > 1
+        else 0
+    )
+    response_log_variance = output.posterior_log_variance[
+        clean_graph.response_start :
+    ]
     return LossOutput(
         loss=loss,
-        row=row.loss,
+        endpoint=endpoint.loss,
         flow=flow,
         layout=layout.loss,
         layout_sink=layout.sink,
         layout_self=layout.self_mass,
         layout_external=layout.external_endpoint,
         variance=variance,
-        candidate_count=row.candidate_count,
-        row_count=row.row_count,
+        kl=kl.loss,
+        raw_kl=kl.raw,
+        pair_count=endpoint.pair_count,
+        heldout_edge_count=endpoint.heldout_edge_count,
+        masked_edge_count=int(corruption.masked_edge.numel()),
+        masked_mass_total=float(corruption.masked_mass.sum().item()),
+        masked_row_fraction=(
+            masked_rows / max(corruption.masked_mass.numel(), 1)
+        ),
+        native_unresolved_mass_mean=float(clean_graph.unresolved.mean().item()),
+        masked_mass_mean=float(corruption.masked_mass.mean().item()),
+        effective_kl_weight=float(effective_kl_weight),
+        active_latent_dimensions=active_latent_dimensions,
+        posterior_logvar_mean=float(response_log_variance.mean().item()),
         layout_candidate_count=layout.candidate_count,
         layout_row_count=layout.row_count,
         layout_self_row_count=layout.self_row_count,

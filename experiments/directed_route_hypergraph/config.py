@@ -12,6 +12,10 @@ class ModelConfig:
     lag_buckets: int = 12
     dropout: float = 0.1
     residual_weight: float = 1.0
+    latent_mode: str = "deterministic"
+    vae_export: str = "mean_logvar"
+    posterior_logvar_min: float = -8.0
+    posterior_logvar_max: float = 4.0
 
     @property
     def hidden_dim(self) -> int:
@@ -20,18 +24,24 @@ class ModelConfig:
 
 @dataclass(frozen=True)
 class LearningConfig:
-    rows_per_graph: int = 256
+    positive_edges_per_graph: int = 4096
+    holdout_fraction: float = 0.15
+    negative_count: int = 1
+    negative_attempt_factor: int = 8
     layout_rows_per_graph: int = 32
     layout_rows_per_batch: int = 64
     layout_min_mass: float = 1e-4
     layout_max_elements: int = 8_000_000
     layout_max_work_elements: int = 250_000_000
     layout_order: str = "ordered"
-    incidence_dropout: float = 0.15
-    head_dropout: float = 0.05
-    flow_weight: float = 0.5
-    layout_weight: float = 0.25
+    incidence_dropout: float = 0.0
+    head_dropout: float = 0.0
+    flow_weight: float = 0.0
+    layout_weight: float = 0.0
     variance_weight: float = 0.05
+    kl_weight: float = 1e-3
+    kl_free_bits: float = 1e-2
+    kl_warmup_epochs: int = 4
 
 
 @dataclass(frozen=True)

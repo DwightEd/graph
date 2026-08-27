@@ -3,8 +3,8 @@ from dataclasses import replace
 import torch
 
 from experiments.directed_route_hypergraph.config import ModelConfig
+from experiments.directed_route_hypergraph.corruption import corrupt_graph
 from experiments.directed_route_hypergraph.model import DirectedRouteHypergraphEncoder
-from experiments.grounded_route.graph import TokenEdges
 from experiments.grounded_route.tests.helpers import make_graph, permute_edge_storage
 
 
@@ -16,46 +16,40 @@ def make_model(graph):
     )
 
 
-def change_one_row(graph, response_index: int, layer: int, head: int):
-    target = graph.response_start + response_index
-    selected = (
-        (graph.edges.target == target)
-        & (graph.edges.layer == layer)
-        & (graph.edges.head == head)
+def without_native_unresolved(graph):
+    retained = torch.zeros_like(graph.unresolved)
+    retained.index_put_(
+        (
+            graph.edges.target - graph.response_start,
+            graph.edges.layer,
+            graph.edges.head,
+        ),
+        graph.edges.weight,
+        accumulate=True,
     )
-    edge = int(torch.nonzero(selected, as_tuple=False)[0].item())
-    delta = 0.02
-    weight = graph.edges.weight.clone()
-    weight[edge] += delta
-    unresolved = graph.unresolved.clone()
-    unresolved[response_index, layer, head] -= delta
     return replace(
         graph,
-        edges=TokenEdges(
-            source=graph.edges.source,
-            target=graph.edges.target,
-            layer=graph.edges.layer,
-            head=graph.edges.head,
-            weight=weight,
-        ),
-        unresolved=unresolved,
+        diagonal=1.0 - retained,
+        unresolved=torch.zeros_like(graph.unresolved),
     ).check()
 
 
-def test_encoder_returns_64_dimensions_and_both_message_stages_receive_gradient():
+def test_deterministic_encoder_exports_64d_final_state_without_layer_inputs():
     torch.manual_seed(3)
     graph = make_graph()
     model = make_model(graph).train()
-    output = model(graph, return_layer_input=True)
+    output = model(graph)
 
     assert output.node_embedding.shape == (graph.token_count, 64)
     assert output.response_embedding.shape == (graph.response_count, 64)
-    assert output.layer_input.shape == (
-        graph.layer_count,
-        graph.token_count,
-        4,
-        16,
+    assert output.decoder_embedding.shape == (graph.token_count, 64)
+    assert output.decoder_response_embedding.shape == (graph.response_count, 64)
+    assert output.posterior_mean.shape == (graph.token_count, 64)
+    assert torch.equal(
+        output.posterior_log_variance,
+        torch.zeros_like(output.posterior_log_variance),
     )
+    assert not hasattr(output, "layer_input")
     assert output.flow_logits.shape == (
         graph.response_count,
         graph.layer_count,
@@ -116,39 +110,71 @@ def test_full_graph_and_truncated_graph_have_identical_prefix_embeddings():
         )
 
 
-def test_current_row_changes_post_update_but_not_pre_consume_scores():
+def test_endpoint_score_reads_final_decoder_embedding_not_export_aliases():
     torch.manual_seed(13)
     graph = make_graph()
-    response_index, layer, head = 3, 0, 0
-    target = graph.response_start + response_index
-    changed = change_one_row(graph, response_index, layer, head)
     model = make_model(graph).eval()
+    output = model(graph)
+    edge = torch.tensor([0, graph.edge_count // 2], dtype=torch.long)
+    source = graph.edges.source[edge]
+    target = graph.edges.target[edge]
+    layer = graph.edges.layer[edge]
+    head = graph.edges.head[edge]
+    baseline = model.endpoint_score(output, graph, source, target, layer, head)
 
-    original = model(graph, return_layer_input=True)
-    modified = model(changed, return_layer_input=True)
-    candidate_source = torch.tensor([0, target - 1])
-    candidate_target = torch.full((2,), target, dtype=torch.long)
-    candidate_layer = torch.full((2,), layer, dtype=torch.long)
-    candidate_head = torch.full((2,), head, dtype=torch.long)
-    original_score = model.endpoint_score(
-        original,
-        graph,
-        candidate_source,
-        candidate_target,
-        candidate_layer,
-        candidate_head,
+    exported_only = replace(
+        output,
+        node_embedding=torch.randn_like(output.node_embedding),
+        response_embedding=torch.randn_like(output.response_embedding),
     )
-    changed_score = model.endpoint_score(
-        modified,
-        changed,
-        candidate_source,
-        candidate_target,
-        candidate_layer,
-        candidate_head,
+    assert torch.allclose(
+        model.endpoint_score(exported_only, graph, source, target, layer, head),
+        baseline,
     )
 
-    assert torch.allclose(original_score, changed_score, atol=1e-6, rtol=1e-5)
+    decoder = output.decoder_embedding.clone()
+    decoder[target] += torch.linspace(-1.0, 1.0, decoder.shape[1])
+    final_state_changed = replace(output, decoder_embedding=decoder)
     assert not torch.allclose(
-        original.response_embedding[response_index],
-        modified.response_embedding[response_index],
+        model.endpoint_score(
+            final_state_changed,
+            graph,
+            source,
+            target,
+            layer,
+            head,
+        ),
+        baseline,
     )
+
+
+def test_artificial_mask_and_native_unresolved_use_distinct_messages():
+    torch.manual_seed(17)
+    graph = without_native_unresolved(make_graph(layers=1, heads=1))
+    result = corrupt_graph(
+        graph,
+        incidence_dropout=0.0,
+        head_dropout=0.0,
+        generator=torch.Generator().manual_seed(19),
+        forced_edge=torch.tensor([0]),
+    )
+    masked_model = make_model(graph).train()
+    masked_output = masked_model(result.graph, masked_mass=result.masked_mass)
+    masked_output.decoder_response_embedding.square().sum().backward()
+
+    masked_gradient = masked_model.source_to_hyperedge.masked_message.grad
+    unresolved_gradient = masked_model.source_to_hyperedge.unresolved_message.grad
+    assert masked_gradient is not None and bool(masked_gradient.abs().sum() > 0)
+    assert unresolved_gradient is not None
+    assert torch.equal(unresolved_gradient, torch.zeros_like(unresolved_gradient))
+
+    native_graph = make_graph(layers=1, heads=1)
+    unresolved_model = make_model(native_graph).train()
+    unresolved_output = unresolved_model(native_graph)
+    unresolved_output.decoder_response_embedding.square().sum().backward()
+
+    native_gradient = unresolved_model.source_to_hyperedge.unresolved_message.grad
+    artificial_gradient = unresolved_model.source_to_hyperedge.masked_message.grad
+    assert native_gradient is not None and bool(native_gradient.abs().sum() > 0)
+    assert artificial_gradient is not None
+    assert torch.equal(artificial_gradient, torch.zeros_like(artificial_gradient))

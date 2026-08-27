@@ -1,217 +1,295 @@
-# Directed Route Hypergraph + Ordered Endpoint Layout
+# Directed Route Hypergraph: Held-out Typed Endpoint Recovery
 
-当前实验研究一个受限问题：稀疏 attention 中按 Transformer 层序组合的真实 source endpoint，能否为 token-level hallucination detection 提供比局部 row 或三态 provenance 更有用的无标签表征。
-
-方法由两部分组成：
+当前主线研究一个比“从 attention 直接判幻觉”更可检验的问题：在保留
+Transformer layer/head 类型的有向 attention-row 超图上，节点表征能否从被明确
+遮蔽的局部结构中恢复真实 source endpoint，并优于 role/lag 匹配的因果非边。
 
 ```text
-deterministic teachers
-  local attention rows
-  + ordered P/R/U provenance
-  + ordered token-endpoint layout
-                  |
-                  v
-corrupted graph -> neural directed-hypergraph encoder -> 64D token embedding
-                                                        -> PCA-kNN score
+clean typed graph
+  -> sample real (source, target, layer, head) edges
+  -> force-hide sampled real edges
+  -> neural directed-hypergraph encoder
+  -> final node latent ranks real source above matched causal non-edge
+  -> frozen node embeddings
+  -> label-free readers / label-only readability diagnostics
 ```
 
-最后的 encoder 和 detector 都不读取 hallucination label。这里的“无标签”不等于“没有神经网络”：`SourceToHyperedge`、slot attention、head pooling、GRU 和三个 decoder 都通过反向传播训练。
+encoder、训练目标和无监督 detector 都不读取 hallucination label。这里的“无标签”
+不等于“没有神经网络”：source-to-hyperedge 聚合、route-conditioned slots、head pooling、
+逐层 token update，以及可选的 variational posterior 都通过反向传播训练。
 
-## 与 Information Flow Reveals When to Trust Language Models 的关系
+## 1. 为什么停止旧 ordered-layout 联合目标
 
-论文先在冻结 LLM 上计算每层 value-aware contribution：
+旧配置同时训练 local row、P/R/U flow 和 ordered endpoint layout：
 
-\[
-a_{j\to i}^{(l)}
-=
-\mathbf 1[j=i]x_i
-+\sum_h W_O^{l,h}A_{ij}^{l,h}W_V^{l,h}x_j,
-\]
+```text
+rows_per_graph=256
+layout_rows_per_graph=32
+incidence_dropout=0.15
+head_dropout=0.05
+flow_weight=0.5
+layout_weight=0.25
+variance_weight=0.05
+```
 
-再用 ALTI 风格距离归一化得到 \(C^{(l)}\)，并按真实层序组合：
+在 149 个 QA 样本、30,619 个 response tokens、2,307 个正例（prevalence
+`0.075345`）上，64D 表征的最佳 validation loss 为 `1.946106`（epoch 5），但
+检测结果接近随机，且弱于 position baseline：
 
-\[
-C^{\mathrm{total}}=C^{(L)}\cdots C^{(1)}.
-\]
+| Frozen embedding reader | AUROC | AUPRC | AUPRC lift |
+|---|---:|---:|---:|
+| Autoencoder | 0.540130 | 0.081410 | 1.080 |
+| Deep SVDD | 0.526438 | 0.078837 | 1.046 |
+| Isolation Forest | 0.550779 | 0.082963 | 1.101 |
+| LOF | 0.518836 | 0.076342 | 1.013 |
+| PCA-kNN | 0.548162 | 0.083510 | 1.108 |
 
-它的信息流抽取本身不训练新 encoder，但完整 trust detector 并不只是“简单算几个特征”：论文还使用 Qwen3 reranker、SHAP relevance，构造 9 个 RBO、2 个 concentration 和 1 个 relevance 特征，最后用 correctness labels 训练 XGBoost。
+| Diagnostic | AUROC | AUPRC |
+|---|---:|---:|
+| Absolute position | 0.617076 | 0.112859 |
+| Relative position | 0.606555 | 0.094919 |
+| Linear probe on node embedding | 0.597574 | 0.096996 |
+| Linear probe on position | 0.606064 | 0.101359 |
+| MLP probe on node embedding | 0.552147 | 0.079619 |
+| MLP probe on position | 0.568792 | 0.092920 |
 
-本实现只迁移层序路径代数，不复现论文的 functional contribution。现有 cache 没有 hidden state、\(W_V/W_O\)、真实 residual message 或 prompt-query rows，所以代码和论文中统一称为 **layer-ordered attention transport endpoint layout**，而不是 Information Flow、causal contribution 或真实 grounding。
+在相同 149-sample / 30,619-token QA 数据规模上，已有 first-order GCN 的结果为：
 
-## 1. Exact typed graph
+| Reader | Directed hypergraph 64D | First-order GCN |
+|---|---:|---:|
+| PCA-kNN AUROC / AUPRC | 0.5482 / 0.0835 | **0.6982 / 0.1617** |
+| Isolation Forest AUROC / AUPRC | 0.5508 / 0.0830 | **0.6362 / 0.1411** |
+| Autoencoder AUROC / AUPRC | 0.5401 / 0.0814 | **0.5649 / 0.0935** |
+| Linear probe AUROC / AUPRC | 0.5976 / 0.0970 | **0.7865 / 0.2999** |
+| MLP probe AUROC / AUPRC | 0.5521 / 0.0796 | **0.7785 / 0.2760** |
+
+因此旧方法不能继续写成“尚无正式结果”。它已经是负结果：更低的 reconstruction
+loss 没有转化为可读的节点几何。训练也存在一个机制缺口：被评分的 clean positive
+support 不一定从 student graph 中移除，模型可能从仍可见的同一 support 完成局部
+重构。P/R/U 和 full layout 还与 local row 包含嵌套信息，使联合 loss 的下降难以定位
+到某个有用的结构机制。
+
+这个结果不单独证明“层序无效”或“超图无效”；它只否定当前 clean-support 联合目标
+作为有效表征学习方案。新主线先回到与成功 GCN 更接近、且不会泄漏答案的 endpoint
+recovery，再决定是否重新加入长路径辅助目标。
+
+## 2. Exact typed graph
 
 一个样本是一张独立 `TokenGraph`：
 
 ```text
 node: token
 edge: (source, response target, layer, head, retained attention weight)
-row mass: retained + diagonal + unresolved = 1
+clean row: retained + diagonal + native unresolved = 1
 ```
 
-构图前不平均 layer/head，不把 cache 没保存的边当作零。prompt-query rows 不可用，因此 prompt token 在跨层 transport 中保持 identity endpoint。
+构图前不平均 layer/head，不把 cache 没保存的边当作零。prompt-query rows 不可用，
+所以当前表征是 post-hoc same-token routing representation，不是 next-token trust
+estimator。
 
-## 2. P/R/U ordered provenance
-
-每个 token 的来源是：
-
-```text
-P  path starts at a prompt token
-R  path remains response-origin / response-closed
-U  path has entered unresolved cached mass
-```
-
-对 response row \((t,l,h)\)：
-
-\[
-\rho_{t,h}^{l}
-=
-\sum_{s<t}a_{t,s}^{l,h}\pi_s^{l-1}
-+d_{t,h}^{l}\pi_t^{l-1}
-+u_{t,h}^{l}e_U.
-\]
-
-head-uniform attention state 与显式 residual proxy \(\alpha\) 合并：
-
-\[
-\pi_t^l=
-\frac{\alpha\pi_t^{l-1}+H^{-1}\sum_h\rho_{t,h}^{l}}
-{\alpha+1}.
-\]
-
-P 只表示路径能追溯到某个 prompt token，不表示该 token 与问题相关或提供了事实证据。
-
-## 3. Ordered endpoint layout
-
-P/R/U 是完整 endpoint layout 的粗粒化。新目标保留每个 token endpoint，并增加一个 unresolved sink \(\bot\)。设 \(Q_t^0\) 为 response token 自身的 one-hot endpoint。每层先用该层全部 typed edges 组成 head-uniform attention transition，再加入 residual proxy：
-
-\[
-Q_t^l
-=
-\frac{
-\alpha Q_t^{l-1}
-+H^{-1}\sum_h
-\left(
-\sum_{s<t}a_{t,s}^{l,h}Q_s^{l-1}
-+d_{t,h}^lQ_t^{l-1}
-+u_{t,h}^le_{\bot}
-\right)
-}{\alpha+1}.
-\]
-
-最终 \(Q_t^L\in\Delta^{N}\) 等于 retained-attention proxy 中所有合法 layer-ordered paths 的权重乘积之和。prompt endpoint 使用隐式 one-hot，response-to-response transport 使用 sparse-dense multiplication，不构造 edge-by-endpoint 三维张量。
-
-训练默认每张图均匀抽取最多 `layout_rows_per_graph=32` 个最终 response rows。实现先从这些 rows 反向追踪每层真实 response relay，构造精确依赖闭包，再只对闭包执行前向 teacher rollout。任意选中 row 的结果与完整 \(R\times(N+1)\) layout 中对应行严格相同；这不是截断近似、top-k 近似或把未计算 endpoint 当作零。
-
-如果随机子集的精确闭包仍超过显式预算，代码按同一随机优先级逐次减半，直至可计算；极端长样本使用首个 response row 作为精确 fallback。只有连该单行都违反用户设置的预算时，该图才跳过 layout 项，local row 与 P/R/U loss 仍继续训练，因此不会因为单个长样本中断整次运行。checkpoint 会保存 `layout_rows_per_graph`，历史中的 eligible-row coverage 可用于审计实际监督覆盖率。
-
-`layout_rows_per_batch` 只切分 neural pointer decoder；`layout_max_elements` 同时限制选中 target/logit 矩阵与 teacher 闭包的峰值 dense state；`layout_max_work_elements` 限制精确闭包的 sparse relay 工作量。完整 layout API 仍保留用于小图测试和 deterministic controls，但默认训练不再强制物化所有 response rows。
-
-unresolved 是吸收式记账：路径一旦进入 cache 未解析质量，就不再假装能恢复到某个已知 endpoint。它不是无效信息或 hallucination 类别。
-
-## 4. 降低 sink/self 捷径的平衡目标
-
-深层 rollout 容易被 unresolved sink 或 residual self endpoint 支配。代码没有把所有列直接塞进一个 categorical CE，而是把 layout loss 分解为：
-
-1. resolved 与 unresolved 的二项质量；
-2. resolved 内 self 与 non-self 的二项质量；
-3. non-self 条件下的 exact endpoint distribution。
-
-\[
-\mathcal L_{layout}
-=
-\mathcal L_{sink}
-+\mathcal L_{self\mid resolved}
-+\mathcal L_{endpoint\mid nonself}.
-\]
-
-第三项按 token row 平衡，并除以可选 non-self endpoints 数量的对数，减弱回答长度造成的 CE 尺度增长。它不会因为 \(\bot\) 或 self mass 很大而直接消失。质量小于 `layout_min_mass` 的条件项跳过，但其上层二项质量仍被训练。这种分解降低单一 sink/self 分类捷径，不保证排除 position/length shortcut，因此三项 loss 和 eligible-row coverage 都单独记录。
-
-训练时 student 只看 incidence/head 被遮蔽并守恒转入 unresolved 的图；local row、P/R/U trajectory 和 endpoint layout target 都来自干净图：
-
-\[
-\mathcal L
-=
-\mathcal L_{row}
-+\lambda_f\mathcal L_{flow}
-+\lambda_q\mathcal L_{layout}
-+\lambda_v\mathcal L_{variance}.
-\]
-
-local row 保留 layer/head，P/R/U 监督每层 trajectory，endpoint layout 监督 retained-attention proxy 内最终全路径的 source identity。三者包含嵌套信息，因此必须通过 `layout_weight=0`、`flow_weight=0` 等消融证明 endpoint 目标有独立价值。权重为零时对应 teacher 和 decoder loss 会真正 bypass，不计算 rollout。
-
-## 5. Neural directed hypergraph student
-
-每个 `(target, layer, head)` 是显式有向超边：
+每个 `(target, layer, head)` 是一个显式有向超边：
 
 ```text
 source token -> attention-row hyperedge -> target token
 ```
 
-模型保留四个 16D route-conditioned slots：P1/P2/R1/R2。response source 若已继承 prompt provenance，仍向 P slots 输送质量；它不会被直接 source role 错算为 response closure。slot 名称不等于数学纯 factorization，必须靠 route gating/head/endpoint controls 验证。
+模型保留四个 route-conditioned slots（默认 `4 x 16 = 64` hidden dimensions），
+在每层先形成 head-specific row message，再更新 target token。容量不是当前负结果的唯一
+解释：同为 64D 的 GCN 明显更强，所以首先必须修正训练问题，而不是只增加维度。
 
-最终四槽展平为 64D token embedding。PCA-whitened kNN 仍是当前 label-free detector，因此新实现只是表征目标优化，还没有真实 QA 结果证明检测更强。
+## 3. 新核心目标：强制 held-out typed endpoint recovery
 
-## 6. 为什么没有重新启用 P-Cut
+对 clean graph 中采样的真实边
+\(e^+=(s^+,t,l,h)\)，训练前强制从 student graph 删除该边。然后复用
+`experiments.grounded_route.learning.matched_negative_edges`，在同一个 typed row
+`(t,l,h)` 中采样不存在的 source \(s^-\)，并匹配：
 
-历史 P-Cut 使用相同 token 的 full/no-prompt/no-response 三视图和 closure score。全量 QA 的冻结方向结果为 AUROC `0.4209`、AUPRC `0.0734`，低于位置基线；记录明确禁止通过翻转方向或换名重新包装。
+- prompt/response source role；
+- causal direction \(s^-<t\)；
+- logarithmic source-target lag bucket；
+- exact layer、head 和 target。
 
-当前改动不做 route cut，不计算 closure，也不把 prompt mass 预设为正确性方向。ordered endpoint layout 只是干净图的连续全路径重构目标；是否改善下游检测必须重新实验，不能从设计推出。
+最终节点 latent 直接给真实与负 endpoint 打分：
 
-## 7. 运行
+\[
+\mathcal L_{endpoint}
+=
+\frac{\sum_i a_i\,\operatorname{softplus}(s_i^- - s_i^+)}
+{\sum_i a_i},
+\]
+
+其中 \(a_i\) 可保留 clean edge 的 attention mass。关键约束是：所有被当作 positive
+监督的 edge 都必须出现在 forced holdout 集合中，student 不能看见该 edge；score 必须
+读取最终 decoder/node latent，而不是读取遮蔽前的 clean support 或只读某层临时状态。
+
+这比旧目标更接近一个必要的机制命题：如果 exact typed topology 对 token 表征有用，
+表征应能在相同 role、相似距离和相同 `(target,layer,head)` 的困难对照中恢复真实
+endpoint。若 real 与 matched non-edge 无差异，就不能把任何下游增益归因于 exact
+endpoint structure。
+
+## 4. Native unresolved 与 artificial masked mass 必须分离
+
+两个“看不见”具有不同语义：
+
+| Channel | 来源 | 可恢复性 | 含义 |
+|---|---|---|---|
+| `native unresolved` | sparse attention cache 原本未保存的质量 | endpoint 未知 | 数据采集造成的 censoring |
+| `masked mass` | 训练时主动移除的已知 retained edge | teacher 知道 endpoint | endpoint-recovery 任务的 corruption |
+
+旧 corruption 将人工删除质量加进 `unresolved`，会把“原生未知”与“人为遮蔽但可恢复”
+混成一个 sink。新实现保持 clean `TokenGraph` 的
+`retained + diagonal + native unresolved = 1` 契约，并通过 student-only
+`masked_mass` channel 传入人工遮蔽量；corrupted view 满足
+`retained_kept + diagonal + native unresolved + masked = 1`。clean teacher 永远使用
+未破坏的 graph。
+
+`native unresolved` 不是无效信息、事实不确定性或 hallucination 类别；`masked_mass`
+也不是一个新 token endpoint。二者不得在 artifact 或论文叙事中互换。
+
+## 5. Deterministic baseline 与可选 VAE
+
+确定性模式是正式公平基线：默认 hidden state 为 64D，训练和导出使用同一个确定性
+latent。只有确定性 endpoint-recovery 已超过旧目标并接近/超过 GCN，才有依据把 VAE
+增益解释为 posterior regularization，而不是额外参数或随机训练带来的偶然结果。
+
+VAE 必须显式开启。对 hidden state \(h_t\)：
+
+\[
+q(z_t\mid G_{masked})
+=\mathcal N(\mu_t,\operatorname{diag}(\exp(\log\sigma_t^2))).
+\]
+
+准确名称是“stochastic variational bottleneck + typed endpoint decoder”。当前没有
+clean-posterior/corrupted-prior 双编码分支，因此不是完整的 conditional VAE，也不能
+声称已经辨识多模态真实路径后验。
+
+训练 decoder 使用 reparameterized sample \(z_t\)，评估固定使用 \(\mu_t\)，避免同一
+checkpoint 因采样产生不同 embedding。KL 使用小权重、free bits 和 warmup，不能让
+posterior 在 endpoint objective 学到结构之前塌缩。
+
+导出维度由 `VAE_EXPORT` 决定：
+
+| Mode | Export | 默认 hidden=64 时的维度 |
+|---|---|---:|
+| deterministic | node state | 64 |
+| VAE | `mean` | 64 |
+| VAE | `mean_logvar` | 128 |
+
+评估器接受任意 embedding dimension；PCA-kNN 内部投影到较低维不等于 encoder 只能
+输出 32D。`mean_logvar` 的 128D 只是把均值和逐维 log-variance 拼接，不自动意味着
+更强表征。
+
+最重要的 claim boundary：posterior variance 描述的是在当前训练 corruption 和
+Gaussian bottleneck 下 latent 的分散程度。它不是事实不确定性、语言模型置信度或
+hallucination score，不得单独作为最终 detector，也不得用 label 事后选择符号。
+
+## 6. 与 *Information Flow Reveals When to Trust Language Models* 的关系
+
+论文先在冻结 LLM 上计算 value-aware contribution，再按真实层序组合每层 transition。
+它的信息流抽取本身不训练新 encoder，但完整 trust detector 还使用神经 reranker、
+SHAP relevance 和 correctness-supervised XGBoost。因此不能概括成“没有神经网络，只
+计算简单特征”。
+
+当前 cache 没有 hidden state、\(W_V/W_O\)、真实 residual message 或 prompt-query
+rows，不能复现 functional contribution。旧 ordered layout 只迁移了非交换层转移的
+组合代数，而且其联合训练结果已经失败。新 endpoint-recovery 主线保留 exact
+layer/head/target typing，不把 attention rollout 冒充 contribution、causal effect 或
+事实 grounding。
+
+ordered P/R/U 和 endpoint-layout decoder 仍可作为显式 auxiliary ablation，但默认
+权重为零；它们只有在 endpoint-only 确定性基线成立后，且 ordered 明显优于 reverse、
+last-layer 和 matched rewire 时，才可能恢复为论文机制的一部分。
+
+## 7. 运行与最小实验矩阵
+
+正式 QA 入口保持唯一：
 
 ```bash
 bash experiments/directed_route_hypergraph/run_qa.sh
 ```
 
-小规模 smoke test：
+本次 objective 与 decoder 均已改变，checkpoint 使用新的 method ID 和
+`architecture_version=2`。旧 ordered-layout checkpoint 会在加载权重前被拒绝；新实验
+必须使用新输出目录并从 `START_STAGE=1` 重新训练，不能只重新执行 encode/evaluate。
+
+当前 endpoint-only deterministic 默认值为：
+
+```text
+POSITIVE_EDGES_PER_GRAPH=4096
+HOLDOUT_FRACTION=0.15
+NEGATIVE_COUNT=1
+NEGATIVE_ATTEMPT_FACTOR=8
+INCIDENCE_DROPOUT=0
+HEAD_DROPOUT=0
+FLOW_WEIGHT=0
+LAYOUT_WEIGHT=0
+VARIANCE_WEIGHT=0.05
+SLOT_DIM=16
+EDGE_HIDDEN_DIM=64
+LATENT_MODE=deterministic
+```
+
+forced endpoint holdout 本身已经提供 corruption；默认关闭额外 incidence/head dropout，
+避免第一轮公平基线混入第二种遮蔽分布。flow/layout 权重为零时对应 teacher/decoder
+目标必须真正 bypass。
+
+VAE 是显式配置，不应覆盖确定性输出目录：
 
 ```bash
-EPOCHS=1 TRAIN_LIMIT=32 TEST_LIMIT=16 \
-OUT=experiments/directed_route_hypergraph/outputs/smoke \
+LATENT_MODE=vae VAE_EXPORT=mean_logvar \
 bash experiments/directed_route_hypergraph/run_qa.sh
 ```
 
-默认关键参数：
+每个 `RUN_NAME`/输出目录必须编码 objective、latent mode、export、slot dimension、KL
+权重和 seed，防止 64D deterministic 与 128D VAE artifact 静默互相覆盖。
+
+第一阶段只运行：
 
 ```text
-INCIDENCE_DROPOUT=0.15
-HEAD_DROPOUT=0.05
-FLOW_WEIGHT=0.5
-LAYOUT_WEIGHT=0.25
-LAYOUT_ROWS_PER_GRAPH=32
-LAYOUT_ROWS_PER_BATCH=64
-LAYOUT_MIN_MASS=0.0001
-LAYOUT_MAX_ELEMENTS=8000000
-LAYOUT_MAX_WORK_ELEMENTS=250000000
-LAYOUT_ORDER=ordered
-RESIDUAL_WEIGHT=1.0
+A. deterministic endpoint recovery
+B. deterministic endpoint recovery + old P/R/U auxiliary
+C. deterministic endpoint recovery + old ordered-layout auxiliary
+D. VAE(mean) endpoint recovery
+E. VAE(mean_logvar) endpoint recovery
 ```
 
-最小目标消融：
+每个表征都用相同 source split、训练预算、frozen detector 与 seeds。必须报告：
+
+- held-out endpoint pair count、forced mask coverage 和 ranking loss；
+- native unresolved 与 artificial masked mass 的守恒测试；
+- PCA-kNN、Isolation Forest、Autoencoder、Deep SVDD、LOF；
+- position baselines 与 linear/MLP readability diagnostics；
+- embedding dimension 和 VAE KL/posterior diagnostics；
+- GCN 的同协议结果，而不是只与旧失败模型比较。
+
+## 8. 当前允许的结论与停止规则
+
+实现阶段允许说：
+
+> We train a label-free directed attention-row hypergraph encoder to recover
+> forced-held-out typed source endpoints against role- and lag-matched causal
+> non-edges, while separating native cache censoring from artificial masks.
+
+当前不能说：
+
+- VAE 已改善 hallucination detection；
+- posterior variance 是 hallucination uncertainty；
+- 复现了 Information Flow 的 functional contribution；
+- exact topology、layer order 或超图结构已经有效；
+- reconstruction/ranking loss 是 hallucination score；
+- 当前方法达到或超过 GCN/SOTA。
+
+停止规则：
 
 ```text
-local only        FLOW_WEIGHT=0 LAYOUT_WEIGHT=0
-local + P/R/U     FLOW_WEIGHT=0.5 LAYOUT_WEIGHT=0
-local + endpoint  FLOW_WEIGHT=0 LAYOUT_WEIGHT=0.25
-all objectives    FLOW_WEIGHT=0.5 LAYOUT_WEIGHT=0.25
-reverse endpoint target   LAYOUT_ORDER=reverse
+endpoint recovery ~= matched non-edge  -> exact typed endpoint 机制不成立
+embedding <= position readability      -> 表征仍被捷径或塌缩主导
+deterministic < GCN                     -> 不用 VAE 掩盖公平基线缺口
+VAE <= deterministic                    -> 去掉 variational 模块
+mean_logvar gain only                   -> 审计 variance 是否只是长度/coverage 编码
+ordered auxiliary ~= reverse           -> 不提出 layer-order 信息流 claim
+real endpoint ~= matched rewire         -> 不提出 exact-topology claim
 ```
 
-默认输出目录包含 `LAYOUT_ROWS_PER_GRAPH`、`FLOW_WEIGHT`、`LAYOUT_WEIGHT`、`RESIDUAL_WEIGHT`、order、variant 和 seed，目标消融不会静默覆盖彼此；其他配置变体可用 `RUN_NAME` 或 `OUT` 显式隔离。
-
-## 8. 解释边界与必须实验
-
-当前实现是 post-hoc same-token routing representation，不是论文的 trust-before-next-token estimator。首个 response token 所需的 prompt 最后一行没有缓存，因此代码不伪造 next-token 对齐。
-
-正式机制结论前至少需要：
-
-- ordered layout 对比 reverse endpoint target、last-layer 和 layer-mean controls；
-- `LAYOUT_ORDER=reverse` 只反转 endpoint teacher；encoder 和 P/R/U teacher 保持正序；
-- real endpoint 对比 role/lag/mass-matched rewire 与 weight shuffle；
-- neural embedding 对比直接 endpoint layout detector；
-- `local / flow / layout` 完整目标消融；
-- position-only、self+unresolved、response length 和 retained coverage controls；
-- 小规模重新采集 value-aware contribution，比较 endpoint JSD/RBO 与 route-token 删除后的 logit drop；
-- QA、Summary、Data2txt 分任务、多个 seed、source bootstrap。
-
-如果正确层序不优于 reverse，real endpoint 不优于 rewire，layout 目标只预测 position/self/unresolved，或 attention-only layout 与 value-aware contribution 明显不一致，就不能把增益归因于跨层信息流。此时应停止增加 encoder 容量，转而补采 hidden/OV/residual caches。
+训练 loss 下降只说明优化目标可拟合；最终结论必须来自冻结表征、统一评估器、多个 seed
+和 source bootstrap。

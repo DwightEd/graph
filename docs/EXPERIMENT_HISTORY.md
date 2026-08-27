@@ -1,7 +1,7 @@
 # Experiment history and decisions
 
 This document preserves the main experiments that preceded the current
-ordered endpoint-layout experiment. Historical code was removed during
+held-out typed endpoint-recovery experiment. Historical code was removed during
 repository consolidation; the numbers below are retained so rejected
 hypotheses are not silently repeated.
 
@@ -178,36 +178,155 @@ the current implementation.
 
 GroundedRoute consolidated the graph contract around token nodes, typed
 `(source,target,layer,head,weight)` edges, separate diagonal mass and explicit
-unresolved mass. Its neural encoder predicts clean attention-row endpoints and
-exports frozen 64D token embeddings for label-free PCA-kNN detection.
+native unresolved mass. The directed route hypergraph then made each
+`(target,layer,head)` row an explicit source-to-hyperedge-to-target computation
+and added deterministic ordered P/R/U provenance, incidence/head corruption and
+an ordered exact-endpoint layout target.
 
-The directed route hypergraph then made each `(target,layer,head)` row an
-explicit source-to-hyperedge-to-target computation and added deterministic
-ordered P/R/U provenance plus mass-conserving incidence/head corruption. No
-formal QA result for either active representation is recorded here.
+The averaged first-order GCN remains the strong graph baseline. On the same
+149-sample QA scale, it learned 64D frozen node embeddings with label-free
+endpoint prediction and obtained:
 
-## 12. Current ordered endpoint-layout experiment
+| GCN reader | AUROC | AUPRC |
+|---|---:|---:|
+| PCA-kNN | 0.6982 | 0.1617 |
+| Isolation Forest | 0.6362 | 0.1411 |
+| Autoencoder | 0.5649 | 0.0935 |
+| Linear supervised readability probe | 0.7865 | 0.2999 |
+| MLP supervised readability probe | 0.7785 | 0.2760 |
 
-The current experiment adds a full token-endpoint attention-transport target:
+These GCN numbers are a representation baseline, not evidence that its exact
+topology is causal: the GCN includes role/position features and averages heads
+and layers before propagation.
 
-\[
-Q^L=T_L\cdots T_1Q^0,
-\]
+## 12. Ordered endpoint-layout negative result
 
-with retained-attention token endpoints and one absorbing sparse-cache sink. It is trained
-from corrupted graph input against the clean layout. The loss separately
-models unresolved mass, self mass and the conditional non-self endpoint shape
-to reduce direct sink/self shortcuts.
+The directed hypergraph run composed attention transitions in Transformer layer
+order and jointly trained local clean-row reconstruction, ordered P/R/U flow,
+and ordered exact-endpoint layout reconstruction. Its frozen configuration was:
 
-This change is materially different from P-Cut: it performs no graph cuts,
-computes no closure score and assumes no correctness direction for prompt or
-response mass. It is also not a replication of value-aware Information Flow;
-the current cache provides attention only.
+```text
+rows_per_graph                  256
+layout_rows_per_graph            32
+layout_rows_per_batch             64
+layout_min_mass               0.0001
+layout_max_elements          8000000
+layout_max_work_elements   250000000
+layout_order                  ordered
+incidence_dropout                0.15
+head_dropout                     0.05
+flow_weight                       0.5
+layout_weight                    0.25
+variance_weight                  0.05
+epochs                              8
+learning_rate                   0.001
+weight_decay                   0.0001
+seed                         20260827
+```
 
-**Status.** Implementation and synthetic invariance tests exist. Detection
-value has not been established. The first required comparison is local-only,
-local + P/R/U, local + endpoint and all objectives under one frozen source
-split, followed by a reverse endpoint-target control and matched-endpoint controls.
+The best validation loss was `1.9461063737791728` at epoch 5. The total-loss
+trajectory was:
+
+| Epoch | Train loss | Validation loss |
+|---:|---:|---:|
+| 1 | 2.188632 | 2.079341 |
+| 2 | 2.064419 | 2.006295 |
+| 3 | 2.020466 | 2.013727 |
+| 4 | 1.995902 | 1.975025 |
+| 5 | 1.982798 | **1.946106** |
+| 6 | 1.971470 | 1.951295 |
+| 7 | 1.964670 | 1.947767 |
+| 8 | 1.962858 | 1.955408 |
+
+At the selected epoch, validation components were row `1.386462`, flow
+`0.583809`, layout `0.917132`, layout-sink `0.492043`, layout-self `0.000049`,
+layout-external `0.425040`, variance `0.769134`, and both layout self/external
+coverage values were `0.050505`. Thus optimization progressed, but most selected
+rows contributed little self-conditional supervision and the flow loss changed
+very little across training.
+
+The frozen representation evaluation used 149 samples, 30,619 tokens, 2,307
+positive tokens and prevalence `0.07534537378751756`. The exported embedding was
+64D. PCA used a `(32, 64)` basis and `(20,000, 32)` calibration reference,
+reported `collapsed=false`, used 20 neighbors, and had whitening scales from
+`0.0129843` to `5.7181654`.
+
+The preserved output directory is:
+
+```text
+/share/home/tm902089733300000/a903202310/lys/research/graph/experiments/directed_route_hypergraph/outputs/qa/ordered_layout_real_lr32_fw0.5_lw0.25_rw1.0_seed20260827
+```
+
+The exact training command and training commit were not captured with the run
+and are therefore recorded as unknown rather than reconstructed from memory.
+The representation evaluator was invoked through
+`experiments/grounded_route/evaluation/run.sh` with 5 folds, 20 epochs, 1,000
+bootstrap replicates and seeds `20260825 20260826 20260827`.
+
+| Unsupervised reader | AUROC | AUPRC | AUPRC lift |
+|---|---:|---:|---:|
+| Autoencoder | 0.540130 | 0.081410 | 1.080 |
+| Deep SVDD | 0.526438 | 0.078837 | 1.046 |
+| Isolation Forest | 0.550779 | 0.082963 | 1.101 |
+| LOF | 0.518836 | 0.076342 | 1.013 |
+| PCA-kNN | 0.548162 | 0.083510 | 1.108 |
+
+| Position/readability diagnostic | AUROC | AUPRC |
+|---|---:|---:|
+| Absolute position | 0.617076 | 0.112859 |
+| Relative position | 0.606555 | 0.094919 |
+| Linear probe on directed-hypergraph embedding | 0.597574 | 0.096996 |
+| Linear probe on position | 0.606064 | 0.101359 |
+| MLP probe on directed-hypergraph embedding | 0.552147 | 0.079619 |
+| MLP probe on position | 0.568792 | 0.092920 |
+
+For the readers available in both reports, the direct comparison is:
+
+| Reader | Ordered-layout hypergraph | First-order GCN | AUROC / AUPRC gap |
+|---|---:|---:|---:|
+| PCA-kNN | 0.5482 / 0.0835 | 0.6982 / 0.1617 | -0.1500 / -0.0782 |
+| Isolation Forest | 0.5508 / 0.0830 | 0.6362 / 0.1411 | -0.0854 / -0.0581 |
+| Autoencoder | 0.5401 / 0.0814 | 0.5649 / 0.0935 | -0.0248 / -0.0121 |
+| Linear probe | 0.5976 / 0.0970 | 0.7865 / 0.2999 | -0.1889 / -0.2029 |
+| MLP probe | 0.5521 / 0.0796 | 0.7785 / 0.2760 | -0.2264 / -0.1964 |
+
+**Decision.** This is a negative representation result. Training loss cannot
+be used as a hallucination score, every unsupervised reader is close to chance,
+position is stronger, and the supervised readability ceiling is far below the
+GCN ceiling. The run does not isolate layer order because several nested
+objectives were enabled together. It therefore rejects the current joint
+clean-support objective, not all possible uses of layer order or exact typed
+graphs.
+
+## 13. New active line: leakage-free typed endpoint recovery
+
+The current implementation reuses GroundedRoute's existing
+`matched_negative_edges` sampler. For every sampled positive
+`(source,target,layer,head)` edge, the student graph is forced to hide that exact
+edge. The final node latent must rank the clean positive source above causal
+non-edges matched on source role and logarithmic lag within the same typed row.
+This removes the previous possibility that a scored positive support remains
+visible in the student input.
+
+Artificially hidden retained mass is no longer added to native `unresolved`.
+The public graph continues to represent only cache censoring through
+`unresolved`; a separate student-only `masked_mass` channel represents known
+training holdouts. Clean flow/layout teachers, when enabled as ablations, always
+read the uncorrupted graph.
+
+The deterministic 64D latent is the mandatory fair baseline. A variational
+posterior is optional and explicitly configured. With hidden dimension 64,
+`mean` export remains 64D and `mean_logvar` export is 128D. Training may sample
+from the posterior, but evaluation exports deterministically. Posterior
+variance measures dispersion under this corruption model and Gaussian
+bottleneck; it is not factual uncertainty or a hallucination score.
+
+**Decision.** Run endpoint-only deterministic recovery first, compare it with
+the existing GCN under the same readers, then test VAE and ordered auxiliaries
+as separate deltas. If deterministic recovery cannot improve on the failed
+ordered-layout representation, do not use a VAE to conceal the objective
+failure. If real endpoints do not beat role/lag-matched rewires, remove the
+exact-topology mechanism claim.
 
 ## Historical branches represented by this record
 

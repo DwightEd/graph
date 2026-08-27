@@ -2,9 +2,12 @@ from dataclasses import replace
 
 import torch
 
+from experiments.directed_route_hypergraph.corruption import corrupt_graph
 from experiments.directed_route_hypergraph.flow import (
+    MASKED,
     flow_step,
     initial_flow,
+    initial_student_flow,
     ordered_flow,
 )
 from experiments.grounded_route.graph import TokenEdges
@@ -64,6 +67,43 @@ def test_flow_step_keeps_prompt_fixed_and_returns_aligned_provenance():
         step.token_state[: graph.response_start],
         state[: graph.response_start],
     )
+
+
+def test_student_flow_propagates_mask_without_losing_probability_mass():
+    graph = make_graph(layers=3, heads=2)
+    corruption = corrupt_graph(
+        graph,
+        incidence_dropout=0.0,
+        head_dropout=0.0,
+        generator=torch.Generator().manual_seed(17),
+        forced_edge=torch.tensor([0, graph.edge_count // 2]),
+    )
+    state = initial_student_flow(corruption.graph)
+
+    masked_seen = False
+    for layer in range(graph.layer_count):
+        step = flow_step(
+            corruption.graph,
+            state,
+            layer,
+            masked_mass=corruption.masked_mass,
+        )
+        assert torch.allclose(
+            step.head_flow.sum(dim=-1),
+            torch.ones_like(step.head_flow[..., 0]),
+            atol=1e-6,
+            rtol=1e-6,
+        )
+        assert torch.allclose(
+            step.token_state.sum(dim=-1),
+            torch.ones_like(step.token_state[..., 0]),
+            atol=1e-6,
+            rtol=1e-6,
+        )
+        masked_seen |= bool((step.head_flow[..., MASKED] > 0).any())
+        state = step.token_state
+
+    assert masked_seen
 
 
 def test_ordered_flow_is_sensitive_to_layer_order():

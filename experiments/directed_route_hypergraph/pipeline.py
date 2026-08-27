@@ -41,7 +41,8 @@ from .config import LearningConfig, ModelConfig, TrainConfig
 from .learning import self_supervised_loss
 from .model import DirectedRouteHypergraphEncoder
 
-METHOD = "directed_route_hypergraph_ordered_layout"
+METHOD = "directed_route_hypergraph_endpoint_recovery"
+ARCHITECTURE_VERSION = 2
 
 
 def fit(
@@ -63,6 +64,11 @@ def fit(
     model_config = ModelConfig() if model_config is None else model_config
     learning_config = LearningConfig() if learning_config is None else learning_config
     train_config = TrainConfig() if train_config is None else train_config
+    if variant == "no_message":
+        raise ValueError(
+            "no_message requires a clean endpoint teacher and a separate "
+            "student-view ablation"
+        )
     dataset = open_research_dataset(data_root, device="cpu")
     train_split = str(dataset.manifest["split"])
     if train_split != "train":
@@ -85,20 +91,48 @@ def fit(
     best_validation = float("inf")
     history = []
 
+    if learning_config.kl_warmup_epochs < 0:
+        raise ValueError("kl_warmup_epochs must be non-negative")
     for epoch in range(train_config.epochs):
         model.train()
         order = list(split["fit_sample_ids"])
         random.Random(train_config.seed + epoch).shuffle(order)
-        losses = []
-        row_losses = []
-        flow_losses = []
-        layout_losses = []
-        layout_sink_losses = []
-        layout_self_losses = []
-        layout_external_losses = []
-        layout_self_coverages = []
-        layout_external_coverages = []
-        variance_losses = []
+        values = {
+            name: []
+            for name in (
+                "loss",
+                "endpoint",
+                "flow",
+                "layout",
+                "layout_sink",
+                "layout_self",
+                "layout_external",
+                "layout_self_coverage",
+                "layout_external_coverage",
+                "variance",
+                "kl",
+                "raw_kl",
+                "effective_kl_weight",
+                "masked_row_fraction",
+                "native_unresolved_mass_mean",
+                "masked_mass_mean",
+                "active_latent_dimensions",
+                "posterior_logvar_mean",
+            )
+        }
+        endpoint_pair_counts = []
+        heldout_edge_counts = []
+        masked_edge_counts = []
+        masked_mass_totals = []
+        warmup_fraction = (
+            1.0
+            if learning_config.kl_warmup_epochs == 0
+            else min(
+                (epoch + 1) / learning_config.kl_warmup_epochs,
+                1.0,
+            )
+        )
+        epoch_kl_weight = learning_config.kl_weight * warmup_fraction
         for sample_id in tqdm(order, desc=f"fit epoch {epoch + 1}", unit="sample"):
             graph = load_graph(
                 dataset,
@@ -115,30 +149,54 @@ def fit(
                 graph,
                 learning_config,
                 generator,
+                kl_weight=epoch_kl_weight,
             )
             output.loss.backward()
             torch.nn.utils.clip_grad_norm_(
                 model.parameters(), train_config.gradient_clip
             )
             optimizer.step()
-            losses.append(float(output.loss.detach().item()))
-            row_losses.append(float(output.row.detach().item()))
-            flow_losses.append(float(output.flow.detach().item()))
-            layout_losses.append(float(output.layout.detach().item()))
-            layout_sink_losses.append(float(output.layout_sink.detach().item()))
-            layout_self_losses.append(float(output.layout_self.detach().item()))
-            layout_external_losses.append(
-                float(output.layout_external.detach().item())
-            )
+            for name in (
+                "loss",
+                "endpoint",
+                "flow",
+                "layout",
+                "layout_sink",
+                "layout_self",
+                "layout_external",
+                "variance",
+                "kl",
+                "raw_kl",
+            ):
+                values[name].append(float(getattr(output, name).detach().item()))
             denominator = max(graph.response_count, 1)
-            layout_self_coverages.append(
+            values["layout_self_coverage"].append(
                 output.layout_self_row_count / denominator
             )
-            layout_external_coverages.append(
+            values["layout_external_coverage"].append(
                 output.layout_external_row_count / denominator
             )
-            variance_losses.append(float(output.variance.detach().item()))
+            values["effective_kl_weight"].append(output.effective_kl_weight)
+            values["masked_row_fraction"].append(output.masked_row_fraction)
+            values["native_unresolved_mass_mean"].append(
+                output.native_unresolved_mass_mean
+            )
+            values["masked_mass_mean"].append(output.masked_mass_mean)
+            values["active_latent_dimensions"].append(
+                output.active_latent_dimensions
+            )
+            values["posterior_logvar_mean"].append(
+                output.posterior_logvar_mean
+            )
+            endpoint_pair_counts.append(output.pair_count)
+            heldout_edge_counts.append(output.heldout_edge_count)
+            masked_edge_counts.append(output.masked_edge_count)
+            masked_mass_totals.append(output.masked_mass_total)
 
+        if not any(endpoint_pair_counts):
+            raise RuntimeError(
+                "no role/lag-matched endpoint pairs were available in the fit epoch"
+            )
         validation = validation_epoch(
             model,
             dataset,
@@ -149,35 +207,40 @@ def fit(
             train_config,
             device,
         )
+        plain_metrics = {
+            "loss",
+            "effective_kl_weight",
+            "masked_row_fraction",
+            "layout_self_coverage",
+            "layout_external_coverage",
+            "native_unresolved_mass_mean",
+            "masked_mass_mean",
+            "active_latent_dimensions",
+            "posterior_logvar_mean",
+        }
         row = {
             "epoch": epoch + 1,
-            "train_loss": float(np.mean(losses)),
-            "train_row_loss": float(np.mean(row_losses)),
-            "train_flow_loss": float(np.mean(flow_losses)),
-            "train_layout_loss": float(np.mean(layout_losses)),
-            "train_layout_sink_loss": float(np.mean(layout_sink_losses)),
-            "train_layout_self_loss": float(np.mean(layout_self_losses)),
-            "train_layout_external_loss": float(np.mean(layout_external_losses)),
-            "train_layout_self_coverage": float(np.mean(layout_self_coverages)),
-            "train_layout_external_coverage": float(
-                np.mean(layout_external_coverages)
+            "train_endpoint_pair_count": int(sum(endpoint_pair_counts)),
+            "train_heldout_edge_count": int(sum(heldout_edge_counts)),
+            "train_graphs_with_pairs": int(
+                sum(count > 0 for count in endpoint_pair_counts)
             ),
-            "train_variance_loss": float(np.mean(variance_losses)),
-            "validation_loss": validation["loss"],
-            "validation_row_loss": validation["row"],
-            "validation_flow_loss": validation["flow"],
-            "validation_layout_loss": validation["layout"],
-            "validation_layout_sink_loss": validation["layout_sink"],
-            "validation_layout_self_loss": validation["layout_self"],
-            "validation_layout_external_loss": validation["layout_external"],
-            "validation_layout_self_coverage": validation[
-                "layout_self_coverage"
-            ],
-            "validation_layout_external_coverage": validation[
-                "layout_external_coverage"
-            ],
-            "validation_variance_loss": validation["variance"],
+            "train_masked_edge_count": int(sum(masked_edge_counts)),
+            "train_masked_mass_total": float(sum(masked_mass_totals)),
         }
+        for name, current in values.items():
+            suffix = "" if name in plain_metrics else "_loss"
+            row[f"train_{name}{suffix}"] = float(np.mean(current))
+        validation_plain = plain_metrics | {
+            "endpoint_pair_count",
+            "heldout_edge_count",
+            "graphs_with_pairs",
+            "masked_edge_count",
+            "masked_mass_total",
+        }
+        for name, value in validation.items():
+            suffix = "" if name in validation_plain else "_loss"
+            row[f"validation_{name}{suffix}"] = value
         history.append(row)
         if validation["loss"] < best_validation:
             best_validation = validation["loss"]
@@ -188,6 +251,7 @@ def fit(
 
     payload = {
         "method": METHOD,
+        "architecture_version": ARCHITECTURE_VERSION,
         "labels_included": False,
         "model_config": asdict(model_config),
         "learning_config": asdict(learning_config),
@@ -498,7 +562,7 @@ def validation_epoch(
         name: []
         for name in (
             "loss",
-            "row",
+            "endpoint",
             "flow",
             "layout",
             "layout_sink",
@@ -507,8 +571,21 @@ def validation_epoch(
             "layout_self_coverage",
             "layout_external_coverage",
             "variance",
+            "kl",
+            "raw_kl",
+            "effective_kl_weight",
+            "masked_row_fraction",
+            "native_unresolved_mass_mean",
+            "masked_mass_mean",
+            "active_latent_dimensions",
+            "posterior_logvar_mean",
         )
     }
+    endpoint_pair_count = 0
+    heldout_edge_count = 0
+    graphs_with_pairs = 0
+    masked_edge_count = 0
+    masked_mass_total = 0.0
     with torch.no_grad():
         for sample_id in sample_ids:
             graph = load_graph(
@@ -526,13 +603,19 @@ def validation_epoch(
                 learning_config,
                 generator,
             )
-            values["loss"].append(float(output.loss.item()))
-            values["row"].append(float(output.row.item()))
-            values["flow"].append(float(output.flow.item()))
-            values["layout"].append(float(output.layout.item()))
-            values["layout_sink"].append(float(output.layout_sink.item()))
-            values["layout_self"].append(float(output.layout_self.item()))
-            values["layout_external"].append(float(output.layout_external.item()))
+            for name in (
+                "loss",
+                "endpoint",
+                "flow",
+                "layout",
+                "layout_sink",
+                "layout_self",
+                "layout_external",
+                "variance",
+                "kl",
+                "raw_kl",
+            ):
+                values[name].append(float(getattr(output, name).item()))
             denominator = max(graph.response_count, 1)
             values["layout_self_coverage"].append(
                 output.layout_self_row_count / denominator
@@ -540,14 +623,40 @@ def validation_epoch(
             values["layout_external_coverage"].append(
                 output.layout_external_row_count / denominator
             )
-            values["variance"].append(float(output.variance.item()))
-    return {name: float(np.mean(current)) for name, current in values.items()}
+            values["effective_kl_weight"].append(output.effective_kl_weight)
+            values["masked_row_fraction"].append(output.masked_row_fraction)
+            values["native_unresolved_mass_mean"].append(
+                output.native_unresolved_mass_mean
+            )
+            values["masked_mass_mean"].append(output.masked_mass_mean)
+            values["active_latent_dimensions"].append(
+                output.active_latent_dimensions
+            )
+            values["posterior_logvar_mean"].append(
+                output.posterior_logvar_mean
+            )
+            endpoint_pair_count += output.pair_count
+            heldout_edge_count += output.heldout_edge_count
+            graphs_with_pairs += int(output.pair_count > 0)
+            masked_edge_count += output.masked_edge_count
+            masked_mass_total += output.masked_mass_total
+    result = {name: float(np.mean(current)) for name, current in values.items()}
+    return {
+        **result,
+        "endpoint_pair_count": int(endpoint_pair_count),
+        "heldout_edge_count": int(heldout_edge_count),
+        "graphs_with_pairs": int(graphs_with_pairs),
+        "masked_edge_count": int(masked_edge_count),
+        "masked_mass_total": float(masked_mass_total),
+    }
 
 
 def restore_model(checkpoint_path, device):
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     if str(checkpoint.get("method", "")) != METHOD:
         raise ValueError("checkpoint belongs to a different method")
+    if int(checkpoint.get("architecture_version", -1)) != ARCHITECTURE_VERSION:
+        raise ValueError("checkpoint has an incompatible architecture version")
     model = DirectedRouteHypergraphEncoder(
         int(checkpoint["layer_count"]),
         int(checkpoint["head_count"]),
