@@ -23,6 +23,7 @@ experiments/grounded_route/        当前 token-graph 表征方法
   lineage.py                       路径来源
   evaluation/                      node-only 评估与构图控制
   iclr/ENGINEERING_RULES.md        项目代码规则
+experiments/directed_route_hypergraph/  node -> attention row -> node 原型
 experiments/dbgnn_reference/       DBGNN / GCN 参考实现
 experiments/holoroute/             历史基线
 docs/EXPERIMENT_HISTORY.md         历史实验记录
@@ -34,9 +35,10 @@ docs/EXPERIMENT_HISTORY.md         历史实验记录
 bash experiments/grounded_route/run_qa.sh
 bash experiments/grounded_route/evaluation/run_qa.sh
 bash experiments/grounded_route/evaluation/run_controls_qa.sh
+bash experiments/directed_route_hypergraph/run_qa.sh
 ```
 
-四种构造分别独立训练和编码：real、no_message、endpoint_rewire、weight_shuffle。所有下游 detector 与 probe 只读取 `node_embedding`。
+GroundedRoute 的四种构造分别独立训练和编码：real、no_message、endpoint_rewire、weight_shuffle。所有下游 detector 与 probe 只读取 `node_embedding`。有向超图原型当前支持 real、endpoint_rewire 和 weight_shuffle。
 
 ## 测试
 
