@@ -97,6 +97,110 @@ source token -> attention-row hyperedge -> target token
 在每层先形成 head-specific row message，再更新 target token。容量不是当前负结果的唯一
 解释：同为 64D 的 GCN 明显更强，所以首先必须修正训练问题，而不是只增加维度。
 
+## Attention-routing mechanism gate
+
+在继续训练 endpoint encoder、扩大 embedding 或增加 loss 之前，先运行一个确定性、
+无参数、无 hallucination label 的 attention-routing 机制门。它不是复活 P-Cut：不做
+`full / no-prompt / no-response` closure；也不把 AE/VAE reconstruction、endpoint ranking
+或 posterior variance 当成主分数。该 gate 只回答当前 cache 能否支持下面三个相互区分
+的机制轴：
+
+| Axis | 机制问题 | 当前 cache 的观测边界 |
+|---|---|---|
+| lineage drift | prompt-rooted routing 是否沿层深和生成位置转为 response-rooted routing | 可观测，但只是 attention routing |
+| routing dispersion | endpoint 支持是否集中、分散，以及不同 heads 是否选择不同 source role | 可在 censoring bounds 下观测 |
+| parametric bias | 被关注内容是否经 OV 写入、被 residual/MLP 保留并推动 chosen-token logit | 不可观测；必须重新 replay OV、residual、MLP 和 logits |
+
+特别地，response-rooted 祖先不等于 parameterized knowledge。artifact 必须记录
+`drift_observed=true`、`dispersion_observed=true` 和
+`parametric_bias_observed=false`；在 value-aware replay 完成前不得构造或填补 bias 分数。
+
+### D/I/E/U lineage 与生成 token 对齐
+
+对每个 response query 按真实 Transformer layer order 递推四类守恒 routing ancestry：
+
+```text
+D  direct prompt-rooted: 当前 query 直接读取 retained prompt endpoint
+I  indirect prompt-rooted: prompt ancestry 经更早的 response carrier 到达当前 query
+E  endogenous response-rooted: 路径根在 response-position input embedding
+U  unresolved: sparse cache 未定位的 censored mass 及其后续传播
+```
+
+不插入 cache 没有观测到的 residual transition，也不把 `U` 并入 `E`。预注册的 drift
+读数是完整逐层 `[D,I,E,U]` trajectory，以及最终 response takeover：
+
+\[
+g_t=\log\frac{E_t+\epsilon}{D_t+I_t+\epsilon}.
+\]
+
+对齐必须使用 predecessor query。若 response token 采用零基索引，则缓存 query `i`
+预测 token `i+1`：第一个 response token 因缺少 last-prompt query 而显式 unavailable，
+最后一个缓存 query 因预测回答外 token 而丢弃。不得用后面的可用 token 替换真实 onset；
+same-token row 只作为 post-hoc misalignment control。
+
+### Censoring-aware dispersion
+
+未保留 endpoint 不是 observed zero。对一个 head-row，设 retained endpoint 与 exact
+diagonal 的质量为 `p`，unresolved mass 为 `u`，可容纳它的 censored causal endpoints
+数为 `m`。entropy 与 HHI 只报告可识别区间：
+
+\[
+H_{\min}=\sum_k-p_k\log p_k-u\log u,\qquad
+H_{\max}=H_{\min}+u\log m,
+\]
+
+\[
+Q_{\min}=\sum_kp_k^2+\frac{u^2}{m},\qquad
+Q_{\max}=\sum_kp_k^2+u^2.
+\]
+
+区间先在每个 `(target,layer,head)` 上计算，再汇总到 predecessor-aligned token；禁止
+用 floor、零或均匀分配产生伪 point estimate。另将每个 head 的 role mass 写为
+`(prompt, earlier-response, diagonal, unresolved)`，用 generalized Jensen-Shannon
+divergence 衡量 head-role disagreement。entropy/concentration bounds 与 head-role JSD
+保持独立输出，不用手工权重与 drift 合成一个分数。
+
+### 必要 controls 与停止门
+
+同一批 rows、同一校准集和同一 score orientation 下固定运行：
+
+```text
+ordered                  真实 0 -> L-1 层序
+reverse                  只反转层组合顺序
+random-layer             非 identity 的固定随机层排列
+last-layer               从初始 roots 只执行最后一个缓存层
+response-carrier-rewire  只重连 R->R carrier，保留 prompt endpoints 与 row nuisances
+same-token               将 query 错配给同位置 token 的 post-hoc control
+```
+
+carrier rewire 必须报告实际 changed-edge fraction；若稀疏图没有合法 swap，不能把它当作
+有效 null。分数先在 source-disjoint、task 与绝对位置分箱的 calibration rows 上冻结，
+之后才打开 test labels，并用 paired source bootstrap 比较。机制扩容的硬门是：
+
+1. ordered drift 必须优于 reverse、last-layer 和 same-token；否则删除 layer-order /
+   pre-generation claim；
+2. drift 或 dispersion 至少一个必须优于 response ordinal、absolute sequence
+   position、prompt length 与 offline response-length baselines；否则停止扩大
+   attention-only encoder、embedding 和 AE/VAE 容量；
+3. ordered 若不优于 random-layer，不能声称真实 chronology 有效；若不优于有效的
+   response-carrier-rewire，不能声称 exact response relay 有效。
+
+不满足这些条件时，训练 loss 下降不构成继续扩容的理由。OV/residual/MLP/logits replay
+属于新的 parametric-bias 可观测阶段，而不是用更大模型挽救当前 attention-only gate。
+
+QA 一键入口为：
+
+```bash
+bash experiments/directed_route_hypergraph/run_lineage_qa.sh
+```
+
+它依次生成 label-free calibration/test traces、冻结的 drift/dispersion scores 和
+post-hoc evaluation。只生成并冻结机制 artifact、不打开标签时使用：
+
+```bash
+EVALUATE=0 bash experiments/directed_route_hypergraph/run_lineage_qa.sh
+```
+
 ## 3. 新核心目标：强制 held-out typed endpoint recovery
 
 对 clean graph 中采样的真实边
