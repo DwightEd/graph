@@ -21,6 +21,7 @@ class ModelConfig:
 @dataclass(frozen=True)
 class LearningConfig:
     rows_per_graph: int = 256
+    layout_rows_per_graph: int = 32
     layout_rows_per_batch: int = 64
     layout_min_mass: float = 1e-4
     layout_max_elements: int = 8_000_000

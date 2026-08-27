@@ -20,6 +20,7 @@ def command_line() -> argparse.ArgumentParser:
     command.add_argument("--limit", type=int)
     command.add_argument("--epochs", type=int, default=8)
     command.add_argument("--rows-per-graph", type=int, default=256)
+    command.add_argument("--layout-rows-per-graph", type=int, default=32)
     command.add_argument("--layout-rows-per-batch", type=int, default=64)
     command.add_argument("--layout-min-mass", type=float, default=1e-4)
     command.add_argument("--layout-max-elements", type=int, default=8_000_000)
@@ -83,6 +84,7 @@ def main() -> None:
             model_config=ModelConfig(residual_weight=arguments.residual_weight),
             learning_config=LearningConfig(
                 rows_per_graph=arguments.rows_per_graph,
+                layout_rows_per_graph=arguments.layout_rows_per_graph,
                 layout_rows_per_batch=arguments.layout_rows_per_batch,
                 layout_min_mass=arguments.layout_min_mass,
                 layout_max_elements=arguments.layout_max_elements,

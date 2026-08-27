@@ -7,6 +7,7 @@ DEVICE=${DEVICE:-cuda}
 TASK=${TASK:-QA}
 EPOCHS=${EPOCHS:-8}
 ROWS_PER_GRAPH=${ROWS_PER_GRAPH:-256}
+LAYOUT_ROWS_PER_GRAPH=${LAYOUT_ROWS_PER_GRAPH:-32}
 LAYOUT_ROWS_PER_BATCH=${LAYOUT_ROWS_PER_BATCH:-64}
 LAYOUT_MIN_MASS=${LAYOUT_MIN_MASS:-0.0001}
 LAYOUT_MAX_ELEMENTS=${LAYOUT_MAX_ELEMENTS:-8000000}
@@ -19,7 +20,7 @@ LAYOUT_WEIGHT=${LAYOUT_WEIGHT:-0.25}
 RESIDUAL_WEIGHT=${RESIDUAL_WEIGHT:-1.0}
 VARIANT=${VARIANT:-real}
 SEED=${SEED:-20260827}
-RUN_NAME=${RUN_NAME:-${LAYOUT_ORDER}_layout_${VARIANT}_fw${FLOW_WEIGHT}_lw${LAYOUT_WEIGHT}_rw${RESIDUAL_WEIGHT}_seed${SEED}}
+RUN_NAME=${RUN_NAME:-${LAYOUT_ORDER}_layout_${VARIANT}_lr${LAYOUT_ROWS_PER_GRAPH}_fw${FLOW_WEIGHT}_lw${LAYOUT_WEIGHT}_rw${RESIDUAL_WEIGHT}_seed${SEED}}
 OUT=${OUT:-${ROOT}/experiments/directed_route_hypergraph/outputs/${TASK,,}/${RUN_NAME}}
 TRAIN_LIMIT=${TRAIN_LIMIT:-}
 TEST_LIMIT=${TEST_LIMIT:-}
@@ -104,6 +105,7 @@ run_stage 1 "[1/5] Fit label-free directed hypergraph encoder" \
   --train "${TRAIN_SPLIT}" --checkpoint "${OUT}/model.pt" \
   --task "${TASK}" --epochs "${EPOCHS}" \
   --rows-per-graph "${ROWS_PER_GRAPH}" --variant "${VARIANT}" \
+  --layout-rows-per-graph "${LAYOUT_ROWS_PER_GRAPH}" \
   --layout-rows-per-batch "${LAYOUT_ROWS_PER_BATCH}" \
   --layout-min-mass "${LAYOUT_MIN_MASS}" \
   --layout-max-elements "${LAYOUT_MAX_ELEMENTS}" \

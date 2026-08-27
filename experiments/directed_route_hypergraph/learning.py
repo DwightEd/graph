@@ -10,7 +10,7 @@ from experiments.grounded_route.graph import TokenGraph
 from .config import LearningConfig
 from .corruption import corrupt_graph
 from .flow import ordered_flow
-from .layout import ordered_endpoint_layout
+from .layout import endpoint_layout_plan, ordered_endpoint_layout
 from .model import DirectedRouteHypergraphEncoder, EncoderOutput
 
 
@@ -261,71 +261,182 @@ def flow_consistency_loss(
     ).sum(dim=-1).mean()
 
 
+def _layout_plan_fits(
+    graph: TokenGraph,
+    response_index: torch.Tensor,
+    *,
+    max_elements: int,
+    max_work_elements: int,
+    layer_order: tuple[int, ...] | None,
+) -> bool:
+    if max_elements < 1:
+        raise ValueError("layout max_elements must be positive")
+    if max_work_elements < 1:
+        raise ValueError("layout max_work_elements must be positive")
+    plan = endpoint_layout_plan(
+        graph,
+        response_index,
+        layer_order=layer_order,
+    )
+    target_elements = len(plan.response_index) * (graph.token_count + 1)
+    element_count = max(target_elements, plan.peak_state_elements)
+    return (
+        element_count <= max_elements
+        and plan.work_element_count <= max_work_elements
+    )
+
+
+def sample_layout_rows(
+    graph: TokenGraph,
+    limit: int,
+    generator: torch.Generator,
+    *,
+    max_elements: int,
+    max_work_elements: int,
+    layer_order: tuple[int, ...] | None = None,
+) -> torch.Tensor:
+    """Choose an exact endpoint-layout subset that fits explicit budgets.
+
+    Rows are sampled uniformly without replacement.  If their exact backward
+    dependency closure is too large, the same random priority order is halved
+    until it fits.  A first-response fallback keeps the objective active on
+    exceptionally long graphs; if even that exact row violates an explicitly
+    tiny budget, the layout objective is skipped for that graph while local-row
+    and P/R/U losses remain active.
+    """
+
+    count = min(max(int(limit), 0), graph.response_count)
+    if count == 0:
+        return torch.empty(0, dtype=torch.long)
+    order = torch.randperm(
+        graph.response_count,
+        generator=cpu_generator(generator),
+    )
+    current = count
+    while current:
+        selected = order[:current].sort().values
+        if _layout_plan_fits(
+            graph,
+            selected,
+            max_elements=max_elements,
+            max_work_elements=max_work_elements,
+            layer_order=layer_order,
+        ):
+            return selected
+        if current == 1:
+            break
+        current = max(1, current // 2)
+
+    fallback = torch.zeros(1, dtype=torch.long)
+    if _layout_plan_fits(
+        graph,
+        fallback,
+        max_elements=max_elements,
+        max_work_elements=max_work_elements,
+        layer_order=layer_order,
+    ):
+        return fallback
+    return torch.empty(0, dtype=torch.long)
+
+
+def _empty_layout_loss(output: EncoderOutput) -> LayoutLoss:
+    zero = output.response_embedding.sum() * 0.0
+    return LayoutLoss(
+        loss=zero,
+        sink=zero,
+        self_mass=zero,
+        external_endpoint=zero,
+        candidate_count=0,
+        row_count=0,
+        self_row_count=0,
+        external_row_count=0,
+    )
+
+
 def endpoint_layout_loss(
     model: DirectedRouteHypergraphEncoder,
     output: EncoderOutput,
     clean_graph: TokenGraph,
     *,
+    response_index: torch.Tensor | None = None,
     rows_per_batch: int = 64,
     min_mass: float = 1e-4,
     max_elements: int = 8_000_000,
     max_work_elements: int = 250_000_000,
     layer_order: tuple[int, ...] | None = None,
 ) -> LayoutLoss:
-    """Recover the clean full-path endpoint layout from a student graph.
+    """Recover clean full-path endpoint layouts for exact selected rows.
 
     The target is the layer-ordered attention-flow proxy over exact endpoints,
-    not a hallucination label and not an OV-aware contribution layout.
+    not a hallucination label and not an OV-aware contribution layout.  An
+    arbitrary response subset is computed through its exact layer-wise
+    dependency closure, so selected rows equal the corresponding rows of the
+    full layout without materializing unrelated response states.
     """
 
     if rows_per_batch < 1:
         raise ValueError("layout rows_per_batch must be positive")
     if not 0.0 < min_mass < 1.0:
         raise ValueError("layout min_mass must be between zero and one")
-    element_count = clean_graph.response_count * (clean_graph.token_count + 1)
+    if response_index is None:
+        response_index = torch.arange(clean_graph.response_count, dtype=torch.long)
+    else:
+        response_index = torch.unique(
+            torch.as_tensor(response_index, dtype=torch.long).detach().cpu(),
+            sorted=True,
+        )
+    if len(response_index) and bool(
+        ((response_index < 0) | (response_index >= clean_graph.response_count)).any()
+    ):
+        raise ValueError("layout response_index is outside the graph")
+    if not len(response_index):
+        return _empty_layout_loss(output)
+
+    plan = endpoint_layout_plan(
+        clean_graph,
+        response_index,
+        layer_order=layer_order,
+    )
+    target_elements = len(response_index) * (clean_graph.token_count + 1)
+    element_count = max(target_elements, plan.peak_state_elements)
     if max_elements < 1:
         raise ValueError("layout max_elements must be positive")
     if element_count > max_elements:
         raise ValueError(
-            "endpoint layout exceeds layout_max_elements; increase the explicit "
-            "limit or set layout_weight=0"
+            f"selected endpoint layout requires {element_count} dense elements, "
+            f"exceeding layout_max_elements={max_elements}; reduce "
+            "layout_rows_per_graph or set layout_weight=0"
         )
     if max_work_elements < 1:
         raise ValueError("layout max_work_elements must be positive")
-    response_relay_edges = int(
-        (clean_graph.edges.source >= clean_graph.response_start).sum().item()
-    )
-    work_element_count = (clean_graph.token_count + 1) * (
-        clean_graph.layer_count * clean_graph.response_count
-        + response_relay_edges
-    )
-    if work_element_count > max_work_elements:
+    if plan.work_element_count > max_work_elements:
         raise ValueError(
-            f"endpoint relay work estimate {work_element_count} exceeds "
-            f"layout_max_work_elements={max_work_elements}; profile the longest "
-            "samples before increasing the limit or set layout_weight=0"
+            f"selected endpoint relay work estimate {plan.work_element_count} "
+            f"exceeds layout_max_work_elements={max_work_elements}; reduce "
+            "layout_rows_per_graph or set layout_weight=0"
         )
+
     target = ordered_endpoint_layout(
         clean_graph,
         residual_weight=model.config.residual_weight,
         layer_order=layer_order,
+        response_index=response_index,
     ).distribution.to(
         device=output.response_embedding.device,
         dtype=output.response_embedding.dtype,
     )
-    if target.shape != (
-        clean_graph.response_count,
-        clean_graph.token_count + 1,
-    ):
+    expected_shape = (len(response_index), clean_graph.token_count + 1)
+    if target.shape != expected_shape:
         raise ValueError("endpoint layout has invalid dimensions")
     if not torch.isfinite(target).all() or not torch.allclose(
         target.sum(dim=1),
-        torch.ones(clean_graph.response_count, device=target.device, dtype=target.dtype),
+        torch.ones(len(response_index), device=target.device, dtype=target.dtype),
         atol=2e-5,
         rtol=2e-5,
     ):
         raise ValueError("endpoint layout must contain finite probability rows")
 
+    response_index = response_index.to(target.device)
     zero = output.response_embedding.sum() * 0.0
     sink_total = zero
     self_total = zero
@@ -333,18 +444,19 @@ def endpoint_layout_loss(
     self_rows = 0
     external_rows = 0
     layout_key = model.layout_key(output.node_embedding)
-    for start in range(0, clean_graph.response_count, rows_per_batch):
-        stop = min(start + rows_per_batch, clean_graph.response_count)
-        response_index = torch.arange(start, stop, device=target.device)
+    for start in range(0, len(response_index), rows_per_batch):
+        stop = min(start + rows_per_batch, len(response_index))
+        current_index = response_index[start:stop]
         logits = model.endpoint_layout_logits(
             output,
             clean_graph,
-            response_index,
+            current_index,
             key=layout_key,
         )
         token_logits = logits[:, :-1]
         target_block = target[start:stop]
-        target_token = clean_graph.response_start + response_index
+        target_token = clean_graph.response_start + current_index
+        block_row = torch.arange(stop - start, device=target.device)
 
         all_normalizer = torch.logsumexp(logits, dim=1)
         token_normalizer = torch.logsumexp(token_logits, dim=1)
@@ -357,22 +469,15 @@ def endpoint_layout_loss(
         ).sum()
 
         known_mass = 1.0 - sink_mass
-        self_mass = target_block[
-            torch.arange(stop - start, device=target.device),
-            target_token,
-        ]
+        self_mass = target_block[block_row, target_token]
         known = known_mass > min_mass
         if bool(known.any()):
             token_log_probability = token_logits - token_normalizer[:, None]
-            self_log_probability = token_log_probability[
-                torch.arange(stop - start, device=target.device),
-                target_token,
-            ]
+            self_log_probability = token_log_probability[block_row, target_token]
             external_logits = token_logits.clone()
-            external_logits[
-                torch.arange(stop - start, device=target.device),
-                target_token,
-            ] = torch.finfo(token_logits.dtype).min
+            external_logits[block_row, target_token] = torch.finfo(
+                token_logits.dtype
+            ).min
             external_log_probability = (
                 torch.logsumexp(external_logits, dim=1) - token_normalizer
             )
@@ -388,10 +493,7 @@ def endpoint_layout_loss(
             external = external_mass > min_mass
             if bool(external.any()):
                 external_target = target_block[:, :-1].clone()
-                external_target[
-                    torch.arange(stop - start, device=target.device),
-                    target_token,
-                ] = 0.0
+                external_target[block_row, target_token] = 0.0
                 external_target = external_target / external_mass.clamp_min(
                     min_mass
                 )[:, None]
@@ -409,13 +511,13 @@ def endpoint_layout_loss(
                 ).sum()
                 external_rows += int(external.sum().item())
 
-    row_count = clean_graph.response_count
+    row_count = len(response_index)
     sink_loss = sink_total / max(row_count, 1)
     self_loss = self_total / max(self_rows, 1)
     external_loss = external_total / max(external_rows, 1)
     candidate_count = sum(
-        clean_graph.response_start + response + 2
-        for response in range(row_count)
+        clean_graph.response_start + int(response) + 2
+        for response in response_index.detach().cpu().tolist()
     )
     return LayoutLoss(
         loss=sink_loss + self_loss + external_loss,
@@ -466,10 +568,19 @@ def self_supervised_loss(
     else:
         raise ValueError("layout_order must be 'ordered' or 'reverse'")
     if config.layout_weight > 0:
+        layout_rows = sample_layout_rows(
+            graph,
+            config.layout_rows_per_graph,
+            generator,
+            max_elements=config.layout_max_elements,
+            max_work_elements=config.layout_max_work_elements,
+            layer_order=layout_order,
+        )
         layout = endpoint_layout_loss(
             model,
             output,
             graph,
+            response_index=layout_rows,
             rows_per_batch=config.layout_rows_per_batch,
             min_mass=config.layout_min_mass,
             max_elements=config.layout_max_elements,
@@ -477,16 +588,7 @@ def self_supervised_loss(
             layer_order=layout_order,
         )
     else:
-        layout = LayoutLoss(
-            loss=zero,
-            sink=zero,
-            self_mass=zero,
-            external_endpoint=zero,
-            candidate_count=0,
-            row_count=0,
-            self_row_count=0,
-            external_row_count=0,
-        )
+        layout = _empty_layout_loss(output)
     variance = variance_regularizer(output.response_embedding)
     loss = (
         row.loss

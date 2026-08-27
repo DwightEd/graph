@@ -98,7 +98,13 @@ Q_t^l
 }{\alpha+1}.
 \]
 
-最终 \(Q_t^L\in\Delta^{N}\) 等于 retained-attention proxy 中所有合法 layer-ordered paths 的权重乘积之和。实现只保存 response layouts，prompt endpoint 使用隐式 one-hot，因此内存为 \(O(RN)\)；response-to-response transport 使用 sparse-dense multiplication，不构造 edge-by-endpoint 三维张量。`layout_rows_per_batch` 只切分 pointer decoder，不切分 teacher rollout。`layout_max_elements` 限制 dense target；`layout_max_work_elements` 在 rollout 前限制代理工作量 \((N+1)(LR+E_{RR})\)。
+最终 \(Q_t^L\in\Delta^{N}\) 等于 retained-attention proxy 中所有合法 layer-ordered paths 的权重乘积之和。prompt endpoint 使用隐式 one-hot，response-to-response transport 使用 sparse-dense multiplication，不构造 edge-by-endpoint 三维张量。
+
+训练默认每张图均匀抽取最多 `layout_rows_per_graph=32` 个最终 response rows。实现先从这些 rows 反向追踪每层真实 response relay，构造精确依赖闭包，再只对闭包执行前向 teacher rollout。任意选中 row 的结果与完整 \(R\times(N+1)\) layout 中对应行严格相同；这不是截断近似、top-k 近似或把未计算 endpoint 当作零。
+
+如果随机子集的精确闭包仍超过显式预算，代码按同一随机优先级逐次减半，直至可计算；极端长样本使用首个 response row 作为精确 fallback。只有连该单行都违反用户设置的预算时，该图才跳过 layout 项，local row 与 P/R/U loss 仍继续训练，因此不会因为单个长样本中断整次运行。checkpoint 会保存 `layout_rows_per_graph`，历史中的 eligible-row coverage 可用于审计实际监督覆盖率。
+
+`layout_rows_per_batch` 只切分 neural pointer decoder；`layout_max_elements` 同时限制选中 target/logit 矩阵与 teacher 闭包的峰值 dense state；`layout_max_work_elements` 限制精确闭包的 sparse relay 工作量。完整 layout API 仍保留用于小图测试和 deterministic controls，但默认训练不再强制物化所有 response rows。
 
 unresolved 是吸收式记账：路径一旦进入 cache 未解析质量，就不再假装能恢复到某个已知 endpoint。它不是无效信息或 hallucination 类别。
 
@@ -172,6 +178,7 @@ INCIDENCE_DROPOUT=0.15
 HEAD_DROPOUT=0.05
 FLOW_WEIGHT=0.5
 LAYOUT_WEIGHT=0.25
+LAYOUT_ROWS_PER_GRAPH=32
 LAYOUT_ROWS_PER_BATCH=64
 LAYOUT_MIN_MASS=0.0001
 LAYOUT_MAX_ELEMENTS=8000000
@@ -190,7 +197,7 @@ all objectives    FLOW_WEIGHT=0.5 LAYOUT_WEIGHT=0.25
 reverse endpoint target   LAYOUT_ORDER=reverse
 ```
 
-默认输出目录包含 `FLOW_WEIGHT`、`LAYOUT_WEIGHT`、`RESIDUAL_WEIGHT`、order、variant 和 seed，目标消融不会静默覆盖彼此；其他配置变体可用 `RUN_NAME` 或 `OUT` 显式隔离。
+默认输出目录包含 `LAYOUT_ROWS_PER_GRAPH`、`FLOW_WEIGHT`、`LAYOUT_WEIGHT`、`RESIDUAL_WEIGHT`、order、variant 和 seed，目标消融不会静默覆盖彼此；其他配置变体可用 `RUN_NAME` 或 `OUT` 显式隔离。
 
 ## 8. 解释边界与必须实验
 
