@@ -21,4 +21,6 @@ def test_answer_features_include_mass_operator_and_permutation_controls():
     assert "operator_normalized_history_dispersion_mean" in feature
     assert "operator_permuted_response_operator_lockin" in feature
     assert feature["row_mass_conservation_error"] < 1e-5
+    assert feature["prompt_code_effective_heads_mean"] > 0.0
+    assert feature["history_code_effective_heads_mean"] > 0.0
     assert all(torch.isfinite(torch.tensor(value)) for value in feature.values())
