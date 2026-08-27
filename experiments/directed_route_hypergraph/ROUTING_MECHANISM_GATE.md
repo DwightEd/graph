@@ -31,7 +31,7 @@ lower/upper bounds 与 head-role JSD，不与 drift 合成一个总分。
 
 ## 实现
 
-- implementation commit: `7ee5e724005e41ae68a5e0dc36533cf19b9a5a54`
+- implementation commit: `7672111d01bf6168a1d597fc571cece51ac5f9a9`
 - lineage DP: `routing_lineage.py`
 - censoring-aware dispersion: `routing_dispersion.py`
 - controls: `lineage_controls.py`
