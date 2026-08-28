@@ -1,9 +1,13 @@
-from experiments.attention_mechanism_audit.reporting import GROUPS, ONSET, render_report
+from experiments.attention_mechanism_audit.reporting import (
+    KEY_METRICS,
+    ONSET_METRICS,
+    render_report,
+)
 
 
 def _report():
-    keys = {metric.key for _title, metrics in GROUPS for metric in metrics}
-    keys.update(metric.key for metric in ONSET)
+    keys = {metric.key for metric in KEY_METRICS}
+    keys.update(metric.key for metric in ONSET_METRICS)
     summary = {
         "correct_mean": 0.2,
         "hallucinated_mean": 0.3,
@@ -32,14 +36,22 @@ def _report():
 def test_key_report_separates_audit_from_detection_and_prints_support_counts():
     text = render_report(_report())
 
-    assert "samples=20 tokens=100 hallucinated=10 prevalence=10.0000%" in text
-    assert "not a trained or unsupervised detector" in text
-    assert "DETECTION NOT EVALUATED" in text
-    assert "S=12 cells=30" in text
-    assert "DiD@0=+3.0000" in text
-    assert "evidence causal effect = observed-token logp(full)" in text
-    assert "source dispersion [primary]" in text
-    assert "ALL SAVED METRICS" not in text
+    assert "20 responses | 100 tokens | 10 hallucinated (10.00%)" in text
+    assert "Matched analysis: 12 sources, 30 source-position cells" in text
+    assert "Routing imbalance (%)" in text
+    assert "First hallucinated token" in text
+    assert "+3.0000 pp" in text
+    assert "detector score and threshold not evaluated" in text
+    assert "Definitions" not in text
+    assert "All saved metrics" not in text
+
+
+def test_explanation_is_opt_in():
+    text = render_report(_report(), explain=True)
+
+    assert "Definitions" in text
+    assert "edge mass = attention" in text
+    assert "Limits" in text
 
 
 def test_all_metrics_are_opt_in():
@@ -55,6 +67,6 @@ def test_all_metrics_are_opt_in():
 
     text = render_report(report, all_metrics=True)
 
-    assert "ALL SAVED METRICS" in text
+    assert "All saved metrics" in text
     assert "diagnostic_only" in text
-    assert "raw(C/H)=n/a/n/a" in text
+    assert "C=n/a H=n/a" in text

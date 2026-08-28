@@ -169,8 +169,9 @@ Outputs:
 
 The default evaluation output prints only the key routing-imbalance,
 dispersion, observed-token evidence-effect, capture-candidate, and onset
-results, including matched source/cell counts and the exact claim boundary.
-The complete diagnostic list is available with `--all-metrics`.
+results in one compact table. Calculation definitions and limitations are
+available with `--explain`; the complete diagnostic list is available with
+`--all-metrics`.
 An existing report can be summarized without replaying or reevaluating:
 
 ```bash

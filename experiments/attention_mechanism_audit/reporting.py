@@ -1,4 +1,4 @@
-"""Concise, presentation-ready rendering of mechanism audit reports."""
+"""Compact rendering of mechanism-audit results."""
 
 from __future__ import annotations
 
@@ -10,257 +10,197 @@ class Metric:
     label: str
     key: str
     scale: float = 1.0
-    unit: str = ""
+    delta_unit: str = ""
 
 
-GROUPS = (
-    (
-        "1. RESPONSE-DIRECTED FUNCTIONAL ROUTING",
-        (
-            Metric(
-                "routing imbalance [primary]",
-                "message_routing_drift_mean",
-                100.0,
-                "%/pp",
-            ),
-        ),
-    ),
-    (
-        "2. ROUTE DISPERSION / CONTRACTION",
-        (
-            Metric(
-                "source dispersion [primary]",
-                "message_source_dispersion_mean",
-                100.0,
-                "%/pp",
-            ),
-            Metric(
-                "head-role JS [secondary]",
-                "head_role_disagreement_mean",
-                1.0,
-                "JS",
-            ),
-        ),
-    ),
-    (
-        "3. OBSERVED-TOKEN EVIDENCE SUPPORT AND CAPTURE CANDIDATE",
-        (
-            Metric(
-                "evidence effect [primary]",
-                "evidence_message_effect",
-                1.0,
-                "logp",
-            ),
-            Metric(
-                "E/R-independent [secondary]",
-                "message_independent_capture_signature",
-                100.0,
-                "%/pp",
-            ),
-        ),
+KEY_METRICS = (
+    Metric("Routing imbalance (%)", "message_routing_drift_mean", 100.0, "pp"),
+    Metric("Source dispersion (%)", "message_source_dispersion_mean", 100.0, "pp"),
+    Metric("Head-role JS", "head_role_disagreement_mean"),
+    Metric("Evidence effect (log p)", "evidence_message_effect"),
+    Metric(
+        "E/R-independent candidate (%)",
+        "message_independent_capture_signature",
+        100.0,
+        "pp",
     ),
 )
 
-ONSET = (
-    Metric("response-evidence imbalance", "message_routing_drift_mean", 100.0, "pp"),
-    Metric("source dispersion", "message_source_dispersion_mean", 100.0, "pp"),
-    Metric("evidence causal effect", "evidence_message_effect", 1.0, "logp"),
+ONSET_METRICS = (
+    Metric("Routing imbalance", "message_routing_drift_mean", 100.0, "pp"),
+    Metric("Source dispersion", "message_source_dispersion_mean", 100.0, "pp"),
+    Metric("Evidence effect", "evidence_message_effect"),
 )
 
 
-def _number(value: float | None, *, signed: bool = False) -> str:
+def _value(value: float | None, scale: float, *, signed: bool = False) -> str:
     if value is None:
         return "n/a"
+    value *= scale
     return f"{value:+.4f}" if signed else f"{value:.4f}"
 
 
-def _interval(interval: list[float | None], scale: float) -> str:
+def _ci(interval: list[float | None], scale: float) -> str:
     if interval[0] is None:
-        return "[n/a,n/a]"
-    return f"[{interval[0] * scale:+.4f},{interval[1] * scale:+.4f}]"
-
-
-def _status(interval: list[float | None]) -> str:
-    low, high = interval
-    if low is None:
-        return "unavailable"
-    if low > 0:
-        return "CI>0"
-    if high < 0:
-        return "CI<0"
-    return "CI crosses 0"
+        return "[n/a, n/a]"
+    return f"[{interval[0] * scale:+.4f}, {interval[1] * scale:+.4f}]"
 
 
 def _direction(report: dict, key: str) -> str:
     low, high = report["summaries"][key]["ci95"]
-    if low is None:
-        return "unavailable"
-    if low > 0:
-        return "positive"
-    if high < 0:
-        return "negative"
-    return "unresolved"
+    if low is None or low <= 0 <= high:
+        return "unresolved"
+    return "higher" if low > 0 else "lower"
 
 
-def _group_result(report: dict, index: int) -> str:
-    if index == 0:
-        imbalance = _direction(report, "message_routing_drift_mean")
-        if imbalance == "positive":
-            return (
-                "GROUP RESULT nominal support for greater response-directed functional "
-                "routing; this alone is not temporal drift."
-            )
-        return "GROUP RESULT response-directed functional routing is not resolved."
-    if index == 1:
-        dispersion = _direction(report, "message_source_dispersion_mean")
-        disagreement = _direction(report, "head_role_disagreement_mean")
-        if dispersion == "positive":
-            return "GROUP RESULT nominal support for broader source dispersion."
-        if disagreement == "negative":
-            return (
-                "GROUP RESULT broad source dispersion is not supported; secondary evidence "
-                "shows greater attention-head role agreement."
-            )
-        return "GROUP RESULT neither broad dispersion nor contraction is resolved."
-    evidence = _direction(report, "evidence_message_effect")
-    capture = _direction(report, "message_independent_capture_signature")
-    if evidence == "negative" and capture == "positive":
-        return (
-            "GROUP RESULT nominal support for a weaker observed-token evidence effect plus a "
-            "minority E/R-message-independent candidate; not pure parameter knowledge."
-        )
-    if evidence == "negative":
-        return "GROUP RESULT nominal support for a weaker observed-token evidence effect only."
-    return "GROUP RESULT evidence-support/capture differences are not resolved."
-
-
-def _summary_line(report: dict, metric: Metric) -> str:
+def _metric_row(report: dict, metric: Metric) -> str:
     result = report["summaries"][metric.key]
     delta = result["position_matched_source_equal_difference"]
-    correct = result["correct_mean"]
-    hallucinated = result["hallucinated_mean"]
+    delta_text = _value(delta, metric.scale, signed=True)
+    if delta is not None and metric.delta_unit:
+        delta_text += f" {metric.delta_unit}"
     return (
-        f"{metric.label:31s} "
-        f"raw(C/H)={_number(None if correct is None else correct * metric.scale)}"
-        f"/{_number(None if hallucinated is None else hallucinated * metric.scale)} "
-        f"matched_delta={_number(None if delta is None else delta * metric.scale, signed=True)} "
-        f"CI={_interval(result['ci95'], metric.scale)} "
-        f"S={result['sources']} cells={result['matched_cells']} "
-        f"{metric.unit} {_status(result['ci95'])}"
+        f"{metric.label:33s} "
+        f"{_value(result['correct_mean'], metric.scale):>10s} "
+        f"{_value(result['hallucinated_mean'], metric.scale):>10s} "
+        f"{delta_text:>13s} "
+        f"{_ci(result['ci95'], metric.scale)}"
     )
 
 
-def _onset_line(report: dict, metric: Metric) -> str:
-    result = report["matched_onset"][metric.key]
-    index = result["offset"].index(0)
-    value = result["difference_in_difference"][index]
-    low = result["ci95_low"][index]
-    high = result["ci95_high"][index]
-    interval = [low, high]
-    return (
-        f"{metric.label:31s} "
-        f"DiD@0={_number(None if value is None else value * metric.scale, signed=True)} "
-        f"CI={_interval(interval, metric.scale)} "
-        f"events={result['events'][index]} S={result['sources'][index]} "
-        f"{metric.unit} {_status(interval)}"
+def _findings(report: dict) -> list[str]:
+    routing = _direction(report, "message_routing_drift_mean")
+    dispersion = _direction(report, "message_source_dispersion_mean")
+    head_js = _direction(report, "head_role_disagreement_mean")
+    evidence = _direction(report, "evidence_message_effect")
+    capture = _direction(report, "message_independent_capture_signature")
+
+    routing_text = (
+        "Routing: hallucinated tokens have a higher response-evidence message imbalance."
+        if routing == "higher"
+        else "Routing: the matched response-evidence imbalance is not resolved."
     )
+    if dispersion == "unresolved" and head_js == "lower":
+        dispersion_text = (
+            "Dispersion: overall source entropy is unchanged; head role distributions are "
+            "more similar for hallucinated tokens."
+        )
+    elif dispersion == "higher":
+        dispersion_text = "Dispersion: source-message entropy is higher for hallucinated tokens."
+    elif dispersion == "lower":
+        dispersion_text = "Dispersion: source-message entropy is lower for hallucinated tokens."
+    else:
+        dispersion_text = "Dispersion: neither source spread nor head-role contraction is resolved."
+
+    evidence_text = (
+        "Evidence: passage messages contribute less to the observed hallucinated token."
+        if evidence == "lower"
+        else "Evidence: the observed-token evidence-effect difference is not resolved."
+    )
+    if capture == "higher":
+        rate = report["summaries"]["message_independent_capture_signature"][
+            "hallucinated_mean"
+        ]
+        evidence_text += f" The E/R-independent candidate covers {rate:.2%} of hallucinated tokens."
+    return [routing_text, dispersion_text, evidence_text]
 
 
-def render_report(report: dict, *, all_metrics: bool = False) -> str:
-    """Return the key audit results and their exact interpretation boundary."""
+def _onset(report: dict) -> list[str]:
+    first = report["matched_onset"][ONSET_METRICS[0].key]
+    index = first["offset"].index(0)
+    if first["events"][index] == 0:
+        return ["Onset: unavailable (no matched first-hallucination events)."]
+
+    lines = [
+        "",
+        "First hallucinated token (difference-in-differences at offset 0)",
+        f"{'Metric':33s} {'DiD':>13s} {'95% CI':>20s} {'events':>8s} {'sources':>8s}",
+    ]
+    for metric in ONSET_METRICS:
+        result = report["matched_onset"][metric.key]
+        value = result["difference_in_difference"][index]
+        value_text = _value(value, metric.scale, signed=True)
+        if value is not None and metric.delta_unit:
+            value_text += f" {metric.delta_unit}"
+        lines.append(
+            f"{metric.label:33s} {value_text:>13s} "
+            f"{_ci([result['ci95_low'][index], result['ci95_high'][index]], metric.scale):>20s} "
+            f"{result['events'][index]:8d} {result['sources'][index]:8d}"
+        )
+    return lines
+
+
+def _explanation() -> list[str]:
+    return [
+        "",
+        "Definitions",
+        "edge mass = attention * ||W_O(head) V(source)||_2",
+        "routing imbalance = response message share - passage message share",
+        "source dispersion = normalized entropy over source-token edge mass",
+        "head-role JS = JS divergence among attention-head role distributions",
+        "evidence effect = observed-token logp(full) - logp(no passage messages)",
+        (
+            "E/R-independent candidate = full margin>0, no(E,R) margin>0, "
+            "and evidence effect<=0"
+        ),
+        "",
+        "Limits",
+        "Passage means the full QA passage block, not annotated key evidence.",
+        "Response share combines earlier response history and the predictor self route.",
+        "Routing mass is observational; only the deletion effects are model interventions.",
+        "The evidence effect concerns the observed token, not global evidence utilization.",
+        "The no(E,R) branch still retains other prompt messages, residual state, and MLP updates.",
+    ]
+
+
+def render_report(
+    report: dict,
+    *,
+    all_metrics: bool = False,
+    explain: bool = False,
+) -> str:
+    """Return the report-ready audit table."""
 
     tokens = report["tokens"]
     positives = report["hallucinated_tokens"]
+    reference = report["summaries"][KEY_METRICS[0].key]
     lines = [
-        "=== KEY THREE-MECHANISM AUDIT ===",
+        "=== Mechanism audit: QA ===",
         (
-            f"DATA samples={report['samples']} tokens={tokens} "
-            f"hallucinated={positives} prevalence={positives / tokens:.4%}"
-        ),
-        "SCOPE post-hoc mechanism audit; this is not a trained or unsupervised detector.",
-        "DETECTION NOT EVALUATED: no label-free score, threshold, AUROC, or AUPRC.",
-        (
-            "TEST matched_delta = hallucinated - correct within source + absolute-position "
-            "+ relative-position cells; sources receive equal weight."
+            f"{report['samples']} responses | {tokens} tokens | {positives} hallucinated "
+            f"({positives / tokens:.2%})"
         ),
         (
-            "UNCERTAINTY 95% source-bootstrap CI; nominal only, with no multiple-testing "
-            "correction. raw(C/H) is descriptive and is not the test statistic."
+            f"Matched analysis: {reference['sources']} sources, "
+            f"{reference['matched_cells']} source-position cells; "
+            "delta = hallucinated - correct; 95% source-bootstrap CI"
         ),
-        (
-            "PRIMARY ENDPOINTS routing imbalance, overall source dispersion, and observed-token "
-            "evidence effect; head-role JS and E/R-independent capture are secondary."
-        ),
+        "",
+        f"{'Metric':33s} {'Correct':>10s} {'Halluc.':>10s} {'Delta':>13s} 95% CI",
     ]
-    for index, (title, metrics) in enumerate(GROUPS):
-        lines.extend(("", f"[{title}]"))
-        lines.extend(_summary_line(report, metric) for metric in metrics)
-        lines.append(_group_result(report, index))
-
+    lines.extend(_metric_row(report, metric) for metric in KEY_METRICS)
+    lines.extend(("", "Findings", *[f"- {line}" for line in _findings(report)]))
+    lines.extend(_onset(report))
     lines.extend(
         (
             "",
-            "[4. FIRST-HALLUCINATION ONSET]",
-            (
-                "DiD@0 = change from token tau-1 to the first hallucinated token tau, "
-                "minus the matched correct pseudo-onset change."
-            ),
-        )
-    )
-    lines.extend(_onset_line(report, metric) for metric in ONSET)
-    lines.extend(
-        (
-            "",
-            "CALCULATION DEFINITIONS",
-            "message edge magnitude = attention * ||W_O(head) V(source)||_2",
-            "evidence = every token in the QA passage block, not annotated key-evidence tokens",
-            "response share = earlier response-history messages + predictor self-route message",
-            "response-evidence imbalance = response message share - evidence message share",
-            "source dispersion = normalized entropy over source-token message magnitudes",
-            "head-role disagreement = JS divergence among attention-head role distributions",
-            "evidence causal effect = observed-token logp(full) - logp(no evidence messages)",
-            "response causal effect = observed-token logp(full) - logp(no response messages)",
-            (
-                "message-independent capture = full margin>0 AND no(evidence,response) "
-                "margin>0 AND evidence effect<=0"
-            ),
-            "",
-            "INTERPRETATION BOUNDARY",
-            (
-                "Routing shares are observational allocation. Temporal drift requires the onset "
-                "DiD, and greater response allocation does not imply greater causal dependence."
-            ),
-            (
-                "Positive dispersion/JS would support diffusion; significant negative values "
-                "support contraction instead."
-            ),
-            (
-                "Evidence deletion tests support for the observed token; it does not by itself "
-                "prove global evidence-utilization failure or hallucination formation."
-            ),
-            (
-                "The no(evidence,response) branch still retains question/constraint messages, "
-                "predictor residual/embedding, and MLP dynamics; it is not parameter-only."
-            ),
-            (
-                "Formation claims additionally require observer=generator and evidence that the "
-                "observer itself prefers the observed token."
-            ),
-            "Layer early/late means first/last one-third of Transformer layers, not token time.",
+            "Status: post-hoc labeled mechanism comparison; detector score and threshold not evaluated.",
         )
     )
 
+    if explain:
+        lines.extend(_explanation())
     if all_metrics:
-        lines.extend(("", "=== ALL SAVED METRICS ==="))
+        lines.extend(("", "All saved metrics"))
         for name, result in report["summaries"].items():
             lines.append(
                 f"{name:42s} "
-                f"raw(C/H)={_number(result['correct_mean'])}/{_number(result['hallucinated_mean'])} "
-                f"matched_delta={_number(result['position_matched_source_equal_difference'], signed=True)} "
-                f"CI={_interval(result['ci95'], 1.0)} "
-                f"S={result['sources']} cells={result['matched_cells']}"
+                f"C={_value(result['correct_mean'], 1.0)} "
+                f"H={_value(result['hallucinated_mean'], 1.0)} "
+                f"delta={_value(result['position_matched_source_equal_difference'], 1.0, signed=True)} "
+                f"CI={_ci(result['ci95'], 1.0)}"
             )
     return "\n".join(lines)
 
 
-__all__ = ["render_report"]
+__all__ = ["KEY_METRICS", "ONSET_METRICS", "render_report"]

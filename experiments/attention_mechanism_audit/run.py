@@ -45,13 +45,26 @@ def _evaluate(args: argparse.Namespace) -> None:
         bootstrap=args.bootstrap,
         seed=args.seed,
     )
-    print("\n" + render_report(report, all_metrics=args.all_metrics))
+    print(
+        "\n"
+        + render_report(
+            report,
+            all_metrics=args.all_metrics,
+            explain=args.explain,
+        )
+    )
     print(f"\nFull report: {args.output}")
 
 
 def _summarize(args: argparse.Namespace) -> None:
     report = json.loads(args.report.read_text(encoding="utf-8"))
-    print(render_report(report, all_metrics=args.all_metrics))
+    print(
+        render_report(
+            report,
+            all_metrics=args.all_metrics,
+            explain=args.explain,
+        )
+    )
 
 
 def parser() -> argparse.ArgumentParser:
@@ -80,6 +93,7 @@ def parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--bootstrap", type=int, default=1000)
     evaluate.add_argument("--seed", type=int, default=20260828)
     evaluate.add_argument("--all-metrics", action="store_true")
+    evaluate.add_argument("--explain", action="store_true")
     evaluate.set_defaults(handler=_evaluate)
 
     summarize = commands.add_parser(
@@ -87,6 +101,7 @@ def parser() -> argparse.ArgumentParser:
     )
     summarize.add_argument("--report", type=Path, required=True)
     summarize.add_argument("--all-metrics", action="store_true")
+    summarize.add_argument("--explain", action="store_true")
     summarize.set_defaults(handler=_summarize)
     return root
 
