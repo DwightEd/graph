@@ -1,0 +1,31 @@
+--- a/experiments/frozen_operator_graph/run_qa.sh
++++ b/experiments/frozen_operator_graph/run_qa.sh
+@@ -157,8 +157,18 @@
+ [ -n "${RESOLVED_MODEL_DTYPE}" ] || fail_run "failed to resolve MODEL_DTYPE from formal cache provenance"
+ 
+ if [ -d "${OUT}" ] && [ -n "$(find "${OUT}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ] && [ "${OVERWRITE}" != "1" ]; then
+-  fail_run "output directory is not empty: ${OUT}. Set OVERWRITE=1 only when replacement is intentional."
++  if [ -f "${OUT}/FAILED.json" ] && [ ! -f "${OUT}/manifest.json" ]; then
++    echo
++    echo "Detected an explicitly failed, incomplete previous construction: ${OUT}"
++    echo "Removing only this incomplete output so the one-command run can restart."
++    run_stage "remove failed incomplete output" rm -rf "${OUT}"
++  else
++    fail_run "output directory is not empty: ${OUT}. Set OVERWRITE=1 only when replacement is intentional."
++  fi
+ fi
+ 
+ run_stage "create output parent" mkdir -p "$(dirname "${OUT}")"
+--- a/experiments/frozen_operator_graph/tests/test_launcher.py
++++ b/experiments/frozen_operator_graph/tests/test_launcher.py
+@@ -20,6 +20,10 @@
+     assert ': "${SPLIT_ROOT:?' not in text
+     assert ': "${MODEL_PATH:?' not in text
+     assert ': "${OUT:?' not in text
++    assert '[ -f "${OUT}/FAILED.json" ]' in text
++    assert '[ ! -f "${OUT}/manifest.json" ]' in text
++    assert 'remove failed incomplete output' in text
++    assert 'Set OVERWRITE=1 only when replacement is intentional' in text
+     result = subprocess.run(
+         ["bash", "-n", str(launcher)],
+         text=True,
