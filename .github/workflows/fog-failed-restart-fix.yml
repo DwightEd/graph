@@ -21,8 +21,46 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git apply --check .bootstrap/fog_failed_restart.patch
-          git apply .bootstrap/fog_failed_restart.patch
+          python - <<'PY'
+          from pathlib import Path
+
+          launcher = Path("experiments/frozen_operator_graph/run_qa.sh")
+          text = launcher.read_text(encoding="utf-8")
+          old = '''if [ -d "${OUT}" ] && [ -n "$(find "${OUT}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ] && [ "${OVERWRITE}" != "1" ]; then
+            fail_run "output directory is not empty: ${OUT}. Set OVERWRITE=1 only when replacement is intentional."
+          fi
+          '''
+          new = '''if [ -d "${OUT}" ] && [ -n "$(find "${OUT}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ] && [ "${OVERWRITE}" != "1" ]; then
+            if [ -f "${OUT}/FAILED.json" ] && [ ! -f "${OUT}/manifest.json" ]; then
+              echo
+              echo "Detected an explicitly failed, incomplete previous construction: ${OUT}"
+              echo "Removing only this incomplete output so the one-command run can restart."
+              run_stage "remove failed incomplete output" rm -rf "${OUT}"
+            else
+              fail_run "output directory is not empty: ${OUT}. Set OVERWRITE=1 only when replacement is intentional."
+            fi
+          fi
+          '''
+          if text.count(old) != 1:
+              raise RuntimeError("launcher output guard did not match exactly once")
+          launcher.write_text(text.replace(old, new), encoding="utf-8")
+
+          test_path = Path("experiments/frozen_operator_graph/tests/test_launcher.py")
+          test_text = test_path.read_text(encoding="utf-8")
+          old_test = '''    assert ': "${OUT:?' not in text
+              result = subprocess.run(
+          '''
+          new_test = '''    assert ': "${OUT:?' not in text
+              assert '[ -f "${OUT}/FAILED.json" ]' in text
+              assert '[ ! -f "${OUT}/manifest.json" ]' in text
+              assert 'remove failed incomplete output' in text
+              assert 'Set OVERWRITE=1 only when replacement is intentional' in text
+              result = subprocess.run(
+          '''
+          if test_text.count(old_test) != 1:
+              raise RuntimeError("launcher test insertion point did not match exactly once")
+          test_path.write_text(test_text.replace(old_test, new_test), encoding="utf-8")
+          PY
           rm -f .bootstrap/fog_failed_restart.patch
           rmdir .bootstrap 2>/dev/null || true
           python -m compileall -q experiments/frozen_operator_graph
