@@ -1,10 +1,12 @@
-"""Frozen-model, answer-level attention hallucination mechanism audit.
+"""Frozen SELECT--RELAY--OVERRIDE grounding-control audit."""
 
-The package keeps three axes separate: grounding drift, routing/functional
-dispersion, and counterfactual evidence bypass.  It is an audit pipeline, not a
-graph encoder and not an unsupervised detector trained on hallucination labels.
-"""
+from .audit import AuditArtifact, load_artifact, save_artifact
+from .data import AuditPair, load_pairs
 
-from .artifacts import MechanismArtifact, load_artifact, save_artifact
-
-__all__ = ["MechanismArtifact", "load_artifact", "save_artifact"]
+__all__ = [
+    "AuditArtifact",
+    "AuditPair",
+    "load_artifact",
+    "load_pairs",
+    "save_artifact",
+]

@@ -1,221 +1,178 @@
-# Attention Hallucination Mechanism Audit
+# SELECT--RELAY--OVERRIDE causal audit
 
-这是一套**机制验证**代码，不是新的构图器、自编码器、VAE，也不是拿标签训练的幻觉检测器。它独立检验三个假设：
+This experiment tests three grounding failures with controlled fact swaps and
+exact frozen-model interventions. It is a mechanism audit, not a graph encoder,
+an autoencoder, a learned hallucination detector, or an observational feature
+probe.
 
-1. **Grounding drift**：生成过程中，被当前 chosen token 使用的注意力从 evidence/question/constraint 转向回答历史；
-2. **Dispersion / cancellation**：路由变散、head 的角色分工分歧，或有符号贡献相互抵消；
-3. **Counterfactual evidence bypass**：删除或替换证据后，冻结模型仍支持原回答。
+## Core hypothesis
 
-三个轴分别报告，不存在手工加权的 hallucination score。第三轴只能称为“证据绕过/回答持续性”，不能单独证明知识一定来自参数。
+At one candidate decision, grounding succeeds only if the model completes a
+three-stage control chain:
 
-## 核心机制
+1. **SELECT / dispersion:** the relevant answer-bearing value must exert more
+   total causal influence than a matched irrelevant value.
+2. **RELAY / drift:** after selection, the response history must carry the
+   counter-prior evidence rather than lock onto the model's emerging text.
+3. **OVERRIDE / parametric bias:** after evidence has entered the computation,
+   the final decision must override the candidate preferred without context.
 
-### 1. 严格 predecessor 对齐
-
-prompt 长度为 `P`，第 `t` 个回答 token 是 `y_t=ids[P+t]`，只能由位置 `P-1+t` 的 logits 预测。原 sparse cache 只有 response-query rows，因此 cache query `i` 对齐回答 token `i+1`；token 0 的 routing/functional 特征必须是 `NaN`，不能伪装成 0。完整模型反事实仍覆盖 token 0。
-
-### 2. 高效估计 token-local 功能贡献
-
-冻结 LLM 并 teacher-force 缓存答案。每层 hook 实际 `v_proj` value state 和进入 `o_proj` 的 head context。令第 `t` 个 chosen log-probability 为 `s_t`；需要的是同一 predictor row 的 Jacobian 对角块 `∂s_t/∂c_t`。如果对整段答案均值只 backward 一次，当前 query 的梯度会混入未来 token，不能用于 onset 审计。
-
-直接逐 token backward 需要 `R` 次反传。代码用 `K` 个确定性 Rademacher probe 做 Hutchinson 对角估计：
-
-\[
-\widehat{\frac{\partial s_t}{\partial c_t}}
-=\frac1K\sum_{k=1}^K z_t^{(k)}
-\frac{\partial\sum_u z_u^{(k)}s_u}{\partial c_t}.
-\]
-
-每个 probe 的 signed gradient 先平均，再计算绝对能量，避免先取绝对值造成正偏。对 cache-retained endpoint 和 exact diagonal 计算：
-
-\[
-\phi^{\ell}_{t,j,h}
-=A^{\ell}_{t,j,h}
-\left\langle
-\widehat{\frac{\partial s_t}{\partial c^{\ell}_{t,h}}},
-v^{\ell}_{j,kv(h)}
-\right\rangle .
-\]
-
-这不是简单 attention mass：实际 value、GQA 映射、`W_O` 后的采用程度、下游 residual/MLP 和 chosen logits 都进入 local gradient。代码保存 signed contribution、absolute energy、signed role contribution 的 probe standard error 和 cancellation：
-
-\[
-\kappa=1-\frac{|\sum_e\phi_e|}{\sum_e|\phi_e|+\epsilon}.
-\]
-
-主漂移量为：
-
-\[
-g_t=\log\frac{E_{history}+\epsilon}
-{E_{evidence}+E_{question}+E_{constraint}+\epsilon}.
-\]
-
-`other_prompt` 不冒充 grounding。现有 `operator_geometry.pt` 不会被动态路径读取；它继续用于静态 `W_OW_V` head-operator geometry 控制。
-
-### 3. cache 与 replay 必须是同一数值路径
-
-只匹配层数、head 数或模型名字不够；否则 cache 的 `A` 与另一 checkpoint 的 `V/gradient` 相乘会成为无效混合量。`attention_cache_spec.dtype` 是原模型前向的**计算 dtype**，`cache_dtype` 只是 attention 张量的**存储 dtype**，二者不能混用。默认 `TORCH_DTYPE=auto` 从前者解析。capture 在加载模型前还要求：
-
-- `attn_implementation=eager`；
-- 当前 Transformers 与 PyTorch 版本/构建等于抽取 manifest；
-- `MODEL_PATH` 根目录文件清单及每个文件 SHA-256 完全一致；
-- 实际加载出的 fully-qualified 模型类、eager 实现和全部浮点参数 dtype 与 manifest 一致。
-
-checkpoint 身份不依赖目录 basename：原目录的无损迁移或改名可以通过，新增权重、配置或 remote-code 文件则会拒绝。
-
-完成 provenance 检查后，baseline replay 才逐一比较：
-
-- 每个 retained endpoint；
-- 每个 exact response diagonal；
-- retained-plus-diagonal row mass。
-
-任一最大绝对误差超过固定阈值 `5e-3` 就中止。这个错误表示 cache attention 与 replay 不是同一次数值计算的产物，不能通过提高阈值绕过。artifact 绑定全部 weight shards、config、tokenizer/chat template、依赖版本、probe seeds 及逐样本 attention-binding 摘要。
-
-### 4. routing 的可观测边界
-
-prompt roles 只从无标签 `source_info.jsonl` 构建，并复现历史 system+user chat template；重建 prefix 必须逐 token 等于 cache。
-
-response-carrier 严格按 Transformer 层传播：当前层 endpoint 读取上一层 source state，不会错误地在同一层内串行传播。每层聚合所有 heads，并保留 head-role JSD、entropy/HHI censoring bounds 和 unresolved coverage。
-
-formal cache 没有 prompt-query rows，因此代码不能拆出 prompt→prompt relay，也不能把 residual/MLP 分解成 attention-path mass。这里报告的是 response-query attention ancestry；functional gradient 吸收下游采用程度，但不声称“完整还原所有网络路径”。另提供距回答位置分箱、bin 内置换 role 的 label-free recency null。由于 QA evidence 是长连续 span，很多 bin 的 role 恒定，该 null 只作诊断，不作为 primary endpoint。
-
-### 5. 七个冻结反事实与 donor ensemble
-
-固定运行：
+The stages have a common outcome variable. For candidates A and B, the replay
+first measures
 
 ```text
-full
-no_evidence
-no_history
-no_evidence_no_history
-swapped_evidence_0
-swapped_evidence_1
-swapped_evidence_2
+raw = logit(B) - logit(A)
 ```
 
-- 所有分支始终 score 原 factual response token，不采用分支 argmax；
-- `no_evidence` 屏蔽 evidence attention keys 对严格后续 query 的传播；
-- `no_history` 只屏蔽 prior-response attention keys；当前 query embedding/residual 仍存在，因此它不是“删除全部回答历史”；
-- 三个 donor 按 target-specific SHA-256 确定性选择，必须同任务、不同 source，并保持 evidence span 与序列位置长度不变；
-- donor slot 不足时逐 slot unavailable；ensemble 仅对 available donor 求均值并报告 donor 间标准差，不 pad、repeat、复用或填 0。
-
-主 evidence-bypass 为：
-
-\[
-B_t=\frac12[(\ell_t^{no\ evidence}-\ell_t^{full})
-+(\overline{\ell_t^{swap}}-\ell_t^{full})].
-\]
-
-history necessity 与 evidence-history interaction 只作 attractor/control。history dependence 没有预注册为 hallucination-high，因为正确推理同样可能高度自洽。
-
-## 一键运行 QA
-
-默认 `TEST_SPLIT` 使用原始、provenance-complete 的 formal cache：
+on the question-only branch. Its sign defines the model's prior; no prior label
+is supplied by the data. Every saved branch is then oriented as
 
 ```text
-/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876/test
+M = logit(counter-prior candidate) - logit(question-only prior)
 ```
 
-该 cache 的抽取 manifest 记录模型计算 dtype、FP16 cache 存储、eager attention、
-Torch/Transformers 版本、模型类及模型根目录全部文件 SHA-256；历史抽取命令的
-`DTYPE=auto` 在支持 BF16 的 CUDA 设备上解析为 BF16。不要改用
-`/data/RAGTruth/attention/llama31_8b/test`：那是缺失上述 provenance 的后续副本，
-不能用于把缓存的 attention 与 replay 的 value/gradient 组合。脚本会在加载模型前
-一次性检查这些字段，不会把 `cache_dtype` 错当成模型计算 dtype。
-脚本默认使用当前环境的 `python`，不会静默离开已经激活的 conda 环境；若 manifest
-版本不匹配，会在模型加载前停止。此时应显式设置 `PYTHON=/path/to/python`（或
-`CACHE_PYTHON=/path/to/python`），而不是放宽 attention binding tolerance。
+Thus `M > 0` always means that counter-prior evidence wins, regardless of
+whether A or B was preferred initially. Exact question-only ties are skipped
+and recorded rather than assigned an arbitrary direction.
 
-先用小样本验证路径、显存、tokenizer 和 cache binding：
+## Seven fixed branches
 
-```bash
-cd /share/home/tm902089733300000/a903202310/lys/research/graph
+| Saved margin | Frozen replay |
+|---|---|
+| `margin_question_only` | Question plus the shared neutral decision prefix; determines the prior direction. |
+| `margin_prior_context` | The matched context whose relevant value supports the prior candidate. |
+| `margin_counter_context` | The matched context whose relevant value supports the counter-prior candidate. |
+| `margin_no_relevant` | Counter-prior context with every relevant value key disconnected from every later query in every layer. |
+| `margin_no_irrelevant` | The same total-path intervention on the equal-length irrelevant control value. |
+| `margin_no_history` | Counter-prior context where only the current predictor cannot attend to strictly earlier response-history keys; its diagonal is retained. |
+| `margin_hybrid_history` | Counter-prior replay with the prior-context history K/V transplanted at every layer and the same absolute positions. Prompt and predictor/self states are untouched. |
 
-LIMIT=2 BOOTSTRAP=50 GRADIENT_PROBES=2 \
-bash experiments/attention_mechanism_audit/run_qa.sh
-```
+The source interventions are deliberately full-path interventions. Blocking a
+source only at the final predictor would miss evidence that first entered the
+response history and would misclassify successful multi-hop routing as a
+selection failure.
 
-确认后运行完整审计：
-
-```bash
-bash experiments/attention_mechanism_audit/run_qa.sh
-```
-
-`run_qa.sh` 不使用全局 `set` 中断选项，而是逐阶段检查并传播原始退出码；
-Python traceback 会直接显示。任一阶段失败或被中断时，后续阶段立即停止，旧的
-`evaluation.json` 也不会被打开。评估成功后，脚本本身会校验新机制审计 schema，
-并打印六个冻结主检验、长度增量、token onset 和可观测性，无需再拼接 JSON 解析命令。
-
-正式默认 `GRADIENT_PROBES=8`。probe CPU 内存约为 `K×L×R×H×D×4` bytes；超过 2 GiB probe buffer 时会显式拒绝，需要降低 `GRADIENT_PROBES` 或拆分超长回答。默认 `TORCH_DTYPE=auto` 会读取 formal manifest 的 `attention_cache_spec.dtype`；显式指定 dtype 时必须与其一致。即使 `cache_dtype=torch.float16`，原 observer 也可能使用另一计算 dtype，所以不能据存储 dtype 推断 replay dtype，更不能放宽 binding tolerance。
-
-如果 provenance 检查报告版本不一致，先查看 cache 所要求的环境：
-
-```bash
-python - <<'PY'
-import json
-import torch
-import transformers
-
-root = "/path/to/attention/llama31_8b/test"
-spec = json.load(open(f"{root}/manifest.json", encoding="utf-8"))["attention_cache_spec"]
-for key in ("dtype", "cache_dtype", "attn_implementation", "transformers_version", "torch_version"):
-    print(f"{key}: cache={spec.get(key)}")
-print(f"transformers_version: runtime={transformers.__version__}")
-print(f"torch_version: runtime={torch.__version__}")
-PY
-```
-
-应激活抽取 cache 时的原环境，或安装 manifest 指定的精确版本。版本和 checkpoint SHA 都一致后仍发生 endpoint mismatch，才需要检查历史抽取 forward 与当前 replay forward；不要把 `5e-3` 改大。
-
-`K=8` 是可运行默认值，不是论文中自动成立的收敛保证。正式报告前应在相同长回答上分别运行 `GRADIENT_PROBES=8/16/32`（或至少两个 seed），比较六个 primary endpoint 的方向和排序稳定性。eager 全序列 replay 的 attention 激活按 `L×H×N²` 增长；先对最长 QA 样本做单样本 smoke，并记录 GPU peak memory，再开始全量运行。
-
-覆盖默认路径：
-
-```bash
-SOURCE_INFO=/path/to/RAGTruth/source_info.jsonl \
-MODEL_PATH=/path/to/Meta-Llama-3.1-8B-Instruct \
-TEST_SPLIT=/path/to/attention/llama31_8b/test \
-OUT=/path/to/new/audit_run \
-bash experiments/attention_mechanism_audit/run_qa.sh
-```
-
-三个物理阶段：
+## Pre-registered readout
 
 ```text
-[1/3] source_info + exact cached prefix -> prompt_roles.jsonl
-[2/3] labels sealed + frozen model replay -> mechanisms.npz
-[3/3] freeze artifact SHA -> open labels -> evaluation.json
+G = M_counter - M_no_relevant       # relevant total-source gain
+S = M_no_irrelevant - M_no_relevant # matched select contrast
+D = M_no_history - M_counter        # history support for the prior
+R = M_counter - M_hybrid_history    # evidence relayed in history K/V
+O = -M_counter                      # prior capture
 ```
 
-`START_STAGE=1` 总是重建角色索引，避免把先前 `LIMIT=1/2` 的 smoke 产物误当成完整
-索引。只有显式设置 `START_STAGE=2` 才会复用已有角色索引；缺少该文件会立即报错。
-`START_STAGE=3` 只读取已冻结的 `mechanisms.npz` 与标签作评估，不再要求角色索引，
-也不执行只服务于模型 replay 的抽取环境版本检查。
+- `select_success := G > 0 and S > 0`.
+- Within that domain, `self_lock := D > 0 and R <= 0`.
+- Within that domain, `capture_failure := O > 0`.
 
-正式路径会逐文件校验 cache manifest 中记录的 SHA-256。由于既有 formal cache 把 attention 与 `y_token` 放在同一个 PT payload，底层反序列化无法做到“物理上从未载入标签张量”；前两阶段会立即丢弃该张量，既不保留也不调用 label API。这里严格主张的是 **labels are not exposed or used before artifact freeze**，而不是夸大为 labels were never deserialized。
+RELAY and OVERRIDE are not evaluated when SELECT fails. This prevents a sample
+that never used the evidence from being mislabeled as history self-lock or
+parametric-prior override. Reports use no hallucination labels, AUROC, learned
+probe, or fitted threshold. Means and 95% intervals are source-grouped so a
+source with many rows does not dominate.
 
-断点重跑：
+## Pair manifest
+
+The audit accepts a JSONL file of already tokenized controlled pairs. It does
+not reconstruct prompt roles, infer evidence spans, or silently fall back to an
+attention cache.
+
+```json
+{
+  "sample_id": "pair-1",
+  "source_id": "source-1",
+  "question_only": {
+    "input_ids": [1, 40, 30, 31],
+    "predictor_index": 3
+  },
+  "context_a": {
+    "input_ids": [1, 10, 20, 11, 21, 30, 31],
+    "predictor_index": 6
+  },
+  "context_b": {
+    "input_ids": [1, 11, 21, 10, 20, 30, 31],
+    "predictor_index": 6
+  },
+  "relevant_span": [1, 3],
+  "irrelevant_span": [3, 5],
+  "history_span": [5, 7],
+  "candidate_a_token_id": 70,
+  "candidate_b_token_id": 71,
+  "decision_prefix_is_neutral": true
+}
+```
+
+All spans are half-open token intervals. The manifest has the following
+non-negotiable experimental contract:
+
+- `context_a` and `context_b` have equal length and the same predictor.
+- All IDs come from the target checkpoint tokenizer, and the supplied prefixes
+  contain no padding positions.
+- The relevant slot in `context_a` semantically supports candidate A; the
+  relevant slot in `context_b` semantically supports candidate B.
+- R/I are equal-length **answer-bearing value slots**, not whole fact
+  sentences. They are exchanged exactly: `A[R] == B[I]` and `A[I] == B[R]`.
+- The two contexts differ nowhere else. This holds lexical content and position
+  constant while swapping which value occupies the relevant role.
+- Question-only and both context branches end in the same neutral decision
+  prefix. It must not reveal either answer. The boolean declaration records
+  that data-curation decision; token IDs alone cannot prove semantic neutrality.
+- `history_span` ends at `predictor_index + 1`. RELAY uses only
+  `[history_start, predictor_index)`, so the current predictor/self is never
+  removed or transplanted.
+- Candidate IDs are the first different tokens after any shared candidate
+  prefix already included in the branch inputs.
+
+These constraints require purpose-built controlled pairs. Reusing the old
+RAGTruth attention cache as if it contained such interventions would not test
+this hypothesis faithfully.
+
+## Run
+
+The target checkpoint is already the script default:
+
+```text
+/share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct
+```
+
+From the repository root:
 
 ```bash
-START_STAGE=2 OUT=/path/to/the/run \
-bash experiments/attention_mechanism_audit/run_qa.sh
-
-START_STAGE=3 OUT=/path/to/the/run \
+PAIRS=/absolute/path/to/audit_pairs.jsonl \
 bash experiments/attention_mechanism_audit/run_qa.sh
 ```
 
-建议使用新的 `OUT`。旧超图、GCN、自编码器输出不会被本实验读取，也无需为本审计删除。
+Optional environment variables are `OUT`, `MODEL_PATH`, `PYTHON`, `DEVICE`,
+`TORCH_DTYPE`, `LIMIT`, `BOOTSTRAP`, and `SEED`. The shell script intentionally
+does not use `set -euo pipefail`: each stage checks its status explicitly, the
+complete Python traceback remains visible, and evaluation never runs after an
+audit failure.
 
-## 结果与可证伪性
+Outputs are intentionally separate from the old feature experiment:
 
-`mechanisms.npz` 保存完整回答 token rows、逐层 trajectories、targets、predictor positions、cache-query shift、七分支 availability、probe 配置、role-position null 和完整 provenance。`evaluation.json` 包含：
+- `control_chain.npz`: seven oriented margins plus the fixed derived columns.
+- `control_chain.json`: schema, counts, and skipped tie IDs.
+- `report.json`: source-grouped SELECT, RELAY, and OVERRIDE summaries.
 
-- 每个机制锁定一个 primary endpoint，报告 frozen-direction AUROC/AUPRC、source-group bootstrap、source-level permutation 和 primary-family BH-FDR；
-- prompt length、response length 及联合 source-group OOF baseline；
-- 每个 primary feature 的 `length-only` 与 `length+feature` OOF 增量，并明确它只是 supervised readability，不是 detector；
-- first hallucination onset 相对前一 token 的变化，以及 source-disjoint、同 response position 的 non-onset control；
-- observer/generator provenance 和机制可观测边界。
+## Fidelity
 
-如果 drift、dispersion、evidence bypass 不能稳定区分正负回答，结论就是这些假设在当前 observer/cache 上未获支持，不能通过翻转方向或给三轴调权来“修复”AUROC。
+The model is frozen and every replay runs under `torch.inference_mode()` with
+eager Llama attention. Candidate margins use the checkpoint's real `lm_head`;
+there is no gradient, attention-mass proxy, operator norm, random donor, or
+learned model.
 
-RAGTruth 原 generator 与当前 Llama-3.1 observer 通常不同，因此结果只能称为 **teacher-forced observer audit**，不能声称复原了原生成模型内部的幻觉形成过程。`A×gradient` 是有限 probe 估计的局部一阶 attribution；有限反事实是 evidence/history sensitivity；两者都不是完整因果证明。
+For history mediation, each layer captures the prior branch's raw `k_proj` and
+`v_proj` outputs only at strictly earlier response positions. The counter
+branch receives those values at the same absolute positions before RoPE. On
+the target Llama-3.1 checkpoint (`pretraining_tp=1`), equal positions give the
+same rotary transform, and GQA K/V remain in their native 8-KV-head geometry;
+nothing is averaged or expanded into the 32 query heads. The full frozen model
+still executes its actual W_Q, W_K, W_V, W_O and MLP computations, so the saved
+cached `operator_geometry.pt` summary is neither needed nor substituted.
+
+Run the focused tests with:
+
+```bash
+pytest -q experiments/attention_mechanism_audit/tests
+```

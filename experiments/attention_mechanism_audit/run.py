@@ -1,160 +1,136 @@
-"""Command-line entry points for the frozen attention-mechanism audit."""
+"""Command line entry point for the controlled grounding-mechanism audit."""
 
 from __future__ import annotations
 
 import argparse
+import json
+from pathlib import Path
+
+from .audit import run_audit
+from .data import load_pairs
+from .evaluate import evaluate_artifact
+from .replay import FrozenMarginReplay
 
 
-DTYPE_CHOICES = ("auto", "float32", "float16", "bfloat16")
-DEFAULT_GRADIENT_PROBES = 8
-DEFAULT_ATTRIBUTION_SEED = 20260828
+DEFAULT_MODEL = (
+    "/share/home/tm902089733300000/a903202310/lys/models/"
+    "Meta-Llama-3.1-8B-Instruct"
+)
 
 
-def command_line() -> argparse.ArgumentParser:
-    """Build the parser without importing Torch or Transformers.
+def _torch_dtype(name: str):
+    import torch
 
-    Keeping heavyweight imports behind the selected command makes ``--help``
-    useful on login nodes and in lightweight CI environments.
-    """
+    return {
+        "auto": "auto",
+        "bfloat16": torch.bfloat16,
+        "float16": torch.float16,
+        "float32": torch.float32,
+    }[name]
 
+
+def _run_audit(args: argparse.Namespace) -> None:
+    pairs = load_pairs(args.pairs)
+    if args.limit is not None:
+        pairs = pairs[: args.limit]
+    if not pairs:
+        raise ValueError("the controlled pair manifest selected no rows")
+    replay = FrozenMarginReplay.from_pretrained(
+        args.model,
+        device=args.device,
+        torch_dtype=_torch_dtype(args.torch_dtype),
+    )
+    manifest = run_audit(
+        _progress(pairs),
+        replay,
+        args.output,
+    )
+    print(json.dumps(manifest, indent=2, sort_keys=True))
+
+
+def _progress(pairs):
+    total = len(pairs)
+    for index, pair in enumerate(pairs, start=1):
+        print(f"audit pair {index}/{total}: {pair.sample_id}", flush=True)
+        yield pair
+
+
+def _statistic(name: str, value: dict[str, object]) -> None:
+    if not value["available"]:
+        print(f"{name:28s} unavailable")
+        return
+    print(
+        f"{name:28s} "
+        f"mean={value['source_equal_mean']:.6f} "
+        f"95%CI=[{value['ci_low']:.6f}, {value['ci_high']:.6f}] "
+        f"N={value['samples']} sources={value['sources']}"
+    )
+
+
+def _print_report(report: dict[str, object]) -> None:
+    mechanisms = report["mechanisms"]
+    select = mechanisms["select"]
+    relay = mechanisms["relay"]
+    override = mechanisms["override"]
+
+    print("\n=== SELECT: total source-path effect ===")
+    _statistic("relevant_gain", select["relevant_gain"])
+    _statistic("select_contrast", select["select_contrast"])
+    _statistic("select_success_rate", select["success_rate"])
+
+    print("\n=== RELAY: select-success domain ===")
+    _statistic("history_prior_support", relay["history_prior_support"])
+    _statistic("history_evidence_relay", relay["history_evidence_relay"])
+    _statistic("self_lock_rate", relay["self_lock_rate"])
+
+    print("\n=== OVERRIDE: select-success domain ===")
+    _statistic("question_prior_strength", override["question_prior_strength"])
+    _statistic("prior_capture", override["prior_capture"])
+    _statistic("capture_failure_rate", override["capture_failure_rate"])
+
+
+def _run_evaluate(args: argparse.Namespace) -> None:
+    report = evaluate_artifact(
+        args.artifact,
+        args.output,
+        bootstrap_replicates=args.bootstrap,
+        seed=args.seed,
+    )
+    _print_report(report)
+    print(f"\nFull report: {Path(args.output)}")
+
+
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description=(
-            "Audit grounding drift, routing dispersion, and counterfactual "
-            "evidence bypass in a frozen causal language model"
-        )
+        description="Frozen SELECT--RELAY--OVERRIDE causal audit"
     )
     commands = parser.add_subparsers(dest="command", required=True)
 
-    command = commands.add_parser(
-        "roles",
-        help="reconstruct a label-free prompt-role index",
-    )
-    command.add_argument("--data", required=True)
-    command.add_argument("--source-info", required=True)
-    command.add_argument("--tokenizer", required=True)
-    command.add_argument("--output", required=True)
-    command.add_argument("--task", default="QA")
-    command.add_argument("--limit", type=int)
-    command.add_argument("--trust-remote-code", action="store_true")
-
-    command = commands.add_parser(
-        "capture",
-        help="freeze label-free answer and token mechanism trajectories",
-    )
-    command.add_argument("--data", required=True)
-    command.add_argument("--roles", required=True)
-    command.add_argument("--source-info", required=True)
-    command.add_argument("--model", required=True)
-    command.add_argument("--output", required=True)
-    command.add_argument("--device", default="cuda")
-    command.add_argument(
+    audit = commands.add_parser("audit", help="run the seven frozen replays")
+    audit.add_argument("--pairs", type=Path, required=True)
+    audit.add_argument("--model", type=Path, default=Path(DEFAULT_MODEL))
+    audit.add_argument("--output", type=Path, required=True)
+    audit.add_argument("--device", default="cuda")
+    audit.add_argument(
         "--torch-dtype",
-        choices=DTYPE_CHOICES,
-        default="auto",
-        help=(
-            "model computation dtype; auto requires and uses "
-            "attention_cache_spec.dtype"
-        ),
+        choices=("auto", "bfloat16", "float16", "float32"),
+        default="bfloat16",
     )
-    command.add_argument("--task", default="QA")
-    command.add_argument("--limit", type=int)
-    command.add_argument("--vocab-chunk-size", type=int, default=4096)
-    command.add_argument(
-        "--gradient-probes",
-        type=int,
-        default=DEFAULT_GRADIENT_PROBES,
-        help="Rademacher probes for each token-diagonal attribution Jacobian",
-    )
-    command.add_argument(
-        "--attribution-seed",
-        type=int,
-        default=DEFAULT_ATTRIBUTION_SEED,
-        help="deterministic local seed for attribution probes",
-    )
-    command.add_argument(
-        "--role-null-bin-width",
-        type=int,
-        default=32,
-        help="distance-to-response bin width for the stratified role null",
-    )
-    command.add_argument("--trust-remote-code", action="store_true")
+    audit.add_argument("--limit", type=int)
+    audit.set_defaults(handler=_run_audit)
 
-    command = commands.add_parser(
-        "evaluate",
-        help="open labels only after the mechanism artifact is frozen",
-    )
-    command.add_argument("--data", required=True)
-    command.add_argument("--artifact", required=True)
-    command.add_argument("--output", required=True)
-    command.add_argument("--bootstrap", type=int, default=1000)
-    command.add_argument("--folds", type=int, default=5)
-    command.add_argument("--seed", type=int, default=20260828)
+    evaluate = commands.add_parser("evaluate", help="summarize fixed effects")
+    evaluate.add_argument("--artifact", type=Path, required=True)
+    evaluate.add_argument("--output", type=Path, required=True)
+    evaluate.add_argument("--bootstrap", type=int, default=1_000)
+    evaluate.add_argument("--seed", type=int, default=20260828)
+    evaluate.set_defaults(handler=_run_evaluate)
     return parser
 
 
-def _print_report(command: str, report: dict[str, object]) -> None:
-    print(f"{command} completed")
-    for name in (
-        "roles",
-        "artifact",
-        "evaluation",
-        "sha256",
-        "samples",
-        "sources",
-        "tokens",
-        "positive_answers",
-        "prevalence",
-        "labels_used",
-    ):
-        if name in report:
-            print(f"{name}: {report[name]}")
-
-
 def main() -> None:
-    arguments = command_line().parse_args()
-    if arguments.command == "roles":
-        from .pipeline import build_roles
-
-        report = build_roles(
-            arguments.data,
-            arguments.source_info,
-            arguments.tokenizer,
-            arguments.output,
-            task=arguments.task,
-            limit=arguments.limit,
-            trust_remote_code=arguments.trust_remote_code,
-        )
-    elif arguments.command == "capture":
-        from .pipeline import capture_mechanisms
-
-        report = capture_mechanisms(
-            arguments.data,
-            arguments.roles,
-            arguments.source_info,
-            arguments.model,
-            arguments.output,
-            device=arguments.device,
-            torch_dtype=arguments.torch_dtype,
-            task=arguments.task,
-            limit=arguments.limit,
-            vocab_chunk_size=arguments.vocab_chunk_size,
-            gradient_probes=arguments.gradient_probes,
-            attribution_seed=arguments.attribution_seed,
-            role_null_bin_width=arguments.role_null_bin_width,
-            trust_remote_code=arguments.trust_remote_code,
-        )
-    else:
-        from .evaluate import evaluate_artifact
-
-        report = evaluate_artifact(
-            arguments.data,
-            arguments.artifact,
-            arguments.output,
-            bootstrap_replicates=arguments.bootstrap,
-            cv_folds=arguments.folds,
-            seed=arguments.seed,
-        )
-    _print_report(arguments.command, report)
+    args = _parser().parse_args()
+    args.handler(args)
 
 
 if __name__ == "__main__":
