@@ -159,7 +159,14 @@ RESOLVED_MODEL_DTYPE=$(printf '%s\n' "${PROVENANCE_OUTPUT}" | sed -n 's/^MODEL_D
 [ -n "${RESOLVED_MODEL_DTYPE}" ] || fail_run "failed to resolve MODEL_DTYPE from formal cache provenance"
 
 if [ -d "${OUT}" ] && [ -n "$(find "${OUT}" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ] && [ "${OVERWRITE}" != "1" ]; then
-  fail_run "output directory is not empty: ${OUT}. Set OVERWRITE=1 only when replacement is intentional."
+  if [ -f "${OUT}/FAILED.json" ] && [ ! -f "${OUT}/manifest.json" ]; then
+    echo
+    echo "Detected an explicitly failed, incomplete previous construction: ${OUT}"
+    echo "Removing only this incomplete output so the one-command run can restart."
+    run_stage "remove failed incomplete output" rm -rf "${OUT}"
+  else
+    fail_run "output directory is not empty: ${OUT}. Set OVERWRITE=1 only when replacement is intentional."
+  fi
 fi
 
 run_stage "create output parent" mkdir -p "$(dirname "${OUT}")"

@@ -20,6 +20,10 @@ def test_qa_launcher_contains_complete_server_paths_and_valid_shell():
     assert ': "${SPLIT_ROOT:?' not in text
     assert ': "${MODEL_PATH:?' not in text
     assert ': "${OUT:?' not in text
+    assert '[ -f "${OUT}/FAILED.json" ]' in text
+    assert '[ ! -f "${OUT}/manifest.json" ]' in text
+    assert 'remove failed incomplete output' in text
+    assert 'Set OVERWRITE=1 only when replacement is intentional' in text
     result = subprocess.run(
         ["bash", "-n", str(launcher)],
         text=True,
