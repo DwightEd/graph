@@ -48,9 +48,12 @@ def _evaluate(args: argparse.Namespace) -> None:
     for name, summary in report["summaries"].items():
         effect = summary["position_matched_source_equal_difference"]
         interval = summary["ci95"]
+        correct = summary["correct_mean"]
+        hallucinated = summary["hallucinated_mean"]
         print(
-            f"{name:38s} correct={summary['correct_mean']:.6f} "
-            f"hallucinated={summary['hallucinated_mean']:.6f} "
+            f"{name:38s} "
+            f"correct={'n/a' if correct is None else f'{correct:.6f}'} "
+            f"hallucinated={'n/a' if hallucinated is None else f'{hallucinated:.6f}'} "
             f"delta={effect} CI={interval}"
         )
     print(f"\nFull report: {args.output}")

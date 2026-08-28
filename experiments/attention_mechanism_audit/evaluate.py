@@ -15,6 +15,10 @@ from .capture import HISTORY, SELF
 from .data import EVIDENCE
 
 
+def _mean_or_none(value: np.ndarray) -> float | None:
+    return float(value.mean()) if len(value) else None
+
+
 def _layer_summary(value: torch.Tensor, name: str) -> dict[str, torch.Tensor]:
     width = max(value.shape[0] // 3, 1)
     early = value[:width].mean(0)
@@ -318,8 +322,8 @@ def evaluate_saved(
     summaries, onset = {}, {}
     for offset, (name, value) in enumerate(metrics.items()):
         summaries[name] = {
-            "correct_mean": float(value[~label].mean()),
-            "hallucinated_mean": float(value[label].mean()),
+            "correct_mean": _mean_or_none(value[~label]),
+            "hallucinated_mean": _mean_or_none(value[label]),
             **_position_matched_difference(
                 value,
                 label,
@@ -368,7 +372,10 @@ def evaluate_saved(
         "matched_onset": onset,
         "token_metrics": str(arrays_path),
     }
-    output.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    output.write_text(
+        json.dumps(report, indent=2, sort_keys=True, allow_nan=False),
+        encoding="utf-8",
+    )
     return report
 
 

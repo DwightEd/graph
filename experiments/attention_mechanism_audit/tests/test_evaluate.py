@@ -3,7 +3,12 @@ import torch
 
 from experiments.attention_mechanism_audit.capture import ROLE_NAMES, SELF
 from experiments.attention_mechanism_audit.data import EVIDENCE
-from experiments.attention_mechanism_audit.evaluate import token_metrics
+from experiments.attention_mechanism_audit.evaluate import _mean_or_none, token_metrics
+
+
+def test_missing_single_sample_class_is_serialized_as_null():
+    assert _mean_or_none(np.asarray([], dtype=np.float32)) is None
+    assert _mean_or_none(np.asarray([1.0, 3.0])) == 2.0
 
 
 def test_token_metrics_keep_layer_drift_and_separate_causal_effects():
