@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from ..capture import ExactLlamaReplay
@@ -54,3 +55,23 @@ def test_default_numeric_tolerance_accepts_exact_bfloat16_replay():
     capture = replay.capture(torch.tensor([1, 2, 3, 4, 5]), response_start=2)
     graph = build_graph_tensors(capture, basis)
     assert graph.audit["max_attention_reconstruction_abs_error"] < 5e-3
+
+def test_replay_rejects_any_post_oproj_attention_mutation():
+    """The recorded attention update must be the direct frozen o_proj output."""
+
+    model, _basis = tiny_model_bundle()
+    attention = model.model.layers[0].self_attn
+    original_forward = attention.forward
+
+    def altered_forward(hidden_states, **kwargs):
+        output, weights = original_forward(hidden_states, **kwargs)
+        return output + output.new_tensor(0.125), weights
+
+    attention.forward = altered_forward
+    replay = ExactLlamaReplay(model, checkpoint="tiny-mutated-attention")
+    with pytest.raises(RuntimeError, match="differs from direct o_proj output"):
+        replay.capture(
+            torch.tensor([1, 2, 3, 4, 5]),
+            response_start=2,
+        )
+

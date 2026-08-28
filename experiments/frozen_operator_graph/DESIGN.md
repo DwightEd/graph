@@ -113,7 +113,9 @@ A construction run is accepted only when:
 - cache binding is verified;
 - no label interface was consumed;
 - `A V` reconstructs the captured `o_proj` input within tolerance;
-- `W_O(A V)+b` reconstructs the captured attention output within tolerance;
+- direct `o_proj` output is bitwise-bound to the self-attention return value;
+- float32 edge messages plus the explicit finite-precision remainder reconstruct
+  the captured `o_proj` output within tolerance;
 - prompt/history/self contexts sum to the total context;
 - explicit plus remainder contexts and route mass are conserved;
 - all feature tensors are finite and match the feature-name contract;

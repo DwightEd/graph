@@ -322,7 +322,6 @@ def build_graph_tensors(
     edge_feature: list[torch.Tensor] = []
 
     max_attention_reconstruction = 0.0
-    max_native_projection_reconstruction = 0.0
     max_context_rounding = 0.0
     max_projection_rounding = 0.0
     max_numerical_remainder = 0.0
@@ -393,45 +392,20 @@ def build_graph_tensors(
             float(context_error.item()),
         )
 
-        # ``A @ V`` and ``o_proj`` are two distinct finite-precision operations.
-        # Validate each against the tensor that actually entered that operation.
-        # Comparing an unrounded float32 composition ``W_O(float32(A @ V))``
-        # directly with a bfloat16/float16 module output creates a false failure
-        # at large late-layer activations (typically one output ULP).
+        # The actual output is captured from the frozen ``o_proj`` module in
+        # the same forward pass. ``capture.py`` also requires self-attention to
+        # return that exact tensor, so no cross-device re-execution is used as a
+        # proxy for CUDA bfloat16/float16 GEMM semantics. Edge/role messages are
+        # decomposed in float32 and the unavoidable hardware numerical residual
+        # is retained explicitly below.
         output_factor_native = basis.output_factor[layer_index].detach().cpu()
         output_weight_native = _output_weight(output_factor_native)
         output_bias_native = basis.output_bias[layer_index].detach().cpu()
         output_weight = output_weight_native.float()
         output_bias = output_bias_native.float()
-        captured_attention_native = layer_capture.attention_output[
+        captured_attention = layer_capture.attention_output[
             capture.response_start :
-        ]
-        captured_attention = captured_attention_native.float()
-
-        captured_context_flat = captured_o_proj_input.reshape(response, hidden)
-        native_projection = functional.linear(
-            captured_context_flat.float(),
-            output_weight,
-            output_bias,
-        ).to(dtype=captured_attention_native.dtype).float()
-        native_projection_error = (
-            native_projection - captured_attention
-        ).abs().max()
-        max_native_projection_reconstruction = max(
-            max_native_projection_reconstruction,
-            float(native_projection_error.item()),
-        )
-        if not torch.allclose(
-            native_projection,
-            captured_attention,
-            atol=config.conservation_atol,
-            rtol=config.conservation_rtol,
-        ):
-            raise ValueError(
-                f"layer {layer_index} native-dtype W_O(o_proj_input) "
-                "reconstruction failed: "
-                f"max_abs_error={float(native_projection_error.item()):.6g}"
-            )
+        ].float()
 
         # Edge/role messages are accumulated in float32 so their additive
         # decomposition is stable and inspectable.  Preserve both unavoidable
@@ -834,17 +808,17 @@ def build_graph_tensors(
             else 0.0
         ),
         "max_attention_reconstruction_abs_error": max_attention_reconstruction,
-        "max_native_projection_reconstruction_abs_error": (
-            max_native_projection_reconstruction
-        ),
         "max_context_rounding_abs_error": max_context_rounding,
         "max_projection_rounding_abs_error": max_projection_rounding,
         "max_numerical_remainder_abs_error": max_numerical_remainder,
         "max_exact_attention_decomposition_abs_error": (
             max_exact_attention_decomposition
         ),
+        "projection_output_binding": (
+            "direct_o_proj_forward_hook_bitwise_equals_self_attention_output"
+        ),
         "projection_validation": (
-            "captured_o_proj_input_float32_accumulation_quantized_to_model_dtype"
+            "float32_edge_decomposition_plus_explicit_finite_precision_remainder"
         ),
         "max_o_proj_input_reconstruction_abs_error": max_o_proj_input_reconstruction,
         "max_role_context_abs_error": max_role_context_error,

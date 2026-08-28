@@ -40,21 +40,20 @@ The layer attention update is reconstructed exactly:
 \sum_s m^{(l)}_{s\to t}+b_O^{(l)}.
 \]
 
-The package checks both
+The package checks the float32 edge sum against the actual captured
+`o_proj` input, captures the actual `o_proj` output directly, and requires the
+self-attention module to return that exact tensor. The graph then records the
+finite-precision residual required by
 
 \[
-A^{(l)}V^{(l)}=\text{o\_proj input}
-\]
-
-and
-
-\[
-W_O^{(l)}(A^{(l)}V^{(l)})+b_O^{(l)}
+\text{captured }o\_proj\text{ output}
 =
-\text{captured attention output}
+W_O^{(l)}(A^{(l)}V^{(l)})+b_O^{(l)}
++\varepsilon_{\mathrm{numeric}}^{(l)}.
 \]
 
-before accepting a graph.
+This avoids pretending that a CPU/float32 re-execution can reproduce the exact
+CUDA bfloat16/float16 GEMM rounding path.
 
 ## What is a node and what is an edge?
 
@@ -185,7 +184,7 @@ checkpoint using eager attention and captures:
 full response-query attention probabilities
 all source value states
 actual o_proj input
-actual attention output
+actual o_proj output, bitwise-bound to the self-attention return value
 residual input and post-attention residual
 pre-attention and pre-MLP normalized states
 MLP update and layer output

@@ -15,7 +15,7 @@ ROLE_COUNT = 3
 ROLE_NAMES = ("prompt", "history", "self")
 
 GRAPH_SCHEMA = "frozen-hypernetwork-operator-graph"
-GRAPH_VERSION = 2
+GRAPH_VERSION = 3
 
 
 def _finite(name: str, value: torch.Tensor) -> None:
@@ -57,8 +57,10 @@ class LayerCapture:
     """Exact signals for one frozen Llama-like decoder layer.
 
     ``attention`` contains only response-query rows and has shape ``[H,R,N]``.
-    The other tensors contain all token positions so source values and residual
-    identities are never reconstructed from an approximation.
+    ``attention_output`` is captured directly from the frozen ``o_proj`` module
+    and is bitwise-bound to the tensor returned by self-attention. The other
+    tensors contain all token positions so source values and residual identities
+    are never reconstructed from an approximation.
     """
 
     attention: torch.Tensor

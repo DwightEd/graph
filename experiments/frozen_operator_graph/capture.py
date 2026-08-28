@@ -238,7 +238,24 @@ class ExactLlamaReplay:
                         f"layer {index} attention weights have wrong shape; "
                         "eager full attention is required"
                     )
-                store("attention_output", index, message[0])
+                direct_projection = captured["attention_output"][index]
+                if direct_projection is None:
+                    raise RuntimeError(
+                        f"layer {index} o_proj output hook did not fire before "
+                        "the self-attention output hook"
+                    )
+                returned_message = message[0].detach().cpu()
+                if not torch.equal(returned_message, direct_projection):
+                    maximum = float(
+                        (returned_message.float() - direct_projection.float())
+                        .abs()
+                        .max()
+                        .item()
+                    )
+                    raise RuntimeError(
+                        f"layer {index} self-attention output differs from direct "
+                        f"o_proj output: max_abs_error={maximum:.6g}"
+                    )
                 store("attention", index, weights[0, :, response_start:, :])
 
             return hook
@@ -254,6 +271,11 @@ class ExactLlamaReplay:
             handles.append(
                 layer.self_attn.o_proj.register_forward_pre_hook(
                     o_proj_input_hook(index)
+                )
+            )
+            handles.append(
+                layer.self_attn.o_proj.register_forward_hook(
+                    simple_output_hook("attention_output", index)
                 )
             )
             handles.append(layer.self_attn.register_forward_hook(attention_hook(index)))
