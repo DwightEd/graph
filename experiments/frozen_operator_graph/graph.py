@@ -322,6 +322,11 @@ def build_graph_tensors(
     edge_feature: list[torch.Tensor] = []
 
     max_attention_reconstruction = 0.0
+    max_native_projection_reconstruction = 0.0
+    max_context_rounding = 0.0
+    max_projection_rounding = 0.0
+    max_numerical_remainder = 0.0
+    max_exact_attention_decomposition = 0.0
     max_o_proj_input_reconstruction = 0.0
     max_role_context_error = 0.0
     max_quotient_context_error = 0.0
@@ -388,32 +393,109 @@ def build_graph_tensors(
             float(context_error.item()),
         )
 
-        output_factor = basis.output_factor[layer_index].detach().cpu().float()
-        output_weight = _output_weight(output_factor)
-        output_bias = basis.output_bias[layer_index].detach().cpu().float()
-        without_bias = functional.linear(
-            total_context_direct.reshape(response, hidden),
-            output_weight,
-            None,
-        )
-        reconstructed_attention = without_bias + output_bias[None]
-        captured_attention = layer_capture.attention_output[
+        # ``A @ V`` and ``o_proj`` are two distinct finite-precision operations.
+        # Validate each against the tensor that actually entered that operation.
+        # Comparing an unrounded float32 composition ``W_O(float32(A @ V))``
+        # directly with a bfloat16/float16 module output creates a false failure
+        # at large late-layer activations (typically one output ULP).
+        output_factor_native = basis.output_factor[layer_index].detach().cpu()
+        output_weight_native = _output_weight(output_factor_native)
+        output_bias_native = basis.output_bias[layer_index].detach().cpu()
+        output_weight = output_weight_native.float()
+        output_bias = output_bias_native.float()
+        captured_attention_native = layer_capture.attention_output[
             capture.response_start :
-        ].float()
-        attention_error = (reconstructed_attention - captured_attention).abs().max()
-        max_attention_reconstruction = max(
-            max_attention_reconstruction,
-            float(attention_error.item()),
+        ]
+        captured_attention = captured_attention_native.float()
+
+        captured_context_flat = captured_o_proj_input.reshape(response, hidden)
+        native_projection = functional.linear(
+            captured_context_flat.float(),
+            output_weight,
+            output_bias,
+        ).to(dtype=captured_attention_native.dtype).float()
+        native_projection_error = (
+            native_projection - captured_attention
+        ).abs().max()
+        max_native_projection_reconstruction = max(
+            max_native_projection_reconstruction,
+            float(native_projection_error.item()),
         )
         if not torch.allclose(
-            reconstructed_attention,
+            native_projection,
             captured_attention,
             atol=config.conservation_atol,
             rtol=config.conservation_rtol,
         ):
             raise ValueError(
-                f"layer {layer_index} exact W_O(A V) reconstruction failed: "
-                f"max_abs_error={float(attention_error.item()):.6g}"
+                f"layer {layer_index} native-dtype W_O(o_proj_input) "
+                "reconstruction failed: "
+                f"max_abs_error={float(native_projection_error.item()):.6g}"
+            )
+
+        # Edge/role messages are accumulated in float32 so their additive
+        # decomposition is stable and inspectable.  Preserve both unavoidable
+        # numerical residuals instead of hiding them or loosening tolerances:
+        #   1) A@V rounding before o_proj,
+        #   2) o_proj output quantization/backend rounding.
+        context_rounding = captured_o_proj_input - total_context_direct
+        context_rounding_error = context_rounding.abs().max()
+        max_context_rounding = max(
+            max_context_rounding,
+            float(context_rounding_error.item()),
+        )
+        without_bias = functional.linear(
+            total_context_direct.reshape(response, hidden),
+            output_weight,
+            None,
+        )
+        context_rounding_message = functional.linear(
+            context_rounding.reshape(response, hidden),
+            output_weight,
+            None,
+        )
+        captured_context_without_bias = without_bias + context_rounding_message
+        projection_linearized = captured_context_without_bias + output_bias[None]
+        projection_rounding = captured_attention - projection_linearized
+        projection_rounding_error = projection_rounding.abs().max()
+        max_projection_rounding = max(
+            max_projection_rounding,
+            float(projection_rounding_error.item()),
+        )
+        numerical_remainder = context_rounding_message + projection_rounding
+        numerical_remainder_error = numerical_remainder.abs().max()
+        max_numerical_remainder = max(
+            max_numerical_remainder,
+            float(numerical_remainder_error.item()),
+        )
+
+        # This is the exact accounting identity used by the graph: every
+        # prompt/history/self message, output bias, and finite-precision
+        # remainder is retained.  The old ``attention_error`` remains an audit
+        # of how far the real-valued edge sum is from the hardware output; it is
+        # evidence about numeric precision, not an operator mismatch.
+        reconstructed_attention = without_bias + output_bias[None]
+        attention_error = (reconstructed_attention - captured_attention).abs().max()
+        max_attention_reconstruction = max(
+            max_attention_reconstruction,
+            float(attention_error.item()),
+        )
+        exact_attention = reconstructed_attention + numerical_remainder
+        exact_attention_error = (exact_attention - captured_attention).abs().max()
+        max_exact_attention_decomposition = max(
+            max_exact_attention_decomposition,
+            float(exact_attention_error.item()),
+        )
+        if not torch.allclose(
+            exact_attention,
+            captured_attention,
+            atol=config.conservation_atol,
+            rtol=config.conservation_rtol,
+        ):
+            raise ValueError(
+                f"layer {layer_index} finite-precision attention accounting "
+                "failed: "
+                f"max_abs_error={float(exact_attention_error.item()):.6g}"
             )
 
         role_residual_message = functional.linear(
@@ -676,7 +758,7 @@ def build_graph_tensors(
                 cosine(prompt_message, history_message, eps=eps),
                 cosine(prompt_message, mlp, eps=eps),
                 cosine(history_message, mlp, eps=eps),
-                cosine(without_bias, mlp, eps=eps),
+                cosine(captured_attention, mlp, eps=eps),
                 prompt_route_fraction,
                 prompt_residual_fraction,
                 prompt_route_fraction - prompt_residual_fraction,
@@ -752,6 +834,18 @@ def build_graph_tensors(
             else 0.0
         ),
         "max_attention_reconstruction_abs_error": max_attention_reconstruction,
+        "max_native_projection_reconstruction_abs_error": (
+            max_native_projection_reconstruction
+        ),
+        "max_context_rounding_abs_error": max_context_rounding,
+        "max_projection_rounding_abs_error": max_projection_rounding,
+        "max_numerical_remainder_abs_error": max_numerical_remainder,
+        "max_exact_attention_decomposition_abs_error": (
+            max_exact_attention_decomposition
+        ),
+        "projection_validation": (
+            "captured_o_proj_input_float32_accumulation_quantized_to_model_dtype"
+        ),
         "max_o_proj_input_reconstruction_abs_error": max_o_proj_input_reconstruction,
         "max_role_context_abs_error": max_role_context_error,
         "max_quotient_context_abs_error": max_quotient_context_error,

@@ -15,7 +15,7 @@ ROLE_COUNT = 3
 ROLE_NAMES = ("prompt", "history", "self")
 
 GRAPH_SCHEMA = "frozen-hypernetwork-operator-graph"
-GRAPH_VERSION = 1
+GRAPH_VERSION = 2
 
 
 def _finite(name: str, value: torch.Tensor) -> None:
