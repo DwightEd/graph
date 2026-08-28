@@ -167,6 +167,21 @@ Outputs:
 - `token_metrics.npz`: aligned token-level mechanism measurements;
 - `report.json`: position-matched summaries and onset tests.
 
+The default evaluation output prints only the key routing-imbalance,
+dispersion, observed-token evidence-effect, capture-candidate, and onset
+results, including matched source/cell counts and the exact claim boundary.
+The complete diagnostic list is available with `--all-metrics`.
+An existing report can be summarized without replaying or reevaluating:
+
+```bash
+python -m experiments.attention_mechanism_audit.run summarize \
+  --report experiments/attention_mechanism_audit/outputs/qa/REPORT/report.json
+```
+
+This is a post-hoc mechanism audit. It does not train or evaluate an
+unsupervised hallucination detector: there is no label-free anomaly score,
+calibrated decision threshold, AUROC, or AUPRC in this experiment.
+
 Focused tests:
 
 ```bash

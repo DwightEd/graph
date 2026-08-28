@@ -359,11 +359,26 @@ def evaluate_saved(
         "samples": len(rows),
         "tokens": int(len(label)),
         "hallucinated_tokens": int(label.sum()),
+        "prevalence": float(label.mean()),
         "generator_models": sorted(
             {str(row.get("generator_model")) for row in rows}
         ),
         "position_bin": int(position_bin),
+        "statistical_design": {
+            "estimand": "hallucinated_minus_correct",
+            "matching": "source_id + absolute_position_bin + relative_position_decile",
+            "source_weighting": "equal",
+            "bootstrap_unit": "source_id",
+            "bootstrap_samples": int(bootstrap),
+            "multiplicity_correction": "none",
+            "primary_endpoints": [
+                "message_routing_drift_mean",
+                "message_source_dispersion_mean",
+                "evidence_message_effect",
+            ],
+        },
         "labels_used_during": "posthoc_evaluation_only",
+        "analysis_scope": "mechanism_audit_not_hallucination_detector",
         "observer_scope": (
             "teacher-forced observer dynamics; formation claims require observer "
             "and generator checkpoints to match"

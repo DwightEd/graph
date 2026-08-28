@@ -10,6 +10,7 @@ import torch
 
 from .audit import capture_split
 from .evaluate import evaluate_saved
+from .reporting import render_report
 
 
 DEFAULT_MODEL = (
@@ -44,19 +45,13 @@ def _evaluate(args: argparse.Namespace) -> None:
         bootstrap=args.bootstrap,
         seed=args.seed,
     )
-    print("\n=== Three-mechanism audit ===")
-    for name, summary in report["summaries"].items():
-        effect = summary["position_matched_source_equal_difference"]
-        interval = summary["ci95"]
-        correct = summary["correct_mean"]
-        hallucinated = summary["hallucinated_mean"]
-        print(
-            f"{name:38s} "
-            f"correct={'n/a' if correct is None else f'{correct:.6f}'} "
-            f"hallucinated={'n/a' if hallucinated is None else f'{hallucinated:.6f}'} "
-            f"delta={effect} CI={interval}"
-        )
+    print("\n" + render_report(report, all_metrics=args.all_metrics))
     print(f"\nFull report: {args.output}")
+
+
+def _summarize(args: argparse.Namespace) -> None:
+    report = json.loads(args.report.read_text(encoding="utf-8"))
+    print(render_report(report, all_metrics=args.all_metrics))
 
 
 def parser() -> argparse.ArgumentParser:
@@ -84,7 +79,15 @@ def parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--position-bin", type=int, default=16)
     evaluate.add_argument("--bootstrap", type=int, default=1000)
     evaluate.add_argument("--seed", type=int, default=20260828)
+    evaluate.add_argument("--all-metrics", action="store_true")
     evaluate.set_defaults(handler=_evaluate)
+
+    summarize = commands.add_parser(
+        "summarize", help="print key results from an existing report without reevaluation"
+    )
+    summarize.add_argument("--report", type=Path, required=True)
+    summarize.add_argument("--all-metrics", action="store_true")
+    summarize.set_defaults(handler=_summarize)
     return root
 
 
