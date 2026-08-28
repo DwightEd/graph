@@ -1,81 +1,68 @@
 #!/usr/bin/env bash
 
-fail_run() {
-  local message=$1
-  local code=${2:-1}
-  echo >&2
-  echo "ERROR: ${message}" >&2
-  echo "Stopped immediately; no later stage was run." >&2
-  exit "${code}"
-}
-
-run_stage() {
-  local stage_name=$1
-  local stage_status
-  shift
-
-  "$@"
-  stage_status=$?
-  if [ "${stage_status}" -ne 0 ]; then
-    fail_run "${stage_name} failed with exit code ${stage_status}." "${stage_status}"
-  fi
-}
-
 REPO=${REPO:-/share/home/tm902089733300000/a903202310/lys/research/graph}
 MODEL_PATH=${MODEL_PATH:-/share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct}
-PAIRS=${PAIRS:-${REPO}/experiments/attention_mechanism_audit/inputs/qa/audit_pairs.jsonl}
+TEST_ROOT=${TEST_ROOT:-/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876/test}
+SOURCE_INFO=${SOURCE_INFO:-/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/source_info.jsonl}
 PYTHON=${PYTHON:-python}
-DEVICE=${DEVICE:-cuda}
-TORCH_DTYPE=${TORCH_DTYPE:-bfloat16}
+DEVICE=${DEVICE:-cuda:0}
+DTYPE=${DTYPE:-bfloat16}
+TOKEN_CHUNK=${TOKEN_CHUNK:-128}
+INTERVENTION_BATCH=${INTERVENTION_BATCH:-3}
+TOP_K=${TOP_K:-8}
+LOGIT_CHUNK=${LOGIT_CHUNK:-64}
+POSITION_BIN=${POSITION_BIN:-16}
 BOOTSTRAP=${BOOTSTRAP:-1000}
 SEED=${SEED:-20260828}
 LIMIT=${LIMIT:-}
 
 MODEL_TAG=${MODEL_TAG:-$(basename "${MODEL_PATH%/}")}
-OUT=${OUT:-${REPO}/experiments/attention_mechanism_audit/outputs/qa/${MODEL_TAG}_grounding_control_seed${SEED}}
-ARTIFACT=${ARTIFACT:-${OUT}/control_chain.npz}
+OUT=${OUT:-${REPO}/experiments/attention_mechanism_audit/outputs/qa/${MODEL_TAG}_teacher_forced_seed${SEED}}
+TRACES=${TRACES:-${OUT}/traces}
 REPORT=${REPORT:-${OUT}/report.json}
 
-run_stage "enter repository ${REPO}" cd "${REPO}"
-
-if [ ! -d "${MODEL_PATH}" ]; then
-  fail_run "model directory does not exist: ${MODEL_PATH}"
-fi
-if [ ! -f "${PAIRS}" ]; then
-  fail_run "controlled pair manifest does not exist: ${PAIRS}"
-fi
-run_stage "create output directory ${OUT}" mkdir -p "${OUT}"
+cd "${REPO}" || exit $?
+mkdir -p "${OUT}" || exit $?
 
 LIMIT_ARGUMENT=()
 if [ -n "${LIMIT}" ]; then
   LIMIT_ARGUMENT=(--limit "${LIMIT}")
 fi
 
-echo "EXPERIMENT: SELECT--RELAY--OVERRIDE grounding control"
-echo "MODEL: ${MODEL_PATH}"
-echo "PAIRS: ${PAIRS}"
-echo "OUTPUT: ${OUT}"
-
-echo
-echo "[1/2] Run seven exact frozen-model causal branches"
-run_stage "causal audit" \
-  "${PYTHON}" -m experiments.attention_mechanism_audit.run audit \
-  --pairs "${PAIRS}" \
+echo "[1/2] Capture chunked A/V functional-message traces"
+"${PYTHON}" -m experiments.attention_mechanism_audit.run capture \
+  --split-root "${TEST_ROOT}" \
+  --source-info "${SOURCE_INFO}" \
   --model "${MODEL_PATH}" \
-  --output "${ARTIFACT}" \
+  --output "${TRACES}" \
   --device "${DEVICE}" \
-  --torch-dtype "${TORCH_DTYPE}" \
+  --dtype "${DTYPE}" \
+  --predictor-chunk "${TOKEN_CHUNK}" \
+  --intervention-batch "${INTERVENTION_BATCH}" \
+  --top-k "${TOP_K}" \
+  --logit-chunk "${LOGIT_CHUNK}" \
   "${LIMIT_ARGUMENT[@]}"
+STATUS=$?
+if [ "${STATUS}" -ne 0 ]; then
+  echo "ERROR: trace capture failed with exit code ${STATUS}." >&2
+  exit "${STATUS}"
+fi
 
 echo
-echo "[2/2] Source-grouped label-free mechanism summary"
-run_stage "mechanism summary" \
-  "${PYTHON}" -m experiments.attention_mechanism_audit.run evaluate \
-  --artifact "${ARTIFACT}" \
+echo "[2/2] Read labels only now and run position-matched mechanism tests"
+"${PYTHON}" -m experiments.attention_mechanism_audit.run evaluate \
+  --traces "${TRACES}" \
+  --split-root "${TEST_ROOT}" \
   --output "${REPORT}" \
+  --position-bin "${POSITION_BIN}" \
   --bootstrap "${BOOTSTRAP}" \
   --seed "${SEED}"
+STATUS=$?
+if [ "${STATUS}" -ne 0 ]; then
+  echo "ERROR: post-hoc evaluation failed with exit code ${STATUS}." >&2
+  exit "${STATUS}"
+fi
 
 echo
-echo "artifact: ${ARTIFACT}"
+echo "traces: ${TRACES}"
 echo "report: ${REPORT}"

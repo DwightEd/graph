@@ -1,12 +1,12 @@
-"""Frozen SELECT--RELAY--OVERRIDE grounding-control audit."""
+"""Frozen-model attention drift, dispersion, and bias audit."""
 
-from .audit import AuditArtifact, load_artifact, save_artifact
-from .data import AuditPair, load_pairs
+from .audit import capture_split, mechanism_effects
+from .capture import FunctionalTraceReplay
+from .evaluate import evaluate_saved
 
 __all__ = [
-    "AuditArtifact",
-    "AuditPair",
-    "load_artifact",
-    "load_pairs",
-    "save_artifact",
+    "FunctionalTraceReplay",
+    "capture_split",
+    "evaluate_saved",
+    "mechanism_effects",
 ]

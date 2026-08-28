@@ -1,177 +1,173 @@
-# SELECT--RELAY--OVERRIDE causal audit
+# Teacher-forced attention mechanism audit
 
-This experiment tests three grounding failures with controlled fact swaps and
-exact frozen-model interventions. It is a mechanism audit, not a graph encoder,
-an autoencoder, a learned hallucination detector, or an observational feature
-probe.
+This experiment tests three mechanisms on real RAGTruth QA responses:
 
-## Core hypothesis
+1. **routing drift**: evidence-conditioned messages are replaced by messages
+   from the model's own response;
+2. **routing dispersion**: source routes spread, heads disagree about source
+   roles, or large messages cancel in the residual stream;
+3. **message-independent capture**: the observed token remains preferred when
+   evidence and response attention messages are removed, while evidence does
+   not help it. This is the operational candidate for parametric bias.
 
-At one candidate decision, grounding succeeds only if the model completes a
-three-stage control chain:
+It is a frozen-model mechanism audit. It is not an autoencoder, a graph
+encoder, a trained hallucination detector, or the earlier controlled-pair
+workflow.
 
-1. **SELECT / dispersion:** the relevant answer-bearing value must exert more
-   total causal influence than a matched irrelevant value.
-2. **RELAY / drift:** after selection, the response history must carry the
-   counter-prior evidence rather than lock onto the model's emerging text.
-3. **OVERRIDE / parametric bias:** after evidence has entered the computation,
-   the final decision must override the candidate preferred without context.
+## Dynamic DAG
 
-The stages have a common outcome variable. For candidates A and B, the replay
-first measures
-
-```text
-raw = logit(B) - logit(A)
-```
-
-on the question-only branch. Its sign defines the model's prior; no prior label
-is supplied by the data. Every saved branch is then oriented as
+For response token `y_t = token_ids[P+t]`, the predictor is the previous
+position `q_t = P+t-1`. At layer `l`, head `h`, and source position `s`, the
+saved directed message is
 
 ```text
-M = logit(counter-prior candidate) - logit(question-only prior)
+m[l,h,t,s] = A[l,h,q_t,s] W_O[l,h] V[l,g(h),s]
 ```
 
-Thus `M > 0` always means that counter-prior evidence wins, regardless of
-whether A or B was preferred initially. Exact question-only ties are skipped
-and recorded rather than assigned an arbitrary direction.
-
-## Seven fixed branches
-
-| Saved margin | Frozen replay |
-|---|---|
-| `margin_question_only` | Question plus the shared neutral decision prefix; determines the prior direction. |
-| `margin_prior_context` | The matched context whose relevant value supports the prior candidate. |
-| `margin_counter_context` | The matched context whose relevant value supports the counter-prior candidate. |
-| `margin_no_relevant` | Counter-prior context with every relevant value key disconnected from every later query in every layer. |
-| `margin_no_irrelevant` | The same total-path intervention on the equal-length irrelevant control value. |
-| `margin_no_history` | Counter-prior context where only the current predictor cannot attend to strictly earlier response-history keys; its diagonal is retained. |
-| `margin_hybrid_history` | Counter-prior replay with the prior-context history K/V transplanted at every layer and the same absolute positions. Prompt and predictor/self states are untouched. |
-
-The source interventions are deliberately full-path interventions. Blocking a
-source only at the final predictor would miss evidence that first entered the
-response history and would misclassify successful multi-hop routing as a
-selection failure.
-
-## Pre-registered readout
+where `g(h)` is the Llama GQA query-head to KV-head map. This gives the actual
+edge-conditioned transformer message: attention chooses the edge at this
+sample, `V` supplies its dynamic content, and the head block of `W_O` decides
+how that content writes into the residual stream. A transformer layer updates
+the token node by
 
 ```text
-G = M_counter - M_no_relevant       # relevant total-source gain
-S = M_no_irrelevant - M_no_relevant # matched select contrast
-D = M_no_history - M_counter        # history support for the prior
-R = M_counter - M_hybrid_history    # evidence relayed in history K/V
-O = -M_counter                      # prior capture
+r' = r + sum(h,s) m[l,h,t,s]
+r_next = r' + MLP(RMSNorm(r'))
 ```
 
-- `select_success := G > 0 and S > 0`.
-- Within that domain, `self_lock := D > 0 and R <= 0`.
-- Within that domain, `capture_failure := O > 0`.
+The raw artifact saves `A`, native-GQA `V`, the actual `o_proj` input and
+output, layer residual input, MLP update, and final hidden state. Any edge
+message can therefore be reconstructed with the referenced checkpoint. It
+does not materialize the prohibitive `[L,H,R,S,4096]` edge tensor.
 
-RELAY and OVERRIDE are not evaluated when SELECT fails. This prevents a sample
-that never used the evidence from being mislabeled as history self-lock or
-parametric-prior override. Reports use no hallucination labels, AUROC, learned
-probe, or fitted threshold. Means and 95% intervals are source-grouped so a
-source with many rows does not dominate.
+The existing `operator_geometry.pt` is an `[L,H,H]` Gram summary of frozen
+`W_O W_V` head operators. It is useful for comparing static head codes, but it
+does not contain the `[H,d,d]` `W_O` block geometry needed to measure a
+sample-specific captured `V`. This audit therefore reads `W_O` from the model
+already loaded for replay and computes that small block geometry once.
 
-## Pair manifest
+The principal route magnitude is
 
-The audit accepts a JSONL file of already tokenized controlled pairs. It does
-not reconstruct prompt roles, infer evidence spans, or silently fall back to an
-attention cache.
-
-```json
-{
-  "sample_id": "pair-1",
-  "source_id": "source-1",
-  "question_only": {
-    "input_ids": [1, 40, 30, 31],
-    "predictor_index": 3
-  },
-  "context_a": {
-    "input_ids": [1, 10, 20, 11, 21, 30, 31],
-    "predictor_index": 6
-  },
-  "context_b": {
-    "input_ids": [1, 11, 21, 10, 20, 30, 31],
-    "predictor_index": 6
-  },
-  "relevant_span": [1, 3],
-  "irrelevant_span": [3, 5],
-  "history_span": [5, 7],
-  "candidate_a_token_id": 70,
-  "candidate_b_token_id": 71,
-  "decision_prefix_is_neutral": true
-}
+```text
+e[l,h,t,s] = A[l,h,q_t,s] ||W_O[l,h] V[l,g(h),s]||_2
 ```
 
-All spans are half-open token intervals. The manifest has the following
-non-negotiable experimental contract:
+This measures what actually enters the residual stream. The code also saves
+role edge magnitudes, source entropy, head-role routes, cancellation, and the
+largest source positions while retaining the layer and head axes. Net role
+vectors remain reconstructible from raw `A/V/W_O`.
 
-- `context_a` and `context_b` have equal length and the same predictor.
-- All IDs come from the target checkpoint tokenizer, and the supplied prefixes
-  contain no padding positions.
-- The relevant slot in `context_a` semantically supports candidate A; the
-  relevant slot in `context_b` semantically supports candidate B.
-- R/I are equal-length **answer-bearing value slots**, not whole fact
-  sentences. They are exchanged exactly: `A[R] == B[I]` and `A[I] == B[R]`.
-- The two contexts differ nowhere else. This holds lexical content and position
-  constant while swapping which value occupies the relevant role.
-- Question-only and both context branches end in the same neutral decision
-  prefix. It must not reveal either answer. The boolean declaration records
-  that data-curation decision; token IDs alone cannot prove semantic neutrality.
-- `history_span` ends at `predictor_index + 1`. RELAY uses only
-  `[history_start, predictor_index)`, so the current predictor/self is never
-  removed or transplanted.
-- Candidate IDs are the first different tokens after any shared candidate
-  prefix already included in the branch inputs.
+These route quantities are observational. Only the full frozen-model replay
+differences below are called end-to-end functional effects.
 
-These constraints require purpose-built controlled pairs. Reusing the old
-RAGTruth attention cache as if it contained such interventions would not test
-this hypothesis faithfully.
+## Same-sample causal branches
+
+At every layer and every processed query, the audit subtracts a selected
+post-softmax residual write without renormalizing the remaining attention:
+
+```text
+removed(G) = W_O sum(h, s in G) A[h,q,s] V[g(h),s]
+attention_output' = attention_output - removed(G)
+```
+
+The modified hidden states continue through the real MLP and all later layers.
+Three branches are run together:
+
+- `evidence_removed`: remove evidence-source messages;
+- `response_removed`: remove attention to all response tokens, including the response
+  predictor's attention diagonal; its residual token embedding is retained;
+- `evidence_response_removed`: remove both message groups.
+
+For target log probability `L`, the registered effects are
+
+```text
+C_evidence  = L_full - L_evidence_removed
+C_response  = L_full - L_response_removed
+interaction = L_full - L_evidence_removed - L_response_removed
+              + L_evidence_response_removed
+```
+
+The combined branch is deliberately named evidence-and-response-message
+removed. It is not
+a question-only run: teacher forcing still supplies the predictor token and
+its residual embedding. The message-independent capture signature uses the
+natural zero conditions
+
+```text
+evidence_response_removed_margin > 0
+full_margin > 0
+C_evidence <= 0
+```
+
+so it tests whether the frozen completion dynamics prefer the observed token
+despite absent grounding messages. For later response tokens this can still
+include lexical continuation from the predictor residual, so it is evidence
+for parametric bias rather than a pure parameter-only measurement. An MLP norm
+alone is never labeled "parameter knowledge."
+
+## Efficient extraction on a 24 GB RTX 4090
+
+The model is loaded once in BF16 and remains frozen. Each branch uses KV-cache
+teacher forcing in 128-token chunks, so attention memory scales as
+`branch_batch * heads * chunk * seen_tokens`, rather than `heads * N^2`.
+Per-layer value buffers retain the exact past `V` needed by message deletion.
+The three intervention branches share one batch, reducing each sample to two
+streaming replays: one raw capture and one three-branch intervention replay.
+
+Each sample is transferred to CPU and saved immediately under `traces/samples`;
+a single writer overlaps the previous save with the next capture. Peak reserved
+CUDA memory is recorded in every sample row and the manifest.
+
+`TOKEN_CHUNK=128 INTERVENTION_BATCH=3` is the 4090 default. For an unusually
+long sample, `TOKEN_CHUNK=64 INTERVENTION_BATCH=1` performs exactly the same
+audit with lower peak memory and more runtime.
+
+## Label separation and statistical test
+
+Capture opens the formal attention archive with embedded labels sealed. It
+uses cached `token_ids` and `response_idx` as the sequence authority and reads
+`source_info.jsonl` only to mark evidence, question, constraint, and other
+prompt tokens. Labels are opened only after all traces exist.
+
+Evaluation binds each saved target sequence back to the formal cache. It then
+reports hallucinated-minus-correct differences within the same source,
+absolute-position bin, and relative-position decile before weighting sources
+equally. The onset analysis is a source-matched difference-in-differences
+against correct pseudo-onsets, rather than an unmatched raw curve.
+
+When the RAGTruth generator differs from the Llama observer, these are the
+observer's teacher-forced processing and maintenance dynamics. A claim about
+the exact formation process requires matching generator and observer
+checkpoints.
 
 ## Run
 
-The target checkpoint is already the script default:
-
-```text
-/share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct
-```
-
-From the repository root:
+From the repository root, the default script already points to the QA formal
+cache, RAGTruth source metadata, and the local Llama-3.1-8B checkpoint:
 
 ```bash
-PAIRS=/absolute/path/to/audit_pairs.jsonl \
+LIMIT=1 bash experiments/attention_mechanism_audit/run_qa.sh
+```
+
+After the smoke sample succeeds, run the complete QA split:
+
+```bash
 bash experiments/attention_mechanism_audit/run_qa.sh
 ```
 
-Optional environment variables are `OUT`, `MODEL_PATH`, `PYTHON`, `DEVICE`,
-`TORCH_DTYPE`, `LIMIT`, `BOOTSTRAP`, and `SEED`. The shell script intentionally
-does not use `set -euo pipefail`: each stage checks its status explicitly, the
-complete Python traceback remains visible, and evaluation never runs after an
-audit failure.
+The script intentionally does not use `set -euo pipefail`. A Python traceback
+remains visible, and evaluation is not started after capture fails.
 
-Outputs are intentionally separate from the old feature experiment:
+Outputs:
 
-- `control_chain.npz`: seven oriented margins plus the fixed derived columns.
-- `control_chain.json`: schema, counts, and skipped tie IDs.
-- `report.json`: source-grouped SELECT, RELAY, and OVERRIDE summaries.
+- `traces/samples/<sample_id>.pt`: raw A/V trajectory, model states, route
+  summaries, and four branch scores;
+- `traces/index.jsonl`: sample paths, sizes, and peak CUDA memory;
+- `traces/manifest.json`: extraction configuration and checkpoint;
+- `token_metrics.npz`: aligned token-level mechanism measurements;
+- `report.json`: position-matched summaries and onset tests.
 
-## Fidelity
-
-The model is frozen and every replay runs under `torch.inference_mode()` with
-eager Llama attention. Candidate margins use the checkpoint's real `lm_head`;
-there is no gradient, attention-mass proxy, operator norm, random donor, or
-learned model.
-
-For history mediation, each layer captures the prior branch's raw `k_proj` and
-`v_proj` outputs only at strictly earlier response positions. The counter
-branch receives those values at the same absolute positions before RoPE. On
-the target Llama-3.1 checkpoint (`pretraining_tp=1`), equal positions give the
-same rotary transform, and GQA K/V remain in their native 8-KV-head geometry;
-nothing is averaged or expanded into the 32 query heads. The full frozen model
-still executes its actual W_Q, W_K, W_V, W_O and MLP computations, so the saved
-cached `operator_geometry.pt` summary is neither needed nor substituted.
-
-Run the focused tests with:
+Focused tests:
 
 ```bash
 pytest -q experiments/attention_mechanism_audit/tests

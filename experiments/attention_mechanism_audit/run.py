@@ -1,4 +1,4 @@
-"""Command line entry point for the controlled grounding-mechanism audit."""
+"""CLI for real-sample teacher-forced mechanism auditing."""
 
 from __future__ import annotations
 
@@ -6,10 +6,10 @@ import argparse
 import json
 from pathlib import Path
 
-from .audit import run_audit
-from .data import load_pairs
-from .evaluate import evaluate_artifact
-from .replay import FrozenMarginReplay
+import torch
+
+from .audit import capture_split
+from .evaluate import evaluate_saved
 
 
 DEFAULT_MODEL = (
@@ -18,118 +18,75 @@ DEFAULT_MODEL = (
 )
 
 
-def _torch_dtype(name: str):
-    import torch
-
-    return {
-        "auto": "auto",
-        "bfloat16": torch.bfloat16,
-        "float16": torch.float16,
-        "float32": torch.float32,
-    }[name]
-
-
-def _run_audit(args: argparse.Namespace) -> None:
-    pairs = load_pairs(args.pairs)
-    if args.limit is not None:
-        pairs = pairs[: args.limit]
-    if not pairs:
-        raise ValueError("the controlled pair manifest selected no rows")
-    replay = FrozenMarginReplay.from_pretrained(
-        args.model,
+def _capture(args: argparse.Namespace) -> None:
+    report = capture_split(
+        split_root=args.split_root,
+        source_info=args.source_info,
+        model_path=args.model,
+        output_root=args.output,
         device=args.device,
-        torch_dtype=_torch_dtype(args.torch_dtype),
+        dtype={"bfloat16": torch.bfloat16, "float16": torch.float16}[args.dtype],
+        limit=args.limit,
+        predictor_chunk=args.predictor_chunk,
+        top_k=args.top_k,
+        logit_chunk=args.logit_chunk,
+        intervention_batch=args.intervention_batch,
     )
-    manifest = run_audit(
-        _progress(pairs),
-        replay,
-        args.output,
-    )
-    print(json.dumps(manifest, indent=2, sort_keys=True))
+    print(json.dumps(report, indent=2, sort_keys=True))
 
 
-def _progress(pairs):
-    total = len(pairs)
-    for index, pair in enumerate(pairs, start=1):
-        print(f"audit pair {index}/{total}: {pair.sample_id}", flush=True)
-        yield pair
-
-
-def _statistic(name: str, value: dict[str, object]) -> None:
-    if not value["available"]:
-        print(f"{name:28s} unavailable")
-        return
-    print(
-        f"{name:28s} "
-        f"mean={value['source_equal_mean']:.6f} "
-        f"95%CI=[{value['ci_low']:.6f}, {value['ci_high']:.6f}] "
-        f"N={value['samples']} sources={value['sources']}"
-    )
-
-
-def _print_report(report: dict[str, object]) -> None:
-    mechanisms = report["mechanisms"]
-    select = mechanisms["select"]
-    relay = mechanisms["relay"]
-    override = mechanisms["override"]
-
-    print("\n=== SELECT: total source-path effect ===")
-    _statistic("relevant_gain", select["relevant_gain"])
-    _statistic("select_contrast", select["select_contrast"])
-    _statistic("select_success_rate", select["success_rate"])
-
-    print("\n=== RELAY: select-success domain ===")
-    _statistic("history_prior_support", relay["history_prior_support"])
-    _statistic("history_evidence_relay", relay["history_evidence_relay"])
-    _statistic("self_lock_rate", relay["self_lock_rate"])
-
-    print("\n=== OVERRIDE: select-success domain ===")
-    _statistic("question_prior_strength", override["question_prior_strength"])
-    _statistic("prior_capture", override["prior_capture"])
-    _statistic("capture_failure_rate", override["capture_failure_rate"])
-
-
-def _run_evaluate(args: argparse.Namespace) -> None:
-    report = evaluate_artifact(
-        args.artifact,
-        args.output,
-        bootstrap_replicates=args.bootstrap,
+def _evaluate(args: argparse.Namespace) -> None:
+    report = evaluate_saved(
+        trace_root=args.traces,
+        split_root=args.split_root,
+        output=args.output,
+        position_bin=args.position_bin,
+        bootstrap=args.bootstrap,
         seed=args.seed,
     )
-    _print_report(report)
-    print(f"\nFull report: {Path(args.output)}")
+    print("\n=== Three-mechanism audit ===")
+    for name, summary in report["summaries"].items():
+        effect = summary["position_matched_source_equal_difference"]
+        interval = summary["ci95"]
+        print(
+            f"{name:38s} correct={summary['correct_mean']:.6f} "
+            f"hallucinated={summary['hallucinated_mean']:.6f} "
+            f"delta={effect} CI={interval}"
+        )
+    print(f"\nFull report: {args.output}")
 
 
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Frozen SELECT--RELAY--OVERRIDE causal audit"
-    )
-    commands = parser.add_subparsers(dest="command", required=True)
+def parser() -> argparse.ArgumentParser:
+    root = argparse.ArgumentParser(description="Teacher-forced functional-message audit")
+    commands = root.add_subparsers(dest="command", required=True)
 
-    audit = commands.add_parser("audit", help="run the seven frozen replays")
-    audit.add_argument("--pairs", type=Path, required=True)
-    audit.add_argument("--model", type=Path, default=Path(DEFAULT_MODEL))
-    audit.add_argument("--output", type=Path, required=True)
-    audit.add_argument("--device", default="cuda")
-    audit.add_argument(
-        "--torch-dtype",
-        choices=("auto", "bfloat16", "float16", "float32"),
-        default="bfloat16",
-    )
-    audit.add_argument("--limit", type=int)
-    audit.set_defaults(handler=_run_audit)
+    capture = commands.add_parser("capture", help="extract and save raw model dynamics")
+    capture.add_argument("--split-root", type=Path, required=True)
+    capture.add_argument("--source-info", type=Path, required=True)
+    capture.add_argument("--model", type=Path, default=Path(DEFAULT_MODEL))
+    capture.add_argument("--output", type=Path, required=True)
+    capture.add_argument("--device", default="cuda:0")
+    capture.add_argument("--dtype", choices=("bfloat16", "float16"), default="bfloat16")
+    capture.add_argument("--predictor-chunk", type=int, default=64)
+    capture.add_argument("--intervention-batch", type=int, choices=(1, 3), default=3)
+    capture.add_argument("--top-k", type=int, default=8)
+    capture.add_argument("--logit-chunk", type=int, default=64)
+    capture.add_argument("--limit", type=int)
+    capture.set_defaults(handler=_capture)
 
-    evaluate = commands.add_parser("evaluate", help="summarize fixed effects")
-    evaluate.add_argument("--artifact", type=Path, required=True)
+    evaluate = commands.add_parser("evaluate", help="compare frozen traces with labels")
+    evaluate.add_argument("--traces", type=Path, required=True)
+    evaluate.add_argument("--split-root", type=Path, required=True)
     evaluate.add_argument("--output", type=Path, required=True)
-    evaluate.add_argument("--bootstrap", type=int, default=1_000)
+    evaluate.add_argument("--position-bin", type=int, default=16)
+    evaluate.add_argument("--bootstrap", type=int, default=1000)
     evaluate.add_argument("--seed", type=int, default=20260828)
-    evaluate.set_defaults(handler=_run_evaluate)
-    return parser
+    evaluate.set_defaults(handler=_evaluate)
+    return root
 
 
 def main() -> None:
-    args = _parser().parse_args()
+    args = parser().parse_args()
     args.handler(args)
 
 

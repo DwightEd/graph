@@ -1,102 +1,79 @@
 import numpy as np
+import torch
 
-from experiments.attention_mechanism_audit.audit import (
-    AuditArtifact,
-    AuditRow,
-    RawMargins,
-)
-from experiments.attention_mechanism_audit.evaluate import (
-    evaluate,
-    source_mean_bootstrap,
-)
+from experiments.attention_mechanism_audit.capture import ROLE_NAMES, SELF
+from experiments.attention_mechanism_audit.data import EVIDENCE
+from experiments.attention_mechanism_audit.evaluate import token_metrics
 
 
-def test_source_bootstrap_weights_sources_not_rows():
-    summary = source_mean_bootstrap(
-        np.asarray([1.0, 3.0, 10.0]),
-        np.asarray(["a", "a", "b"]),
-        replicates=101,
-        seed=7,
-    )
-
-    assert summary["available"] is True
-    assert summary["samples"] == 3
-    assert summary["sources"] == 2
-    assert summary["source_equal_mean"] == 6.0
-    assert summary["ci_low"] <= 6.0 <= summary["ci_high"]
-
-
-def test_evaluation_reports_only_the_three_fixed_mechanisms():
-    artifact = AuditArtifact.from_rows(
-        [
-            AuditRow(
-                "a1",
-                "a",
-                10,
-                11,
-                True,
-                RawMargins(-1.0, -2.0, -1.0, -2.0, 0.0, 0.0, 0.0),
+def test_token_metrics_keep_layer_drift_and_separate_causal_effects():
+    layers, responses, heads, roles = 3, 3, 2, len(ROLE_NAMES)
+    edge = torch.zeros(layers, responses, heads, roles)
+    edge[:, 0, :, EVIDENCE] = 1.0
+    edge[0, 1, :, EVIDENCE] = 2.0
+    edge[1:, 1, :, SELF] = 2.0
+    edge[:, 2, :, len(ROLE_NAMES) - 2] = 1.0
+    route = torch.zeros_like(edge)
+    route[:, 0, :, EVIDENCE] = 1.0
+    route[0, 1, :, EVIDENCE] = 1.0
+    route[1, 1, :, SELF] = 1.0
+    route[2, 1, 0, EVIDENCE] = 1.0
+    route[2, 1, 1, SELF] = 1.0
+    route[:, 2, :, len(ROLE_NAMES) - 2] = 1.0
+    artifact = {
+        "trace": {
+            "role_edge_magnitude": edge,
+            "role_attention": route,
+            "source_message_entropy": torch.zeros(layers, responses),
+            "message_coherence": torch.ones(layers, responses),
+            "source_role": torch.tensor(
+                [
+                    [EVIDENCE, SELF, -1, -1],
+                    [EVIDENCE, 1, SELF, -1],
+                    [EVIDENCE, 1, len(ROLE_NAMES) - 2, SELF],
+                ],
+                dtype=torch.int8,
             ),
-            AuditRow(
-                "a2",
-                "a",
-                10,
-                11,
-                False,
-                RawMargins(-1.0, -2.0, 1.0, 2.0, 1.0, 0.0, 0.0),
-            ),
-            AuditRow(
-                "b1",
-                "b",
-                20,
-                21,
-                True,
-                RawMargins(-2.0, -3.0, 2.0, 1.0, 2.0, 1.0, 1.0),
-            ),
-        ]
+        },
+        "mechanism": {
+            "evidence_message_effect": torch.tensor([0.25, -0.5, 0.1]),
+            "response_message_effect": torch.tensor([0.1, 0.8, 0.4]),
+            "evidence_response_removed_margin": torch.tensor([-0.1, 0.2, 0.2]),
+            "full_margin": torch.tensor([-0.2, 0.3, -0.1]),
+        },
+    }
+
+    metrics = token_metrics(artifact)
+
+    np.testing.assert_allclose(
+        metrics["message_evidence_share_mean"], [1.0, 1 / 3, 0.0]
     )
-
-    report = evaluate(artifact, bootstrap_replicates=101, seed=11)
-
-    assert report["labels_used"] is False
-    assert set(report["mechanisms"]) == {"select", "relay", "override"}
-    assert "auroc" not in str(report).lower()
-    assert "probe" not in str(report).lower()
-    assert (
-        report["mechanisms"]["select"]["success_rate"]["source_equal_mean"]
-        == 0.75
+    np.testing.assert_allclose(
+        metrics["message_response_share_mean"], [0.0, 2 / 3, 1.0]
     )
-    relay = report["mechanisms"]["relay"]
-    assert relay["self_lock_rate"]["source_equal_mean"] == 0.5
-    override = report["mechanisms"]["override"]
-    assert override["eligible_samples"] == 2
-    assert override["eligible_sources"] == 2
-    assert override["capture_failure_rate"]["source_equal_mean"] == 0.5
-
-
-def test_relay_and_override_are_unavailable_without_select_success():
-    artifact = AuditArtifact.from_rows(
-        [
-            AuditRow(
-                "sample",
-                "source",
-                10,
-                11,
-                True,
-                RawMargins(-1.0, -1.0, -0.5, 0.0, 0.0, 0.0, -0.5),
-            )
-        ]
+    np.testing.assert_allclose(
+        metrics["message_routing_drift_mean"], [-1.0, 1 / 3, 1.0]
     )
-
-    mechanisms = evaluate(artifact, bootstrap_replicates=11)["mechanisms"]
-    relay = mechanisms["relay"]
-    override = mechanisms["override"]
-
-    assert relay["eligible_samples"] == 0
-    assert relay["history_prior_support"]["available"] is False
-    assert relay["history_evidence_relay"]["available"] is False
-    assert relay["self_lock_rate"]["available"] is False
-    assert override["eligible_samples"] == 0
-    assert override["question_prior_strength"]["available"] is False
-    assert override["prior_capture"]["available"] is False
-    assert override["capture_failure_rate"]["available"] is False
+    np.testing.assert_allclose(
+        metrics["message_routing_drift_layer_shift"], [0.0, 2.0, 0.0]
+    )
+    np.testing.assert_allclose(
+        metrics["attention_routing_drift_mean"], [-1.0, 0.0, 1.0]
+    )
+    np.testing.assert_allclose(
+        metrics["attention_routing_drift_layer_shift"], [0.0, 1.0, 0.0]
+    )
+    np.testing.assert_allclose(metrics["message_source_dispersion_mean"], 0.0)
+    np.testing.assert_allclose(
+        metrics["head_role_disagreement_mean"], [0.0, np.log(2) / 3, 0.0]
+    )
+    np.testing.assert_allclose(
+        metrics["head_role_disagreement_layer_shift"], [0.0, np.log(2), 0.0]
+    )
+    np.testing.assert_allclose(metrics["message_coherence_mean"], 1.0)
+    np.testing.assert_allclose(
+        metrics["evidence_message_effect"], [0.25, -0.5, 0.1]
+    )
+    np.testing.assert_allclose(
+        metrics["message_independent_capture_signature"], [0.0, 1.0, 0.0]
+    )
