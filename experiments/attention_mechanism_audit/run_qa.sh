@@ -24,7 +24,9 @@ run_stage() {
 }
 
 REPO=${REPO:-/share/home/tm902089733300000/a903202310/lys/research/graph}
-TEST_SPLIT=${TEST_SPLIT:-/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/attention/llama31_8b/test}
+CACHE_PROJECT_ROOT=${CACHE_PROJECT_ROOT:-/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph}
+FORMAL_CACHE_ROOT=${FORMAL_CACHE_ROOT:-${CACHE_PROJECT_ROOT}/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876}
+TEST_SPLIT=${TEST_SPLIT:-${FORMAL_CACHE_ROOT}/test}
 RAGTRUTH_ROOT=${RAGTRUTH_ROOT:-/share/home/tm902089733300000/a903202310/lys/data/RAGTruth}
 SOURCE_INFO=${SOURCE_INFO:-${RAGTRUTH_ROOT}/source_info.jsonl}
 if [ ! -f "${SOURCE_INFO}" ] && [ -f "${RAGTRUTH_ROOT}/dataset/source_info.jsonl" ]; then
@@ -32,7 +34,7 @@ if [ ! -f "${SOURCE_INFO}" ] && [ -f "${RAGTRUTH_ROOT}/dataset/source_info.jsonl
 fi
 MODEL_PATH=${MODEL_PATH:-/share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct}
 TOKENIZER_PATH=${TOKENIZER_PATH:-${MODEL_PATH}}
-PYTHON=${PYTHON:-python}
+PYTHON=${PYTHON:-${CACHE_PYTHON:-python}}
 DEVICE=${DEVICE:-cuda}
 TORCH_DTYPE=${TORCH_DTYPE:-auto}
 TASK=${TASK:-QA}
@@ -44,7 +46,6 @@ LIMIT=${LIMIT:-}
 BOOTSTRAP=${BOOTSTRAP:-1000}
 FOLDS=${FOLDS:-5}
 START_STAGE=${START_STAGE:-1}
-FORCE_ROLES=${FORCE_ROLES:-0}
 TRUST_REMOTE_CODE=${TRUST_REMOTE_CODE:-0}
 
 if ! [[ "${START_STAGE}" =~ ^[1-3]$ ]]; then
@@ -62,6 +63,77 @@ run_stage "create output directory ${OUT}" mkdir -p "${OUT}"
 
 echo "EXPERIMENT: attention_mechanism_audit"
 echo "OUTPUT: ${OUT}"
+echo "PYTHON: ${PYTHON}"
+
+validate_cache_provenance() {
+  "${PYTHON}" - "${TEST_SPLIT}/manifest.json" <<'PY'
+import json
+import sys
+
+import torch
+import transformers
+
+path = sys.argv[1]
+with open(path, encoding="utf-8") as file:
+    manifest = json.load(file)
+
+spec = manifest.get("attention_cache_spec")
+if not isinstance(spec, dict):
+    raise ValueError(f"attention_cache_spec is missing from {path}")
+required = (
+    "dtype",
+    "attn_implementation",
+    "transformers_version",
+    "torch_version",
+    "model_files_sha256",
+    "model_class",
+)
+missing = [name for name in required if not spec.get(name)]
+if missing:
+    raise ValueError(
+        "attention cache is a provenance-truncated copy; missing "
+        f"{missing}. Use the original fresh_attention_c8847872bedf cache, "
+        "not /data/RAGTruth/attention/llama31_8b/test"
+    )
+if str(manifest.get("state", "")).casefold() != "complete":
+    raise ValueError(f"attention cache manifest is not complete: {path}")
+if str(spec["attn_implementation"]).casefold() != "eager":
+    raise ValueError(
+        "attention cache was not extracted with eager attention; the audit "
+        "cannot combine it with an eager replay"
+    )
+
+print("CACHE PROVENANCE:")
+print(f"manifest: {path}")
+print(f"computation_dtype: {spec['dtype']}")
+print(f"storage_dtype: {spec.get('cache_dtype')}")
+print(f"attention_implementation: {spec['attn_implementation']}")
+print(f"transformers_version: {spec['transformers_version']}")
+print(f"torch_version: {spec['torch_version']}")
+print(f"runtime_transformers_version: {transformers.__version__}")
+print(f"runtime_torch_version: {torch.__version__}")
+if str(transformers.__version__) != str(spec["transformers_version"]):
+    raise ValueError(
+        "Transformers version differs from the extraction runtime: "
+        f"cache={spec['transformers_version']}, "
+        f"runtime={transformers.__version__}. Set PYTHON (or "
+        "CACHE_PYTHON) to an interpreter with the exact recorded version."
+    )
+if str(torch.__version__) != str(spec["torch_version"]):
+    raise ValueError(
+        "PyTorch version/build differs from the extraction runtime: "
+        f"cache={spec['torch_version']}, runtime={torch.__version__}. "
+        "Set PYTHON (or CACHE_PYTHON) to an interpreter with the exact "
+        "recorded build."
+    )
+PY
+}
+
+if [ "${START_STAGE}" -le 2 ]; then
+  run_stage "attention-cache provenance preflight" validate_cache_provenance
+else
+  echo "CACHE PROVENANCE: skipped (evaluation-only restart)"
+fi
 
 LIMIT_ARGUMENT=()
 [ -n "${LIMIT}" ] && LIMIT_ARGUMENT=(--limit "${LIMIT}")
@@ -72,28 +144,26 @@ if [ "${START_STAGE}" -le 1 ]; then
   if [ ! -f "${SOURCE_INFO}" ]; then
     fail_run "SOURCE_INFO must point to RAGTruth's label-free source_info.jsonl: ${SOURCE_INFO}"
   fi
-  if [ -f "${ROLE_INDEX}" ] && [ "${FORCE_ROLES}" != "1" ]; then
-    echo
-    echo "[1/3] Reuse exact prompt-role index: ${ROLE_INDEX}"
-  else
-    echo
-    echo "[1/3] Reconstruct and verify label-free prompt roles"
-    run_stage "prompt-role reconstruction" \
-      "${PYTHON}" -m experiments.attention_mechanism_audit.run roles \
-      --data "${TEST_SPLIT}" \
-      --source-info "${SOURCE_INFO}" \
-      --tokenizer "${TOKENIZER_PATH}" \
-      --output "${ROLE_INDEX}" \
-      --task "${TASK}" \
-      "${LIMIT_ARGUMENT[@]}" \
-      "${TRUST_ARGUMENT[@]}"
-  fi
+  echo
+  echo "[1/3] Reconstruct and verify label-free prompt roles"
+  run_stage "prompt-role reconstruction" \
+    "${PYTHON}" -m experiments.attention_mechanism_audit.run roles \
+    --data "${TEST_SPLIT}" \
+    --source-info "${SOURCE_INFO}" \
+    --tokenizer "${TOKENIZER_PATH}" \
+    --output "${ROLE_INDEX}" \
+    --task "${TASK}" \
+    "${LIMIT_ARGUMENT[@]}" \
+    "${TRUST_ARGUMENT[@]}"
+elif [ "${START_STAGE}" -eq 2 ]; then
+  echo
+  echo "[1/3] Reuse prompt-role index for explicit restart (START_STAGE=${START_STAGE}): ${ROLE_INDEX}"
 else
   echo
-  echo "[1/3] Prompt-role reconstruction -- skipped (START_STAGE=${START_STAGE})"
+  echo "[1/3] Prompt-role reconstruction -- skipped (evaluation-only restart)"
 fi
 
-if [ ! -f "${ROLE_INDEX}" ]; then
+if [ "${START_STAGE}" -le 2 ] && [ ! -f "${ROLE_INDEX}" ]; then
   fail_run "Prompt-role index is missing: ${ROLE_INDEX}"
 fi
 

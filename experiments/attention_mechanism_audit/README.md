@@ -110,6 +110,22 @@ history necessity 与 evidence-history interaction 只作 attractor/control。hi
 
 ## 一键运行 QA
 
+默认 `TEST_SPLIT` 使用原始、provenance-complete 的 formal cache：
+
+```text
+/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876/test
+```
+
+该 cache 的抽取 manifest 记录模型计算 dtype、FP16 cache 存储、eager attention、
+Torch/Transformers 版本、模型类及模型根目录全部文件 SHA-256；历史抽取命令的
+`DTYPE=auto` 在支持 BF16 的 CUDA 设备上解析为 BF16。不要改用
+`/data/RAGTruth/attention/llama31_8b/test`：那是缺失上述 provenance 的后续副本，
+不能用于把缓存的 attention 与 replay 的 value/gradient 组合。脚本会在加载模型前
+一次性检查这些字段，不会把 `cache_dtype` 错当成模型计算 dtype。
+脚本默认使用当前环境的 `python`，不会静默离开已经激活的 conda 环境；若 manifest
+版本不匹配，会在模型加载前停止。此时应显式设置 `PYTHON=/path/to/python`（或
+`CACHE_PYTHON=/path/to/python`），而不是放宽 attention binding tolerance。
+
 先用小样本验证路径、显存、tokenizer 和 cache binding：
 
 ```bash
@@ -170,6 +186,11 @@ bash experiments/attention_mechanism_audit/run_qa.sh
 [2/3] labels sealed + frozen model replay -> mechanisms.npz
 [3/3] freeze artifact SHA -> open labels -> evaluation.json
 ```
+
+`START_STAGE=1` 总是重建角色索引，避免把先前 `LIMIT=1/2` 的 smoke 产物误当成完整
+索引。只有显式设置 `START_STAGE=2` 才会复用已有角色索引；缺少该文件会立即报错。
+`START_STAGE=3` 只读取已冻结的 `mechanisms.npz` 与标签作评估，不再要求角色索引，
+也不执行只服务于模型 replay 的抽取环境版本检查。
 
 正式路径会逐文件校验 cache manifest 中记录的 SHA-256。由于既有 formal cache 把 attention 与 `y_token` 放在同一个 PT payload，底层反序列化无法做到“物理上从未载入标签张量”；前两阶段会立即丢弃该张量，既不保留也不调用 label API。这里严格主张的是 **labels are not exposed or used before artifact freeze**，而不是夸大为 labels were never deserialized。
 

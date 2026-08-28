@@ -3,6 +3,7 @@ import json
 import numpy as np
 import pytest
 
+from experiments.attention_mechanism_audit import roles as roles_module
 from experiments.attention_mechanism_audit.roles import (
     CONSTRAINT,
     EVIDENCE,
@@ -112,6 +113,25 @@ def test_role_jsonl_round_trip_is_label_free_and_keeps_replayable_prompt(tmp_pat
     np.testing.assert_array_equal(loaded.role_ids, role_map.role_ids)
     np.testing.assert_array_equal(loaded.prompt_token_ids, role_map.prompt_token_ids)
     assert loaded.prompt_token_sha256 == role_map.prompt_token_sha256
+
+
+def test_role_jsonl_failed_atomic_replace_preserves_previous_index(
+    tmp_path, monkeypatch
+):
+    role_map, _ = _build(qa_source())
+    path = tmp_path / "roles.jsonl"
+    previous = b"previous-complete-index\n"
+    path.write_bytes(previous)
+
+    def fail_replace(_source, _destination):
+        raise OSError("sentinel replace failure")
+
+    monkeypatch.setattr(roles_module.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="sentinel replace failure"):
+        write_role_jsonl({role_map.source_id: role_map}, path)
+
+    assert path.read_bytes() == previous
+    assert list(tmp_path.glob(".roles.jsonl.*.tmp")) == []
 
 
 def test_role_jsonl_rejects_duplicate_source_rows(tmp_path):

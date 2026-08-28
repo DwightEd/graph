@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 from experiments.attention_mechanism_audit.run import command_line
 
 
@@ -101,6 +103,11 @@ def test_shell_does_not_use_global_set_failure_flags():
         line.strip().startswith("set -") for line in script.splitlines()
     )
     assert "pipefail" not in script
+    assert "fresh_attention_c8847872bedf_20260731T074520Z_p876" in script
+    assert "TEST_SPLIT=${TEST_SPLIT:-${FORMAL_CACHE_ROOT}/test}" in script
+    assert "PYTHON=${PYTHON:-${CACHE_PYTHON:-python}}" in script
+    assert "FORCE_ROLES" not in script
+    assert "Reuse exact prompt-role index" not in script
 
 
 def test_shell_preserves_capture_failure_and_never_opens_evaluation(tmp_path):
@@ -121,6 +128,7 @@ def test_shell_preserves_capture_failure_and_never_opens_evaluation(tmp_path):
     test_split.mkdir()
     model_path.mkdir()
     output.mkdir()
+    role_index.write_text("STALE_SMOKE_ROLE\n", encoding="utf-8")
     stale_evaluation = '{"schema":"old-report","sentinel":"STALE_JSON"}\n'
     evaluation.write_text(stale_evaluation, encoding="utf-8")
 
@@ -136,6 +144,12 @@ def test_shell_preserves_capture_failure_and_never_opens_evaluation(tmp_path):
         "    'experiments.attention_mechanism_audit.run',\n"
         "] and len(arguments) >= 3:\n"
         "    command = arguments[2]\n"
+        "elif (\n"
+        "    arguments and arguments[0] == '-'\n"
+        "    and len(arguments) > 1\n"
+        "    and arguments[1].endswith('/manifest.json')\n"
+        "):\n"
+        "    command = 'cache-preflight'\n"
         "elif arguments and arguments[0] == '-':\n"
         "    command = 'json-render'\n"
         "else:\n"
@@ -157,6 +171,9 @@ def test_shell_preserves_capture_failure_and_never_opens_evaluation(tmp_path):
         "    print('  File fake_capture.py, line 1, in capture', file=sys.stderr)\n"
         "    print('RuntimeError: sentinel capture failure', file=sys.stderr)\n"
         "    raise SystemExit(37)\n"
+        "\n"
+        "if command == 'cache-preflight':\n"
+        "    raise SystemExit(0)\n"
         "\n"
         "if command == 'evaluate':\n"
         "    Path(os.environ['EVALUATE_MARKER']).write_text(\n"
@@ -190,7 +207,6 @@ def test_shell_preserves_capture_failure_and_never_opens_evaluation(tmp_path):
             "ARTIFACT": str(artifact),
             "EVALUATION": str(evaluation),
             "START_STAGE": "1",
-            "FORCE_ROLES": "1",
             "FAKE_CALLS": str(calls),
             "EVALUATE_MARKER": str(evaluate_marker),
             "JSON_MARKER": str(json_marker),
@@ -212,11 +228,91 @@ def test_shell_preserves_capture_failure_and_never_opens_evaluation(tmp_path):
     assert "failed with exit code 37" in result.stderr
     assert "[3/3]" not in result.stdout
     assert "STALE_JSON" not in result.stdout
-    assert calls.read_text(encoding="utf-8").splitlines() == ["roles", "capture"]
+    assert calls.read_text(encoding="utf-8").splitlines() == [
+        "cache-preflight",
+        "roles",
+        "capture",
+    ]
+    assert role_index.read_text(encoding="utf-8") == "{}\n"
     assert not artifact.exists()
     assert evaluation.read_text(encoding="utf-8") == stale_evaluation
     assert not evaluate_marker.exists()
     assert not json_marker.exists()
+
+
+def test_shell_stage_three_needs_only_frozen_artifact(tmp_path):
+    repository = Path(__file__).resolve().parents[3]
+    output = tmp_path / "output"
+    output.mkdir()
+    artifact = output / "mechanisms.npz"
+    evaluation = output / "evaluation.json"
+    calls = tmp_path / "calls.txt"
+    fake_python = tmp_path / "fake_python"
+    artifact.write_bytes(b"frozen-mechanism-artifact")
+
+    fake_python.write_text(
+        f"#!{sys.executable}\n"
+        "import os\n"
+        "from pathlib import Path\n"
+        "import sys\n"
+        "arguments = sys.argv[1:]\n"
+        "if arguments[:3] == [\n"
+        "    '-m',\n"
+        "    'experiments.attention_mechanism_audit.run',\n"
+        "    'evaluate',\n"
+        "]:\n"
+        "    command = 'evaluate'\n"
+        "elif arguments and arguments[0] == '-':\n"
+        "    command = 'json-render'\n"
+        "else:\n"
+        "    command = 'unexpected'\n"
+        "with Path(os.environ['FAKE_CALLS']).open(\n"
+        "    'a', encoding='utf-8'\n"
+        ") as file:\n"
+        "    file.write(command + '\\n')\n"
+        "if command == 'evaluate':\n"
+        "    output = Path(arguments[arguments.index('--output') + 1])\n"
+        "    output.write_text('{}\\n', encoding='utf-8')\n"
+        "    raise SystemExit(0)\n"
+        "if command == 'json-render':\n"
+        "    raise SystemExit(0)\n"
+        "raise SystemExit(99)\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "REPO": str(repository),
+            "TEST_SPLIT": str(tmp_path / "cache-with-no-manifest"),
+            "SOURCE_INFO": str(tmp_path / "missing-source-info.jsonl"),
+            "PYTHON": str(fake_python),
+            "OUT": str(output),
+            "ROLE_INDEX": str(output / "missing-roles.jsonl"),
+            "ARTIFACT": str(artifact),
+            "EVALUATION": str(evaluation),
+            "START_STAGE": "3",
+            "FAKE_CALLS": str(calls),
+        }
+    )
+
+    result = subprocess.run(
+        ["bash", "experiments/attention_mechanism_audit/run_qa.sh"],
+        cwd=repository,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "CACHE PROVENANCE: skipped (evaluation-only restart)" in result.stdout
+    assert "Prompt-role reconstruction -- skipped" in result.stdout
+    assert calls.read_text(encoding="utf-8").splitlines() == [
+        "evaluate",
+        "json-render",
+    ]
 
 
 def test_embedded_report_renderer_accepts_only_the_mechanism_schema(tmp_path):
@@ -297,3 +393,53 @@ def test_embedded_report_renderer_accepts_only_the_mechanism_schema(tmp_path):
 
     assert old_schema.returncode != 0
     assert "refusing to print an old operator-validation report" in old_schema.stderr
+
+
+def test_embedded_cache_preflight_requires_complete_matching_provenance(tmp_path):
+    torch = pytest.importorskip("torch")
+    transformers = pytest.importorskip("transformers")
+    repository = Path(__file__).resolve().parents[3]
+    script = (
+        repository / "experiments" / "attention_mechanism_audit" / "run_qa.sh"
+    ).read_text(encoding="utf-8")
+    start = '\"${PYTHON}\" - \"${TEST_SPLIT}/manifest.json\" <<\'PY\'\n'
+    preflight = script.split(start, 1)[1].split("\nPY\n}", 1)[0]
+    manifest = {
+        "state": "complete",
+        "attention_cache_spec": {
+            "dtype": "torch.bfloat16",
+            "cache_dtype": "torch.float16",
+            "attn_implementation": "eager",
+            "transformers_version": transformers.__version__,
+            "torch_version": torch.__version__,
+            "model_files_sha256": {"config.json": "0" * 64},
+            "model_class": "transformers.models.llama.LlamaForCausalLM",
+        },
+    }
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    valid = subprocess.run(
+        [sys.executable, "-", str(path)],
+        input=preflight,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert valid.returncode == 0, valid.stderr
+    assert "computation_dtype: torch.bfloat16" in valid.stdout
+    assert "storage_dtype: torch.float16" in valid.stdout
+
+    del manifest["attention_cache_spec"]["dtype"]
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    truncated = subprocess.run(
+        [sys.executable, "-", str(path)],
+        input=preflight,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert truncated.returncode != 0
+    assert "provenance-truncated copy" in truncated.stderr

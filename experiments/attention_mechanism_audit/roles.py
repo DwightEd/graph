@@ -12,7 +12,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
+import tempfile
 from typing import Iterable, Mapping
 
 import numpy as np
@@ -555,7 +557,24 @@ def write_role_jsonl(role_maps: Mapping[str, PromptRoleMap], output_path) -> Pat
             )
             + "\n"
         )
-    path.write_text("".join(lines), encoding="utf-8")
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            handle.write("".join(lines))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
     return path
 
 
