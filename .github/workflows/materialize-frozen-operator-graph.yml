@@ -5,7 +5,6 @@ on:
     branches:
       - agent/frozen-operator-graph-one-click
     paths:
-      - ".bootstrap/fog.part*"
       - ".github/workflows/materialize-frozen-operator-graph.yml"
 
 permissions:
@@ -26,7 +25,10 @@ jobs:
           echo "a7ad3b60ad126642571f5fb85d7a5f43b93cd7a82d73e40691d99aea191cfc83  /tmp/frozen_operator_graph.tar.xz" | sha256sum -c -
           tar -xJf /tmp/frozen_operator_graph.tar.xz -C .
           rm -rf .bootstrap
-          rm -f .github/workflows/materialize-frozen-operator-graph.yml
+          # The runner token has contents permission but not workflow-edit
+          # permission. Tests still run here; the temporary CI file is omitted
+          # from this source commit and the materializer is cleaned separately.
+          rm -f .github/workflows/frozen-operator-graph-tests.yml
           python -m compileall -q experiments/frozen_operator_graph
           bash -n experiments/frozen_operator_graph/run_qa.sh
       - name: Run frozen operator graph unit tests
