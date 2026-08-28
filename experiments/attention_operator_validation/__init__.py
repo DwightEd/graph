@@ -1,17 +1,6 @@
 """Pair-specific attention operator-code mechanism validation."""
 
-from . import corrections as _corrections
-
-_corrections.install()
-
-from .features import OPERATOR_MODES, extract_answer_features
-from .operators import (
-    OperatorGeometry,
-    apply_factorized_operator,
-    load_factorized_basis,
-    load_operator_geometry,
-)
-from .pair_codes import PairCodeField, build_pair_code_field
+from importlib import import_module
 
 __all__ = [
     "OPERATOR_MODES",
@@ -23,3 +12,25 @@ __all__ = [
     "extract_answer_features",
     "load_operator_geometry",
 ]
+
+
+_EXPORT_MODULE = {
+    "OPERATOR_MODES": ".features",
+    "extract_answer_features": ".features",
+    "OperatorGeometry": ".operators",
+    "apply_factorized_operator": ".operators",
+    "load_factorized_basis": ".operators",
+    "load_operator_geometry": ".operators",
+    "PairCodeField": ".pair_codes",
+    "build_pair_code_field": ".pair_codes",
+}
+
+
+def __getattr__(name: str):
+    """Keep artifact/evaluation imports usable without importing PyTorch."""
+
+    if name not in _EXPORT_MODULE:
+        raise AttributeError(name)
+    value = getattr(import_module(_EXPORT_MODULE[name], __name__), name)
+    globals()[name] = value
+    return value

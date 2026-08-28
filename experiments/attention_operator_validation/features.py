@@ -24,7 +24,7 @@ OPERATOR_MODES = (
 def _finite_mean(value: torch.Tensor) -> float:
     value = value.flatten().float()
     value = value[torch.isfinite(value)]
-    return float(value.mean().item()) if len(value) else 0.0
+    return float(value.mean().item()) if len(value) else float("nan")
 
 
 def _masked_mean(value: torch.Tensor, mask: torch.Tensor) -> float:
@@ -56,6 +56,18 @@ def _mean_slope(value: torch.Tensor) -> float:
     return _finite_mean(slope)
 
 
+def _weighted_effective_heads(
+    code: torch.Tensor,
+    probability: torch.Tensor,
+) -> torch.Tensor:
+    """Average ``exp(H(head-code))`` over observed role/source pairs."""
+
+    if code.ndim != 2 or probability.shape != (code.shape[0],):
+        raise ValueError("head codes and pair probabilities are misaligned")
+    entropy = -(code * code.clamp_min(1e-12).log()).sum(dim=1)
+    return (probability * entropy.exp()).sum()
+
+
 def _role_pair_statistics(
     graph: TokenGraph,
     field: PairCodeField,
@@ -73,8 +85,11 @@ def _role_pair_statistics(
     prompt_lag = torch.zeros(shape)
     history_lag = torch.zeros(shape)
     total_lag = torch.zeros(shape)
-    prompt_head_effective = torch.zeros(shape)
-    history_head_effective = torch.zeros(shape)
+    # Zero is outside the semantic range of an effective head count.  Missing
+    # role/source pairs therefore remain unavailable NaN and are summarized
+    # conditionally; their coverage is reported separately below.
+    prompt_head_effective = torch.full(shape, float("nan"))
+    history_head_effective = torch.full(shape, float("nan"))
     prompt_observed = torch.zeros(shape)
     history_observed = torch.zeros(shape)
 
@@ -102,12 +117,10 @@ def _role_pair_statistics(
                 probability * ((target - source) / target)
             ).sum()
             code = field.direction[current]
-            code_entropy = -(
-                code * code.clamp_min(1e-12).log()
-            ).sum(dim=1).exp()
-            head_effective[layer, response] = (
-                probability * code_entropy
-            ).sum()
+            head_effective[layer, response] = _weighted_effective_heads(
+                code,
+                probability,
+            )
             coverage = field.observed[current].float().mean(dim=1)
             observed[layer, response] = (probability * coverage).sum()
 
@@ -370,6 +383,12 @@ def extract_answer_features(
             ),
             "history_code_effective_heads_mean": _finite_mean(
                 route["history_head_effective"]
+            ),
+            "prompt_code_valid_row_fraction": float(
+                torch.isfinite(route["prompt_head_effective"]).float().mean().item()
+            ),
+            "history_code_valid_row_fraction": float(
+                torch.isfinite(route["history_head_effective"]).float().mean().item()
             ),
             "prompt_observed_head_fraction": _finite_mean(route["prompt_observed"]),
             "history_observed_head_fraction": _finite_mean(route["history_observed"]),

@@ -8,13 +8,25 @@ from pathlib import Path
 import numpy as np
 from tqdm.auto import tqdm
 
+from experiment_protocol import FrozenFile, dataset_manifest_sha256
 from research_dataset import open_research_dataset
 from experiments.grounded_route.config import GraphConfig
 from experiments.grounded_route.graph import build_graph
 from experiments.grounded_route.pipeline import select_samples
 
-from .artifacts import FeatureTable, load_feature_table, save_feature_table
-from .evaluate import grouped_probe_report, univariate_report
+from .artifacts import (
+    FeatureTable,
+    implementation_sha256,
+    load_feature_table,
+    save_feature_table,
+)
+from .evaluate import (
+    frozen_evaluation_spec,
+    grouped_probe_report,
+    univariate_report,
+    validate_frozen_evaluation_spec,
+    validate_label_free_bindings,
+)
 from .features import OPERATOR_MODES, extract_answer_features
 from .operators import (
     extract_operator_geometry,
@@ -75,8 +87,15 @@ def extract_features(
     """Freeze answer-level mechanism features without opening hallucination labels."""
 
     graph_config = GraphConfig() if graph_config is None else graph_config
-    dataset = open_research_dataset(data_root, device="cpu")
-    geometry = load_operator_geometry(operator_path)
+    dataset = open_research_dataset(
+        data_root,
+        device="cpu",
+        verify_hashes=True,
+        retain_embedded_labels=False,
+    )
+    frozen_operator = FrozenFile.capture(operator_path)
+    geometry = load_operator_geometry(frozen_operator.path)
+    frozen_operator.verify(frozen_operator.path)
     expected = (
         int(dataset.manifest["num_layers"]),
         int(dataset.manifest["num_heads"]),
@@ -86,6 +105,8 @@ def extract_features(
             "operator geometry does not match the attention-cache layer/head geometry"
         )
     sample_ids = select_samples(dataset, task, limit)
+    if not sample_ids:
+        raise ValueError("feature extraction selected no answers")
 
     rows: list[dict[str, float]] = []
     sources = []
@@ -123,6 +144,8 @@ def extract_features(
         [[row[name] for name in feature_names] for row in rows],
         dtype=np.float32,
     )
+    frozen_operator.verify(frozen_operator.path)
+    directions, probe_groups = frozen_evaluation_spec(feature_names)
     table = FeatureTable(
         sample_id=np.asarray(sample_ids, dtype=str),
         source_id=np.asarray(sources, dtype=str),
@@ -131,12 +154,15 @@ def extract_features(
         feature_names=feature_names,
         feature=feature,
         metadata={
-            "labels_included": False,
+            "labels_used": False,
+            "audit_scope": "selected_samples",
+            "implementation_sha256": implementation_sha256(),
+            "dataset_manifest_sha256": dataset_manifest_sha256(dataset),
             "data_root": str(Path(data_root).resolve()),
             "split": str(dataset.manifest["split"]),
             "task": task,
-            "operator_path": str(Path(operator_path).resolve()),
-            "operator_sha256": file_sha256(operator_path),
+            "operator_path": str(frozen_operator.path),
+            "operator_sha256": frozen_operator.sha256,
             "model_path": geometry.model_path,
             "architecture": geometry.architecture,
             "imputation": imputation,
@@ -144,6 +170,8 @@ def extract_features(
             "layer_count": geometry.layer_count,
             "head_count": geometry.head_count,
             "feature_modes": list(OPERATOR_MODES),
+            "feature_directions": directions,
+            "probe_groups": probe_groups,
         },
     )
     save_feature_table(output_path, table)
@@ -151,7 +179,7 @@ def extract_features(
         "features": str(Path(output_path).resolve()),
         "samples": len(sample_ids),
         "feature_count": len(feature_names),
-        "labels_read": False,
+        "labels_used": False,
         "operator_sha256": table.metadata["operator_sha256"],
     }
 
@@ -167,23 +195,49 @@ def evaluate_features(
 ) -> dict[str, object]:
     """Open answer labels only after the feature artifact has been frozen."""
 
-    table = load_feature_table(feature_path)
-    if bool(table.metadata.get("labels_included", True)):
-        raise ValueError("mechanism feature artifact must be label-free")
+    if int(bootstrap_replicates) < 0:
+        raise ValueError("bootstrap_replicates must be non-negative")
+
+    frozen = FrozenFile.capture(feature_path)
+    table = load_feature_table(frozen.path)
+    frozen.verify(frozen.path)
     if Path(str(table.metadata["data_root"])).resolve() != Path(data_root).resolve():
         raise ValueError("evaluation data root differs from the frozen feature artifact")
+    directions, probe_groups = validate_frozen_evaluation_spec(
+        table.feature_names,
+        table.metadata["feature_directions"],
+        table.metadata["probe_groups"],
+    )
 
+    # Complete canonical binding on a label-sealed instance.  The formal cache
+    # physically co-locates y_token with attention, so retaining labels even for
+    # this pass would make the firewall ordering ambiguous.
+    binding_dataset = open_research_dataset(
+        data_root,
+        device="cpu",
+        verify_hashes=True,
+        retain_embedded_labels=False,
+    )
+    source_id = validate_label_free_bindings(table, binding_dataset)
+    frozen.verify(frozen.path)
+
+    # Only a second dataset instance is allowed to retain/open labels.
     dataset = open_research_dataset(
         data_root,
         device="cpu",
+        verify_hashes=True,
         retain_embedded_labels=True,
     )
+    if dataset_manifest_sha256(dataset) != table.metadata["dataset_manifest_sha256"]:
+        raise ValueError("labeled dataset manifest differs from feature artifact")
+    if str(dataset.manifest.get("split")) != "test":
+        raise ValueError("operator mechanism labels may only be opened on test")
+    frozen.verify(frozen.path)
     labels = dataset.prepare_evaluation_labels(table.sample_id.tolist())
     answer_label = []
     positive_fraction = []
-    verified_source = []
-    for sample_id, expected_source in tqdm(
-        zip(table.sample_id.tolist(), table.source_id.tolist(), strict=True),
+    for sample_id in tqdm(
+        table.sample_id.tolist(),
         total=len(table.sample_id),
         desc="answer labels",
         unit="answer",
@@ -193,28 +247,38 @@ def evaluate_features(
             token_label = labels.response_labels(sample).detach().cpu().numpy().astype(np.int8)
             answer_label.append(int(token_label.any()))
             positive_fraction.append(float(token_label.mean()) if len(token_label) else 0.0)
-            verified_source.append(str(sample.source_id))
         finally:
             sample.release_attention()
-        if verified_source[-1] != str(expected_source):
-            raise ValueError("feature and label source IDs are misaligned")
+    frozen.verify(frozen.path)
 
     answer_label = np.asarray(answer_label, dtype=np.int8)
     positive_fraction = np.asarray(positive_fraction, dtype=np.float64)
-    source_id = np.asarray(verified_source, dtype=str)
+    length_baseline = univariate_report(
+        np.log1p(table.response_length.astype(np.float64))[:, None],
+        ("log_response_length",),
+        answer_label,
+        source_id,
+        bootstrap_replicates=bootstrap_replicates,
+        seed=seed + 100_000,
+        directions={"log_response_length": "high"},
+    )[0]
     report = {
         "schema": "attention-operator-answer-mechanism-evaluation",
         "version": 1,
         "labels_read": True,
+        "labels_used": True,
         "labels_used_during": "posthoc_answer_level_mechanism_validation",
-        "feature_artifact": str(Path(feature_path).resolve()),
-        "feature_sha256": file_sha256(feature_path),
+        "feature_artifact": str(frozen.path),
+        "feature_sha256": frozen.sha256,
+        "dataset_manifest_sha256": table.metadata["dataset_manifest_sha256"],
+        "implementation_sha256": table.metadata["implementation_sha256"],
         "operator_sha256": table.metadata["operator_sha256"],
         "samples": len(answer_label),
         "positive_answers": int(answer_label.sum()),
         "prevalence": float(answer_label.mean()),
         "mean_positive_token_fraction": float(positive_fraction.mean()),
         "answer_label_definition": "1 iff any response token is labeled hallucinated",
+        "response_length_baseline": length_baseline,
         "univariate": univariate_report(
             table.feature,
             table.feature_names,
@@ -222,6 +286,7 @@ def evaluate_features(
             source_id,
             bootstrap_replicates=bootstrap_replicates,
             seed=seed,
+            directions=directions,
         ),
         "source_grouped_logistic_readability": grouped_probe_report(
             table.feature,
@@ -231,6 +296,8 @@ def evaluate_features(
             folds=cv_folds,
             bootstrap_replicates=bootstrap_replicates,
             seed=seed,
+            frozen_groups=probe_groups,
+            response_length=table.response_length,
         ),
         "claim_boundary": (
             "Operator-aware features are post-hoc answer-level diagnostics. "
@@ -238,6 +305,7 @@ def evaluate_features(
             "an unsupervised hallucination detector."
         ),
     }
+    frozen.verify(frozen.path)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(

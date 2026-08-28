@@ -86,6 +86,19 @@ actual message vectors without materializing the full `B_h` matrices.
 The supervised logistic probes are mechanism-readability diagnostics. They are
 not an unsupervised hallucination detector.
 
+Feature artifacts use schema version 2. They are byte-deterministic and bind
+the exact implementation, dataset manifest, operator geometry, registered
+feature directions, and probe groups. Artifacts produced before this
+provenance fix—or by different feature/evaluation code—are intentionally
+rejected and stage 2 must be rerun; feature names alone cannot distinguish the
+corrected head-effective-number formula from the earlier implementation.
+
+Evaluation first reopens the selected samples with embedded-label retention
+disabled and verifies source ID, task, response length, file hashes, and the
+dataset manifest. Only after that pass succeeds does a separate dataset object
+open labels. The captured feature bytes are reverified before and after label
+evaluation.
+
 ## Features and controls
 
 Mass/topology features test existing hypotheses:
@@ -111,6 +124,11 @@ prompt-history operator distance, same-layer switching across generated tokens,
 late response-code stability, response lock-in, and an early-confusion to
 late-collapse statistic.
 
+Effective-head counts are conditional on rows that actually contain the
+corresponding prompt/history role. Missing role rows are unavailable rather
+than impossible zero-head observations; valid-row fractions and observed-head
+coverage are reported separately.
+
 The central comparisons are:
 
 ```text
@@ -121,6 +139,12 @@ mass + operator_normalized  > mass + operator_permuted
 
 Without these gains, the attention head vector may be only another correlated
 routing statistic rather than a useful functional code.
+
+All supervised readability comparisons include `log1p(response_length)` and
+also report a response-length-only baseline, because the answer label is
+positive when *any* token is hallucinated. A source-grouped split is used only
+when every train and test fold contains both classes; folds are never removed
+post hoc based on their labels.
 
 ## Run QA
 

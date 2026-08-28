@@ -11,6 +11,8 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.preprocessing import StandardScaler
 
+from experiment_protocol import dataset_manifest_sha256
+
 
 MODE_PREFIXES = (
     "identity_",
@@ -39,6 +41,8 @@ def feature_direction(name: str) -> str:
     if name in {
         "prompt_code_effective_heads_mean",
         "history_code_effective_heads_mean",
+        "prompt_code_valid_row_fraction",
+        "history_code_valid_row_fraction",
         "prompt_observed_head_fraction",
         "history_observed_head_fraction",
         "row_mass_conservation_error",
@@ -66,7 +70,7 @@ def _source_bootstrap(
     replicates: int,
     seed: int,
 ) -> dict[str, float | int | None]:
-    groups = tuple(dict.fromkeys(source_id.astype(str).tolist()))
+    groups = tuple(sorted(set(source_id.astype(str).tolist())))
     rows = {group: np.flatnonzero(source_id.astype(str) == group) for group in groups}
     random = np.random.default_rng(seed)
     estimates = []
@@ -116,7 +120,15 @@ def univariate_report(
     *,
     bootstrap_replicates: int,
     seed: int,
+    directions: dict[str, str] | None = None,
 ) -> list[dict[str, object]]:
+    directions = (
+        {name: feature_direction(name) for name in feature_names}
+        if directions is None
+        else dict(directions)
+    )
+    if set(directions) != set(feature_names):
+        raise ValueError("frozen feature directions do not cover the feature schema")
     rows = []
     p_values = []
     p_locations = []
@@ -130,7 +142,7 @@ def univariate_report(
             rows.append(
                 {
                     "feature": name,
-                    "direction": feature_direction(name),
+                    "direction": directions[name],
                     "samples": len(current_value),
                     "auroc_raw_high": None,
                     "auprc_raw_high": None,
@@ -144,7 +156,9 @@ def univariate_report(
         rank_biserial = (
             2.0 * float(statistic.statistic) / (len(positive) * len(negative)) - 1.0
         )
-        direction = feature_direction(name)
+        direction = directions[name]
+        if direction not in {"high", "low", "exploratory"}:
+            raise ValueError(f"invalid frozen direction for {name}")
         oriented = (
             current_value
             if direction == "high"
@@ -195,40 +209,133 @@ def univariate_report(
     return rows
 
 
-def _column_groups(feature_names: tuple[str, ...]) -> OrderedDict[str, list[int]]:
-    mass = [
-        index
-        for index, name in enumerate(feature_names)
+def feature_groups(feature_names: tuple[str, ...]) -> OrderedDict[str, list[str]]:
+    """Return the named feature controls frozen into every stage-2 artifact."""
+
+    raw_head_summary_names = {
+        "prompt_code_effective_heads_mean",
+        "history_code_effective_heads_mean",
+    }
+    routing = [
+        name
+        for name in feature_names
         if not name.startswith(MODE_PREFIXES)
+        and name not in raw_head_summary_names
+    ]
+    raw_head_summary = [
+        name
+        for name in feature_names
+        if name in raw_head_summary_names
     ]
     identity = [
-        index for index, name in enumerate(feature_names) if name.startswith("identity_")
+        name for name in feature_names if name.startswith("identity_")
     ]
     raw = [
-        index
-        for index, name in enumerate(feature_names)
+        name
+        for name in feature_names
         if name.startswith("operator_raw_")
     ]
     normalized = [
-        index
-        for index, name in enumerate(feature_names)
+        name
+        for name in feature_names
         if name.startswith("operator_normalized_")
     ]
     permuted = [
-        index
-        for index, name in enumerate(feature_names)
+        name
+        for name in feature_names
         if name.startswith("operator_permuted_")
     ]
     return OrderedDict(
         (
-            ("mass_only", mass),
-            ("mass_plus_raw_head_code", mass + identity),
-            ("mass_plus_operator_raw", mass + raw),
-            ("mass_plus_operator_normalized", mass + normalized),
-            ("mass_plus_operator_permuted", mass + permuted),
+            ("routing_only", routing),
+            ("routing_plus_head_entropy", routing + raw_head_summary),
+            ("routing_plus_raw_head_code", routing + identity),
+            ("routing_plus_operator_raw", routing + raw),
+            ("routing_plus_operator_normalized", routing + normalized),
+            ("routing_plus_operator_permuted", routing + permuted),
             ("operator_normalized_only", normalized),
         )
     )
+
+
+def _column_groups(
+    feature_names: tuple[str, ...],
+    frozen_groups: dict[str, list[str]] | None = None,
+) -> OrderedDict[str, list[int]]:
+    """Resolve a frozen name-based spec to artifact column indices."""
+
+    expected = feature_groups(feature_names)
+    if frozen_groups is None:
+        frozen_groups = dict(expected)
+    if dict(frozen_groups) != dict(expected):
+        raise ValueError("frozen probe groups differ from the registered controls")
+    location = {name: index for index, name in enumerate(feature_names)}
+    return OrderedDict(
+        (group, [location[name] for name in frozen_groups[group]])
+        for group in expected
+    )
+
+
+def frozen_evaluation_spec(
+    feature_names: tuple[str, ...],
+) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """Freeze directions and supervised control membership before labels open."""
+
+    directions = {name: feature_direction(name) for name in feature_names}
+    groups = {name: list(features) for name, features in feature_groups(feature_names).items()}
+    return directions, groups
+
+
+def validate_frozen_evaluation_spec(
+    feature_names: tuple[str, ...],
+    directions,
+    groups,
+) -> tuple[dict[str, str], dict[str, list[str]]]:
+    expected_directions, expected_groups = frozen_evaluation_spec(feature_names)
+    directions = dict(directions)
+    groups = {str(name): list(features) for name, features in dict(groups).items()}
+    if directions != expected_directions:
+        raise ValueError("frozen feature directions differ from the implementation")
+    if groups != expected_groups:
+        raise ValueError("frozen probe groups differ from the implementation")
+    return directions, groups
+
+
+def validate_label_free_bindings(table, dataset) -> np.ndarray:
+    """Rebind every answer row to canonical data without opening label APIs."""
+
+    recorded_manifest = str(table.metadata["dataset_manifest_sha256"])
+    if dataset_manifest_sha256(dataset) != recorded_manifest:
+        raise ValueError("evaluation dataset manifest differs from feature artifact")
+    recorded_split = str(table.metadata.get("split", ""))
+    actual_split = str(dataset.manifest.get("split", ""))
+    if actual_split != recorded_split:
+        raise ValueError("evaluation dataset split differs from feature artifact")
+    if actual_split != "test":
+        raise ValueError("operator mechanism labels may only be opened on test")
+    available = set(map(str, dataset.sample_ids))
+    selected = tuple(table.sample_id.astype(str).tolist())
+    if not set(selected).issubset(available):
+        raise ValueError("feature artifact contains samples outside the dataset")
+
+    canonical_sources = []
+    for row, sample_id in enumerate(selected):
+        sample = dataset[sample_id]
+        try:
+            attention = sample.attention()
+            source_id = str(sample.source_id)
+            task_type = str(sample.task_type or "")
+            response_length = int(attention.num_response_tokens)
+        finally:
+            sample.release_attention()
+        if source_id != str(table.source_id[row]):
+            raise ValueError("feature and canonical source IDs are misaligned")
+        if task_type != str(table.task_type[row]):
+            raise ValueError("feature and canonical task types are misaligned")
+        if response_length != int(table.response_length[row]):
+            raise ValueError("feature and canonical response lengths are misaligned")
+        canonical_sources.append(source_id)
+    return np.asarray(canonical_sources, dtype=str)
 
 
 def _fit_fold(
@@ -263,6 +370,8 @@ def grouped_probe_report(
     folds: int,
     bootstrap_replicates: int,
     seed: int,
+    frozen_groups: dict[str, list[str]] | None = None,
+    response_length: np.ndarray | None = None,
 ) -> dict[str, object]:
     """Source-grouped supervised readability diagnostics.
 
@@ -276,6 +385,14 @@ def grouped_probe_report(
     requested = min(int(folds), len(unique_groups))
     if requested < 2 or np.unique(label).size < 2:
         return {"available": False, "reason": "insufficient groups or classes"}
+    class_group_count = [
+        len(np.unique(groups[label == current])) for current in np.unique(label)
+    ]
+    if min(class_group_count) < 2:
+        return {
+            "available": False,
+            "reason": "each class must occur in at least two source groups",
+        }
 
     split = None
     actual_folds = 0
@@ -290,7 +407,11 @@ def grouped_probe_report(
             )
         except ValueError:
             continue
-        if current:
+        if current and all(
+            np.unique(label[train]).size == 2
+            and np.unique(label[test]).size == 2
+            for train, test in current
+        ):
             split = current
             actual_folds = candidate
             break
@@ -301,25 +422,42 @@ def grouped_probe_report(
         "folds_requested": requested,
         "folds_used": actual_folds,
     }
-    for name, columns in _column_groups(feature_names).items():
+    groups_to_fit: OrderedDict[str, list[int]] = OrderedDict()
+    if response_length is not None:
+        response_length = np.asarray(response_length)
+        if response_length.shape != (len(label),) or bool((response_length < 1).any()):
+            raise ValueError("response_length must align with probe rows")
+        length_feature = np.log1p(response_length.astype(np.float64))[:, None]
+        groups_to_fit["response_length_only"] = []
+        report["response_length_transform"] = "log1p"
+    else:
+        length_feature = None
+    groups_to_fit.update(_column_groups(feature_names, frozen_groups))
+    for name, columns in groups_to_fit.items():
         if not columns:
-            continue
-        prediction = np.full(len(label), np.nan, dtype=np.float64)
-        valid_folds = 0
-        for train, test in split:
-            if np.unique(label[train]).size < 2 or np.unique(label[test]).size < 2:
+            if length_feature is None:
                 continue
+            selected_feature = length_feature
+        else:
+            selected_feature = feature[:, columns]
+            if length_feature is not None:
+                selected_feature = np.column_stack((length_feature, selected_feature))
+        prediction = np.full(len(label), np.nan, dtype=np.float64)
+        for train, test in split:
             prediction[test] = _fit_fold(
-                feature[train][:, columns],
+                selected_feature[train],
                 label[train],
-                feature[test][:, columns],
+                selected_feature[test],
             )
-            valid_folds += 1
         valid = np.isfinite(prediction)
+        if not bool(valid.all()):
+            raise RuntimeError("source-grouped folds did not score every answer")
         result = _metrics(label[valid], prediction[valid])
         report[name] = {
-            "features": len(columns),
-            "folds_valid": valid_folds,
+            "mechanism_features": len(columns),
+            "features": selected_feature.shape[1],
+            "includes_response_length": length_feature is not None,
+            "folds_valid": actual_folds,
             "answers_scored": int(valid.sum()),
             **result,
             "source_bootstrap": (

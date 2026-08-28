@@ -1,4 +1,6 @@
-import torch
+import pytest
+
+torch = pytest.importorskip("torch")
 
 from experiments.attention_operator_validation.pair_codes import (
     PAIR_RETAINED,
