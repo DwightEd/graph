@@ -51,6 +51,7 @@ TOKENIZER_FILES = (
     "chat_template.jinja",
 )
 WEIGHT_PATTERNS = ("*.safetensors", "pytorch_model*.bin")
+REPLAY_DTYPES = ("float32", "float16", "bfloat16")
 
 
 def _hash_named_files(root: Path, files: list[Path]) -> str:
@@ -89,6 +90,227 @@ def checkpoint_fingerprints(model_path) -> tuple[str, str]:
         _hash_named_files(root, configuration + weights),
         _hash_named_files(root, tokenizer),
     )
+
+
+def _normalized_replay_dtype(value: object) -> str:
+    """Normalize a manifest/CLI dtype without confusing it with storage dtype."""
+
+    name = str(value).strip().casefold().removeprefix("torch.")
+    aliases = {"half": "float16", "bf16": "bfloat16", "float": "float32"}
+    name = aliases.get(name, name)
+    if name not in REPLAY_DTYPES:
+        raise ValueError(f"unsupported attention-cache computation dtype: {value!r}")
+    return name
+
+
+def resolve_replay_dtype(requested_dtype: str, cache_spec: Mapping[str, object]) -> str:
+    """Resolve ``auto`` from computation dtype, never serialized cache dtype."""
+
+    requested = str(requested_dtype).strip().casefold()
+    if requested not in {"auto", *REPLAY_DTYPES}:
+        raise ValueError(
+            "--torch-dtype must be auto, float32, float16, or bfloat16"
+        )
+    if "dtype" not in cache_spec:
+        raise ValueError(
+            "attention_cache_spec does not record the model computation dtype; "
+            "use a provenance-complete cache or regenerate it"
+        )
+    expected = _normalized_replay_dtype(cache_spec["dtype"])
+    if requested != "auto" and requested != expected:
+        raise ValueError(
+            f"requested --torch-dtype {requested} differs from the cache "
+            f"computation dtype {expected}; use --torch-dtype auto (or {expected})"
+        )
+    return expected
+
+
+def validate_replay_runtime(
+    cache_spec: Mapping[str, object],
+    *,
+    requested_dtype: str,
+    transformers_version: str,
+    torch_version: str,
+) -> str:
+    """Validate runtime fields that can alter eager attention numerics."""
+
+    resolved_dtype = resolve_replay_dtype(requested_dtype, cache_spec)
+    implementation = str(cache_spec.get("attn_implementation", "")).casefold()
+    if implementation != "eager":
+        raise ValueError(
+            "attention cache was not extracted with attn_implementation=eager; "
+            "this audit cannot mix its attention with an eager replay"
+        )
+
+    expected_transformers = str(cache_spec.get("transformers_version", ""))
+    if not expected_transformers:
+        raise ValueError(
+            "attention_cache_spec does not record transformers_version; "
+            "use a provenance-complete cache or regenerate it"
+        )
+    if str(transformers_version) != expected_transformers:
+        raise ValueError(
+            "Transformers version differs from the attention-cache extraction "
+            f"runtime: expected {expected_transformers}, found "
+            f"{transformers_version}. Activate the extraction environment or "
+            f"install transformers=={expected_transformers}; do not relax the "
+            "attention-binding tolerance"
+        )
+
+    expected_torch = str(cache_spec.get("torch_version", ""))
+    if not expected_torch:
+        raise ValueError(
+            "attention_cache_spec does not record torch_version; use a "
+            "provenance-complete cache or regenerate it"
+        )
+    if str(torch_version) != expected_torch:
+        raise ValueError(
+            "PyTorch version/build differs from the attention-cache extraction "
+            f"runtime: expected {expected_torch}, found {torch_version}. "
+            "Activate the exact extraction environment (including its CUDA "
+            "build); do not relax the attention-binding tolerance"
+        )
+    return resolved_dtype
+
+
+def validate_checkpoint_file_hashes(
+    model_path, expected_hashes: object
+) -> dict[str, str]:
+    """Bind the exact extraction-time root-file inventory and its bytes."""
+
+    root = Path(model_path).resolve()
+    if not root.is_dir():
+        raise ValueError("mechanism capture requires a local checkpoint directory")
+    if not isinstance(expected_hashes, Mapping) or not expected_hashes:
+        raise ValueError(
+            "attention_cache_spec has no model_files_sha256 map; use a "
+            "provenance-complete cache or regenerate it"
+        )
+
+    expected_by_name: dict[str, str] = {}
+    for raw_name, raw_digest in sorted(
+        expected_hashes.items(), key=lambda item: str(item[0])
+    ):
+        name = str(raw_name)
+        expected = str(raw_digest).casefold()
+        relative = Path(name)
+        if (
+            relative.is_absolute()
+            or len(relative.parts) != 1
+            or relative.name in {"", ".", ".."}
+            or len(expected) != 64
+            or any(character not in "0123456789abcdef" for character in expected)
+        ):
+            raise ValueError(
+                "attention_cache_spec contains an invalid model_files_sha256 entry"
+            )
+        if name in expected_by_name:
+            raise ValueError(
+                "attention_cache_spec contains duplicate model file names"
+            )
+        expected_by_name[name] = expected
+
+    # The upstream extractor hashes every regular file in MODEL_PATH's root.
+    # Match that inventory exactly: an added weight/config/remote-code file may
+    # change from_pretrained's resolution even when every old file still exists.
+    # ``is_file`` intentionally follows Hugging Face snapshot symlinks into the
+    # shared blobs directory; lexical single-component names already prevent
+    # manifest path traversal.
+    actual_names = {path.name for path in root.iterdir() if path.is_file()}
+    expected_names = set(expected_by_name)
+    missing = sorted(expected_names - actual_names)
+    unexpected = sorted(actual_names - expected_names)
+    if missing or unexpected:
+        problems = [*(f"missing {name}" for name in missing)]
+        problems.extend(f"unexpected {name}" for name in unexpected)
+        detail = "; ".join(problems[:5])
+        if len(problems) > 5:
+            detail += f"; and {len(problems) - 5} more"
+        raise ValueError(
+            "MODEL_PATH root-file inventory differs from the exact checkpoint "
+            f"recorded by the attention cache ({detail}). Point MODEL_PATH at "
+            "the original checkpoint or regenerate the cache with the current "
+            "checkpoint"
+        )
+
+    actual: dict[str, str] = {}
+    problems: list[str] = []
+    for name, expected in sorted(expected_by_name.items()):
+        path = root / name
+        digest = file_sha256(path)
+        actual[name] = digest
+        if digest.casefold() != expected:
+            problems.append(f"SHA256 mismatch for {name}")
+    if problems:
+        detail = "; ".join(problems[:5])
+        if len(problems) > 5:
+            detail += f"; and {len(problems) - 5} more"
+        raise ValueError(
+            "MODEL_PATH is not the exact checkpoint recorded by the attention "
+            f"cache ({detail}). Point MODEL_PATH at the original checkpoint or "
+            "regenerate the cache with the current checkpoint"
+        )
+    return actual
+
+
+def validate_loaded_replay_provenance(
+    replay,
+    cache_spec: Mapping[str, object],
+    *,
+    resolved_dtype: str,
+) -> dict[str, object]:
+    """Verify what ``from_pretrained`` instantiated, not only its source files."""
+
+    model = replay.model
+    expected_class = str(cache_spec.get("model_class", ""))
+    if not expected_class:
+        raise ValueError(
+            "attention_cache_spec does not record model_class; use a "
+            "provenance-complete cache or regenerate it"
+        )
+    actual_class = f"{type(model).__module__}.{type(model).__qualname__}"
+    if actual_class != expected_class:
+        raise ValueError(
+            "loaded replay model class differs from attention-cache extraction: "
+            f"expected {expected_class}, found {actual_class}. Use the exact "
+            "extraction code path and trust_remote_code setting"
+        )
+
+    implementation = str(
+        getattr(getattr(model, "config", None), "_attn_implementation", "")
+    ).casefold()
+    if implementation != "eager":
+        raise ValueError(
+            "loaded replay model did not instantiate eager attention: "
+            f"found {implementation or '<missing>'}"
+        )
+
+    mismatched: list[str] = []
+    floating_count = 0
+    for name, parameter in model.named_parameters():
+        is_floating = getattr(parameter, "is_floating_point", None)
+        if not callable(is_floating) or not bool(is_floating()):
+            continue
+        floating_count += 1
+        actual_dtype = _normalized_replay_dtype(parameter.dtype)
+        if actual_dtype != resolved_dtype:
+            mismatched.append(f"{name}={actual_dtype}")
+    if floating_count == 0:
+        raise ValueError("loaded replay model exposes no floating-point parameters")
+    if mismatched:
+        detail = ", ".join(mismatched[:5])
+        if len(mismatched) > 5:
+            detail += f", and {len(mismatched) - 5} more"
+        raise ValueError(
+            "loaded replay parameter dtype differs from the cache computation "
+            f"dtype {resolved_dtype} ({detail})"
+        )
+    return {
+        "model_class": actual_class,
+        "attention_implementation": implementation,
+        "parameter_dtype": resolved_dtype,
+        "floating_parameter_tensors": floating_count,
+    }
 
 
 def select_samples(dataset, task: str, limit: int | None) -> tuple[str, ...]:
@@ -365,7 +587,7 @@ def capture_mechanisms(
     output_path,
     *,
     device: str = "cuda",
-    torch_dtype: str = "float16",
+    torch_dtype: str = "auto",
     task: str = "QA",
     limit: int | None = None,
     vocab_chunk_size: int = 4096,
@@ -401,21 +623,27 @@ def capture_mechanisms(
         "float16": torch.float16,
         "bfloat16": torch.bfloat16,
     }
-    if torch_dtype not in dtype_by_name:
-        raise ValueError(f"unknown torch dtype: {torch_dtype}")
-
     dataset = open_research_dataset(
         data_root,
         device="cpu",
         verify_hashes=True,
         retain_embedded_labels=False,
     )
-    cache_dtype = str(getattr(dataset, "spec", {}).get("cache_dtype", ""))
-    if cache_dtype == "torch.float16" and torch_dtype != "float16":
-        raise ValueError(
-            "the formal attention cache was extracted with float16; replay must "
-            "use --torch-dtype float16 before numerical endpoint binding"
-        )
+    cache_spec = getattr(dataset, "spec", {})
+    try:
+        import transformers
+    except ImportError as error:  # pragma: no cover - runtime dependency
+        raise RuntimeError("mechanism capture requires Transformers") from error
+    resolved_torch_dtype = validate_replay_runtime(
+        cache_spec,
+        requested_dtype=torch_dtype,
+        transformers_version=str(transformers.__version__),
+        torch_version=str(torch.__version__),
+    )
+    validate_checkpoint_file_hashes(
+        model_path,
+        cache_spec.get("model_files_sha256"),
+    )
     sample_ids = select_samples(dataset, task, limit)
     roles = load_role_jsonl(role_index_path)
     source_rows = read_source_info(source_info_path)
@@ -424,20 +652,21 @@ def capture_mechanisms(
     cache_observer = str(dataset.manifest.get("observer_model") or "")
     replay_name = Path(model_path).name
     normalized_replay = _normalized_model_name(replay_name)
-    if not _normalized_model_name(cache_observer):
-        raise ValueError(
-            "the attention cache does not identify its observer checkpoint"
-        )
-    if _normalized_model_name(cache_observer) != normalized_replay:
-        raise ValueError(
-            "replay checkpoint name differs from the attention-cache observer"
-        )
+    normalized_observer = _normalized_model_name(cache_observer)
+    observer_name_matches_replay = bool(normalized_observer) and (
+        normalized_observer == normalized_replay
+    )
     replay = FrozenCausalReplay.from_pretrained(
         model_path,
         device=device,
-        torch_dtype=dtype_by_name[torch_dtype],
+        torch_dtype=dtype_by_name[resolved_torch_dtype],
         local_files_only=True,
         trust_remote_code=trust_remote_code,
+    )
+    loaded_replay_provenance = validate_loaded_replay_provenance(
+        replay,
+        cache_spec,
+        resolved_dtype=resolved_torch_dtype,
     )
     if replay.head_count != int(dataset.manifest["num_heads"]):
         raise ValueError("replay model head count differs from attention cache")
@@ -675,8 +904,10 @@ def capture_mechanisms(
         "counterfactual_history_necessity",
     )
     onset = tuple(name for name in onset_candidates if name in token_feature_names)
+    verified_observer_name = normalized_observer or normalized_replay
     generator_matches = [
-        _normalized_model_name(name) == normalized_replay for name in generator_models
+        _normalized_model_name(name) == verified_observer_name
+        for name in generator_models
     ]
     swap_available_count = sum(bool(selected) for selected in donors.values())
     complete_swap_ensemble_count = sum(
@@ -709,10 +940,6 @@ def capture_mechanisms(
             max(float(value["known_mass_max_abs_error"]) for value in attention_bindings)
         ),
     }
-    try:
-        import transformers
-    except ImportError as error:  # pragma: no cover - already required by replay
-        raise RuntimeError("transformers disappeared after model replay") from error
     metadata: dict[str, object] = {
         "labels_used": False,
         "label_boundary": (
@@ -813,13 +1040,23 @@ def capture_mechanisms(
             "attention_implementation": "eager",
             "requested_device": device,
             "actual_embedding_device": str(replay._embedding_device()),
-            "torch_dtype": torch_dtype,
+            "requested_torch_dtype": torch_dtype,
+            "torch_dtype": resolved_torch_dtype,
+            "cache_computation_dtype": _normalized_replay_dtype(cache_spec["dtype"]),
+            "cache_storage_dtype": str(cache_spec.get("cache_dtype", "")),
+            "cache_model_files_sha256_verified": True,
             "cache_files_verified_against_manifest_sha256": True,
+            "loaded_model_class": loaded_replay_provenance["model_class"],
+            "loaded_parameter_dtype": loaded_replay_provenance["parameter_dtype"],
+            "loaded_floating_parameter_tensors": loaded_replay_provenance[
+                "floating_parameter_tensors"
+            ],
         },
         "observer_generator_audit": {
             "cache_observer_model": cache_observer,
             "replay_checkpoint": str(Path(model_path).resolve()),
-            "cache_observer_name_matches_replay": True,
+            "cache_observer_name_matches_replay": observer_name_matches_replay,
+            "checkpoint_identity_verified_without_path_name": True,
             "cache_attention_values_match_replay": True,
             "generator_models": sorted(set(generator_models)),
             "generator_matches_replay_answers": int(sum(generator_matches)),

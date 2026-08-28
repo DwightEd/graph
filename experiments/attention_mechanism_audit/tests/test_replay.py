@@ -244,19 +244,26 @@ def test_capture_hook_exact_enumeration_recovers_token_diagonal(monkeypatch):
             super().__init__()
             self.embed_tokens = embedding
             self.layers = torch.nn.ModuleList([CrossTokenLayer()])
+            self.last_used_input_ids = False
+            self.last_attention_mask_ndim = -1
 
         def forward(
             self,
             *,
-            inputs_embeds,
+            input_ids=None,
+            inputs_embeds=None,
             attention_mask,
-            position_ids,
+            position_ids=None,
             use_cache,
             output_attentions,
             output_hidden_states,
             return_dict,
         ):
             del position_ids, use_cache, output_attentions, output_hidden_states
+            self.last_used_input_ids = input_ids is not None
+            self.last_attention_mask_ndim = attention_mask.ndim
+            if inputs_embeds is None:
+                inputs_embeds = self.embed_tokens(input_ids)
             context = self.layers[0].self_attn(inputs_embeds, attention_mask)
             # For predictor rows 0 and 1, the score Jacobian with respect to the
             # hooked o_proj input is [[1, 0], [100, 2]].  Thus an answer-mean
@@ -327,6 +334,8 @@ def test_capture_hook_exact_enumeration_recovers_token_diagonal(monkeypatch):
     assert torch.allclose(
         capture.o_proj_input_gradients[0], expected_diagonal, atol=1e-7
     )
+    assert replay.model.model.last_used_input_ids is True
+    assert replay.model.model.last_attention_mask_ndim == 2
     assert not torch.allclose(
         capture.o_proj_input_gradients[0, 0],
         exact_jacobian[:, 0].mean().reshape(1, 1),
@@ -450,19 +459,29 @@ def test_toy_llama_replay_is_frozen_and_captures_value_path_when_torch_available
             self.layers = torch.nn.ModuleList([ToyLayer(), ToyLayer()])
             self.forward_calls = 0
             self.backward_calls = 0
+            self.last_used_input_ids = False
+            self.last_attention_mask_ndim = -1
+            self.call_embedding_twice = False
 
         def forward(
             self,
             *,
-            inputs_embeds,
+            input_ids=None,
+            inputs_embeds=None,
             attention_mask,
-            position_ids,
+            position_ids=None,
             use_cache,
             output_attentions,
             output_hidden_states,
             return_dict,
         ):
             del position_ids, use_cache, output_attentions, output_hidden_states
+            self.last_used_input_ids = input_ids is not None
+            self.last_attention_mask_ndim = attention_mask.ndim
+            if inputs_embeds is None:
+                inputs_embeds = self.embed_tokens(input_ids)
+                if self.call_embedding_twice:
+                    self.embed_tokens(input_ids)
             self.forward_calls += 1
             if inputs_embeds.requires_grad:
                 def count_backward(gradient):
@@ -496,6 +515,17 @@ def test_toy_llama_replay_is_frozen_and_captures_value_path_when_torch_available
     original = {name: value.detach().clone() for name, value in model.state_dict().items()}
     replay = FrozenCausalReplay(model, checkpoint="toy")
     token_ids = np.array([1, 2, 3, 4, 5])
+
+    def module_hook_counts():
+        modules = [model.get_input_embeddings()]
+        for layer in model.model.layers:
+            modules.extend((layer.self_attn.v_proj, layer.self_attn.o_proj))
+        return tuple(
+            (len(module._forward_hooks), len(module._forward_pre_hooks))
+            for module in modules
+        )
+
+    hooks_before_capture = module_hook_counts()
 
     result = replay.replay(
         token_ids,
@@ -533,8 +563,11 @@ def test_toy_llama_replay_is_frozen_and_captures_value_path_when_torch_available
         gradient_probes=3,
         attribution_seed=41,
     )
+    assert model.model.last_used_input_ids is True
+    assert model.model.last_attention_mask_ndim == 2
     assert model.model.forward_calls - forward_before_capture == 1
     assert model.model.backward_calls - backward_before_capture == 3
+    assert module_hook_counts() == hooks_before_capture
     repeated_capture = replay.capture_baseline(
         token_ids,
         prompt_length=3,
@@ -546,6 +579,31 @@ def test_toy_llama_replay_is_frozen_and_captures_value_path_when_torch_available
         capture.o_proj_input_gradient_probes,
         repeated_capture.o_proj_input_gradient_probes,
     )
+    assert module_hook_counts() == hooks_before_capture
+
+    with pytest.raises(RuntimeError, match="did not return attention weights"):
+        replay.capture_baseline(
+            token_ids,
+            prompt_length=3,
+            vocab_chunk_size=3,
+            gradient_probes=1,
+            attribution_seed=41,
+            expected_graph=object(),
+        )
+    assert module_hook_counts() == hooks_before_capture
+
+    model.model.call_embedding_twice = True
+    with pytest.raises(RuntimeError, match="must fire exactly once"):
+        replay.capture_baseline(
+            token_ids,
+            prompt_length=3,
+            vocab_chunk_size=3,
+            gradient_probes=1,
+            attribution_seed=41,
+        )
+    model.model.call_embedding_twice = False
+    assert module_hook_counts() == hooks_before_capture
+
     calls_before_reuse = model.model.forward_calls
     reused_result = replay.replay(
         token_ids,

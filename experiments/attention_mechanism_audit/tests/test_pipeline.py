@@ -17,6 +17,10 @@ from experiments.attention_mechanism_audit.pipeline import (
     checkpoint_fingerprints,
     flatten_token_trajectories,
     preregistered_directions,
+    resolve_replay_dtype,
+    validate_checkpoint_file_hashes,
+    validate_loaded_replay_provenance,
+    validate_replay_runtime,
 )
 from experiments.attention_mechanism_audit.tests.test_artifacts import mechanism_table
 
@@ -149,6 +153,156 @@ def test_checkpoint_fingerprint_binds_weight_and_tokenizer_bytes(tmp_path):
 
     assert first_model != second_model
     assert first_tokenizer == second_tokenizer
+
+
+def replay_spec(**updates):
+    spec = {
+        "dtype": "float16",
+        "cache_dtype": "torch.float32",
+        "attn_implementation": "eager",
+        "transformers_version": "4.46.3",
+        "torch_version": "2.6.0+cu124",
+    }
+    spec.update(updates)
+    return spec
+
+
+def test_replay_dtype_auto_uses_compute_dtype_not_storage_dtype():
+    spec = replay_spec(dtype="torch.bfloat16", cache_dtype="torch.float16")
+
+    assert resolve_replay_dtype("auto", spec) == "bfloat16"
+    assert resolve_replay_dtype("bfloat16", spec) == "bfloat16"
+    with pytest.raises(ValueError, match="differs from the cache computation dtype"):
+        resolve_replay_dtype("float16", spec)
+
+
+def test_replay_runtime_requires_exact_versions_and_eager():
+    spec = replay_spec()
+
+    assert validate_replay_runtime(
+        spec,
+        requested_dtype="auto",
+        transformers_version="4.46.3",
+        torch_version="2.6.0+cu124",
+    ) == "float16"
+    with pytest.raises(ValueError, match="install transformers==4.46.3"):
+        validate_replay_runtime(
+            spec,
+            requested_dtype="auto",
+            transformers_version="4.57.1",
+            torch_version="2.6.0+cu124",
+        )
+    with pytest.raises(ValueError, match="exact extraction environment"):
+        validate_replay_runtime(
+            spec,
+            requested_dtype="auto",
+            transformers_version="4.46.3",
+            torch_version="2.7.0+cu126",
+        )
+    with pytest.raises(ValueError, match="attn_implementation=eager"):
+        validate_replay_runtime(
+            replay_spec(attn_implementation="sdpa"),
+            requested_dtype="auto",
+            transformers_version="4.46.3",
+            torch_version="2.6.0+cu124",
+        )
+
+
+def test_checkpoint_file_hashes_bind_manifest_files(tmp_path):
+    model = tmp_path / "model"
+    model.mkdir()
+    config = model / "config.json"
+    shard = model / "model-00001-of-00001.safetensors"
+    config.write_text("{}", encoding="utf-8")
+    shard.write_bytes(b"weights")
+    expected = {
+        "config.json": file_sha256(config),
+        shard.name: file_sha256(shard),
+    }
+
+    assert validate_checkpoint_file_hashes(model, expected) == expected
+    shard.write_bytes(b"different weights")
+    with pytest.raises(ValueError, match="SHA256 mismatch"):
+        validate_checkpoint_file_hashes(model, expected)
+
+
+def test_checkpoint_file_hashes_reject_extra_loadable_file(tmp_path):
+    model = tmp_path / "model"
+    model.mkdir()
+    config = model / "config.json"
+    shard = model / "model-00001-of-00001.safetensors"
+    config.write_text("{}", encoding="utf-8")
+    shard.write_bytes(b"extraction weights")
+    expected = {
+        config.name: file_sha256(config),
+        shard.name: file_sha256(shard),
+    }
+    (model / "model.safetensors").write_bytes(b"later replacement weights")
+
+    with pytest.raises(ValueError, match="unexpected model.safetensors"):
+        validate_checkpoint_file_hashes(model, expected)
+
+
+def test_checkpoint_file_hashes_allow_snapshot_blob_symlink(tmp_path):
+    blob = tmp_path / "blobs" / "weight"
+    blob.parent.mkdir()
+    blob.write_bytes(b"shared snapshot weights")
+    model = tmp_path / "snapshots" / "revision"
+    model.mkdir(parents=True)
+    shard = model / "model.safetensors"
+    shard.symlink_to(blob)
+    expected = {shard.name: file_sha256(blob)}
+
+    assert validate_checkpoint_file_hashes(model, expected) == expected
+
+
+def test_loaded_replay_provenance_checks_class_eager_and_parameter_dtype():
+    class FakeParameter:
+        def __init__(self, dtype):
+            self.dtype = dtype
+
+        def is_floating_point(self):
+            return True
+
+    class FakeModel:
+        def __init__(self, implementation="eager", dtype="torch.bfloat16"):
+            self.config = SimpleNamespace(_attn_implementation=implementation)
+            self.parameter = FakeParameter(dtype)
+
+        def named_parameters(self):
+            return [("model.layers.0.self_attn.v_proj.weight", self.parameter)]
+
+    expected_class = f"{FakeModel.__module__}.{FakeModel.__qualname__}"
+    spec = {"model_class": expected_class}
+    replay = SimpleNamespace(model=FakeModel())
+
+    provenance = validate_loaded_replay_provenance(
+        replay,
+        spec,
+        resolved_dtype="bfloat16",
+    )
+    assert provenance["model_class"] == expected_class
+    assert provenance["attention_implementation"] == "eager"
+    assert provenance["parameter_dtype"] == "bfloat16"
+
+    with pytest.raises(ValueError, match="model class differs"):
+        validate_loaded_replay_provenance(
+            replay,
+            {"model_class": "elsewhere.OtherModel"},
+            resolved_dtype="bfloat16",
+        )
+    with pytest.raises(ValueError, match="did not instantiate eager"):
+        validate_loaded_replay_provenance(
+            SimpleNamespace(model=FakeModel(implementation="sdpa")),
+            spec,
+            resolved_dtype="bfloat16",
+        )
+    with pytest.raises(ValueError, match="parameter dtype differs"):
+        validate_loaded_replay_provenance(
+            SimpleNamespace(model=FakeModel(dtype="torch.float16")),
+            spec,
+            resolved_dtype="bfloat16",
+        )
 
 
 def test_answer_label_includes_positive_unavailable_first_token():

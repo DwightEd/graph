@@ -681,22 +681,45 @@ class FrozenCausalReplay:
         additive.masked_fill_(~allowed, torch.finfo(dtype).min)
         return additive[None, None, :, :]
 
-    def _forward_hidden(self, token_ids: Any, allowed_attention: np.ndarray):
+    def _forward_attention_mask(
+        self,
+        token_ids: Any,
+        allowed_attention: np.ndarray,
+    ):
+        """Mirror the cache extractor for an ordinary causal forward.
+
+        The formal cache was extracted with ``input_ids`` and a two-dimensional
+        all-ones attention mask.  A dense four-dimensional additive mask is
+        reserved for actual counterfactual interventions.  Although the two
+        masks are mathematically equivalent for a full causal forward, using
+        the extraction path removes kernel/version-dependent mask preparation
+        as a source of cache/replay disagreement.
+        """
+
         torch = self._torch
+        allowed = np.asarray(allowed_attention, dtype=np.bool_)
+        causal = causal_allowed_attention(int(token_ids.numel()))
+        if np.array_equal(allowed, causal):
+            return torch.ones(
+                (1, int(token_ids.numel())),
+                dtype=torch.long,
+                device=token_ids.device,
+            )
+        return self._additive_mask(
+            allowed,
+            dtype=self.model.get_input_embeddings().weight.dtype,
+            device=token_ids.device,
+        )
+
+    def _forward_hidden(self, token_ids: Any, allowed_attention: np.ndarray):
         token_ids = _as_1d_long(token_ids, device=self._embedding_device())
-        embeddings = self.model.get_input_embeddings()(token_ids[None, :])
-        position_ids = torch.arange(
-            token_ids.numel(), dtype=torch.long, device=embeddings.device
-        )[None, :]
-        attention_mask = self._additive_mask(
+        attention_mask = self._forward_attention_mask(
+            token_ids,
             allowed_attention,
-            dtype=embeddings.dtype,
-            device=embeddings.device,
         )
         output = self._backbone()(
-            inputs_embeds=embeddings,
+            input_ids=token_ids[None, :],
             attention_mask=attention_mask,
-            position_ids=position_ids,
             use_cache=False,
             output_attentions=False,
             output_hidden_states=False,
@@ -1074,6 +1097,8 @@ class FrozenCausalReplay:
         module_handles = []
         tensor_handles = []
         active_probe: list[int | None] = [None]
+        embedding_output: list[Any | None] = [None]
+        embedding_hook_calls = [0]
 
         def capture_value(index: int):
             def hook(_module: Any, _arguments: Any, output: Any) -> None:
@@ -1135,26 +1160,41 @@ class FrozenCausalReplay:
                 layer.self_attn.o_proj.register_forward_pre_hook(capture_o_input(index))
             )
 
+        def enable_input_gradient(
+            _module: Any,
+            _arguments: Any,
+            output: Any,
+        ):
+            embedding_hook_calls[0] += 1
+            if embedding_hook_calls[0] != 1:
+                raise RuntimeError(
+                    "input embedding gradient hook must fire exactly once per replay"
+                )
+            if not torch.is_tensor(output):
+                raise RuntimeError("embedding hook expected a tensor output")
+            # Parameters remain frozen.  This leaf only enables autograd from
+            # the unchanged embedding values through every later layer, while
+            # retaining the cache extractor's exact ``input_ids`` call path.
+            value = output.detach().requires_grad_(True)
+            embedding_output[0] = value
+            return value
+
+        module_handles.append(
+            self.model.get_input_embeddings().register_forward_hook(
+                enable_input_gradient
+            )
+        )
+
         self.model.zero_grad(set_to_none=True)
         try:
             token_tensor = _as_1d_long(tokens_np, device=self._embedding_device())
-            embeddings = (
-                self.model.get_input_embeddings()(token_tensor[None, :])
-                .detach()
-                .requires_grad_(True)
-            )
-            position_ids = torch.arange(
-                token_tensor.numel(), dtype=torch.long, device=embeddings.device
-            )[None, :]
-            attention_mask = self._additive_mask(
+            attention_mask = self._forward_attention_mask(
+                token_tensor,
                 allowed_attention,
-                dtype=embeddings.dtype,
-                device=embeddings.device,
             )
             output = self._backbone()(
-                inputs_embeds=embeddings,
+                input_ids=token_tensor[None, :],
                 attention_mask=attention_mask,
-                position_ids=position_ids,
                 use_cache=False,
                 output_attentions=expected_graph is not None,
                 output_hidden_states=False,
@@ -1163,6 +1203,10 @@ class FrozenCausalReplay:
             hidden = getattr(output, "last_hidden_state", None)
             if hidden is None:
                 hidden = output[0]
+            if embedding_hook_calls[0] != 1:
+                raise RuntimeError(
+                    "input embedding gradient hook must fire exactly once per replay"
+                )
             attention_cache_binding = None
             if expected_graph is not None:
                 replay_attentions = getattr(output, "attentions", None)
@@ -1191,6 +1235,9 @@ class FrozenCausalReplay:
             )
             objective = chosen_logprob.mean()
             detached_predictor_hidden = predictor_hidden.detach()
+            embeddings = embedding_output[0]
+            if embeddings is None:
+                raise RuntimeError("input embedding gradient hook did not fire")
             for probe_index in range(int(gradient_probes)):
                 active_probe[0] = probe_index
                 embeddings.grad = None

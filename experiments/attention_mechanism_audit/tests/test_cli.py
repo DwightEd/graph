@@ -49,7 +49,7 @@ def test_cli_freezes_three_physical_stages_and_defaults():
 
     assert roles.command == "roles"
     assert capture.command == "capture"
-    assert capture.torch_dtype == "float16"
+    assert capture.torch_dtype == "auto"
     assert capture.vocab_chunk_size == 4096
     assert capture.gradient_probes == 8
     assert capture.role_null_bin_width == 32

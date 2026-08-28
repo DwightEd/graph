@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+import re
 
 import numpy as np
 import pytest
@@ -66,8 +66,68 @@ def test_cache_binding_rejects_weight_or_diagonal_mismatch(index):
     attention = replay_attention()[0].copy()
     attention[index] += 0.02
 
-    with pytest.raises(ValueError, match="does not match"):
+    with pytest.raises(ValueError, match="does not match") as caught:
         validate_replay_attention(Graph(), (attention,))
+
+    message = str(caught.value)
+    assert "worst_retained=(layer=" in message
+    assert "worst_diagonal=(layer=" in message
+    assert "worst_known_mass=(layer=" in message
+    assert "cache=" in message
+    assert "replay=" in message
+    assert "abs_error=" in message
+    assert "per_layer_max=[L0(retained=" in message
+
+
+def test_cache_binding_reports_exact_worst_retained_endpoint():
+    attention = replay_attention()[0].copy()
+    attention[0, 0, 3, 0] += 0.03
+
+    with pytest.raises(ValueError) as caught:
+        validate_replay_attention(Graph(), (attention,))
+
+    message = str(caught.value)
+    endpoint = re.search(
+        r"worst_retained=\(layer=0, head=0, query=3, source=0, "
+        r"cache=([^,]+), replay=([^,]+), abs_error=([^\)]+)\)",
+        message,
+    )
+    assert endpoint is not None
+    cache, replay, error = map(float, endpoint.groups())
+    assert cache == pytest.approx(0.1)
+    assert replay == pytest.approx(0.13)
+    assert error == pytest.approx(0.03)
+
+
+def test_cache_binding_reports_accumulated_known_mass_endpoint():
+    attention = replay_attention()[0].copy()
+    attention[0, 0, 2, 0] += 0.004
+    attention[0, 0, 2, 2] += 0.004
+
+    with pytest.raises(ValueError) as caught:
+        validate_replay_attention(Graph(), (attention,))
+
+    message = str(caught.value)
+    maxima = re.search(
+        r"retained_max=([^,]+), diagonal_max=([^,]+), "
+        r"known_mass_max=([^,]+)",
+        message,
+    )
+    assert maxima is not None
+    retained, diagonal, known_mass = map(float, maxima.groups())
+    assert retained == pytest.approx(0.004, abs=2e-8)
+    assert diagonal == pytest.approx(0.004, abs=2e-8)
+    assert known_mass == pytest.approx(0.008, abs=2e-8)
+    endpoint = re.search(
+        r"worst_known_mass=\(layer=0, head=0, query=2, "
+        r"cache=([^,]+), replay=([^,]+), abs_error=([^\)]+)\)",
+        message,
+    )
+    assert endpoint is not None
+    cache, replay, error = map(float, endpoint.groups())
+    assert cache == pytest.approx(0.6)
+    assert replay == pytest.approx(0.608)
+    assert error == pytest.approx(0.008, abs=2e-8)
 
 
 def test_cache_binding_rejects_wrong_geometry():

@@ -54,13 +54,22 @@ g_t=\log\frac{E_{history}+\epsilon}
 
 ### 3. cache 与 replay 必须是同一数值路径
 
-只匹配层数、head 数或模型名字不够；否则 cache 的 `A` 与另一 checkpoint 的 `V/gradient` 相乘会成为无效混合量。baseline replay 强制 `eager + float16`，并在接受功能特征前逐一比较：
+只匹配层数、head 数或模型名字不够；否则 cache 的 `A` 与另一 checkpoint 的 `V/gradient` 相乘会成为无效混合量。`attention_cache_spec.dtype` 是原模型前向的**计算 dtype**，`cache_dtype` 只是 attention 张量的**存储 dtype**，二者不能混用。默认 `TORCH_DTYPE=auto` 从前者解析。capture 在加载模型前还要求：
+
+- `attn_implementation=eager`；
+- 当前 Transformers 与 PyTorch 版本/构建等于抽取 manifest；
+- `MODEL_PATH` 根目录文件清单及每个文件 SHA-256 完全一致；
+- 实际加载出的 fully-qualified 模型类、eager 实现和全部浮点参数 dtype 与 manifest 一致。
+
+checkpoint 身份不依赖目录 basename：原目录的无损迁移或改名可以通过，新增权重、配置或 remote-code 文件则会拒绝。
+
+完成 provenance 检查后，baseline replay 才逐一比较：
 
 - 每个 retained endpoint；
 - 每个 exact response diagonal；
 - retained-plus-diagonal row mass。
 
-任一最大绝对误差超过固定阈值 `5e-3` 就中止。artifact 绑定全部 weight shards、config、tokenizer/chat template、依赖版本、probe seeds 及逐样本 attention-binding 摘要。
+任一最大绝对误差超过固定阈值 `5e-3` 就中止。这个错误表示 cache attention 与 replay 不是同一次数值计算的产物，不能通过提高阈值绕过。artifact 绑定全部 weight shards、config、tokenizer/chat template、依赖版本、probe seeds 及逐样本 attention-binding 摘要。
 
 ### 4. routing 的可观测边界
 
@@ -117,7 +126,26 @@ bash experiments/attention_mechanism_audit/run_qa.sh \
 2>&1 | tee experiments/attention_mechanism_audit/run_qa.log
 ```
 
-正式默认 `GRADIENT_PROBES=8`。probe CPU 内存约为 `K×L×R×H×D×4` bytes；超过 2 GiB probe buffer 时会显式拒绝，需要降低 `GRADIENT_PROBES` 或拆分超长回答。formal cache 由 FP16 observer 提取，因此默认且要求 `TORCH_DTYPE=float16`；不要切换 bfloat16 后放宽 binding tolerance。
+正式默认 `GRADIENT_PROBES=8`。probe CPU 内存约为 `K×L×R×H×D×4` bytes；超过 2 GiB probe buffer 时会显式拒绝，需要降低 `GRADIENT_PROBES` 或拆分超长回答。默认 `TORCH_DTYPE=auto` 会读取 formal manifest 的 `attention_cache_spec.dtype`；显式指定 dtype 时必须与其一致。即使 `cache_dtype=torch.float16`，原 observer 也可能使用另一计算 dtype，所以不能据存储 dtype 推断 replay dtype，更不能放宽 binding tolerance。
+
+如果 provenance 检查报告版本不一致，先查看 cache 所要求的环境：
+
+```bash
+python - <<'PY'
+import json
+import torch
+import transformers
+
+root = "/path/to/attention/llama31_8b/test"
+spec = json.load(open(f"{root}/manifest.json", encoding="utf-8"))["attention_cache_spec"]
+for key in ("dtype", "cache_dtype", "attn_implementation", "transformers_version", "torch_version"):
+    print(f"{key}: cache={spec.get(key)}")
+print(f"transformers_version: runtime={transformers.__version__}")
+print(f"torch_version: runtime={torch.__version__}")
+PY
+```
+
+应激活抽取 cache 时的原环境，或安装 manifest 指定的精确版本。版本和 checkpoint SHA 都一致后仍发生 endpoint mismatch，才需要检查历史抽取 forward 与当前 replay forward；不要把 `5e-3` 改大。
 
 `K=8` 是可运行默认值，不是论文中自动成立的收敛保证。正式报告前应在相同长回答上分别运行 `GRADIENT_PROBES=8/16/32`（或至少两个 seed），比较六个 primary endpoint 的方向和排序稳定性。eager 全序列 replay 的 attention 激活按 `L×H×N²` 增长；先对最长 QA 样本做单样本 smoke，并记录 GPU peak memory，再开始全量运行。
 

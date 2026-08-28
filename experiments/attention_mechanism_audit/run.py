@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 
-DTYPE_CHOICES = ("float32", "float16", "bfloat16")
+DTYPE_CHOICES = ("auto", "float32", "float16", "bfloat16")
 DEFAULT_GRADIENT_PROBES = 8
 DEFAULT_ATTRIBUTION_SEED = 20260828
 
@@ -47,7 +47,15 @@ def command_line() -> argparse.ArgumentParser:
     command.add_argument("--model", required=True)
     command.add_argument("--output", required=True)
     command.add_argument("--device", default="cuda")
-    command.add_argument("--torch-dtype", choices=DTYPE_CHOICES, default="float16")
+    command.add_argument(
+        "--torch-dtype",
+        choices=DTYPE_CHOICES,
+        default="auto",
+        help=(
+            "model computation dtype; auto requires and uses "
+            "attention_cache_spec.dtype"
+        ),
+    )
     command.add_argument("--task", default="QA")
     command.add_argument("--limit", type=int)
     command.add_argument("--vocab-chunk-size", type=int, default=4096)

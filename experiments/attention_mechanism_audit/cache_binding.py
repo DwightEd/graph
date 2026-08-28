@@ -66,6 +66,44 @@ def _channel(value: Any, *, heads: int, tokens: int) -> Any:
     )
 
 
+def _endpoint_description(
+    name: str,
+    endpoint: dict[str, int | float] | None,
+) -> str:
+    """Format one worst endpoint without hiding its absolute coordinates."""
+
+    if endpoint is None:
+        return f"worst_{name}=none"
+    fields = [
+        f"layer={int(endpoint['layer'])}",
+        f"head={int(endpoint['head'])}",
+        f"query={int(endpoint['query'])}",
+    ]
+    if "source" in endpoint:
+        fields.append(f"source={int(endpoint['source'])}")
+    fields.extend(
+        (
+            f"cache={float(endpoint['cache']):.9g}",
+            f"replay={float(endpoint['replay']):.9g}",
+            f"abs_error={float(endpoint['abs_error']):.9g}",
+        )
+    )
+    return f"worst_{name}=({', '.join(fields)})"
+
+
+def _per_layer_description(per_layer: Sequence[tuple[float, float, float]]) -> str:
+    """Format retained/diagonal/known-mass maxima for every layer."""
+
+    entries = [
+        (
+            f"L{layer}(retained={retained:.6g},diagonal={diagonal:.6g},"
+            f"known_mass={known_mass:.6g})"
+        )
+        for layer, (retained, diagonal, known_mass) in enumerate(per_layer)
+    ]
+    return "per_layer_max=[" + "; ".join(entries) + "]"
+
+
 @dataclass(frozen=True)
 class AttentionCacheBinding:
     """A compact audit record for one cache/replay numerical comparison."""
@@ -115,11 +153,15 @@ def validate_replay_attention(
     if cached_unresolved.shape != cached_diagonal.shape:
         raise ValueError("cached unresolved mass has invalid geometry")
 
-    retained_errors: list[np.ndarray] = []
-    diagonal_errors: list[np.ndarray] = []
-    known_mass_errors: list[np.ndarray] = []
     retained_count = 0
     diagonal_count = response_count * layer_count * head_count
+    retained_max = 0.0
+    diagonal_max = 0.0
+    known_max = 0.0
+    worst_retained: dict[str, int | float] | None = None
+    worst_diagonal: dict[str, int | float] | None = None
+    worst_known_mass: dict[str, int | float] | None = None
+    per_layer: list[tuple[float, float, float]] = []
 
     for layer in range(layer_count):
         channel = _channel(
@@ -138,8 +180,24 @@ def validate_replay_attention(
             replay_weight = _selected_attention(channel, head, target, source)
             if not np.isfinite(replay_weight).all():
                 raise ValueError("replay retained attention contains non-finite values")
-            retained_errors.append(np.abs(replay_weight - cached_weight))
+            retained_error = np.abs(replay_weight - cached_weight)
+            retained_index = int(np.argmax(retained_error))
+            layer_retained_max = float(retained_error[retained_index])
+            if worst_retained is None or layer_retained_max > retained_max:
+                retained_max = layer_retained_max
+                worst_retained = {
+                    "layer": layer,
+                    "head": int(head[retained_index]),
+                    "query": int(target[retained_index]),
+                    "source": int(source[retained_index]),
+                    "cache": float(cached_weight[retained_index]),
+                    "replay": float(replay_weight[retained_index]),
+                    "abs_error": layer_retained_max,
+                }
             retained_count += int(source.size)
+        else:
+            replay_weight = np.empty(0, dtype=np.float64)
+            layer_retained_max = 0.0
 
         query = response_start + np.arange(response_count, dtype=np.int64)
         diagonal_head = np.repeat(np.arange(head_count, dtype=np.int64), response_count)
@@ -150,8 +208,27 @@ def validate_replay_attention(
             diagonal_query,
             diagonal_query,
         ).reshape(head_count, response_count).T
+        if not np.isfinite(replay_diagonal).all():
+            raise ValueError("replay diagonal attention contains non-finite values")
         cached_layer_diagonal = cached_diagonal[:, layer]
-        diagonal_errors.append(np.abs(replay_diagonal - cached_layer_diagonal))
+        diagonal_error = np.abs(replay_diagonal - cached_layer_diagonal)
+        diagonal_index = np.unravel_index(
+            int(np.argmax(diagonal_error)), diagonal_error.shape
+        )
+        layer_diagonal_max = float(diagonal_error[diagonal_index])
+        if worst_diagonal is None or layer_diagonal_max > diagonal_max:
+            response_index, diagonal_head_index = map(int, diagonal_index)
+            diagonal_max = layer_diagonal_max
+            query_index = response_start + response_index
+            worst_diagonal = {
+                "layer": layer,
+                "head": diagonal_head_index,
+                "query": query_index,
+                "source": query_index,
+                "cache": float(cached_layer_diagonal[diagonal_index]),
+                "replay": float(replay_diagonal[diagonal_index]),
+                "abs_error": layer_diagonal_max,
+            }
 
         replay_known = replay_diagonal.copy()
         if source.size:
@@ -161,24 +238,36 @@ def validate_replay_attention(
                 replay_weight,
             )
         cached_known = 1.0 - cached_unresolved[:, layer]
-        known_mass_errors.append(np.abs(replay_known - cached_known))
+        known_error = np.abs(replay_known - cached_known)
+        known_index = np.unravel_index(
+            int(np.argmax(known_error)), known_error.shape
+        )
+        layer_known_max = float(known_error[known_index])
+        if worst_known_mass is None or layer_known_max > known_max:
+            response_index, known_head_index = map(int, known_index)
+            known_max = layer_known_max
+            worst_known_mass = {
+                "layer": layer,
+                "head": known_head_index,
+                "query": response_start + response_index,
+                "cache": float(cached_known[known_index]),
+                "replay": float(replay_known[known_index]),
+                "abs_error": layer_known_max,
+            }
+        per_layer.append(
+            (layer_retained_max, layer_diagonal_max, layer_known_max)
+        )
 
-    retained_error = (
-        np.concatenate(retained_errors)
-        if retained_errors
-        else np.empty(0, dtype=np.float64)
-    )
-    diagonal_error = np.concatenate([value.ravel() for value in diagonal_errors])
-    known_error = np.concatenate([value.ravel() for value in known_mass_errors])
-    retained_max = float(retained_error.max(initial=0.0))
-    diagonal_max = float(diagonal_error.max(initial=0.0))
-    known_max = float(known_error.max(initial=0.0))
     if max(retained_max, diagonal_max, known_max) > tolerance:
         raise ValueError(
             "replay attention does not match the frozen cache: "
             f"retained_max={retained_max:.6g}, "
             f"diagonal_max={diagonal_max:.6g}, "
-            f"known_mass_max={known_max:.6g}, tolerance={tolerance:.6g}"
+            f"known_mass_max={known_max:.6g}, tolerance={tolerance:.6g}; "
+            f"{_endpoint_description('retained', worst_retained)}; "
+            f"{_endpoint_description('diagonal', worst_diagonal)}; "
+            f"{_endpoint_description('known_mass', worst_known_mass)}; "
+            f"{_per_layer_description(per_layer)}"
         )
     return AttentionCacheBinding(
         verified=True,
