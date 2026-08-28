@@ -122,9 +122,13 @@ bash experiments/attention_mechanism_audit/run_qa.sh
 确认后运行完整审计：
 
 ```bash
-bash experiments/attention_mechanism_audit/run_qa.sh \
-2>&1 | tee experiments/attention_mechanism_audit/run_qa.log
+bash experiments/attention_mechanism_audit/run_qa.sh
 ```
+
+`run_qa.sh` 不使用全局 `set` 中断选项，而是逐阶段检查并传播原始退出码；
+Python traceback 会直接显示。任一阶段失败或被中断时，后续阶段立即停止，旧的
+`evaluation.json` 也不会被打开。评估成功后，脚本本身会校验新机制审计 schema，
+并打印六个冻结主检验、长度增量、token onset 和可观测性，无需再拼接 JSON 解析命令。
 
 正式默认 `GRADIENT_PROBES=8`。probe CPU 内存约为 `K×L×R×H×D×4` bytes；超过 2 GiB probe buffer 时会显式拒绝，需要降低 `GRADIENT_PROBES` 或拆分超长回答。默认 `TORCH_DTYPE=auto` 会读取 formal manifest 的 `attention_cache_spec.dtype`；显式指定 dtype 时必须与其一致。即使 `cache_dtype=torch.float16`，原 observer 也可能使用另一计算 dtype，所以不能据存储 dtype 推断 replay dtype，更不能放宽 binding tolerance。
 
