@@ -250,3 +250,36 @@ def test_multilayer_scores_are_chunk_and_intervention_batch_invariant():
                 torch.testing.assert_close(left, right, atol=3e-5, rtol=3e-5)
             else:
                 assert torch.equal(left, right)
+
+
+def test_mechanism_trace_keeps_registered_routes_without_dense_raw_states():
+    _model, replay = _tiny_replay(layers=2)
+    token_ids, response_start, prompt_roles = _inputs()
+
+    artifact = replay.capture(
+        token_ids,
+        response_start,
+        prompt_roles,
+        predictor_chunk=2,
+        top_k=3,
+        retain_raw=False,
+    )
+
+    trace = artifact["trace"]
+    assert {
+        "role_attention",
+        "role_edge_magnitude",
+        "source_message_entropy",
+        "message_coherence",
+        "top_source_index",
+        "top_source_magnitude",
+        "source_role",
+    } <= set(trace)
+    assert {
+        "attention",
+        "value_states",
+        "residual_input",
+        "attention_update",
+        "mlp_update",
+        "final_hidden",
+    }.isdisjoint(trace)

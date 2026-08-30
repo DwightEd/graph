@@ -35,10 +35,15 @@ r' = r + sum(h,s) m[l,h,t,s]
 r_next = r' + MLP(RMSNorm(r'))
 ```
 
-The raw artifact saves `A`, native-GQA `V`, the actual `o_proj` input and
-output, layer residual input, MLP update, and final hidden state. Any edge
-message can therefore be reconstructed with the referenced checkpoint. It
-does not materialize the prohibitive `[L,H,R,S,4096]` edge tensor.
+The full-QA run stores the registered mechanism observables: per-head role
+messages, source entropy, cancellation, top source-token routes, and all causal
+branch scores. `TRACE_LEVEL=raw` additionally retains dense `A`, native-GQA
+`V`, residual/MLP states, and the `o_proj` input/output for selected case
+studies. Raw storage is not required to compute any registered endpoint.
+Compact sample reports show source-token marginals and head-role marginals as
+separate measurements; they do not claim that a listed source belongs to a
+listed head. Use `TRACE_LEVEL=raw` for joint head/source path reconstruction in
+selected cases.
 
 The existing `operator_geometry.pt` is an `[L,H,H]` Gram summary of frozen
 `W_O W_V` head operators. It is useful for comparing static head codes, but it
@@ -54,8 +59,8 @@ e[l,h,t,s] = A[l,h,q_t,s] ||W_O[l,h] V[l,g(h),s]||_2
 
 This measures what actually enters the residual stream. The code also saves
 role edge magnitudes, source entropy, head-role routes, cancellation, and the
-largest source positions while retaining the layer and head axes. Net role
-vectors remain reconstructible from raw `A/V/W_O`.
+largest source positions while retaining the layer and head axes. Raw-mode
+edge messages remain reconstructible from `A/V/W_O`.
 
 These route quantities are observational. Only the full frozen-model replay
 differences below are called end-to-end functional effects.
@@ -114,9 +119,10 @@ Per-layer value buffers retain the exact past `V` needed by message deletion.
 The three intervention branches share one batch, reducing each sample to two
 streaming replays: one raw capture and one three-branch intervention replay.
 
-Each sample is transferred to CPU and saved immediately under `traces/samples`;
-a single writer overlaps the previous save with the next capture. Peak reserved
-CUDA memory is recorded in every sample row and the manifest.
+Each sample is transferred to CPU and saved immediately under `traces/samples`.
+Every completed save is appended to `index.jsonl`, so an interrupted all-data
+run resumes without replaying indexed samples. Peak reserved CUDA memory is
+recorded in every sample row and the manifest.
 
 `TOKEN_CHUNK=128 INTERVENTION_BATCH=3` is the 4090 default. For an unusually
 long sample, `TOKEN_CHUNK=64 INTERVENTION_BATCH=1` performs exactly the same
@@ -129,11 +135,13 @@ uses cached `token_ids` and `response_idx` as the sequence authority and reads
 `source_info.jsonl` only to mark evidence, question, constraint, and other
 prompt tokens. Labels are opened only after all traces exist.
 
-Evaluation binds each saved target sequence back to the formal cache. It then
-reports hallucinated-minus-correct differences within the same source,
-absolute-position bin, and relative-position decile before weighting sources
-equally. The onset analysis is a source-matched difference-in-differences
-against correct pseudo-onsets, rather than an unmatched raw curve.
+Evaluation binds each saved target sequence back to the formal cache. The
+primary comparison is within a mixed-label response and position cell. Cells
+are overlap-weighted, responses are averaged within generator/source, and
+sources receive equal weight. Source bootstrap intervals and sign-flip tests
+use 10,000 draws; the three primary endpoint p-values receive Holm correction.
+The onset analysis compares each hallucination onset with nearby all-correct
+transitions in the same response.
 
 When the RAGTruth generator differs from the Llama observer, these are the
 observer's teacher-forced processing and maintenance dynamics. A claim about
@@ -149,7 +157,7 @@ cache, RAGTruth source metadata, and the local Llama-3.1-8B checkpoint:
 LIMIT=1 bash experiments/attention_mechanism_audit/run_qa.sh
 ```
 
-After the smoke sample succeeds, run the complete QA split:
+After the smoke run succeeds, audit every cached QA response in train and test:
 
 ```bash
 bash experiments/attention_mechanism_audit/run_qa.sh
@@ -158,14 +166,20 @@ bash experiments/attention_mechanism_audit/run_qa.sh
 The script intentionally does not use `set -euo pipefail`. A Python traceback
 remains visible, and evaluation is not started after capture fails.
 
+The existing 149 test traces are reused when `${OUT}/traces/index.jsonl`
+exists. The train split continues under `${OUT}/train/traces`.
+
 Outputs:
 
-- `traces/samples/<sample_id>.pt`: raw A/V trajectory, model states, route
-  summaries, and four branch scores;
+- `{train,test}/traces/samples/<sample_id>.pt`: exact compact mechanism trace
+  and four branch scores;
 - `traces/index.jsonl`: sample paths, sizes, and peak CUDA memory;
 - `traces/manifest.json`: extraction configuration and checkpoint;
-- `token_metrics.npz`: aligned token-level mechanism measurements;
-- `report.json`: position-matched summaries and onset tests.
+- `{train,test}/sample_audits/<sample_id>.json`: token, onset, layer/head, and
+  top-source evidence for every response;
+- `{train,test}/figures/samples/<sample_id>.png`: four-panel response audit;
+- `{train,test,all}/figures`: effect, heterogeneity, and onset figures;
+- `all/report.json`: train, test, and source-level combined coverage summary.
 
 The default evaluation output prints only the key routing-imbalance,
 dispersion, observed-token evidence-effect, capture-candidate, and onset
@@ -178,6 +192,18 @@ An existing report can be summarized without replaying or reevaluating:
 python -m experiments.attention_mechanism_audit.run summarize \
   --report experiments/attention_mechanism_audit/outputs/qa/REPORT/report.json
 ```
+
+Print the measured onset changes, top source tokens, and top layer/head roles
+for one response:
+
+```bash
+python -m experiments.attention_mechanism_audit.run summarize-sample \
+  --audit /path/to/sample_audits/SAMPLE_ID.json
+```
+
+"All" means every QA response available in the formal train/test attention
+cache. Raw RAGTruth rows without a faithful attention cache are not counted as
+audited, and Summary/Data2txt require their own evidence-region definitions.
 
 This is a post-hoc mechanism audit. It does not train or evaluate an
 unsupervised hallucination detector: there is no label-free anomaly score,

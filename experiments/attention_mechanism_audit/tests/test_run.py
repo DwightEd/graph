@@ -25,6 +25,7 @@ def test_capture_cli_targets_real_cached_samples_and_frozen_llama():
     assert args.intervention_batch == 3
     assert args.top_k == 8
     assert args.logit_chunk == 64
+    assert args.trace_level == "mechanism"
     assert vars(args).keys().isdisjoint({"pairs", "candidate_a", "candidate_b"})
 
 
@@ -45,4 +46,28 @@ def test_evaluate_cli_is_posthoc_and_has_no_probe_training_options():
     assert args.split_root == Path("cache/test")
     assert args.output == Path("report.json")
     assert args.position_bin == 16
+    assert args.bootstrap == 10000
+    assert args.model == Path(DEFAULT_MODEL)
     assert vars(args).keys().isdisjoint({"pairs", "folds", "epochs", "probe"})
+
+
+def test_combine_cli_accepts_train_and_test_reports():
+    args = parser().parse_args(
+        [
+            "combine",
+            "--input",
+            "train",
+            "train/report.json",
+            "--input",
+            "test",
+            "test/report.json",
+            "--output",
+            "all/report.json",
+        ]
+    )
+
+    assert args.input == [
+        ["train", "train/report.json"],
+        ["test", "test/report.json"],
+    ]
+    assert args.output == Path("all/report.json")

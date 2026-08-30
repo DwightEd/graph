@@ -48,7 +48,9 @@ def _save(path: Path, artifact: dict[str, Any]) -> dict[str, Any]:
         "sample_id": artifact["sample_id"],
         "source_id": artifact["source_id"],
         "task_type": artifact["task_type"],
+        "split": artifact.get("split"),
         "generator_model": artifact["generator_model"],
+        "trace_level": artifact.get("trace_level", "raw"),
         "path": path.name,
         "tokens": int(len(artifact["token_ids"])),
         "response_tokens": int(len(artifact["target_ids"])),
@@ -70,8 +72,9 @@ def capture_split(
     top_k: int = 8,
     logit_chunk: int = 64,
     intervention_batch: int = 3,
+    trace_level: str = "mechanism",
 ) -> dict[str, Any]:
-    """Capture label-free raw dynamics, then persist each sample immediately."""
+    """Capture every eligible sample, journaling progress for exact resume."""
 
     from transformers import AutoTokenizer
 
@@ -87,23 +90,69 @@ def capture_split(
     output = Path(output_root)
     samples = output / "samples"
     samples.mkdir(parents=True, exist_ok=True)
-    rows: list[dict[str, Any]] = []
+    index_path = output / "index.jsonl"
+    manifest_path = output / "manifest.json"
+    previous_manifest = (
+        json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest_path.is_file()
+        else {}
+    )
+    if previous_manifest:
+        expected = {
+            "schema": SCHEMA,
+            "version": VERSION,
+            "split_root": str(Path(split_root).resolve()),
+            "source_info": str(Path(source_info).resolve()),
+            "observer_checkpoint": replay.checkpoint,
+            "model_dtype": str(dtype),
+            "top_k_message_sources": int(top_k),
+        }
+        changed = [
+            name
+            for name, value in expected.items()
+            if previous_manifest.get(name, value) != value
+        ]
+        if changed:
+            raise ValueError(
+                "cannot resume traces with changed provenance: " + ", ".join(changed)
+            )
+    rows = load_index(output) if index_path.is_file() else []
+    existing_levels = {
+        row.get("trace_level", previous_manifest.get("trace_level", "raw"))
+        for row in rows
+    }
+    if trace_level == "raw" and "mechanism" in existing_levels:
+        raise ValueError("raw capture requires a new output when compact traces exist")
+    indexed = {str(row["sample_id"]) for row in rows}
+    resumed = len(rows)
+    new_samples = 0
     role_cache: dict[str, torch.Tensor] = {}
     pending = None
-    captured = 0
+    eligible = 0
+
+    def record(saved: dict[str, Any]) -> None:
+        nonlocal new_samples
+        rows.append(saved)
+        indexed.add(str(saved["sample_id"]))
+        with index_path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(saved, sort_keys=True) + "\n")
+        new_samples += 1
 
     with ThreadPoolExecutor(max_workers=1) as writer:
         for sample_id in dataset.sample_ids:
-            if limit is not None and captured >= int(limit):
-                break
             sample = dataset[sample_id]
-            attention = sample.attention()
             if str(sample.task_type).casefold() != "qa":
                 sample.release_attention()
                 continue
+            if limit is not None and eligible >= int(limit):
+                break
+            eligible += 1
+            if str(sample_id) in indexed:
+                sample.release_attention()
+                continue
+            attention = sample.attention()
             source_id = str(sample.source_id)
-            captured += 1
-            print(f"capture {captured}: {sample_id}", flush=True)
+            print(f"capture {new_samples + 1} (eligible {eligible}): {sample_id}", flush=True)
             prompt_roles = role_cache.get(source_id)
             if prompt_roles is None:
                 prompt_roles = torch.from_numpy(
@@ -123,6 +172,7 @@ def capture_split(
                 top_k=top_k,
                 logit_chunk=logit_chunk,
                 intervention_batch=intervention_batch,
+                retain_raw=trace_level == "raw",
             )
             artifact = {
                 "schema": SCHEMA,
@@ -132,6 +182,8 @@ def capture_split(
                 "task_type": str(sample.task_type),
                 "generator_model": sample.generator_model,
                 "observer_checkpoint": replay.checkpoint,
+                "split": dataset.manifest.get("split"),
+                "trace_level": trace_level,
                 "labels_used": False,
                 **capture,
             }
@@ -139,20 +191,30 @@ def capture_split(
             destination = samples / f"{sample_id}.pt"
             sample.release_attention()
             if pending is not None:
-                rows.append(pending.result())
+                record(pending.result())
             pending = writer.submit(_save, destination, artifact)
         if pending is not None:
-            rows.append(pending.result())
+            record(pending.result())
 
-    index_path = output / "index.jsonl"
-    index_path.write_text(
-        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows),
-        encoding="utf-8",
+    complete = limit is None or bool(previous_manifest.get("complete", False))
+    eligible_total = (
+        eligible
+        if limit is None
+        else previous_manifest.get(
+            "eligible_qa", previous_manifest.get("eligible_qa_seen")
+        )
     )
     manifest = {
         "schema": SCHEMA,
         "version": VERSION,
         "samples": len(rows),
+        "dataset_candidates": len(dataset.sample_ids),
+        "eligible_qa": eligible_total,
+        "selected_qa_seen": eligible,
+        "resumed_samples": resumed,
+        "new_samples": new_samples,
+        "complete": complete,
+        "split": dataset.manifest.get("split"),
         "split_root": str(Path(split_root).resolve()),
         "source_info": str(Path(source_info).resolve()),
         "observer_checkpoint": replay.checkpoint,
@@ -164,12 +226,15 @@ def capture_split(
         "predictor_chunk": int(predictor_chunk),
         "intervention_batch": int(intervention_batch),
         "top_k_message_sources": int(top_k),
+        "trace_levels": sorted(
+            existing_levels | ({trace_level} if new_samples else set())
+        ),
         "max_cuda_reserved_bytes": max(
             (row["peak_cuda_reserved_bytes"] for row in rows), default=0
         ),
         "index": str(index_path),
     }
-    (output / "manifest.json").write_text(
+    manifest_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
     )
     return manifest

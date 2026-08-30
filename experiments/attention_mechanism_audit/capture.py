@@ -156,26 +156,12 @@ class FunctionalTraceReplay:
         source_tokens: int,
         top_k: int,
         dtype: torch.dtype,
+        *,
+        retain_raw: bool,
     ) -> dict[str, torch.Tensor]:
         layers = len(self.layers)
         roles = len(ROLE_NAMES)
-        return {
-            "attention": torch.zeros(
-                layers, self.heads, response_tokens, source_tokens, dtype=dtype
-            ),
-            "o_proj_input": torch.empty(
-                layers, response_tokens, self.hidden, dtype=dtype
-            ),
-            "residual_input": torch.empty(
-                layers, response_tokens, self.hidden, dtype=dtype
-            ),
-            "attention_update": torch.empty(
-                layers, response_tokens, self.hidden, dtype=dtype
-            ),
-            "mlp_update": torch.empty(
-                layers, response_tokens, self.hidden, dtype=dtype
-            ),
-            "final_hidden": torch.empty(response_tokens, self.hidden, dtype=dtype),
+        trace = {
             "role_attention": torch.empty(
                 layers, response_tokens, self.heads, roles, dtype=torch.float32
             ),
@@ -195,6 +181,26 @@ class FunctionalTraceReplay:
                 layers, response_tokens, top_k, dtype=torch.float32
             ),
         }
+        if retain_raw:
+            trace.update(
+                attention=torch.zeros(
+                    layers, self.heads, response_tokens, source_tokens, dtype=dtype
+                ),
+                o_proj_input=torch.empty(
+                    layers, response_tokens, self.hidden, dtype=dtype
+                ),
+                residual_input=torch.empty(
+                    layers, response_tokens, self.hidden, dtype=dtype
+                ),
+                attention_update=torch.empty(
+                    layers, response_tokens, self.hidden, dtype=dtype
+                ),
+                mlp_update=torch.empty(
+                    layers, response_tokens, self.hidden, dtype=dtype
+                ),
+                final_hidden=torch.empty(response_tokens, self.hidden, dtype=dtype),
+            )
+        return trace
 
     def _forward(
         self,
@@ -204,6 +210,7 @@ class FunctionalTraceReplay:
         *,
         removals: tuple[str | None, ...],
         capture: bool,
+        retain_raw: bool,
         predictor_chunk: int,
         top_k: int,
         logit_chunk: int,
@@ -216,7 +223,13 @@ class FunctionalTraceReplay:
         roles = source_roles(prompt_roles, response_start, len(ids))
         roles_device = roles.to(self.device)
         k = min(top_k, source_tokens)
-        trace = self._empty_trace(response_tokens, source_tokens, k, dtype) if capture else None
+        trace = (
+            self._empty_trace(
+                response_tokens, source_tokens, k, dtype, retain_raw=retain_raw
+            )
+            if capture
+            else None
+        )
         values = [
             torch.empty(
                 batch,
@@ -283,7 +296,7 @@ class FunctionalTraceReplay:
         def layer_input_hook(index: int):
             def hook(_module: Any, args: tuple[Any, ...]) -> None:
                 window = response_window()
-                if capture and window is not None:
+                if capture and retain_raw and window is not None:
                     local, row_start, row_stop = window
                     trace["residual_input"][index, row_start:row_stop] = (
                         args[0][0, local:].detach().cpu()
@@ -294,7 +307,7 @@ class FunctionalTraceReplay:
         def o_proj_input_hook(index: int):
             def hook(_module: Any, args: tuple[Any, ...]) -> None:
                 window = response_window()
-                if capture and window is not None:
+                if capture and retain_raw and window is not None:
                     local, row_start, row_stop = window
                     trace["o_proj_input"][index, row_start:row_stop] = (
                         args[0][0, local:].detach().cpu()
@@ -305,7 +318,7 @@ class FunctionalTraceReplay:
         def mlp_hook(index: int):
             def hook(_module: Any, _args: Any, output: Any) -> None:
                 window = response_window()
-                if capture and window is not None:
+                if capture and retain_raw and window is not None:
                     local, row_start, row_stop = window
                     trace["mlp_update"][index, row_start:row_stop] = (
                         self._tensor(output)[0, local:].detach().cpu()
@@ -350,12 +363,13 @@ class FunctionalTraceReplay:
                         current_k, dim=-1
                     )
 
-                    trace["attention"][index, :, row_start:row_stop, :query_stop] = (
-                        attention[0, :, local:, :query_stop].detach().cpu()
-                    )
-                    trace["attention_update"][index, row_start:row_stop] = (
-                        message[0, local:].detach().cpu()
-                    )
+                    if retain_raw:
+                        trace["attention"][
+                            index, :, row_start:row_stop, :query_stop
+                        ] = attention[0, :, local:, :query_stop].detach().cpu()
+                        trace["attention_update"][index, row_start:row_stop] = (
+                            message[0, local:].detach().cpu()
+                        )
                     trace["role_attention"][index, row_start:row_stop] = (
                         torch.stack(role_attention, -1).detach().cpu()
                     )
@@ -404,13 +418,16 @@ class FunctionalTraceReplay:
             return hook
 
         for index, layer in enumerate(self.layers):
-            handles.append(layer.register_forward_pre_hook(layer_input_hook(index)))
             handles.append(layer.self_attn.v_proj.register_forward_hook(v_hook(index)))
-            handles.append(
-                layer.self_attn.o_proj.register_forward_pre_hook(o_proj_input_hook(index))
-            )
             handles.append(layer.self_attn.register_forward_hook(attention_hook(index)))
-            handles.append(layer.mlp.register_forward_hook(mlp_hook(index)))
+            if retain_raw:
+                handles.append(layer.register_forward_pre_hook(layer_input_hook(index)))
+                handles.append(
+                    layer.self_attn.o_proj.register_forward_pre_hook(
+                        o_proj_input_hook(index)
+                    )
+                )
+                handles.append(layer.mlp.register_forward_hook(mlp_hook(index)))
 
         try:
             past = None
@@ -452,7 +469,7 @@ class FunctionalTraceReplay:
                             score_fields[name][branch, row_start:row_stop] = getattr(
                                 current, name
                             )
-                    if capture:
+                    if capture and retain_raw:
                         trace["final_hidden"][row_start:row_stop] = (
                             hidden[0].detach().cpu()
                         )
@@ -466,7 +483,8 @@ class FunctionalTraceReplay:
         ]
         if not capture:
             return scores, None
-        trace["value_states"] = torch.stack([value[0].cpu() for value in values])
+        if retain_raw:
+            trace["value_states"] = torch.stack([value[0].cpu() for value in values])
         trace["source_role"] = roles
         return scores, trace
 
@@ -480,8 +498,9 @@ class FunctionalTraceReplay:
         top_k: int = 8,
         logit_chunk: int = 64,
         intervention_batch: int = 3,
+        retain_raw: bool = True,
     ) -> dict[str, Any]:
-        """Save one raw trace and three same-sample message-deletion branches."""
+        """Save one mechanism trace and three same-sample message-deletion branches."""
 
         token_ids = torch.as_tensor(token_ids, dtype=torch.long, device="cpu")
         prompt_roles = torch.as_tensor(prompt_roles, dtype=torch.int8, device="cpu")
@@ -493,6 +512,7 @@ class FunctionalTraceReplay:
             prompt_roles,
             removals=(None,),
             capture=True,
+            retain_raw=retain_raw,
             predictor_chunk=predictor_chunk,
             top_k=top_k,
             logit_chunk=logit_chunk,
@@ -511,6 +531,7 @@ class FunctionalTraceReplay:
                 prompt_roles,
                 removals=tuple(removal for _name, removal in current_specs),
                 capture=False,
+                retain_raw=False,
                 predictor_chunk=predictor_chunk,
                 top_k=top_k,
                 logit_chunk=logit_chunk,
