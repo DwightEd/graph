@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
 import torch
@@ -12,11 +12,8 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 from research_dataset import open_research_dataset
 
-from .audit import load_index
-from .capture import HISTORY, SELF
-from .data import EVIDENCE
+from .audit import SCHEMA, VERSION, load_index
 from .visualize import plot_population, plot_sample_dashboard
-
 
 SCORE_ORDER = (
     "causal_route_capture",
@@ -45,9 +42,6 @@ def _binary_metrics(label: np.ndarray, score: np.ndarray) -> dict[str, float | i
     prevalence = float(label.mean())
     auprc = float(average_precision_score(label, score))
     return {
-        "tokens": int(len(label)),
-        "positive_tokens": int(label.sum()),
-        "prevalence": prevalence,
         "auroc": float(roc_auc_score(label, score)),
         "auprc": auprc,
         "auprc_lift": auprc / prevalence,
@@ -89,20 +83,14 @@ def layer_mechanisms(artifact: dict) -> dict[str, torch.Tensor]:
     """Return the two route mechanisms without expanding hand-built features."""
 
     trace = artifact["trace"]
-    edge = trace["role_edge_magnitude"].float()
-    role_mass = edge.sum(2)
-    total = role_mass.sum(-1).clamp_min(1e-12)
-    response_token_exists = (torch.arange(edge.shape[1]) > 0)[None]
-    evidence_share = role_mass[..., EVIDENCE] / total
-    response_share = (
-        role_mass[..., HISTORY]
-        + role_mass[..., SELF] * response_token_exists.to(role_mass.dtype)
-    ) / total
+    total = trace["total_message_magnitude"].float().clamp_min(1e-12)
+    evidence_share = trace["evidence_message_magnitude"].float() / total
+    response_share = trace["response_message_magnitude"].float() / total
 
-    active_sources = (trace["source_role"] >= 0).sum(-1).float().clamp_min(2)
+    active_sources = torch.arange(total.shape[1]) + artifact["response_start"]
+    active_sources = active_sources.float().clamp_min(2)
     dispersion = (
-        trace["source_message_entropy"].float()
-        / active_sources.log()[None]
+        trace["source_message_entropy"].float() / active_sources.log()[None]
     )
     return {
         "routing_imbalance": response_share - evidence_share,
@@ -112,24 +100,20 @@ def layer_mechanisms(artifact: dict) -> dict[str, torch.Tensor]:
     }
 
 
-def token_scores(
-    artifact: dict,
-    layers: dict[str, torch.Tensor] | None = None,
-) -> dict[str, np.ndarray]:
+def token_scores(artifact: dict) -> dict[str, np.ndarray]:
     """Compute the fixed primary score and its three mechanism components."""
 
-    layers = layers or layer_mechanisms(artifact)
-    evidence_effect = artifact["mechanism"]["evidence_message_effect"].float()
-    response_effect = artifact["mechanism"]["response_message_effect"].float()
+    layers = layer_mechanisms(artifact)
+    inputs = artifact["score_inputs"]
     values = {
-        "causal_route_capture": response_effect - evidence_effect,
+        "causal_route_capture": (
+            inputs["no_evidence_logprob"] - inputs["no_response_logprob"]
+        ),
         "routing_imbalance": layers["routing_imbalance"].mean(0),
         "source_dispersion": layers["source_dispersion"].mean(0),
-        "message_independent_preference": artifact["mechanism"][
-            "evidence_response_removed_margin"
-        ].float(),
+        "message_independent_preference": inputs["no_evidence_response_margin"],
     }
-    return {name: values[name].cpu().numpy() for name in SCORE_ORDER}
+    return {name: values[name].float().cpu().numpy() for name in SCORE_ORDER}
 
 
 def detection_summary(
@@ -204,15 +188,8 @@ def build_report(
         bootstrap=bootstrap,
         seed=seed,
     )
-    means = {
-        name: {
-            "correct": float(scores[name][~label].mean()) if (~label).any() else None,
-            "hallucinated": float(scores[name][label].mean()) if label.any() else None,
-        }
-        for name in SCORE_ORDER[1:]
-    }
     return {
-        "schema": "ragtruth-three-mechanism-detection-v1",
+        "schema": "ragtruth-three-mechanism-detection-v2",
         "samples": int(np.unique(sample_id).size),
         "sources": int(np.unique(source_id).size),
         "tokens": int(len(label)),
@@ -225,45 +202,47 @@ def build_report(
             "the original high-dispersion hypothesis"
         ),
         "detection": detection,
-        "mechanism_means": means,
         "labels_used_during": "posthoc_evaluation_only",
         "analysis_scope": (
-            "fixed-score exploratory audit over every cached QA token"
+            "fixed-score exploratory audit over pooled captured QA tokens"
         ),
     }
 
 
-def _load_input(
-    trace_root: Path,
-    split_root: Path,
-) -> dict[str, np.ndarray]:
-    rows = load_index(trace_root)
-    dataset = open_research_dataset(
-        split_root,
-        device="cpu",
-        retain_embedded_labels=True,
-    )
-    labels = dataset.prepare_evaluation_labels([row["sample_id"] for row in rows])
-    split = str(dataset.manifest.get("split") or split_root.name)
-    arrays: dict[str, list[np.ndarray]] = {
-        "label": [],
-        "sample_id": [],
-        "source_id": [],
-        "split": [],
-        "token_index": [],
-        "response_length": [],
-        **{name: [] for name in SCORE_ORDER},
-    }
-    for row in rows:
+def _load_scores(trace_root: Path) -> list[tuple[dict, dict[str, np.ndarray]]]:
+    scored = []
+    for row in load_index(trace_root):
         artifact = torch.load(
             trace_root / "samples" / row["path"],
             map_location="cpu",
             weights_only=True,
         )
+        scored.append((row, token_scores(artifact)))
+    return scored
+
+
+def _add_labels(
+    scored: list[tuple[dict, dict[str, np.ndarray]]],
+    split_root: Path,
+) -> dict[str, np.ndarray]:
+    dataset = open_research_dataset(
+        split_root,
+        device="cpu",
+        retain_embedded_labels=True,
+    )
+    labels = dataset.prepare_evaluation_labels([row["sample_id"] for row, _ in scored])
+    arrays: dict[str, list[np.ndarray]] = {
+        "label": [],
+        "sample_id": [],
+        "source_id": [],
+        "token_index": [],
+        "response_length": [],
+        **{name: [] for name in SCORE_ORDER},
+    }
+    for row, current in scored:
         sample = dataset[row["sample_id"]]
         token_label = labels.response_labels(sample).cpu().numpy().astype(bool)
         sample.release_attention()
-        current = token_scores(artifact)
         count = len(token_label)
         if any(len(value) != count for value in current.values()):
             raise ValueError(
@@ -272,7 +251,6 @@ def _load_input(
         arrays["label"].append(token_label)
         arrays["sample_id"].append(np.repeat(str(row["sample_id"]), count))
         arrays["source_id"].append(np.repeat(str(row["source_id"]), count))
-        arrays["split"].append(np.repeat(split, count))
         arrays["token_index"].append(np.arange(count, dtype=np.int32))
         arrays["response_length"].append(np.full(count, count, dtype=np.int32))
         for name in SCORE_ORDER:
@@ -281,6 +259,21 @@ def _load_input(
         name: np.concatenate(value)
         for name, value in arrays.items()
     }
+
+
+def _load_manifest(trace_root: Path, split_root: Path | None = None) -> dict:
+    manifest = json.loads((trace_root / "manifest.json").read_text(encoding="utf-8"))
+    valid = (
+        manifest.get("schema") == SCHEMA
+        and manifest.get("version") == VERSION
+        and (
+            split_root is None
+            or manifest.get("split_root") == str(split_root.resolve())
+        )
+    )
+    if not valid:
+        raise ValueError(f"trace manifest does not match v{VERSION} or its cache")
+    return manifest
 
 
 def evaluate_all(
@@ -292,13 +285,13 @@ def evaluate_all(
 ) -> dict:
     """Pool physical cache shards first, then evaluate exactly once."""
 
-    pieces, manifests = [], []
+    shards, manifests = [], []
     for trace_root, split_root in inputs:
         trace_root = Path(trace_root)
-        pieces.append(_load_input(trace_root, Path(split_root)))
-        manifests.append(
-            json.loads((trace_root / "manifest.json").read_text(encoding="utf-8"))
-        )
+        split_root = Path(split_root)
+        manifests.append(_load_manifest(trace_root, split_root))
+        shards.append((_load_scores(trace_root), split_root))
+    pieces = [_add_labels(scores, split_root) for scores, split_root in shards]
     merged = {
         name: np.concatenate([piece[name] for piece in pieces])
         for name in pieces[0]
@@ -345,7 +338,7 @@ def evaluate_all(
 
 def plot_saved_sample(
     *,
-    inputs: Iterable[tuple[str | Path, str | Path]],
+    inputs: Iterable[str | Path],
     sample_id: str,
     model_path: str | Path,
     output: str | Path,
@@ -354,8 +347,9 @@ def plot_saved_sample(
 
     from transformers import AutoTokenizer
 
-    for trace_root_value, split_root_value in inputs:
+    for trace_root_value in inputs:
         trace_root = Path(trace_root_value)
+        _load_manifest(trace_root)
         row = next(
             (
                 row
@@ -371,15 +365,6 @@ def plot_saved_sample(
             map_location="cpu",
             weights_only=True,
         )
-        dataset = open_research_dataset(
-            split_root_value,
-            device="cpu",
-            retain_embedded_labels=True,
-        )
-        labels = dataset.prepare_evaluation_labels([row["sample_id"]])
-        sample = dataset[row["sample_id"]]
-        token_label = labels.response_labels(sample).cpu().numpy().astype(bool)
-        sample.release_attention()
         tokenizer = AutoTokenizer.from_pretrained(
             str(model_path),
             local_files_only=True,
@@ -404,19 +389,23 @@ def plot_saved_sample(
             top_mass[valid],
         )
         source_flow /= (
-            trace["role_edge_magnitude"].sum((0, 2, 3)).numpy()[:, None]
+            trace["total_message_magnitude"].sum(0).numpy()[:, None]
             + 1e-12
         )
         shown = np.argsort(source_flow.sum(0))[-16:][::-1]
-        mechanism = artifact["mechanism"]
+        score_inputs = artifact["score_inputs"]
+        full = score_inputs["full_logprob"]
         record = {
             "sample_id": str(sample_id),
             "token_text": tokenizer.convert_ids_to_tokens(
-                artifact["target_ids"].tolist()
+                artifact["token_ids"][artifact["response_start"] :].tolist()
             ),
-            "label": token_label,
-            "evidence_effect": mechanism["evidence_message_effect"].numpy(),
-            "response_effect": mechanism["response_message_effect"].numpy(),
+            "evidence_effect": (
+                full - score_inputs["no_evidence_logprob"]
+            ).numpy(),
+            "response_effect": (
+                full - score_inputs["no_response_logprob"]
+            ).numpy(),
             "source_token_text": [
                 f"{index}:"
                 + tokenizer.convert_ids_to_tokens(
@@ -433,15 +422,3 @@ def plot_saved_sample(
         )
         return {"sample_id": str(sample_id), "output": str(output)}
     raise ValueError(f"sample {sample_id} was not found in the saved traces")
-
-
-__all__ = [
-    "SCORE_DEFINITIONS",
-    "SCORE_ORDER",
-    "build_report",
-    "detection_summary",
-    "evaluate_all",
-    "layer_mechanisms",
-    "plot_saved_sample",
-    "token_scores",
-]

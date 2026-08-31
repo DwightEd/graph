@@ -3,42 +3,11 @@ import sys
 from types import SimpleNamespace
 
 import numpy as np
-import torch
+import pytest
+
+torch = pytest.importorskip("torch")
 
 import experiments.attention_mechanism_audit.audit as audit_module
-from experiments.attention_mechanism_audit.audit import mechanism_effects
-
-
-def test_mechanism_effects_keep_only_the_score_inputs():
-    scores = {
-        "full": {"target_logprob": torch.tensor([-1.0, -2.0])},
-        "evidence_removed": {"target_logprob": torch.tensor([-3.0, -4.0])},
-        "response_removed": {"target_logprob": torch.tensor([-2.0, -5.0])},
-        "evidence_response_removed": {
-            "target_logprob": torch.tensor([-4.0, -7.0]),
-            "target_margin": torch.tensor([0.5, -0.5]),
-        },
-    }
-    scores["full"]["target_margin"] = torch.tensor([0.25, -0.25])
-
-    effects = mechanism_effects(scores)
-
-    torch.testing.assert_close(
-        effects["evidence_message_effect"], torch.tensor([2.0, 2.0])
-    )
-    torch.testing.assert_close(
-        effects["response_message_effect"], torch.tensor([1.0, 3.0])
-    )
-    assert set(effects) == {
-        "evidence_message_effect",
-        "response_message_effect",
-        "evidence_response_removed_margin",
-        "full_margin",
-    }
-    assert effects["evidence_response_removed_margin"] is scores[
-        "evidence_response_removed"
-    ]["target_margin"]
-    assert effects["full_margin"] is scores["full"]["target_margin"]
 
 
 def test_capture_split_resumes_from_the_journal_without_replaying_samples(
@@ -83,30 +52,18 @@ def test_capture_split_resumes_from_the_journal_without_replaying_samples(
     capture_calls = []
 
     class FakeReplay:
-        checkpoint = "frozen-observer"
-
         def capture(self, token_ids, response_start, _roles, **kwargs):
-            capture_calls.append((int(token_ids[1]), kwargs["retain_raw"]))
-            target = token_ids[response_start:].clone()
+            capture_calls.append(int(token_ids[1]))
             return {
                 "token_ids": token_ids.clone(),
-                "target_ids": target,
+                "response_start": response_start,
                 "peak_cuda_reserved_bytes": int(token_ids[1]),
-                "scores": {
-                    "full": {
-                        "target_logprob": torch.tensor([-1.0]),
-                        "target_margin": torch.tensor([0.5]),
-                    },
-                    "evidence_removed": {
-                        "target_logprob": torch.tensor([-2.0])
-                    },
-                    "response_removed": {
-                        "target_logprob": torch.tensor([-3.0])
-                    },
-                    "evidence_response_removed": {
-                        "target_logprob": torch.tensor([-4.0]),
-                        "target_margin": torch.tensor([-0.5]),
-                    },
+                "trace": {},
+                "score_inputs": {
+                    "full_logprob": torch.tensor([-1.0]),
+                    "no_evidence_logprob": torch.tensor([-2.0]),
+                    "no_response_logprob": torch.tensor([-3.0]),
+                    "no_evidence_response_margin": torch.tensor([-0.5]),
                 },
             }
 
@@ -156,13 +113,20 @@ def test_capture_split_resumes_from_the_journal_without_replaying_samples(
     assert first["selected_qa_seen"] == 2
     assert first["eligible_qa"] is None
     assert first["complete"] is False
-    assert capture_calls == [(11, False), (12, False)]
+    assert capture_calls == [11, 12]
     first_rows = [
         json.loads(line)
         for line in (output / "index.jsonl").read_text(encoding="utf-8").splitlines()
     ]
     assert [row["sample_id"] for row in first_rows] == ["qa-1", "qa-2"]
-
+    saved = torch.load(output / "samples" / "qa-1.pt", weights_only=True)
+    assert set(saved) == {"token_ids", "response_start", "trace", "score_inputs"}
+    assert set(saved["score_inputs"]) == {
+        "full_logprob",
+        "no_evidence_logprob",
+        "no_response_logprob",
+        "no_evidence_response_margin",
+    }
     second = audit_module.capture_split(**common)
 
     assert second["samples"] == 3
@@ -171,7 +135,7 @@ def test_capture_split_resumes_from_the_journal_without_replaying_samples(
     assert second["selected_qa_seen"] == 3
     assert second["eligible_qa"] == 3
     assert second["complete"] is True
-    assert capture_calls == [(11, False), (12, False), (13, False)]
+    assert capture_calls == [11, 12, 13]
     assert samples["qa-1"].attention_calls == 1
     assert samples["qa-2"].attention_calls == 1
     final_rows = [
@@ -186,4 +150,15 @@ def test_capture_split_resumes_from_the_journal_without_replaying_samples(
     assert third["complete"] is True
     assert third["eligible_qa"] == 3
     assert third["selected_qa_seen"] == 1
-    assert capture_calls == [(11, False), (12, False), (13, False)]
+    assert capture_calls == [11, 12, 13]
+
+    (output / "manifest.json").unlink()
+    with pytest.raises(ValueError, match="index exists without a v3 manifest"):
+        audit_module.capture_split(**common)
+    assert capture_calls == [11, 12, 13]
+
+    (output / "manifest.json").write_text(
+        json.dumps({"schema": audit_module.SCHEMA, "version": 2}), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="changed provenance"):
+        audit_module.capture_split(**common)

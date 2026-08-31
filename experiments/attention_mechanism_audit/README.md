@@ -1,131 +1,124 @@
 # Teacher-forced three-mechanism audit
 
-This experiment asks whether hallucinated response tokens show three specific
-attention-message mechanisms in a frozen Llama-3.1-8B observer:
+This experiment audits every cached **QA** response with one frozen
+Llama-3.1-8B observer. Files under `train` and `test` are only two physical
+cache shards: no model is trained and the shards are pooled into one result.
 
-1. **routing imbalance**: functional message mass shifts from the supplied QA
-   evidence toward the generated response history;
-2. **source dispersion**: evidence routes spread over more source tokens;
-3. **message-independent preference**: the observed token remains preferred
-   after evidence and response attention messages are removed.
+## What is computed
 
-It processes every QA response available in the formal attention archive.
-The archive happens to store files under `train` and `test`, but those names
-are storage locations only: this experiment trains nothing, evaluates no
-split separately, and pools both locations into one result.
-
-Directory-level implementation constraints are recorded in `AGENTS.md`, so a
-coding agent working in this module receives the same minimal-code and exact-
-method contract instead of relying on rules stored in a sibling experiment.
-
-## Core calculation
-
-For response token `y_t`, source token `s`, layer `l`, and attention head `h`,
-the dynamic directed message is
-
-```text
-m[l,h,t,s] = A[l,h,q_t,s] W_O[l,h] V[l,g(h),s]
-```
-
-where `q_t` is the predictor position and `g(h)` maps a query head to its GQA
-KV head. Its edge magnitude is
+For response token `t`, visible source token `s`, layer `l`, and query head
+`h`, the message magnitude is
 
 ```text
 e[l,h,t,s] = A[l,h,q_t,s] ||W_O[l,h] V[l,g(h),s]||_2
 ```
 
-This is not an attention-only proxy: `A` chooses a route, `V` supplies its
-sample-specific content, and the head block of `W_O` writes that content into
-the residual stream.
+`q_t` is the position predicting token `t`; `g(h)` maps a query head to its
+GQA KV head. Thus the statistic uses the actual sample-specific attention
+weight `A`, value vector `V`, and the matching layer/head block of `W_O`.
 
-The frozen model is then replayed with evidence messages or response-history
-messages removed after softmax, without renormalizing other routes. Removed
-hidden states continue through the real MLP and every later layer. With
-`L_full`, `L_no_evidence`, and `L_no_response` denoting observed-token log
-probabilities, the four fixed label-free scores are:
+Each sample has four teacher-forced forward branches:
+
+| branch | attention messages deleted after softmax |
+|---|---|
+| `full` | none |
+| `no_evidence` | QA passage tokens |
+| `no_response` | visible response tokens, including a response-token predictor |
+| `no_evidence_response` | both groups above |
+
+Deleted attention mass is not renormalized. The resulting hidden state still
+passes through the real output projection, residual path, MLP, and all later
+layers. By default the three intervention branches are one batch, so these are
+four logical branches but two chunked replay passes: one full and one
+intervened.
+
+Let `ell_*` be the observed token log probability in each branch, and let
+`margin_no_evidence_response` be its logit minus the best competing logit. The
+only four reported scores are
 
 ```text
-causal_route_capture = L_no_evidence - L_no_response
-routing_imbalance    = response_message_share - evidence_message_share
-source_dispersion    = normalized entropy of source-token message magnitudes
-message_independent_preference = margin_no_evidence_or_response_messages
+causal_route_capture = ell_no_evidence - ell_no_response       # primary
+routing_imbalance = response_message_share - evidence_message_share
+source_dispersion = mean_l entropy_s(sum_h e[l,h,t,s]) / log(visible_sources)
+message_independent_preference = margin_no_evidence_response
 ```
 
-`causal_route_capture` is the main score. The other three values are reported
-separately as mechanism components; they are not concatenated into a learned
-classifier. The preregistered direction of source dispersion is positive; an
-AUROC below 0.5 is evidence against that hypothesis and is not flipped after
-labels are read.
+`routing_imbalance` and `source_dispersion` are averaged over layers. Response
+share contains response history (and self when it exists); evidence share
+contains the supplied passage. Dispersion covers all causally visible source
+positions. Score signs are fixed before labels are read; values are never
+flipped because an AUROC is below `0.5`.
 
-The final margin is a message-independent preference candidate, not a pure
-parameter-knowledge measurement: question/constraint messages, the predictor
-residual embedding, and all MLP updates remain active.
+The capture is deliberately compact. It saves token IDs plus one response
+boundary, total/evidence/response magnitudes, source entropy, top-k routes for
+an on-demand sample view, and four scalar branch inputs (`full`, `no_evidence`,
+`no_response` log probabilities plus the joint-removal margin). It does **not**
+save dense attention, value, hidden-state, or weight-matrix copies per token.
+Model weights stay in the checkpoint and each layer's `W_O` is used directly
+during capture.
 
-Labels are unavailable to capture and to all four score equations. They are
-opened only after both physical cache locations have been captured, to compute
-pooled token-level AUROC and AUPRC. These are post-hoc detection diagnostics,
-not a trained classifier or a calibrated deployment threshold.
+Labels are opened only during pooled evaluation, to compute token-level AUROC
+and AUPRC. These are post-hoc detection diagnostics, not a trained classifier
+or a calibrated threshold. `message_independent_preference` is not pure
+parameter knowledge: question/constraint messages, token residuals, and MLP
+updates remain active.
 
-## One-click run
+## Run every QA sample
 
-From the repository root, first run one cached response as a smoke test:
+From the repository root, smoke-test one QA response per physical shard first:
 
 ```bash
 LIMIT=1 bash experiments/attention_mechanism_audit/run_qa.sh
 ```
 
-Then capture/resume and evaluate every cached QA response:
+Then capture/resume both physical shards and evaluate all QA tokens once:
 
 ```bash
 bash experiments/attention_mechanism_audit/run_qa.sh
 ```
 
-The script uses the local Meta-Llama-3.1-8B-Instruct checkpoint and formal QA
-cache by default. It performs only two logical stages:
+The v3 output directory is intentionally separate: an older capture used the
+last layer's `W_O` in every intervention hook, so its causal scores must not be
+resumed. The observational routing statistics were unaffected, but the main
+score and message-independent preference must be recaptured.
 
-1. capture or resume exact traces from the physical `train` and `test` cache
-   directories;
-2. pool those traces once and produce one all-data evaluation.
+Useful overrides include `MODEL_PATH`, `CACHE_ROOT`, `SOURCE_INFO`, `OUT`,
+`DEVICE`, `DTYPE`, `TOKEN_CHUNK`, `INTERVENTION_BATCH`, `TOP_K`, `LOGIT_CHUNK`,
+`BOOTSTRAP`, and `SEED`.
 
-It intentionally does not use `set -euo pipefail`. If Python fails, its full
-traceback remains visible and the next stage is not run.
+The script has exactly two stages:
 
-The compact outputs are:
+1. capture or resume `train` and `test` independently;
+2. pool both trace directories and evaluate once.
 
-- `{train,test}/traces/`: resumable exact captures for the two physical cache
-  locations;
-- `token_scores.npz`: sample/token identity, labels, the main score, and
-  the three mechanism components;
-- `report.json`: pooled coverage plus AUROC and AUPRC;
-- `figures/`: ROC/PR, mechanism distributions, and relative-position dynamics
-  computed from all pooled tokens.
+It intentionally does not enable `set -e`, `set -u`, or `pipefail`. Every
+Python command is checked explicitly, so a failure leaves the full Python
+traceback visible and prevents later stages from running.
 
-No per-sample figures are generated during the all-data run.
+Outputs are:
 
-## Inspect one sample on demand
+- `{train,test}/traces/`: compact resumable captures;
+- `token_scores.npz`: identity, labels, one primary score, and three components;
+- `report.json`: pooled coverage, AUROC, and AUPRC;
+- `figures/`: population plots computed from every pooled token.
 
-After capture, render one response by sample ID without rerunning the model:
+No per-sample figure is generated by the all-data run.
+
+## Plot one saved sample
+
+Generate a sample view explicitly by ID, without replaying the model:
 
 ```bash
 python -m experiments.attention_mechanism_audit.run plot-sample \
-  --input /path/to/train/traces /path/to/cache/train \
-  --input /path/to/test/traces /path/to/cache/test \
+  --input /path/to/train/traces \
+  --input /path/to/test/traces \
   --sample-id SAMPLE_ID \
   --output sample.png
 ```
 
-The same command can be placed in a notebook cell and `SAMPLE_ID` changed
-interactively. `sample_explorer.ipynb` already contains both cache locations,
-so only `SAMPLE_ID` needs to change. This view is for tracing a concrete case;
-the headline plots always come from the pooled all-data evaluation.
-
-## Scope
-
-The audit measures how this frozen observer processes teacher-forced tokens.
-If the original response was generated by another model, it does not establish
-the original generator's exact formation process. The evidence region is the
-QA passage block supplied by the dataset, not a manually annotated minimal
-support span.
+The audit describes how the frozen observer processes teacher-forced tokens.
+If another model generated the cached answer, it does not recover that
+generator's internal process.
 
 Run the focused tests with:
 

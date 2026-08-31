@@ -11,7 +11,6 @@ import torch
 from .audit import capture_split
 from .evaluate import SCORE_ORDER, evaluate_all, plot_saved_sample
 
-
 DEFAULT_MODEL = (
     "/share/home/tm902089733300000/a903202310/lys/models/"
     "Meta-Llama-3.1-8B-Instruct"
@@ -19,7 +18,13 @@ DEFAULT_MODEL = (
 
 
 def _print_report(report: dict) -> None:
-    print("\n=== ALL-QA THREE-MECHANISM DETECTION ===")
+    def ci(interval: list[float | None]) -> str:
+        if interval[0] is None:
+            return "n/a"
+        return f"[{interval[0]:.6f},{interval[1]:.6f}]"
+
+    scope = "ALL-QA" if report["capture_complete"] else "PARTIAL-QA"
+    print(f"\n=== {scope} THREE-MECHANISM DETECTION ===")
     print(
         f"samples={report['samples']} sources={report['sources']} "
         f"tokens={report['tokens']} positives={report['hallucinated_tokens']} "
@@ -35,9 +40,9 @@ def _print_report(report: dict) -> None:
         print(
             f"{role:9s} {name:24s} "
             f"AUROC={result['auroc']:.6f} "
-            f"CI=[{result['auroc_ci95'][0]:.6f},{result['auroc_ci95'][1]:.6f}] "
+            f"CI={ci(result['auroc_ci95'])} "
             f"AUPRC={result['auprc']:.6f} "
-            f"CI=[{result['auprc_ci95'][0]:.6f},{result['auprc_ci95'][1]:.6f}] "
+            f"CI={ci(result['auprc_ci95'])} "
             f"lift={result['auprc_lift']:.3f}"
         )
 
@@ -55,7 +60,6 @@ def _capture(args: argparse.Namespace) -> None:
         top_k=args.top_k,
         logit_chunk=args.logit_chunk,
         intervention_batch=args.intervention_batch,
-        trace_level=args.trace_level,
     )
     print(json.dumps(report, indent=2, sort_keys=True))
 
@@ -71,11 +75,6 @@ def _evaluate(args: argparse.Namespace) -> None:
     print(f"\nreport: {args.output}")
     print(f"token scores: {report['token_scores']}")
     print(f"population figures: {report['figures']}")
-
-
-def _summarize(args: argparse.Namespace) -> None:
-    report = json.loads(args.report.read_text(encoding="utf-8"))
-    _print_report(report)
 
 
 def _plot_sample(args: argparse.Namespace) -> None:
@@ -104,11 +103,6 @@ def parser() -> argparse.ArgumentParser:
     capture.add_argument("--top-k", type=int, default=8)
     capture.add_argument("--logit-chunk", type=int, default=64)
     capture.add_argument("--limit", type=int)
-    capture.add_argument(
-        "--trace-level",
-        choices=("mechanism", "raw"),
-        default="mechanism",
-    )
     capture.set_defaults(handler=_capture)
 
     evaluate = commands.add_parser(
@@ -127,19 +121,15 @@ def parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--seed", type=int, default=20260828)
     evaluate.set_defaults(handler=_evaluate)
 
-    summarize = commands.add_parser("summarize", help="print one existing report")
-    summarize.add_argument("--report", type=Path, required=True)
-    summarize.set_defaults(handler=_summarize)
-
     sample = commands.add_parser(
         "plot-sample",
         help="render one saved sample without replaying the model",
     )
     sample.add_argument(
         "--input",
-        nargs=2,
         action="append",
-        metavar=("TRACES", "CACHE"),
+        type=Path,
+        metavar="TRACES",
         required=True,
     )
     sample.add_argument("--sample-id", required=True)

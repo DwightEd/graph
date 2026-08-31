@@ -12,7 +12,6 @@ matplotlib.use("Agg")
 from matplotlib import pyplot as plt  # noqa: E402
 from matplotlib.colors import TwoSlopeNorm  # noqa: E402
 
-
 SCORE_LABELS = {
     "causal_route_capture": "Causal route capture",
     "routing_imbalance": "Response − evidence routing",
@@ -60,7 +59,7 @@ def _detection_curves(
         axis.set_ylim(0, 1)
         axis.grid(alpha=0.18)
     axes[1].legend(frameon=False, fontsize=8)
-    figure.suptitle("All cached QA tokens")
+    figure.suptitle("Pooled captured QA tokens")
     figure.savefig(output, dpi=180)
     plt.close(figure)
 
@@ -71,7 +70,6 @@ def _ecdf(value: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _mechanism_distributions(
-    label: np.ndarray,
     scores: dict[str, np.ndarray],
     output: Path,
 ) -> None:
@@ -84,26 +82,20 @@ def _mechanism_distributions(
     for axis, name in zip(axes, names):
         score = scores[name]
         low, high = np.quantile(score, [0.01, 0.99])
-        for mask, text, color in (
-            (~label, "Correct", "#2166ac"),
-            (label, "Hallucinated", "#b2182b"),
-        ):
-            x, y = _ecdf(np.clip(score[mask], low, high))
-            axis.plot(x, y, color=color, lw=1.8, label=text)
+        x, y = _ecdf(np.clip(score, low, high))
+        axis.plot(x, y, color=COLORS[name], lw=1.8)
         axis.set(
             title=SCORE_LABELS[name],
             xlabel="Token score",
             ylabel="Empirical CDF",
         )
         axis.grid(alpha=0.18)
-    axes[0].legend(frameon=False)
-    figure.suptitle("All-token mechanism distributions (display clipped at 1st/99th percentiles)")
+    figure.suptitle("Pooled-token distributions (clipped at 1st/99th percentiles)")
     figure.savefig(output, dpi=180)
     plt.close(figure)
 
 
 def _mechanisms_by_position(
-    label: np.ndarray,
     scores: dict[str, np.ndarray],
     token_index: np.ndarray,
     response_length: np.ndarray,
@@ -121,25 +113,20 @@ def _mechanisms_by_position(
     x = (np.arange(10) + 0.5) / 10
     figure, axes = plt.subplots(1, 3, figsize=(13, 4), constrained_layout=True)
     for axis, name in zip(axes, names):
-        for class_mask, text, color in (
-            (~label, "Correct", "#2166ac"),
-            (label, "Hallucinated", "#b2182b"),
-        ):
-            mean = [
-                scores[name][class_mask & (position == block)].mean()
-                if np.any(class_mask & (position == block))
-                else np.nan
-                for block in range(10)
-            ]
-            axis.plot(x, mean, marker="o", ms=3, color=color, label=text)
+        mean = [
+            scores[name][position == block].mean()
+            if np.any(position == block)
+            else np.nan
+            for block in range(10)
+        ]
+        axis.plot(x, mean, marker="o", ms=3, color=COLORS[name])
         axis.set(
             title=SCORE_LABELS[name],
             xlabel="Relative response position",
             ylabel="Mean token score",
         )
         axis.grid(alpha=0.18)
-    axes[0].legend(frameon=False)
-    figure.suptitle("Mechanism dynamics over all cached QA responses")
+    figure.suptitle("Mechanism dynamics over pooled captured QA responses")
     figure.savefig(output, dpi=180)
     plt.close(figure)
 
@@ -158,25 +145,13 @@ def plot_population(
     output_root.mkdir(parents=True, exist_ok=True)
     if all(result["auroc"] is not None for result in report["detection"].values()):
         _detection_curves(label, scores, output_root / "roc_pr.png")
-    _mechanism_distributions(
-        label,
-        scores,
-        output_root / "mechanism_distributions.png",
-    )
+    _mechanism_distributions(scores, output_root / "mechanism_distributions.png")
     _mechanisms_by_position(
-        label,
         scores,
         token_index,
         response_length,
         output_root / "mechanism_by_position.png",
     )
-
-
-def _hallucination_spans(label: np.ndarray) -> list[tuple[int, int]]:
-    padded = np.pad(label.astype(bool), (1, 1))
-    starts = np.flatnonzero(~padded[:-1] & padded[1:])
-    stops = np.flatnonzero(padded[:-1] & ~padded[1:])
-    return list(zip(starts, stops))
 
 
 def plot_sample_dashboard(
@@ -188,9 +163,8 @@ def plot_sample_dashboard(
 
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    label = np.asarray(record["label"], dtype=bool)
     token_text = list(record["token_text"])
-    x = np.arange(len(label))
+    x = np.arange(len(token_text))
     figure, axes = plt.subplots(
         5,
         1,
@@ -270,9 +244,6 @@ def plot_sample_dashboard(
     axes[4].set(title="Functional-message role share", ylabel="Share")
     axes[4].legend(frameon=False, ncols=2)
 
-    for axis in axes:
-        for start, stop in _hallucination_spans(label):
-            axis.axvspan(start - 0.5, stop - 0.5, color="crimson", alpha=0.12, lw=0)
     stride = max(1, int(np.ceil(len(token_text) / 24)))
     ticks = np.arange(0, len(token_text), stride)
     axes[-1].set_xticks(
@@ -285,6 +256,3 @@ def plot_sample_dashboard(
     axes[-1].set_xlabel("Response token")
     figure.savefig(output, dpi=180)
     plt.close(figure)
-
-
-__all__ = ["plot_population", "plot_sample_dashboard"]

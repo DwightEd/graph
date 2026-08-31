@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import torch
 from torch.nn import functional as F
 
-from .data import EVIDENCE, ROLE_NAMES as PROMPT_ROLE_NAMES
-
+from .data import EVIDENCE
+from .data import ROLE_NAMES as PROMPT_ROLE_NAMES
 
 HISTORY = len(PROMPT_ROLE_NAMES)
 SELF = HISTORY + 1
-ROLE_NAMES = (*PROMPT_ROLE_NAMES, "history", "self")
 
 
 def predictor_positions(response_start: int, token_count: int) -> torch.Tensor:
@@ -43,28 +43,23 @@ def source_roles(
 
 @dataclass
 class BranchScores:
-    target_logit: torch.Tensor
-    target_logprob: torch.Tensor
-    target_margin: torch.Tensor
-    top1_token_id: torch.Tensor
+    logprob: torch.Tensor
+    margin: torch.Tensor
 
 
 class FunctionalTraceReplay:
-    """Save dynamic A/V messages and delete selected source writes causally."""
+    """Aggregate dynamic A/V/W_O messages and replay causal deletions."""
 
-    def __init__(self, model: Any, *, checkpoint: str = "<in-memory>") -> None:
+    def __init__(self, model: Any) -> None:
         self.model = model.eval()
         self.model.requires_grad_(False)
-        self.checkpoint = str(checkpoint)
-        self.backbone = model.model
-        self.layers = tuple(self.backbone.layers)
+        self.layers = tuple(model.model.layers)
         config = model.config
         self.heads = int(config.num_attention_heads)
         self.kv_heads = int(getattr(config, "num_key_value_heads", self.heads))
-        self.hidden = int(config.hidden_size)
-        self.head_dim = int(getattr(config, "head_dim", self.hidden // self.heads))
+        self.head_dim = self.layers[0].self_attn.q_proj.out_features // self.heads
         repeats = self.heads // self.kv_heads
-        self.q_to_kv = torch.arange(self.heads) // repeats
+        self.q_to_kv = torch.arange(self.heads, device=self.device) // repeats
         self.output_grams = tuple(self._output_gram(layer) for layer in self.layers)
 
     @classmethod
@@ -74,7 +69,7 @@ class FunctionalTraceReplay:
         *,
         device: str = "cuda:0",
         dtype: torch.dtype = torch.bfloat16,
-    ) -> "FunctionalTraceReplay":
+    ) -> FunctionalTraceReplay:
         from transformers import AutoModelForCausalLM
 
         model = AutoModelForCausalLM.from_pretrained(
@@ -83,7 +78,7 @@ class FunctionalTraceReplay:
             torch_dtype=dtype,
             attn_implementation="eager",
         ).to(device)
-        return cls(model, checkpoint=str(Path(checkpoint).resolve()))
+        return cls(model)
 
     @property
     def device(self) -> torch.device:
@@ -91,8 +86,31 @@ class FunctionalTraceReplay:
 
     def _output_gram(self, layer: Any) -> torch.Tensor:
         weight = layer.self_attn.o_proj.weight.detach().float()
-        blocks = weight.reshape(self.hidden, self.heads, self.head_dim).permute(1, 2, 0)
+        blocks = weight.reshape(weight.shape[0], self.heads, self.head_dim).permute(
+            1, 2, 0
+        )
         return blocks @ blocks.transpose(1, 2)
+
+    def _source_norm(self, index: int, value: torch.Tensor) -> torch.Tensor:
+        """Return ``||W_O[h] V[s, kv(h)]||`` for every source and query head."""
+
+        value = value[:, self.q_to_kv].float()
+        return torch.einsum(
+            "shd,hde,she->sh", value, self.output_grams[index], value
+        ).clamp_min(0).sqrt()
+
+    def _removed_write(
+        self,
+        index: int,
+        context: torch.Tensor,
+    ) -> torch.Tensor:
+        """Project selected per-head context through this layer's own W_O."""
+
+        return F.linear(
+            context.flatten(-2),
+            self.layers[index].self_attn.o_proj.weight,
+            bias=None,
+        )
 
     def _target_scores(
         self,
@@ -101,27 +119,16 @@ class FunctionalTraceReplay:
         *,
         chunk: int,
     ) -> BranchScores:
-        target_logits, target_logprobs, margins, top1 = [], [], [], []
+        logprobs, margins = [], []
         for start in range(0, len(hidden), chunk):
             stop = min(start + chunk, len(hidden))
             logits = self.model.lm_head(hidden[start:stop]).float()
             targets = target_ids[start:stop]
             selected = logits.gather(1, targets[:, None]).squeeze(1)
             competitor = logits.scatter(1, targets[:, None], -torch.inf).max(1).values
-            target_logits.append(selected.cpu())
-            target_logprobs.append((selected - logits.logsumexp(1)).cpu())
+            logprobs.append((selected - logits.logsumexp(1)).cpu())
             margins.append((selected - competitor).cpu())
-            top1.append(logits.argmax(1).cpu())
-        return BranchScores(
-            torch.cat(target_logits),
-            torch.cat(target_logprobs),
-            torch.cat(margins),
-            torch.cat(top1),
-        )
-
-    @staticmethod
-    def _tensor(output: Any) -> torch.Tensor:
-        return output if torch.is_tensor(output) else output[0]
+        return BranchScores(torch.cat(logprobs), torch.cat(margins))
 
     def _removal_mask(
         self,
@@ -131,7 +138,7 @@ class FunctionalTraceReplay:
         query_start: int,
         query_stop: int,
     ) -> torch.Tensor | None:
-        if removals[0] is None:
+        if not any(removals):
             return None
         source = torch.arange(query_stop, device=self.device)
         query = torch.arange(query_start, query_stop, device=self.device)
@@ -153,21 +160,15 @@ class FunctionalTraceReplay:
     def _empty_trace(
         self,
         response_tokens: int,
-        source_tokens: int,
         top_k: int,
-        dtype: torch.dtype,
-        *,
-        retain_raw: bool,
     ) -> dict[str, torch.Tensor]:
         layers = len(self.layers)
-        roles = len(ROLE_NAMES)
-        trace = {
-            "role_edge_magnitude": torch.empty(
-                layers, response_tokens, self.heads, roles, dtype=torch.float32
-            ),
-            "source_message_entropy": torch.empty(
-                layers, response_tokens, dtype=torch.float32
-            ),
+        shape = (layers, response_tokens)
+        return {
+            "total_message_magnitude": torch.empty(*shape, dtype=torch.float32),
+            "evidence_message_magnitude": torch.empty(*shape, dtype=torch.float32),
+            "response_message_magnitude": torch.empty(*shape, dtype=torch.float32),
+            "source_message_entropy": torch.empty(*shape, dtype=torch.float32),
             "top_source_index": torch.full(
                 (layers, response_tokens, top_k), -1, dtype=torch.int32
             ),
@@ -175,26 +176,6 @@ class FunctionalTraceReplay:
                 layers, response_tokens, top_k, dtype=torch.float32
             ),
         }
-        if retain_raw:
-            trace.update(
-                attention=torch.zeros(
-                    layers, self.heads, response_tokens, source_tokens, dtype=dtype
-                ),
-                o_proj_input=torch.empty(
-                    layers, response_tokens, self.hidden, dtype=dtype
-                ),
-                residual_input=torch.empty(
-                    layers, response_tokens, self.hidden, dtype=dtype
-                ),
-                attention_update=torch.empty(
-                    layers, response_tokens, self.hidden, dtype=dtype
-                ),
-                mlp_update=torch.empty(
-                    layers, response_tokens, self.hidden, dtype=dtype
-                ),
-                final_hidden=torch.empty(response_tokens, self.hidden, dtype=dtype),
-            )
-        return trace
 
     def _forward(
         self,
@@ -204,7 +185,6 @@ class FunctionalTraceReplay:
         *,
         removals: tuple[str | None, ...],
         capture: bool,
-        retain_raw: bool,
         predictor_chunk: int,
         top_k: int,
         logit_chunk: int,
@@ -214,27 +194,29 @@ class FunctionalTraceReplay:
         response_tokens = len(ids) - response_start
         batch = len(removals)
         dtype = self.model.get_input_embeddings().weight.dtype
-        roles = source_roles(prompt_roles, response_start, len(ids))
-        roles_device = roles.to(self.device)
-        k = min(top_k, source_tokens)
-        trace = (
-            self._empty_trace(
-                response_tokens, source_tokens, k, dtype, retain_raw=retain_raw
-            )
+        intervene = any(removals)
+        roles_device = (
+            source_roles(prompt_roles, response_start, len(ids)).to(self.device)
             if capture
             else None
         )
-        values = [
-            torch.empty(
-                batch,
-                source_tokens,
-                self.kv_heads,
-                self.head_dim,
-                dtype=dtype,
-                device=self.device,
-            )
-            for _ in self.layers
-        ]
+        k = min(top_k, source_tokens)
+        trace = self._empty_trace(response_tokens, k) if capture else None
+        values = (
+            [
+                torch.empty(
+                    batch,
+                    source_tokens,
+                    self.kv_heads,
+                    self.head_dim,
+                    dtype=dtype,
+                    device=self.device,
+                )
+                for _ in self.layers
+            ]
+            if intervene
+            else None
+        )
         source_norms = (
             [
                 torch.empty(
@@ -248,15 +230,8 @@ class FunctionalTraceReplay:
             if capture
             else None
         )
-        score_fields = {
-            name: torch.empty(batch, response_tokens, dtype=field_dtype)
-            for name, field_dtype in (
-                ("target_logit", torch.float32),
-                ("target_logprob", torch.float32),
-                ("target_margin", torch.float32),
-                ("top1_token_id", torch.long),
-            )
-        }
+        logprob = torch.empty(batch, response_tokens)
+        margin = torch.empty(batch, response_tokens)
         query_start = query_stop = 0
         remove_mask = None
         handles = []
@@ -273,49 +248,11 @@ class FunctionalTraceReplay:
                 current = output.reshape(
                     batch, query_stop - query_start, self.kv_heads, self.head_dim
                 )
-                values[index][:, query_start:query_stop].copy_(current)
+                if intervene:
+                    values[index][:, query_start:query_stop].copy_(current)
                 if capture:
-                    current_by_head = current[
-                        0, :, self.q_to_kv.to(self.device), :
-                    ].float()
-                    source_norms[index][query_start:query_stop] = torch.einsum(
-                        "shd,hde,she->sh",
-                        current_by_head,
-                        self.output_grams[index],
-                        current_by_head,
-                    ).clamp_min(0).sqrt()
-
-            return hook
-
-        def layer_input_hook(index: int):
-            def hook(_module: Any, args: tuple[Any, ...]) -> None:
-                window = response_window()
-                if capture and retain_raw and window is not None:
-                    local, row_start, row_stop = window
-                    trace["residual_input"][index, row_start:row_stop] = (
-                        args[0][0, local:].detach().cpu()
-                    )
-
-            return hook
-
-        def o_proj_input_hook(index: int):
-            def hook(_module: Any, args: tuple[Any, ...]) -> None:
-                window = response_window()
-                if capture and retain_raw and window is not None:
-                    local, row_start, row_stop = window
-                    trace["o_proj_input"][index, row_start:row_stop] = (
-                        args[0][0, local:].detach().cpu()
-                    )
-
-            return hook
-
-        def mlp_hook(index: int):
-            def hook(_module: Any, _args: Any, output: Any) -> None:
-                window = response_window()
-                if capture and retain_raw and window is not None:
-                    local, row_start, row_stop = window
-                    trace["mlp_update"][index, row_start:row_stop] = (
-                        self._tensor(output)[0, local:].detach().cpu()
+                    source_norms[index][query_start:query_stop] = self._source_norm(
+                        index, current[0]
                     )
 
             return hook
@@ -324,9 +261,6 @@ class FunctionalTraceReplay:
             def hook(_module: Any, _args: Any, output: Any):
                 parts = list(output)
                 message, attention = parts[0], parts[1]
-                value_by_head = values[index][
-                    :, :query_stop, self.q_to_kv.to(self.device), :
-                ]
                 window = response_window()
 
                 if capture and window is not None:
@@ -335,10 +269,11 @@ class FunctionalTraceReplay:
                     current_roles = roles_device[row_start:row_stop, :query_stop]
                     source_norm = source_norms[index][:query_stop]
                     edge_magnitude = a.float() * source_norm.T[None]
-                    role_edge = []
-                    for role in range(len(ROLE_NAMES)):
-                        mask = (current_roles == role)[:, None, :]
-                        role_edge.append((edge_magnitude * mask).sum(-1))
+                    response_mask = current_roles == HISTORY
+                    response_mask |= (current_roles == SELF) & (
+                        torch.arange(row_start, row_stop, device=self.device)[:, None]
+                        > 0
+                    )
                     source_magnitude = edge_magnitude.sum(1)
                     probability = source_magnitude / source_magnitude.sum(
                         -1, keepdim=True
@@ -351,15 +286,20 @@ class FunctionalTraceReplay:
                         current_k, dim=-1
                     )
 
-                    if retain_raw:
-                        trace["attention"][
-                            index, :, row_start:row_stop, :query_stop
-                        ] = attention[0, :, local:, :query_stop].detach().cpu()
-                        trace["attention_update"][index, row_start:row_stop] = (
-                            message[0, local:].detach().cpu()
-                        )
-                    trace["role_edge_magnitude"][index, row_start:row_stop] = (
-                        torch.stack(role_edge, -1).detach().cpu()
+                    trace["total_message_magnitude"][index, row_start:row_stop] = (
+                        source_magnitude.sum(-1).detach().cpu()
+                    )
+                    trace["evidence_message_magnitude"][index, row_start:row_stop] = (
+                        (edge_magnitude * (current_roles == EVIDENCE)[:, None])
+                        .sum((1, 2))
+                        .detach()
+                        .cpu()
+                    )
+                    trace["response_message_magnitude"][index, row_start:row_stop] = (
+                        (edge_magnitude * response_mask[:, None])
+                        .sum((1, 2))
+                        .detach()
+                        .cpu()
                     )
                     trace["source_message_entropy"][index, row_start:row_stop] = (
                         entropy.detach().cpu()
@@ -376,19 +316,17 @@ class FunctionalTraceReplay:
                     )
 
                 if remove_mask is not None:
+                    value_by_head = values[index][
+                        :, :query_stop, self.q_to_kv, :
+                    ]
                     removed_context = torch.einsum(
                         "bhqs,bshd->bqhd",
                         attention * remove_mask[:, None],
                         value_by_head,
                     )
-                    removed_write = F.linear(
-                        removed_context.reshape(
-                            batch, query_stop - query_start, self.hidden
-                        ),
-                        layer.self_attn.o_proj.weight,
-                        bias=None,
+                    parts[0] = message - self._removed_write(
+                        index, removed_context
                     )
-                    parts[0] = message - removed_write
                 parts[1] = None
                 return tuple(parts)
 
@@ -397,14 +335,6 @@ class FunctionalTraceReplay:
         for index, layer in enumerate(self.layers):
             handles.append(layer.self_attn.v_proj.register_forward_hook(v_hook(index)))
             handles.append(layer.self_attn.register_forward_hook(attention_hook(index)))
-            if retain_raw:
-                handles.append(layer.register_forward_pre_hook(layer_input_hook(index)))
-                handles.append(
-                    layer.self_attn.o_proj.register_forward_pre_hook(
-                        o_proj_input_hook(index)
-                    )
-                )
-                handles.append(layer.mlp.register_forward_hook(mlp_hook(index)))
 
         try:
             past = None
@@ -418,7 +348,7 @@ class FunctionalTraceReplay:
                         query_start,
                         query_stop,
                     )
-                    output = self.backbone(
+                    output = self.model.model(
                         input_ids=ids[None, query_start:query_stop].expand(batch, -1),
                         attention_mask=torch.ones(
                             batch, query_stop, dtype=torch.long, device=self.device
@@ -439,30 +369,18 @@ class FunctionalTraceReplay:
                         response_start + row_start : response_start + row_stop
                     ]
                     for branch in range(batch):
-                        current = self._target_scores(
+                        score = self._target_scores(
                             hidden[branch], targets, chunk=logit_chunk
                         )
-                        for name in score_fields:
-                            score_fields[name][branch, row_start:row_stop] = getattr(
-                                current, name
-                            )
-                    if capture and retain_raw:
-                        trace["final_hidden"][row_start:row_stop] = (
-                            hidden[0].detach().cpu()
-                        )
+                        logprob[branch, row_start:row_stop] = score.logprob
+                        margin[branch, row_start:row_stop] = score.margin
         finally:
             for handle in handles:
                 handle.remove()
 
-        scores = [
-            BranchScores(**{name: value[branch] for name, value in score_fields.items()})
-            for branch in range(batch)
-        ]
+        scores = [BranchScores(logprob[i], margin[i]) for i in range(batch)]
         if not capture:
             return scores, None
-        if retain_raw:
-            trace["value_states"] = torch.stack([value[0].cpu() for value in values])
-        trace["source_role"] = roles
         return scores, trace
 
     def capture(
@@ -475,9 +393,8 @@ class FunctionalTraceReplay:
         top_k: int = 8,
         logit_chunk: int = 64,
         intervention_batch: int = 3,
-        retain_raw: bool = True,
     ) -> dict[str, Any]:
-        """Save one mechanism trace and three same-sample message-deletion branches."""
+        """Save compact message statistics and three causal deletion branches."""
 
         token_ids = torch.as_tensor(token_ids, dtype=torch.long, device="cpu")
         prompt_roles = torch.as_tensor(prompt_roles, dtype=torch.int8, device="cpu")
@@ -489,34 +406,25 @@ class FunctionalTraceReplay:
             prompt_roles,
             removals=(None,),
             capture=True,
-            retain_raw=retain_raw,
             predictor_chunk=predictor_chunk,
             top_k=top_k,
             logit_chunk=logit_chunk,
         )
-        branches = {"full": full_scores[0]}
-        branch_specs = (
-            ("evidence_removed", "evidence"),
-            ("response_removed", "response"),
-            ("evidence_response_removed", "both"),
-        )
-        for start in range(0, len(branch_specs), intervention_batch):
-            current_specs = branch_specs[start : start + intervention_batch]
-            current_scores, _ = self._forward(
+        removals = ("evidence", "response", "both")
+        intervened = []
+        for start in range(0, len(removals), intervention_batch):
+            scores, _ = self._forward(
                 token_ids,
                 response_start,
                 prompt_roles,
-                removals=tuple(removal for _name, removal in current_specs),
+                removals=removals[start : start + intervention_batch],
                 capture=False,
-                retain_raw=False,
                 predictor_chunk=predictor_chunk,
                 top_k=top_k,
                 logit_chunk=logit_chunk,
             )
-            branches.update(
-                (name, score)
-                for (name, _removal), score in zip(current_specs, current_scores)
-            )
+            intervened.extend(scores)
+        no_evidence, no_response, no_evidence_response = intervened
         peak = (
             int(torch.cuda.max_memory_reserved(self.device))
             if self.device.type == "cuda"
@@ -525,27 +433,12 @@ class FunctionalTraceReplay:
         return {
             "token_ids": token_ids,
             "response_start": int(response_start),
-            "predictor_positions": predictor_positions(response_start, len(token_ids)),
-            "target_ids": token_ids[response_start:],
-            "prompt_role": prompt_roles,
-            "role_names": ROLE_NAMES,
             "trace": trace,
-            "scores": {
-                name: {
-                    field: getattr(score, field)
-                    for field in BranchScores.__dataclass_fields__
-                }
-                for name, score in branches.items()
+            "score_inputs": {
+                "full_logprob": full_scores[0].logprob,
+                "no_evidence_logprob": no_evidence.logprob,
+                "no_response_logprob": no_response.logprob,
+                "no_evidence_response_margin": no_evidence_response.margin,
             },
             "peak_cuda_reserved_bytes": peak,
         }
-
-
-__all__ = [
-    "FunctionalTraceReplay",
-    "HISTORY",
-    "ROLE_NAMES",
-    "SELF",
-    "predictor_positions",
-    "source_roles",
-]

@@ -11,13 +11,12 @@ TOKEN_CHUNK=${TOKEN_CHUNK:-128}
 INTERVENTION_BATCH=${INTERVENTION_BATCH:-3}
 TOP_K=${TOP_K:-8}
 LOGIT_CHUNK=${LOGIT_CHUNK:-64}
-TRACE_LEVEL=${TRACE_LEVEL:-mechanism}
 BOOTSTRAP=${BOOTSTRAP:-1000}
 SEED=${SEED:-20260828}
 LIMIT=${LIMIT:-}
 
 MODEL_TAG=${MODEL_TAG:-$(basename "${MODEL_PATH%/}")}
-OUT=${OUT:-${REPO}/experiments/attention_mechanism_audit/outputs/qa/${MODEL_TAG}_teacher_forced_seed${SEED}}
+OUT=${OUT:-${REPO}/experiments/attention_mechanism_audit/outputs/qa/${MODEL_TAG}_causal_route_v3_seed${SEED}}
 TRAIN_ROOT=${TRAIN_ROOT:-${CACHE_ROOT}/train}
 TEST_ROOT=${TEST_ROOT:-${CACHE_ROOT}/test}
 TRAIN_TRACES=${TRAIN_TRACES:-${OUT}/train/traces}
@@ -25,10 +24,6 @@ TEST_TRACES=${TEST_TRACES:-${OUT}/test/traces}
 
 cd "${REPO}" || exit $?
 mkdir -p "${OUT}" || exit $?
-
-if [ -f "${OUT}/traces/index.jsonl" ] && [ ! -f "${TEST_TRACES}/index.jsonl" ]; then
-  TEST_TRACES=${OUT}/traces
-fi
 
 LIMIT_ARGUMENT=()
 if [ -n "${LIMIT}" ]; then
@@ -51,7 +46,6 @@ capture_shard() {
     --intervention-batch "${INTERVENTION_BATCH}" \
     --top-k "${TOP_K}" \
     --logit-chunk "${LOGIT_CHUNK}" \
-    --trace-level "${TRACE_LEVEL}" \
     "${LIMIT_ARGUMENT[@]}"
   STATUS=$?
   if [ "${STATUS}" -ne 0 ]; then
@@ -65,7 +59,7 @@ capture_shard train "${TRAIN_ROOT}" "${TRAIN_TRACES}"
 capture_shard test "${TEST_ROOT}" "${TEST_TRACES}"
 
 echo
-echo "[2/2] Pool every cached QA token and evaluate once"
+echo "[2/2] Pool captured QA tokens and evaluate once"
 "${PYTHON}" -m experiments.attention_mechanism_audit.run evaluate \
   --input "${TRAIN_TRACES}" "${TRAIN_ROOT}" \
   --input "${TEST_TRACES}" "${TEST_ROOT}" \

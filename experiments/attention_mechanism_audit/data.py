@@ -3,15 +3,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Mapping
 
 import numpy as np
 
-
 ROLE_NAMES = ("evidence", "question", "constraint", "other_prompt")
 EVIDENCE, QUESTION, CONSTRAINT, OTHER_PROMPT = range(len(ROLE_NAMES))
-ROLE_TO_ID = {name: index for index, name in enumerate(ROLE_NAMES)}
 HISTORICAL_SYSTEM_PROMPT = "You are a helpful assistant."
 
 
@@ -65,14 +63,6 @@ def _qa_character_roles(source: Mapping) -> np.ndarray:
     return roles
 
 
-def _encoding_arrays(encoding) -> tuple[np.ndarray, np.ndarray]:
-    input_ids = encoding["input_ids"]
-    offsets = encoding["offset_mapping"]
-    if input_ids and isinstance(input_ids[0], list):
-        input_ids, offsets = input_ids[0], offsets[0]
-    return np.asarray(input_ids, dtype=np.int64), np.asarray(offsets, dtype=np.int64)
-
-
 def _cpu_array(values) -> np.ndarray:
     if hasattr(values, "detach"):
         values = values.detach().cpu().numpy()
@@ -97,7 +87,8 @@ def build_prompt_role_ids(
         add_special_tokens=False,
         return_offsets_mapping=True,
     )
-    rebuilt_ids, offsets = _encoding_arrays(encoded)
+    rebuilt_ids = np.asarray(encoded["input_ids"], dtype=np.int64)
+    offsets = np.asarray(encoded["offset_mapping"], dtype=np.int64)
     cached_prefix = _cpu_array(cached_token_ids)[:response_start]
     if rebuilt_ids.shape != (response_start,) or not np.array_equal(
         rebuilt_ids, cached_prefix

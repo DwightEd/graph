@@ -1,34 +1,41 @@
 import json
+import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
-import torch
+import pytest
+
+torch = pytest.importorskip("torch")
 
 import experiments.attention_mechanism_audit.evaluate as evaluate
-from experiments.attention_mechanism_audit.capture import HISTORY, ROLE_NAMES
-from experiments.attention_mechanism_audit.data import EVIDENCE
 
 
 def _artifact() -> dict:
-    edge = torch.zeros(2, 2, 1, len(ROLE_NAMES))
-    edge[:, 0, 0, EVIDENCE] = 1
-    edge[0, 1, 0, EVIDENCE] = 3
-    edge[0, 1, 0, HISTORY] = 1
-    edge[1, 1, 0, EVIDENCE] = 1
-    edge[1, 1, 0, HISTORY] = 3
     return {
+        "token_ids": torch.tensor([10, 11, 12, 13, 14]),
+        "response_start": 3,
         "trace": {
-            "role_edge_magnitude": edge,
+            "total_message_magnitude": torch.tensor([[1.0, 4.0], [1.0, 4.0]]),
+            "evidence_message_magnitude": torch.tensor(
+                [[1.0, 3.0], [1.0, 1.0]]
+            ),
+            "response_message_magnitude": torch.tensor(
+                [[0.0, 1.0], [0.0, 3.0]]
+            ),
             "source_message_entropy": torch.tensor(
                 [[0.0, np.log(2)], [0.0, np.log(4)]]
             ),
-            "source_role": torch.tensor(
-                [[EVIDENCE, -1, -1, -1], [EVIDENCE, HISTORY, 2, 3]]
+            "top_source_index": torch.tensor(
+                [[[0, 1], [1, 2]], [[0, 2], [2, 3]]], dtype=torch.int32
             ),
+            "top_source_magnitude": torch.ones(2, 2, 2),
         },
-        "mechanism": {
-            "evidence_message_effect": torch.tensor([0.5, -1.0]),
-            "response_message_effect": torch.tensor([0.2, 2.0]),
-            "evidence_response_removed_margin": torch.tensor([0.2, 0.9]),
+        "score_inputs": {
+            "full_logprob": torch.tensor([-1.0, -2.0]),
+            "no_evidence_logprob": torch.tensor([-1.5, -1.0]),
+            "no_response_logprob": torch.tensor([-1.2, -4.0]),
+            "no_evidence_response_margin": torch.tensor([0.2, 0.9]),
         },
     }
 
@@ -78,7 +85,6 @@ def test_physical_shards_are_pooled_before_one_evaluation(tmp_path, monkeypatch)
             "label": label,
             "sample_id": np.asarray([name, name]),
             "source_id": np.asarray([name, name]),
-            "split": np.asarray([name, name]),
             "token_index": np.asarray([0, 1], dtype=np.int32),
             "response_length": np.asarray([2, 2], dtype=np.int32),
             **{
@@ -91,10 +97,16 @@ def test_physical_shards_are_pooled_before_one_evaluation(tmp_path, monkeypatch)
         "train": shard("train", [0.9, 1.0]),
         "test": shard("test", [0.0, 0.1]),
     }
+    events = []
     monkeypatch.setattr(
         evaluate,
-        "_load_input",
-        lambda traces, _cache: pieces[traces.name],
+        "_load_scores",
+        lambda traces: events.append(f"score:{traces.name}") or traces.name,
+    )
+    monkeypatch.setattr(
+        evaluate,
+        "_add_labels",
+        lambda name, _cache: events.append(f"label:{name}") or pieces[name],
     )
     plotted = []
     monkeypatch.setattr(
@@ -106,7 +118,14 @@ def test_physical_shards_are_pooled_before_one_evaluation(tmp_path, monkeypatch)
         root = tmp_path / name
         root.mkdir()
         (root / "manifest.json").write_text(
-            json.dumps({"complete": True}),
+            json.dumps(
+                {
+                    "schema": evaluate.SCHEMA,
+                    "version": evaluate.VERSION,
+                    "split_root": str(Path(f"cache/{name}").resolve()),
+                    "complete": True,
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -128,6 +147,53 @@ def test_physical_shards_are_pooled_before_one_evaluation(tmp_path, monkeypatch)
     )
     assert "by_split" not in report
     assert len(plotted) == 1
+    assert events == ["score:train", "score:test", "label:train", "label:test"]
     assert output.is_file()
     assert (tmp_path / "token_scores.npz").is_file()
     json.loads(output.read_text(encoding="utf-8"))
+
+
+def test_sample_plot_consumes_only_the_compact_trace(tmp_path, monkeypatch):
+    class FakeTokenizer:
+        @classmethod
+        def from_pretrained(cls, *_args, **_kwargs):
+            return cls()
+
+        def convert_ids_to_tokens(self, values):
+            if isinstance(values, list):
+                return [f"t{value}" for value in values]
+            return f"t{values}"
+
+    seen = {}
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        SimpleNamespace(AutoTokenizer=FakeTokenizer),
+    )
+    monkeypatch.setattr(evaluate, "_load_manifest", lambda *_args: {})
+    monkeypatch.setattr(
+        evaluate,
+        "load_index",
+        lambda _root: [{"sample_id": "sample", "path": "sample.pt"}],
+    )
+    monkeypatch.setattr(evaluate.torch, "load", lambda *_args, **_kwargs: _artifact())
+    monkeypatch.setattr(
+        evaluate,
+        "plot_sample_dashboard",
+        lambda record, layers, output: seen.update(
+            record=record, layers=layers, output=output
+        ),
+    )
+
+    result = evaluate.plot_saved_sample(
+        inputs=[tmp_path / "traces"],
+        sample_id="sample",
+        model_path=tmp_path / "model",
+        output=tmp_path / "sample.png",
+    )
+
+    assert result["sample_id"] == "sample"
+    assert seen["record"]["token_text"] == ["t13", "t14"]
+    assert seen["record"]["source_flow"].shape == (4, 2)
+    assert "label" not in seen["record"]
+    assert seen["layers"]["routing_imbalance"].shape == (2, 2)

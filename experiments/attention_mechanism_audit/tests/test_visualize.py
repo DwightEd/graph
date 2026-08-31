@@ -2,11 +2,13 @@ from pathlib import Path
 
 import numpy as np
 
-from experiments.attention_mechanism_audit.evaluate import SCORE_ORDER
 from experiments.attention_mechanism_audit.visualize import (
+    SCORE_LABELS,
     plot_population,
     plot_sample_dashboard,
 )
+
+SCORE_ORDER = tuple(SCORE_LABELS)
 
 
 def _assert_png(path: Path) -> None:
@@ -53,7 +55,6 @@ def test_one_sample_figure_is_only_an_explicit_call(tmp_path):
     record = {
         "sample_id": "11907",
         "token_text": ["A", "B"],
-        "label": np.asarray([0, 1]),
         "evidence_effect": np.asarray([0.5, -0.2]),
         "response_effect": np.asarray([0.1, 0.8]),
         "source_token_text": ["0:A", "1:B"],
