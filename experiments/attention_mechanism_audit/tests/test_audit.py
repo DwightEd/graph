@@ -10,7 +10,7 @@ torch = pytest.importorskip("torch")
 import experiments.attention_mechanism_audit.audit as audit_module
 
 
-def test_capture_split_resumes_from_the_journal_without_replaying_samples(
+def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     tmp_path, monkeypatch
 ):
     class FakeAttention:
@@ -38,8 +38,8 @@ def test_capture_split_resumes_from_the_journal_without_replaying_samples(
     samples = {
         "summary": FakeSample("summary", "Summary", 10),
         "qa-1": FakeSample("qa-1", "QA", 11),
-        "qa-2": FakeSample("qa-2", "qa", 12),
-        "qa-3": FakeSample("qa-3", "QA", 13),
+        "data2txt": FakeSample("data2txt", "Data2txt", 12),
+        "qa-2": FakeSample("qa-2", "qa", 13),
     }
 
     class FakeDataset:
@@ -52,7 +52,9 @@ def test_capture_split_resumes_from_the_journal_without_replaying_samples(
     capture_calls = []
 
     class FakeReplay:
-        def capture(self, token_ids, response_start, _roles, **kwargs):
+        def capture(self, token_ids, response_start, evidence_mask, **kwargs):
+            assert evidence_mask.dtype == torch.bool
+            assert evidence_mask.shape == (2,)
             capture_calls.append(int(token_ids[1]))
             return {
                 "token_ids": token_ids.clone(),
@@ -82,8 +84,8 @@ def test_capture_split_resumes_from_the_journal_without_replaying_samples(
     )
     monkeypatch.setattr(
         audit_module,
-        "build_prompt_role_ids",
-        lambda *_args: np.zeros(2, dtype=np.int8),
+        "build_evidence_mask",
+        lambda *_args: np.zeros(2, dtype=bool),
     )
     monkeypatch.setattr(
         audit_module.FunctionalTraceReplay,
@@ -105,21 +107,32 @@ def test_capture_split_resumes_from_the_journal_without_replaying_samples(
         "device": "cpu",
         "dtype": torch.float32,
     }
-    first = audit_module.capture_split(**common, limit=2)
+    first = audit_module.capture_split(**common, limit=1)
 
-    assert first["samples"] == 2
+    assert first["samples"] == 3
     assert first["resumed_samples"] == 0
-    assert first["new_samples"] == 2
-    assert first["selected_qa_seen"] == 2
-    assert first["eligible_qa"] is None
+    assert first["new_samples"] == 3
+    assert first["selected_samples_seen"] == 3
+    assert first["eligible_samples"] is None
     assert first["complete"] is False
-    assert capture_calls == [11, 12]
+    assert first["version"] == 4
+    assert first["task_types"] == ["QA", "Summary", "Data2txt"]
+    assert capture_calls == [10, 11, 12]
     first_rows = [
         json.loads(line)
         for line in (output / "index.jsonl").read_text(encoding="utf-8").splitlines()
     ]
-    assert [row["sample_id"] for row in first_rows] == ["qa-1", "qa-2"]
-    saved = torch.load(output / "samples" / "qa-1.pt", weights_only=True)
+    assert [row["sample_id"] for row in first_rows] == [
+        "summary",
+        "qa-1",
+        "data2txt",
+    ]
+    assert [row["task_type"] for row in first_rows] == [
+        "Summary",
+        "QA",
+        "Data2txt",
+    ]
+    saved = torch.load(output / "samples" / "summary.pt", weights_only=True)
     assert set(saved) == {"token_ids", "response_start", "trace", "score_inputs"}
     assert set(saved["score_inputs"]) == {
         "full_logprob",
@@ -129,36 +142,47 @@ def test_capture_split_resumes_from_the_journal_without_replaying_samples(
     }
     second = audit_module.capture_split(**common)
 
-    assert second["samples"] == 3
-    assert second["resumed_samples"] == 2
+    assert second["samples"] == 4
+    assert second["resumed_samples"] == 3
     assert second["new_samples"] == 1
-    assert second["selected_qa_seen"] == 3
-    assert second["eligible_qa"] == 3
+    assert second["selected_samples_seen"] == 4
+    assert second["eligible_samples"] == 4
     assert second["complete"] is True
-    assert capture_calls == [11, 12, 13]
+    assert capture_calls == [10, 11, 12, 13]
+    assert samples["summary"].attention_calls == 1
     assert samples["qa-1"].attention_calls == 1
-    assert samples["qa-2"].attention_calls == 1
     final_rows = [
         json.loads(line)
         for line in (output / "index.jsonl").read_text(encoding="utf-8").splitlines()
     ]
-    assert [row["sample_id"] for row in final_rows] == ["qa-1", "qa-2", "qa-3"]
+    assert [row["sample_id"] for row in final_rows] == [
+        "summary",
+        "qa-1",
+        "data2txt",
+        "qa-2",
+    ]
+    assert [row["task_type"] for row in final_rows] == [
+        "Summary",
+        "QA",
+        "Data2txt",
+        "QA",
+    ]
     assert len({row["sample_id"] for row in final_rows}) == len(final_rows)
 
     third = audit_module.capture_split(**common, limit=1)
 
     assert third["complete"] is True
-    assert third["eligible_qa"] == 3
-    assert third["selected_qa_seen"] == 1
-    assert capture_calls == [11, 12, 13]
+    assert third["eligible_samples"] == 4
+    assert third["selected_samples_seen"] == 3
+    assert capture_calls == [10, 11, 12, 13]
 
     (output / "manifest.json").unlink()
-    with pytest.raises(ValueError, match="index exists without a v3 manifest"):
+    with pytest.raises(ValueError):
         audit_module.capture_split(**common)
-    assert capture_calls == [11, 12, 13]
+    assert capture_calls == [10, 11, 12, 13]
 
     (output / "manifest.json").write_text(
-        json.dumps({"schema": audit_module.SCHEMA, "version": 2}), encoding="utf-8"
+        json.dumps({"schema": audit_module.SCHEMA, "version": 3}), encoding="utf-8"
     )
     with pytest.raises(ValueError, match="changed provenance"):
         audit_module.capture_split(**common)

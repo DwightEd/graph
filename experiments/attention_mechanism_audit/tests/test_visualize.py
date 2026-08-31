@@ -19,16 +19,8 @@ def _assert_png(path: Path) -> None:
 
 def test_population_figures_use_all_token_arrays(tmp_path):
     label = np.asarray([0, 0, 1, 1], dtype=bool)
-    scores = {
-        name: np.asarray([0.0, 0.2, 0.8, 1.0])
-        for name in SCORE_ORDER
-    }
-    report = {
-        "detection": {
-            name: {"auroc": 1.0}
-            for name in SCORE_ORDER
-        }
-    }
+    scores = {name: np.asarray([0.0, 0.2, 0.8, 1.0]) for name in SCORE_ORDER}
+    report = {"detection": {name: {"auroc": 1.0} for name in SCORE_ORDER}}
 
     plot_population(
         label,

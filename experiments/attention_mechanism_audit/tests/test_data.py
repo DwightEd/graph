@@ -4,12 +4,8 @@ import numpy as np
 import pytest
 
 from experiments.attention_mechanism_audit.data import (
-    CONSTRAINT,
-    EVIDENCE,
     HISTORICAL_SYSTEM_PROMPT,
-    OTHER_PROMPT,
-    QUESTION,
-    build_prompt_role_ids,
+    build_evidence_mask,
     load_source_info,
     render_historical_prompt,
 )
@@ -49,9 +45,29 @@ def qa_source():
         "task_type": "QA",
         "source_info": {
             "question": "Where is Ada?",
-            "passages": "Ada is in Paris.",
+            "passages": "Ada is in Paris.\n",
         },
         "prompt": prompt,
+    }
+
+
+def summary_source():
+    evidence = "Ada moved to Paris. She works there."
+    return {
+        "source_id": "source-2",
+        "task_type": "Summary",
+        "source_info": evidence,
+        "prompt": f"Summarize the following news within 20 words:\n{evidence}\noutput:",
+    }
+
+
+def data2txt_source():
+    evidence = {"name": "Ada's Cafe", "city": "Paris", "WiFi": None}
+    return {
+        "source_id": "source-3",
+        "task_type": "Data2txt",
+        "source_info": evidence,
+        "prompt": f"Instruction:\nUse only this data.\nStructured data:\n{evidence}\nOverview:",
     }
 
 
@@ -75,34 +91,28 @@ def test_duplicate_source_id_is_rejected(tmp_path):
         load_source_info(path)
 
 
-def test_prompt_roles_exactly_partition_cached_prompt():
+@pytest.mark.parametrize("source", [qa_source(), summary_source(), data2txt_source()])
+def test_evidence_mask_exactly_matches_each_task_source(source):
     tokenizer = CharacterTokenizer()
-    source = qa_source()
     rendered = render_historical_prompt(tokenizer, source["prompt"])
     cached_ids = np.asarray([ord(character) for character in rendered] + [999])
 
-    roles = build_prompt_role_ids(
+    mask = build_evidence_mask(
         source,
         tokenizer,
         cached_ids,
         response_start=len(rendered),
     )
 
-    prompt_start = rendered.index(source["prompt"])
-    question_start = rendered.index("Where is Ada?", prompt_start)
-    evidence_start = rendered.index("Ada is in Paris.", prompt_start)
-    constraint_start = rendered.index("Answer the question:", prompt_start)
-    assert roles.dtype == np.int8
-    assert roles.shape == (len(rendered),)
-    assert roles[0] == OTHER_PROMPT
-    assert roles[constraint_start] == CONSTRAINT
-    assert np.all(
-        roles[question_start : question_start + len("Where is Ada?")] == QUESTION
-    )
-    assert np.all(
-        roles[evidence_start : evidence_start + len("Ada is in Paris.")] == EVIDENCE
-    )
-    assert roles[-1] == OTHER_PROMPT
+    evidence = source["source_info"]
+    if source["task_type"] == "QA":
+        evidence = evidence["passages"].removesuffix("\n")
+    evidence = str(evidence)
+    evidence_start = rendered.index(source["prompt"]) + source["prompt"].index(evidence)
+    expected = np.zeros(len(rendered), dtype=bool)
+    expected[evidence_start : evidence_start + len(evidence)] = True
+    assert mask.dtype == bool
+    assert np.array_equal(mask, expected)
 
 
 def test_rebuilt_prompt_must_equal_cached_prefix():
@@ -113,7 +123,7 @@ def test_rebuilt_prompt_must_equal_cached_prefix():
     cached_ids[len(cached_ids) // 2] += 1
 
     with pytest.raises(ValueError, match="exactly match cached token prefix"):
-        build_prompt_role_ids(
+        build_evidence_mask(
             source,
             tokenizer,
             cached_ids,
@@ -121,9 +131,9 @@ def test_rebuilt_prompt_must_equal_cached_prefix():
         )
 
 
-def test_only_qa_roles_are_built():
+def test_unknown_task_is_rejected():
     tokenizer = CharacterTokenizer()
-    source = {**qa_source(), "task_type": "Summary"}
+    source = {**qa_source(), "task_type": "Translation"}
 
-    with pytest.raises(ValueError, match="supports QA only"):
-        build_prompt_role_ids(source, tokenizer, [], response_start=1)
+    with pytest.raises(ValueError, match="unsupported task type"):
+        build_evidence_mask(source, tokenizer, [], response_start=1)

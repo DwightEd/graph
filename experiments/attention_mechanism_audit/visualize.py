@@ -59,7 +59,7 @@ def _detection_curves(
         axis.set_ylim(0, 1)
         axis.grid(alpha=0.18)
     axes[1].legend(frameon=False, fontsize=8)
-    figure.suptitle("Pooled captured QA tokens")
+    figure.suptitle("Pooled captured response tokens")
     figure.savefig(output, dpi=180)
     plt.close(figure)
 
@@ -126,7 +126,7 @@ def _mechanisms_by_position(
             ylabel="Mean token score",
         )
         axis.grid(alpha=0.18)
-    figure.suptitle("Mechanism dynamics over pooled captured QA responses")
+    figure.suptitle("Mechanism dynamics over pooled captured responses")
     figure.savefig(output, dpi=180)
     plt.close(figure)
 

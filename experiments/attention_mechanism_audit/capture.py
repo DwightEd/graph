@@ -10,36 +10,6 @@ from typing import Any
 import torch
 from torch.nn import functional as F
 
-from .data import EVIDENCE
-from .data import ROLE_NAMES as PROMPT_ROLE_NAMES
-
-HISTORY = len(PROMPT_ROLE_NAMES)
-SELF = HISTORY + 1
-
-
-def predictor_positions(response_start: int, token_count: int) -> torch.Tensor:
-    """Position ``q`` predicts response token ``token_ids[q + 1]``."""
-
-    return torch.arange(response_start - 1, token_count - 1, dtype=torch.long)
-
-
-def source_roles(
-    prompt_roles: torch.Tensor,
-    response_start: int,
-    token_count: int,
-) -> torch.Tensor:
-    """Role of every causal source for every response-token predictor."""
-
-    predictors = predictor_positions(response_start, token_count)
-    source_count = token_count - 1
-    roles = torch.full((len(predictors), source_count), -1, dtype=torch.int8)
-    roles[:, :response_start] = prompt_roles.to(torch.int8)
-    for row, query in enumerate(predictors.tolist()):
-        if query >= response_start:
-            roles[row, response_start:query] = HISTORY
-        roles[row, query] = SELF
-    return roles
-
 
 @dataclass
 class BranchScores:
@@ -95,9 +65,11 @@ class FunctionalTraceReplay:
         """Return ``||W_O[h] V[s, kv(h)]||`` for every source and query head."""
 
         value = value[:, self.q_to_kv].float()
-        return torch.einsum(
-            "shd,hde,she->sh", value, self.output_grams[index], value
-        ).clamp_min(0).sqrt()
+        return (
+            torch.einsum("shd,hde,she->sh", value, self.output_grams[index], value)
+            .clamp_min(0)
+            .sqrt()
+        )
 
     def _removed_write(
         self,
@@ -133,7 +105,7 @@ class FunctionalTraceReplay:
     def _removal_mask(
         self,
         removals: tuple[str | None, ...],
-        prompt_roles: torch.Tensor,
+        evidence_mask: torch.Tensor,
         response_start: int,
         query_start: int,
         query_stop: int,
@@ -145,7 +117,7 @@ class FunctionalTraceReplay:
         causal = source[None] <= query[:, None]
         evidence = torch.zeros(query_stop, dtype=torch.bool, device=self.device)
         prompt_stop = min(response_start, query_stop)
-        evidence[:prompt_stop] = prompt_roles[:prompt_stop].to(self.device) == EVIDENCE
+        evidence[:prompt_stop] = evidence_mask[:prompt_stop].to(self.device)
         response = source >= response_start
         masks = []
         for removal in removals:
@@ -181,7 +153,7 @@ class FunctionalTraceReplay:
         self,
         token_ids: torch.Tensor,
         response_start: int,
-        prompt_roles: torch.Tensor,
+        evidence_mask: torch.Tensor,
         *,
         removals: tuple[str | None, ...],
         capture: bool,
@@ -195,11 +167,7 @@ class FunctionalTraceReplay:
         batch = len(removals)
         dtype = self.model.get_input_embeddings().weight.dtype
         intervene = any(removals)
-        roles_device = (
-            source_roles(prompt_roles, response_start, len(ids)).to(self.device)
-            if capture
-            else None
-        )
+        evidence_device = evidence_mask.to(self.device)
         k = min(top_k, source_tokens)
         trace = self._empty_trace(response_tokens, k) if capture else None
         values = (
@@ -266,37 +234,37 @@ class FunctionalTraceReplay:
                 if capture and window is not None:
                     local, row_start, row_stop = window
                     a = attention[0, :, local:, :query_stop].permute(1, 0, 2)
-                    current_roles = roles_device[row_start:row_stop, :query_stop]
                     source_norm = source_norms[index][:query_stop]
                     edge_magnitude = a.float() * source_norm.T[None]
-                    response_mask = current_roles == HISTORY
-                    response_mask |= (current_roles == SELF) & (
-                        torch.arange(row_start, row_stop, device=self.device)[:, None]
-                        > 0
+                    evidence = torch.zeros(
+                        query_stop, dtype=torch.bool, device=self.device
+                    )
+                    prompt_stop = min(response_start, query_stop)
+                    evidence[:prompt_stop] = evidence_device[:prompt_stop]
+                    response = (
+                        torch.arange(query_stop, device=self.device) >= response_start
                     )
                     source_magnitude = edge_magnitude.sum(1)
                     probability = source_magnitude / source_magnitude.sum(
                         -1, keepdim=True
                     ).clamp_min(1e-12)
-                    entropy = -(
-                        probability * probability.clamp_min(1e-12).log()
-                    ).sum(-1)
-                    current_k = min(k, query_stop)
-                    top_magnitude, top_index = source_magnitude.topk(
-                        current_k, dim=-1
+                    entropy = -(probability * probability.clamp_min(1e-12).log()).sum(
+                        -1
                     )
+                    current_k = min(k, query_stop)
+                    top_magnitude, top_index = source_magnitude.topk(current_k, dim=-1)
 
                     trace["total_message_magnitude"][index, row_start:row_stop] = (
                         source_magnitude.sum(-1).detach().cpu()
                     )
                     trace["evidence_message_magnitude"][index, row_start:row_stop] = (
-                        (edge_magnitude * (current_roles == EVIDENCE)[:, None])
+                        (edge_magnitude * evidence[None, None])
                         .sum((1, 2))
                         .detach()
                         .cpu()
                     )
                     trace["response_message_magnitude"][index, row_start:row_stop] = (
-                        (edge_magnitude * response_mask[:, None])
+                        (edge_magnitude * response[None, None])
                         .sum((1, 2))
                         .detach()
                         .cpu()
@@ -304,29 +272,21 @@ class FunctionalTraceReplay:
                     trace["source_message_entropy"][index, row_start:row_stop] = (
                         entropy.detach().cpu()
                     )
-                    trace["top_source_index"][
-                        index, row_start:row_stop, :current_k
-                    ] = (
+                    trace["top_source_index"][index, row_start:row_stop, :current_k] = (
                         top_index.int().cpu()
                     )
                     trace["top_source_magnitude"][
                         index, row_start:row_stop, :current_k
-                    ] = (
-                        top_magnitude.detach().cpu()
-                    )
+                    ] = top_magnitude.detach().cpu()
 
                 if remove_mask is not None:
-                    value_by_head = values[index][
-                        :, :query_stop, self.q_to_kv, :
-                    ]
+                    value_by_head = values[index][:, :query_stop, self.q_to_kv, :]
                     removed_context = torch.einsum(
                         "bhqs,bshd->bqhd",
                         attention * remove_mask[:, None],
                         value_by_head,
                     )
-                    parts[0] = message - self._removed_write(
-                        index, removed_context
-                    )
+                    parts[0] = message - self._removed_write(index, removed_context)
                 parts[1] = None
                 return tuple(parts)
 
@@ -343,7 +303,7 @@ class FunctionalTraceReplay:
                     query_stop = min(query_start + predictor_chunk, source_tokens)
                     remove_mask = self._removal_mask(
                         removals,
-                        prompt_roles,
+                        evidence_mask,
                         response_start,
                         query_start,
                         query_stop,
@@ -387,7 +347,7 @@ class FunctionalTraceReplay:
         self,
         token_ids: Sequence[int] | torch.Tensor,
         response_start: int,
-        prompt_roles: Sequence[int] | torch.Tensor,
+        evidence_mask: Sequence[bool] | torch.Tensor,
         *,
         predictor_chunk: int = 64,
         top_k: int = 8,
@@ -397,13 +357,13 @@ class FunctionalTraceReplay:
         """Save compact message statistics and three causal deletion branches."""
 
         token_ids = torch.as_tensor(token_ids, dtype=torch.long, device="cpu")
-        prompt_roles = torch.as_tensor(prompt_roles, dtype=torch.int8, device="cpu")
+        evidence_mask = torch.as_tensor(evidence_mask, dtype=torch.bool, device="cpu")
         if self.device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(self.device)
         full_scores, trace = self._forward(
             token_ids,
             response_start,
-            prompt_roles,
+            evidence_mask,
             removals=(None,),
             capture=True,
             predictor_chunk=predictor_chunk,
@@ -416,7 +376,7 @@ class FunctionalTraceReplay:
             scores, _ = self._forward(
                 token_ids,
                 response_start,
-                prompt_roles,
+                evidence_mask,
                 removals=removals[start : start + intervention_batch],
                 capture=False,
                 predictor_chunk=predictor_chunk,

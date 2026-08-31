@@ -17,12 +17,8 @@ def _artifact() -> dict:
         "response_start": 3,
         "trace": {
             "total_message_magnitude": torch.tensor([[1.0, 4.0], [1.0, 4.0]]),
-            "evidence_message_magnitude": torch.tensor(
-                [[1.0, 3.0], [1.0, 1.0]]
-            ),
-            "response_message_magnitude": torch.tensor(
-                [[0.0, 1.0], [0.0, 3.0]]
-            ),
+            "evidence_message_magnitude": torch.tensor([[1.0, 3.0], [1.0, 1.0]]),
+            "response_message_magnitude": torch.tensor([[0.0, 1.0], [0.0, 3.0]]),
             "source_message_entropy": torch.tensor(
                 [[0.0, np.log(2)], [0.0, np.log(4)]]
             ),
@@ -55,10 +51,7 @@ def test_four_scores_are_the_fixed_mechanism_equations():
 def test_auc_direction_is_never_flipped_after_reading_labels():
     label = np.asarray([0, 1, 0, 1], dtype=bool)
     source = np.asarray(["a", "a", "b", "b"])
-    scores = {
-        name: np.asarray([0.9, 1.0, 0.0, 0.1])
-        for name in evaluate.SCORE_ORDER
-    }
+    scores = {name: np.asarray([0.9, 1.0, 0.0, 0.1]) for name in evaluate.SCORE_ORDER}
     scores["source_dispersion"] *= -1
 
     result = evaluate.detection_summary(
@@ -78,6 +71,7 @@ def test_auc_direction_is_never_flipped_after_reading_labels():
 
 
 def test_physical_shards_are_pooled_before_one_evaluation(tmp_path, monkeypatch):
+    task_type = "Summary"
     label = np.asarray([0, 1], dtype=bool)
 
     def shard(name: str, score: list[float]) -> dict[str, np.ndarray]:
@@ -101,7 +95,9 @@ def test_physical_shards_are_pooled_before_one_evaluation(tmp_path, monkeypatch)
     monkeypatch.setattr(
         evaluate,
         "_load_scores",
-        lambda traces: events.append(f"score:{traces.name}") or traces.name,
+        lambda traces, task: (
+            events.append(f"score:{traces.name}:{task}") or traces.name
+        ),
     )
     monkeypatch.setattr(
         evaluate,
@@ -123,6 +119,7 @@ def test_physical_shards_are_pooled_before_one_evaluation(tmp_path, monkeypatch)
                     "schema": evaluate.SCHEMA,
                     "version": evaluate.VERSION,
                     "split_root": str(Path(f"cache/{name}").resolve()),
+                    "task_types": ["QA", "Summary", "Data2txt"],
                     "complete": True,
                 }
             ),
@@ -132,10 +129,12 @@ def test_physical_shards_are_pooled_before_one_evaluation(tmp_path, monkeypatch)
     output = tmp_path / "report.json"
     report = evaluate.evaluate_all(
         inputs=[(tmp_path / "train", "cache/train"), (tmp_path / "test", "cache/test")],
+        task_type=task_type,
         output=output,
         bootstrap=0,
     )
 
+    assert report["task_type"] == task_type
     assert report["samples"] == 2
     assert report["tokens"] == 4
     assert report["physical_cache_shards"] == 2
@@ -147,7 +146,12 @@ def test_physical_shards_are_pooled_before_one_evaluation(tmp_path, monkeypatch)
     )
     assert "by_split" not in report
     assert len(plotted) == 1
-    assert events == ["score:train", "score:test", "label:train", "label:test"]
+    assert events == [
+        "score:train:Summary",
+        "score:test:Summary",
+        "label:train",
+        "label:test",
+    ]
     assert output.is_file()
     assert (tmp_path / "token_scores.npz").is_file()
     json.loads(output.read_text(encoding="utf-8"))

@@ -1,61 +1,85 @@
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("torch")
 
-from experiments.attention_mechanism_audit.run import (
-    DEFAULT_MODEL,
-    SCORE_ORDER,
-    _print_report,
-    parser,
-)
+import experiments.attention_mechanism_audit.run as run
 
 
-def test_capture_cli_uses_the_exact_frozen_model_path():
-    args = parser().parse_args(
+def test_all_cli_uses_the_shared_cache_and_exact_frozen_model():
+    args = run.parser().parse_args(
         [
-            "capture",
-            "--split-root",
-            "cache/train",
+            "all",
+            "--cache",
+            "cache",
             "--source-info",
             "source.jsonl",
             "--output",
-            "traces",
+            "results",
         ]
     )
 
-    assert args.model == Path(DEFAULT_MODEL)
-    assert args.predictor_chunk == 128
-    assert args.intervention_batch == 3
-    assert "trace_level" not in vars(args)
+    assert args.model == run.DEFAULT_MODEL
+    assert args.cache == Path("cache")
+    assert args.source_info == Path("source.jsonl")
+    assert args.output == Path("results")
+    assert args.device == "cuda:0"
+    assert args.dtype == "bfloat16"
+    assert args.limit is None
 
 
-def test_evaluate_cli_accepts_multiple_physical_shards_once():
-    args = parser().parse_args(
-        [
-            "evaluate",
-            "--input",
-            "train/traces",
-            "cache/train",
-            "--input",
-            "test/traces",
-            "cache/test",
-            "--output",
-            "report.json",
-        ]
-    )
-
-    assert args.input == [
-        ["train/traces", "cache/train"],
-        ["test/traces", "cache/test"],
+def test_all_command_evaluates_each_task_from_the_same_saved_traces(
+    tmp_path, monkeypatch
+):
+    shared = [
+        (tmp_path / "traces/train", tmp_path / "cache/train"),
+        (tmp_path / "traces/test", tmp_path / "cache/test"),
     ]
-    assert args.output == Path("report.json")
-    assert vars(args).keys().isdisjoint({"split_name", "combine", "probe", "epochs"})
+    captures = []
+    evaluations = []
+
+    def capture_all(**kwargs):
+        captures.append(kwargs)
+        return {task: shared for task in run.TASK_TYPES}
+
+    def evaluate_all(*, inputs, task_type, output, bootstrap, seed):
+        evaluations.append((inputs, task_type, output, bootstrap, seed))
+        return {"token_scores": "scores.npz", "figures": "figures"}
+
+    monkeypatch.setattr(run, "capture_all", capture_all)
+    monkeypatch.setattr(run, "evaluate_all", evaluate_all)
+    monkeypatch.setattr(run, "_print_report", lambda *_args: None)
+
+    args = Namespace(
+        cache=tmp_path / "cache",
+        source_info=tmp_path / "source.jsonl",
+        model=tmp_path / "model",
+        output=tmp_path / "results",
+        device="cuda:0",
+        dtype="bfloat16",
+        limit=None,
+        bootstrap=10,
+        seed=7,
+    )
+    run._all(args)
+
+    assert len(captures) == 1
+    assert captures[0]["split_roots"] == (
+        tmp_path / "cache/train",
+        tmp_path / "cache/test",
+    )
+    assert [call[1] for call in evaluations] == list(run.TASK_TYPES)
+    assert all(call[0] is shared for call in evaluations)
+    assert [call[2] for call in evaluations] == [
+        tmp_path / "results" / task.casefold() / "report.json"
+        for task in run.TASK_TYPES
+    ]
 
 
 def test_plot_sample_searches_the_same_saved_inputs():
-    args = parser().parse_args(
+    args = run.parser().parse_args(
         [
             "plot-sample",
             "--input",
@@ -82,7 +106,7 @@ def test_report_prints_without_bootstrap_intervals(capsys):
         "auroc_ci95": [None, None],
         "auprc_ci95": [None, None],
     }
-    _print_report(
+    run._print_report(
         {
             "samples": 1,
             "sources": 1,
@@ -90,10 +114,11 @@ def test_report_prints_without_bootstrap_intervals(capsys):
             "hallucinated_tokens": 1,
             "prevalence": 0.5,
             "capture_complete": False,
-            "primary_score": SCORE_ORDER[0],
-            "detection": {name: metric for name in SCORE_ORDER},
-        }
+            "task_type": "Summary",
+            "primary_score": run.SCORE_ORDER[0],
+            "detection": {name: metric for name in run.SCORE_ORDER},
+        },
     )
     output = capsys.readouterr().out
-    assert "PARTIAL-QA" in output
+    assert "PARTIAL-SUMMARY" in output
     assert output.count("CI=n/a") == 8

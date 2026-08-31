@@ -12,7 +12,8 @@ this directory. The rules below are mandatory for this experiment.
   messages and causal message deletion. Never silently replace it with an
   attention-only proxy, static operator geometry, or another cheaper method.
 - Treat `train` and `test` only as physical attention-cache locations. Capture
-  both, then pool every available QA response into one evaluation. There is no
+  both, then pool them within each task. Report QA, Summary, and Data2txt
+  separately; never mix task types into one headline result. There is no
   fitting split, calibration split, or split-level headline result.
 - Keep labels sealed during capture and score construction. Open them only to
   compute post-hoc AUROC and AUPRC on the pooled token scores.
@@ -21,13 +22,14 @@ this directory. The rules below are mandatory for this experiment.
   `source_dispersion`, and `message_independent_preference`). Additional
   diagnostics must answer a stated scientific question and must not appear in
   the default output.
-- Generate population statistics and figures after all data have been pooled.
-  Do not automatically emit one JSON or figure per sample. A sample figure is
-  an explicit, on-demand operation selected by sample ID.
-- Keep one one-click `run_qa.sh`. Do not use `set -e`, `set -u`,
-  `set -o pipefail`, or `set -euo pipefail`. Check the exit code after each
-  command so the original Python traceback stays visible and later stages do
-  not run after failure.
+- Generate task-level population statistics and figures after both physical
+  shards have been pooled. Do not automatically emit one JSON or figure per
+  sample. A sample figure is an explicit, on-demand operation selected by
+  sample ID.
+- Keep one one-click `run_all.sh` containing only the single foreground Python
+  entry. Orchestration belongs in Python so an exception preserves its full
+  traceback and stops later tasks. Do not use background execution or shell
+  setup logic.
 - Test the message equations, score equations, pooled evaluation, and CLI
   contract. Do not grow tests around incidental schemas or error wording.
 - When delegating work to another agent, repeat the exact scope and these

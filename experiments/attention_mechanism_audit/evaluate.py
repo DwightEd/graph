@@ -1,4 +1,4 @@
-"""Pool saved QA traces and evaluate four fixed label-free scores."""
+"""Pool saved traces by task and evaluate four fixed label-free scores."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from research_dataset import open_research_dataset
 
 from .audit import SCHEMA, VERSION, load_index
+from .data import canonical_task_type
 from .visualize import plot_population, plot_sample_dashboard
 
 SCORE_ORDER = (
@@ -23,9 +24,7 @@ SCORE_ORDER = (
 )
 
 SCORE_DEFINITIONS = {
-    "causal_route_capture": (
-        "logp(no evidence messages) - logp(no response messages)"
-    ),
+    "causal_route_capture": ("logp(no evidence messages) - logp(no response messages)"),
     "routing_imbalance": (
         "mean_layer(response functional-message share - evidence share)"
     ),
@@ -89,9 +88,7 @@ def layer_mechanisms(artifact: dict) -> dict[str, torch.Tensor]:
 
     active_sources = torch.arange(total.shape[1]) + artifact["response_start"]
     active_sources = active_sources.float().clamp_min(2)
-    dispersion = (
-        trace["source_message_entropy"].float() / active_sources.log()[None]
-    )
+    dispersion = trace["source_message_entropy"].float() / active_sources.log()[None]
     return {
         "routing_imbalance": response_share - evidence_share,
         "source_dispersion": dispersion,
@@ -163,15 +160,14 @@ def detection_summary(
                 }
             )
         else:
-            result.update(
-                {"auroc_ci95": [None, None], "auprc_ci95": [None, None]}
-            )
+            result.update({"auroc_ci95": [None, None], "auprc_ci95": [None, None]})
         results[name] = result
     return results
 
 
 def build_report(
     *,
+    task_type: str,
     label: np.ndarray,
     sample_id: np.ndarray,
     source_id: np.ndarray,
@@ -190,6 +186,7 @@ def build_report(
     )
     return {
         "schema": "ragtruth-three-mechanism-detection-v2",
+        "task_type": task_type,
         "samples": int(np.unique(sample_id).size),
         "sources": int(np.unique(source_id).size),
         "tokens": int(len(label)),
@@ -204,14 +201,19 @@ def build_report(
         "detection": detection,
         "labels_used_during": "posthoc_evaluation_only",
         "analysis_scope": (
-            "fixed-score exploratory audit over pooled captured QA tokens"
+            "fixed-score exploratory audit over pooled captured task tokens"
         ),
     }
 
 
-def _load_scores(trace_root: Path) -> list[tuple[dict, dict[str, np.ndarray]]]:
+def _load_scores(
+    trace_root: Path,
+    task_type: str,
+) -> list[tuple[dict, dict[str, np.ndarray]]]:
     scored = []
     for row in load_index(trace_root):
+        if canonical_task_type(row["task_type"]) != task_type:
+            continue
         artifact = torch.load(
             trace_root / "samples" / row["path"],
             map_location="cpu",
@@ -255,13 +257,14 @@ def _add_labels(
         arrays["response_length"].append(np.full(count, count, dtype=np.int32))
         for name in SCORE_ORDER:
             arrays[name].append(current[name])
-    return {
-        name: np.concatenate(value)
-        for name, value in arrays.items()
-    }
+    return {name: np.concatenate(value) for name, value in arrays.items()}
 
 
-def _load_manifest(trace_root: Path, split_root: Path | None = None) -> dict:
+def _load_manifest(
+    trace_root: Path,
+    split_root: Path | None = None,
+    task_type: str | None = None,
+) -> dict:
     manifest = json.loads((trace_root / "manifest.json").read_text(encoding="utf-8"))
     valid = (
         manifest.get("schema") == SCHEMA
@@ -270,6 +273,7 @@ def _load_manifest(trace_root: Path, split_root: Path | None = None) -> dict:
             split_root is None
             or manifest.get("split_root") == str(split_root.resolve())
         )
+        and (task_type is None or task_type in manifest.get("task_types", []))
     )
     if not valid:
         raise ValueError(f"trace manifest does not match v{VERSION} or its cache")
@@ -279,25 +283,30 @@ def _load_manifest(trace_root: Path, split_root: Path | None = None) -> dict:
 def evaluate_all(
     *,
     inputs: Iterable[tuple[str | Path, str | Path]],
+    task_type: str,
     output: str | Path,
     bootstrap: int = 1000,
     seed: int = 20260828,
 ) -> dict:
     """Pool physical cache shards first, then evaluate exactly once."""
 
+    task_type = canonical_task_type(task_type)
     shards, manifests = [], []
     for trace_root, split_root in inputs:
         trace_root = Path(trace_root)
         split_root = Path(split_root)
-        manifests.append(_load_manifest(trace_root, split_root))
-        shards.append((_load_scores(trace_root), split_root))
+        manifests.append(_load_manifest(trace_root, split_root, task_type))
+        scores = _load_scores(trace_root, task_type)
+        if not scores:
+            raise ValueError(f"no {task_type} samples in {trace_root}")
+        shards.append((scores, split_root))
     pieces = [_add_labels(scores, split_root) for scores, split_root in shards]
     merged = {
-        name: np.concatenate([piece[name] for piece in pieces])
-        for name in pieces[0]
+        name: np.concatenate([piece[name] for piece in pieces]) for name in pieces[0]
     }
     scores = {name: merged[name] for name in SCORE_ORDER}
     report = build_report(
+        task_type=task_type,
         label=merged["label"],
         sample_id=merged["sample_id"],
         source_id=merged["source_id"],
@@ -324,9 +333,7 @@ def evaluate_all(
             "token_scores": str(scores_path),
             "figures": str(figures),
             "physical_cache_shards": len(pieces),
-            "capture_complete": all(
-                manifest["complete"] for manifest in manifests
-            ),
+            "capture_complete": all(manifest["complete"] for manifest in manifests),
         }
     )
     output.write_text(
@@ -388,10 +395,7 @@ def plot_saved_sample(
             (response_index[valid], top_index[valid]),
             top_mass[valid],
         )
-        source_flow /= (
-            trace["total_message_magnitude"].sum(0).numpy()[:, None]
-            + 1e-12
-        )
+        source_flow /= trace["total_message_magnitude"].sum(0).numpy()[:, None] + 1e-12
         shown = np.argsort(source_flow.sum(0))[-16:][::-1]
         score_inputs = artifact["score_inputs"]
         full = score_inputs["full_logprob"]
@@ -400,17 +404,11 @@ def plot_saved_sample(
             "token_text": tokenizer.convert_ids_to_tokens(
                 artifact["token_ids"][artifact["response_start"] :].tolist()
             ),
-            "evidence_effect": (
-                full - score_inputs["no_evidence_logprob"]
-            ).numpy(),
-            "response_effect": (
-                full - score_inputs["no_response_logprob"]
-            ).numpy(),
+            "evidence_effect": (full - score_inputs["no_evidence_logprob"]).numpy(),
+            "response_effect": (full - score_inputs["no_response_logprob"]).numpy(),
             "source_token_text": [
                 f"{index}:"
-                + tokenizer.convert_ids_to_tokens(
-                    int(artifact["token_ids"][index])
-                )
+                + tokenizer.convert_ids_to_tokens(int(artifact["token_ids"][index]))
                 for index in shown
             ],
             "source_flow": source_flow[:, shown].T,

@@ -4,14 +4,7 @@ torch = pytest.importorskip("torch")
 transformers = pytest.importorskip("transformers")
 from torch.nn import functional as F
 
-from experiments.attention_mechanism_audit.capture import (
-    HISTORY,
-    SELF,
-    FunctionalTraceReplay,
-    predictor_positions,
-    source_roles,
-)
-from experiments.attention_mechanism_audit.data import CONSTRAINT, EVIDENCE, QUESTION
+from experiments.attention_mechanism_audit.capture import FunctionalTraceReplay
 
 
 def _tiny_replay(*, layers=2):
@@ -40,18 +33,18 @@ def _inputs():
     return (
         torch.tensor([1, 5, 7, 9, 11, 13, 15]),
         3,
-        torch.tensor([EVIDENCE, QUESTION, CONSTRAINT]),
+        torch.tensor([True, False, False]),
     )
 
 
-def _one_shot_scores(model, token_ids, response_start, prompt_roles, removal):
+def _one_shot_scores(model, token_ids, response_start, evidence_mask, removal):
     layers = tuple(model.model.layers)
     length = len(token_ids) - 1
     kv_heads = model.config.num_key_value_heads
     repeats = model.config.num_attention_heads // kv_heads
     removed = torch.zeros(length, dtype=torch.bool)
     if removal in {"evidence", "both"}:
-        removed[:response_start] |= prompt_roles == EVIDENCE
+        removed[:response_start] |= evidence_mask
     if removal in {"response", "both"}:
         removed[response_start:] = True
     mask = torch.ones(length, length, dtype=torch.bool).tril() & removed[None]
@@ -85,20 +78,22 @@ def _one_shot_scores(model, token_ids, response_start, prompt_roles, removal):
         handles.extend(
             (
                 layer.self_attn.v_proj.register_forward_hook(save_value(index)),
-                layer.self_attn.register_forward_hook(
-                    delete_messages(index, layer)
-                ),
+                layer.self_attn.register_forward_hook(delete_messages(index, layer)),
             )
         )
     try:
         with torch.inference_mode():
-            logits = model(
-                input_ids=token_ids[:-1][None],
-                attention_mask=torch.ones(1, length, dtype=torch.long),
-                use_cache=False,
-                output_attentions=True,
-                return_dict=True,
-            ).logits[0, response_start - 1 :].float()
+            logits = (
+                model(
+                    input_ids=token_ids[:-1][None],
+                    attention_mask=torch.ones(1, length, dtype=torch.long),
+                    use_cache=False,
+                    output_attentions=True,
+                    return_dict=True,
+                )
+                .logits[0, response_start - 1 :]
+                .float()
+            )
     finally:
         for handle in handles:
             handle.remove()
@@ -110,22 +105,27 @@ def _one_shot_scores(model, token_ids, response_start, prompt_roles, removal):
 
 def test_capture_keeps_only_the_exact_inputs_needed_by_the_four_scores():
     model, replay = _tiny_replay()
-    token_ids, response_start, prompt_roles = _inputs()
-    predictors = predictor_positions(response_start, len(token_ids))
+    token_ids, response_start, evidence_mask = _inputs()
+    predictors = torch.arange(response_start - 1, len(token_ids) - 1)
 
     with torch.inference_mode():
-        logits = model(
-            input_ids=token_ids[None],
-            attention_mask=torch.ones_like(token_ids)[None],
-            use_cache=False,
-            return_dict=True,
-        ).logits[0].index_select(0, predictors).float()
+        logits = (
+            model(
+                input_ids=token_ids[None],
+                attention_mask=torch.ones_like(token_ids)[None],
+                use_cache=False,
+                return_dict=True,
+            )
+            .logits[0]
+            .index_select(0, predictors)
+            .float()
+        )
     targets = token_ids[response_start:]
     selected = logits.gather(1, targets[:, None]).squeeze(1)
     expected_logprob = selected - logits.logsumexp(1)
 
     artifact = replay.capture(
-        token_ids, response_start, prompt_roles, predictor_chunk=2, top_k=3
+        token_ids, response_start, evidence_mask, predictor_chunk=2, top_k=3
     )
 
     assert artifact["response_start"] == response_start
@@ -165,15 +165,9 @@ def test_capture_keeps_only_the_exact_inputs_needed_by_the_four_scores():
     assert torch.all(trace["response_message_magnitude"][:, 1:] > 0)
     assert torch.all(
         trace["total_message_magnitude"] + 1e-6
-        >= trace["evidence_message_magnitude"]
-        + trace["response_message_magnitude"]
+        >= trace["evidence_message_magnitude"] + trace["response_message_magnitude"]
     )
 
-    roles = source_roles(prompt_roles, response_start, len(token_ids))
-    assert roles[0, 2] == SELF
-    assert not torch.any(roles[0] == HISTORY)
-    assert roles[2, 3] == HISTORY
-    assert roles[2, 4] == SELF
     assert all(not parameter.requires_grad for parameter in model.parameters())
     assert all(parameter.grad is None for parameter in model.parameters())
 
@@ -216,23 +210,23 @@ def test_multilayer_interventions_match_an_independent_full_sequence_oracle():
         )
         model.model.layers[1].self_attn.o_proj.weight.zero_()
     replay = FunctionalTraceReplay(model)
-    token_ids, response_start, prompt_roles = _inputs()
+    token_ids, response_start, evidence_mask = _inputs()
     actual = replay.capture(
         token_ids,
         response_start,
-        prompt_roles,
+        evidence_mask,
         predictor_chunk=len(token_ids),
         intervention_batch=1,
     )["score_inputs"]
-    full = _one_shot_scores(model, token_ids, response_start, prompt_roles, None)
+    full = _one_shot_scores(model, token_ids, response_start, evidence_mask, None)
     no_evidence = _one_shot_scores(
-        model, token_ids, response_start, prompt_roles, "evidence"
+        model, token_ids, response_start, evidence_mask, "evidence"
     )
     no_response = _one_shot_scores(
-        model, token_ids, response_start, prompt_roles, "response"
+        model, token_ids, response_start, evidence_mask, "response"
     )
     no_evidence_response = _one_shot_scores(
-        model, token_ids, response_start, prompt_roles, "both"
+        model, token_ids, response_start, evidence_mask, "both"
     )
     expected = {
         "full_logprob": full[0],
@@ -255,9 +249,7 @@ def test_source_norm_is_dynamic_value_through_each_head_output_block():
             [
                 F.linear(
                     value[:, replay.q_to_kv[head]].float(),
-                    weight[
-                        :, head * replay.head_dim : (head + 1) * replay.head_dim
-                    ],
+                    weight[:, head * replay.head_dim : (head + 1) * replay.head_dim],
                 ).norm(dim=-1)
                 for head in range(replay.heads)
             ],
