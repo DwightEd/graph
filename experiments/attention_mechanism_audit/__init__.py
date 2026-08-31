@@ -2,11 +2,11 @@
 
 from .audit import capture_split, mechanism_effects
 from .capture import FunctionalTraceReplay
-from .evaluate import evaluate_saved
+from .evaluate import evaluate_all
 
 __all__ = [
     "FunctionalTraceReplay",
     "capture_split",
-    "evaluate_saved",
+    "evaluate_all",
     "mechanism_effects",
 ]

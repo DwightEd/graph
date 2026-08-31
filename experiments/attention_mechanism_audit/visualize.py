@@ -1,4 +1,4 @@
-"""Figures for sample-level and population-level mechanism audits."""
+"""Population figures and one explicitly requested sample dashboard."""
 
 from __future__ import annotations
 
@@ -6,12 +6,170 @@ from pathlib import Path
 
 import matplotlib
 import numpy as np
+from sklearn.metrics import precision_recall_curve, roc_curve
 
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt  # noqa: E402
 from matplotlib.colors import TwoSlopeNorm  # noqa: E402
 
-from .reporting import KEY_METRICS, ONSET_METRICS
+
+SCORE_LABELS = {
+    "causal_route_capture": "Causal route capture",
+    "routing_imbalance": "Response − evidence routing",
+    "source_dispersion": "Source dispersion",
+    "message_independent_preference": "Message-independent preference",
+}
+COLORS = {
+    "causal_route_capture": "#b2182b",
+    "routing_imbalance": "#2166ac",
+    "source_dispersion": "#762a83",
+    "message_independent_preference": "#1b7837",
+}
+
+
+def _detection_curves(
+    label: np.ndarray,
+    scores: dict[str, np.ndarray],
+    output: Path,
+) -> None:
+    figure, axes = plt.subplots(1, 2, figsize=(11, 4.8), constrained_layout=True)
+    axes[0].plot([0, 1], [0, 1], color="0.65", ls="--", label="Chance")
+    axes[1].axhline(label.mean(), color="0.65", ls="--", label="Prevalence")
+    for name, score in scores.items():
+        fpr, tpr, _ = roc_curve(label, score)
+        precision, recall, _ = precision_recall_curve(label, score)
+        width = 2.5 if name == "causal_route_capture" else 1.4
+        axes[0].plot(
+            fpr,
+            tpr,
+            color=COLORS[name],
+            lw=width,
+            label=SCORE_LABELS[name],
+        )
+        axes[1].plot(
+            recall,
+            precision,
+            color=COLORS[name],
+            lw=width,
+            label=SCORE_LABELS[name],
+        )
+    axes[0].set(xlabel="False-positive rate", ylabel="True-positive rate", title="ROC")
+    axes[1].set(xlabel="Recall", ylabel="Precision", title="Precision–recall")
+    for axis in axes:
+        axis.set_xlim(0, 1)
+        axis.set_ylim(0, 1)
+        axis.grid(alpha=0.18)
+    axes[1].legend(frameon=False, fontsize=8)
+    figure.suptitle("All cached QA tokens")
+    figure.savefig(output, dpi=180)
+    plt.close(figure)
+
+
+def _ecdf(value: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    x = np.sort(value)
+    return x, np.arange(1, len(x) + 1) / len(x)
+
+
+def _mechanism_distributions(
+    label: np.ndarray,
+    scores: dict[str, np.ndarray],
+    output: Path,
+) -> None:
+    names = (
+        "routing_imbalance",
+        "source_dispersion",
+        "message_independent_preference",
+    )
+    figure, axes = plt.subplots(1, 3, figsize=(13, 4), constrained_layout=True)
+    for axis, name in zip(axes, names):
+        score = scores[name]
+        low, high = np.quantile(score, [0.01, 0.99])
+        for mask, text, color in (
+            (~label, "Correct", "#2166ac"),
+            (label, "Hallucinated", "#b2182b"),
+        ):
+            x, y = _ecdf(np.clip(score[mask], low, high))
+            axis.plot(x, y, color=color, lw=1.8, label=text)
+        axis.set(
+            title=SCORE_LABELS[name],
+            xlabel="Token score",
+            ylabel="Empirical CDF",
+        )
+        axis.grid(alpha=0.18)
+    axes[0].legend(frameon=False)
+    figure.suptitle("All-token mechanism distributions (display clipped at 1st/99th percentiles)")
+    figure.savefig(output, dpi=180)
+    plt.close(figure)
+
+
+def _mechanisms_by_position(
+    label: np.ndarray,
+    scores: dict[str, np.ndarray],
+    token_index: np.ndarray,
+    response_length: np.ndarray,
+    output: Path,
+) -> None:
+    names = (
+        "routing_imbalance",
+        "source_dispersion",
+        "message_independent_preference",
+    )
+    position = np.minimum(
+        (10 * (token_index + 0.5) / response_length).astype(np.int8),
+        9,
+    )
+    x = (np.arange(10) + 0.5) / 10
+    figure, axes = plt.subplots(1, 3, figsize=(13, 4), constrained_layout=True)
+    for axis, name in zip(axes, names):
+        for class_mask, text, color in (
+            (~label, "Correct", "#2166ac"),
+            (label, "Hallucinated", "#b2182b"),
+        ):
+            mean = [
+                scores[name][class_mask & (position == block)].mean()
+                if np.any(class_mask & (position == block))
+                else np.nan
+                for block in range(10)
+            ]
+            axis.plot(x, mean, marker="o", ms=3, color=color, label=text)
+        axis.set(
+            title=SCORE_LABELS[name],
+            xlabel="Relative response position",
+            ylabel="Mean token score",
+        )
+        axis.grid(alpha=0.18)
+    axes[0].legend(frameon=False)
+    figure.suptitle("Mechanism dynamics over all cached QA responses")
+    figure.savefig(output, dpi=180)
+    plt.close(figure)
+
+
+def plot_population(
+    label: np.ndarray,
+    scores: dict[str, np.ndarray],
+    token_index: np.ndarray,
+    response_length: np.ndarray,
+    report: dict,
+    output_root: Path,
+) -> None:
+    """Generate only pooled population figures."""
+
+    output_root = Path(output_root)
+    output_root.mkdir(parents=True, exist_ok=True)
+    if all(result["auroc"] is not None for result in report["detection"].values()):
+        _detection_curves(label, scores, output_root / "roc_pr.png")
+    _mechanism_distributions(
+        label,
+        scores,
+        output_root / "mechanism_distributions.png",
+    )
+    _mechanisms_by_position(
+        label,
+        scores,
+        token_index,
+        response_length,
+        output_root / "mechanism_by_position.png",
+    )
 
 
 def _hallucination_spans(label: np.ndarray) -> list[tuple[int, int]]:
@@ -21,244 +179,112 @@ def _hallucination_spans(label: np.ndarray) -> list[tuple[int, int]]:
     return list(zip(starts, stops))
 
 
-def _shade_hallucinations(axis, spans: list[tuple[int, int]]) -> None:
-    for start, stop in spans:
-        axis.axvspan(start - 0.5, stop - 0.5, color="crimson", alpha=0.14, lw=0)
-
-
-def _token_ticks(axis, token_text: list[str]) -> None:
-    stride = max(1, int(np.ceil(len(token_text) / 24)))
-    ticks = np.arange(0, len(token_text), stride)
-    labels = [token_text[index].replace("\n", "\\n") for index in ticks]
-    axis.set_xticks(ticks, labels, rotation=60, ha="right", fontsize=7)
-
-
 def plot_sample_dashboard(
     record: dict,
-    layer_metrics: dict[str, np.ndarray],
+    layers: dict[str, np.ndarray],
     output: Path,
 ) -> None:
-    """Plot routes, causal effects, and role shares for one generated response."""
+    """Plot the exact saved route dynamics for one requested response."""
 
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    token_text = list(record["token_text"])
     label = np.asarray(record["label"], dtype=bool)
-    token_metrics = record["token_metrics"]
-    evidence_effect = np.asarray(token_metrics["evidence_message_effect"], dtype=float)
-    response_effect = np.asarray(token_metrics["response_message_effect"], dtype=float)
-    routing = np.asarray(layer_metrics["routing_imbalance"], dtype=float)
-    dispersion = np.asarray(layer_metrics["source_dispersion"], dtype=float)
-    evidence_share = np.asarray(layer_metrics["evidence_share"], dtype=float)
-    response_share = np.asarray(layer_metrics["response_share"], dtype=float)
-    spans = _hallucination_spans(label)
-    x = np.arange(len(token_text))
-
-    figure, axes = plt.subplots(4, 1, figsize=(14, 12), sharex=True, constrained_layout=True)
-    figure.suptitle(f"Sample {record['sample_id']}: attention mechanism audit", fontsize=14)
+    token_text = list(record["token_text"])
+    x = np.arange(len(label))
+    figure, axes = plt.subplots(
+        5,
+        1,
+        figsize=(14, 15),
+        sharex=True,
+        constrained_layout=True,
+    )
+    figure.suptitle(f"Sample {record['sample_id']}")
 
     image = axes[0].imshow(
-        routing,
+        layers["routing_imbalance"],
         aspect="auto",
         origin="lower",
         cmap="coolwarm",
-        norm=TwoSlopeNorm(vmin=-1.0, vcenter=0.0, vmax=1.0),
+        norm=TwoSlopeNorm(vmin=-1, vcenter=0, vmax=1),
     )
-    axes[0].set(title="Response − evidence message routing", ylabel="Layer")
-    figure.colorbar(image, ax=axes[0], label="Routing imbalance")
+    axes[0].set(title="Response − evidence functional routing", ylabel="Layer")
+    figure.colorbar(image, ax=axes[0])
 
     image = axes[1].imshow(
-        dispersion,
+        layers["source_dispersion"],
         aspect="auto",
         origin="lower",
         cmap="viridis",
-        vmin=0.0,
-        vmax=1.0,
-    )
-    axes[1].set(title="Source-message dispersion", ylabel="Layer")
-    figure.colorbar(image, ax=axes[1], label="Normalized entropy")
-
-    axes[2].axhline(0, color="0.55", lw=0.8)
-    axes[2].plot(x, evidence_effect, label="Evidence effect", color="#2166ac", lw=1.5)
-    axes[2].plot(x, response_effect, label="Response effect", color="#b2182b", lw=1.5)
-    axes[2].set(title="Observed-token causal effects", ylabel="Δ log p")
-    axes[2].legend(frameon=False, ncols=2)
-
-    axes[3].plot(x, evidence_share.mean(0), label="Evidence", color="#1b9e77", lw=1.5)
-    axes[3].plot(x, response_share.mean(0), label="Response", color="#d95f02", lw=1.5)
-    axes[3].set(
-        title="Mean functional-message role share",
-        ylabel="Share",
-        xlabel="Response token",
-    )
-    axes[3].set_ylim(0, 1)
-    axes[3].legend(frameon=False, ncols=2)
-
-    for axis in axes:
-        _shade_hallucinations(axis, spans)
-    _token_ticks(axes[-1], token_text)
-    figure.savefig(output, dpi=180)
-    plt.close(figure)
-
-
-def _plot_population_effects(report: dict, output: Path) -> None:
-    if "by_split" in report:
-        styles = {
-            "train": ("s", "#1b9e77", 0.2),
-            "test": ("^", "#d95f02", 0.0),
-        }
-        split_reports = [
-            (name, current, *styles.get(name, ("D", "#7570b3", 0.1)))
-            for name, current in report["by_split"].items()
-        ]
-        split_reports.append(("all", report, "o", "#2166ac", -0.2))
-    else:
-        split_reports = [(None, report, "o", "#2166ac", 0.0)]
-
-    panels = (
-        (
-            "Percentage-point effects",
-            (KEY_METRICS[0], KEY_METRICS[1], KEY_METRICS[4]),
-            "pp",
-        ),
-        ("Head-role disagreement", (KEY_METRICS[2],), "JS divergence"),
-        ("Observed-token evidence support", (KEY_METRICS[3],), "Δ log p"),
-    )
-    figure, axes = plt.subplots(1, 3, figsize=(15, 5), constrained_layout=True)
-    for axis, (title, metrics, unit) in zip(axes, panels):
-        y = np.arange(len(metrics))[::-1]
-        axis.axvline(0, color="0.4", lw=1)
-        for split_name, split_report, marker, color, offset in split_reports:
-            for row, metric in zip(y, metrics):
-                result = split_report["summaries"][metric.key]
-                delta = result["position_matched_source_equal_difference"]
-                if delta is None:
-                    continue
-                effect = delta * metric.scale
-                ci = result.get("ci95")
-                error = None
-                if ci is not None and ci[0] is not None and ci[1] is not None:
-                    error = [
-                        [effect - ci[0] * metric.scale],
-                        [ci[1] * metric.scale - effect],
-                    ]
-                axis.errorbar(
-                    effect,
-                    row + offset,
-                    xerr=error,
-                    fmt=marker,
-                    color=color,
-                    ecolor=color,
-                    capsize=3,
-                    ms=6,
-                )
-            if split_name is not None and axis is axes[0]:
-                axis.plot([], [], marker=marker, color=color, ls="none", label=split_name)
-        axis.set_yticks(y, [metric.label for metric in metrics])
-        axis.set_xlabel(f"Hallucinated − correct ({unit})")
-        axis.set_title(title)
-        axis.grid(axis="x", alpha=0.2)
-    figure.suptitle("Position-matched population effects (95% source-bootstrap CI)")
-    if "by_split" in report:
-        axes[0].legend(frameon=False, ncols=3)
-    figure.savefig(output, dpi=180)
-    plt.close(figure)
-
-
-def _plot_sample_map(sample_records: list[dict], output: Path) -> None:
-    routing = np.asarray(
-        [
-            record["routing_mean"]
-            if "routing_mean" in record
-            else np.mean(record["token_metrics"]["message_routing_drift_mean"])
-            for record in sample_records
-        ]
-    )
-    evidence = np.asarray(
-        [
-            record["evidence_effect_mean"]
-            if "evidence_effect_mean" in record
-            else np.mean(record["token_metrics"]["evidence_message_effect"])
-            for record in sample_records
-        ]
-    )
-    fraction = np.asarray(
-        [
-            record["hallucinated_fraction"]
-            if "hallucinated_fraction" in record
-            else np.mean(record["label"])
-            for record in sample_records
-        ]
-    )
-
-    figure, axis = plt.subplots(figsize=(7.5, 5.8), constrained_layout=True)
-    points = axis.scatter(
-        routing,
-        evidence,
-        c=fraction,
-        cmap="magma_r",
         vmin=0,
         vmax=1,
-        s=34,
-        alpha=0.8,
-        edgecolors="none",
     )
-    axis.axvline(0, color="0.6", lw=0.8)
-    axis.axhline(0, color="0.6", lw=0.8)
-    axis.set(
-        xlabel="Mean response − evidence routing",
-        ylabel="Mean evidence effect (Δ log p)",
-        title="Sample-level mechanism map",
+    axes[1].set(title="Source-message dispersion", ylabel="Layer")
+    figure.colorbar(image, ax=axes[1])
+
+    image = axes[2].imshow(
+        record["source_flow"],
+        aspect="auto",
+        origin="upper",
+        cmap="magma",
+        vmin=0,
     )
-    figure.colorbar(points, ax=axis, label="Hallucinated-token fraction")
+    axes[2].set(
+        title="Retained top-k source-token message share",
+        ylabel="Source token",
+    )
+    axes[2].set_yticks(
+        np.arange(len(record["source_token_text"])),
+        record["source_token_text"],
+        fontsize=7,
+    )
+    figure.colorbar(image, ax=axes[2])
+
+    axes[3].axhline(0, color="0.55", lw=0.8)
+    axes[3].plot(
+        x,
+        record["evidence_effect"],
+        color="#2166ac",
+        label="Evidence effect",
+    )
+    axes[3].plot(
+        x,
+        record["response_effect"],
+        color="#b2182b",
+        label="Response effect",
+    )
+    axes[3].set(title="Frozen-model message-deletion effects", ylabel="Δ log p")
+    axes[3].legend(frameon=False, ncols=2)
+
+    axes[4].plot(
+        x,
+        layers["evidence_share"].mean(0),
+        color="#1b9e77",
+        label="Evidence",
+    )
+    axes[4].plot(
+        x,
+        layers["response_share"].mean(0),
+        color="#d95f02",
+        label="Response",
+    )
+    axes[4].set(title="Functional-message role share", ylabel="Share")
+    axes[4].legend(frameon=False, ncols=2)
+
+    for axis in axes:
+        for start, stop in _hallucination_spans(label):
+            axis.axvspan(start - 0.5, stop - 0.5, color="crimson", alpha=0.12, lw=0)
+    stride = max(1, int(np.ceil(len(token_text) / 24)))
+    ticks = np.arange(0, len(token_text), stride)
+    axes[-1].set_xticks(
+        ticks,
+        [token_text[index].replace("\n", "\\n") for index in ticks],
+        rotation=60,
+        ha="right",
+        fontsize=7,
+    )
+    axes[-1].set_xlabel("Response token")
     figure.savefig(output, dpi=180)
     plt.close(figure)
-
-
-def _onset_series(values, length: int, scale: float) -> np.ndarray:
-    if values is None:
-        return np.full(length, np.nan)
-    return np.asarray([np.nan if value is None else value for value in values]) * scale
-
-
-def _plot_onset(report: dict, output: Path) -> None:
-    figure, axes = plt.subplots(2, 1, figsize=(8.5, 8), sharex=True, constrained_layout=True)
-    panels = (
-        (axes[0], ONSET_METRICS[:2], "Matched DiD (pp)", "Routing and dispersion"),
-        (axes[1], ONSET_METRICS[2:], "Matched DiD (Δ log p)", "Evidence support"),
-    )
-    for axis, metrics, ylabel, title in panels:
-        for metric in metrics:
-            result = report["matched_onset"][metric.key]
-            offset = np.asarray(result["offset"])
-            value = _onset_series(
-                result.get("difference_in_difference"), len(offset), metric.scale
-            )
-            low = _onset_series(result.get("ci95_low"), len(offset), metric.scale)
-            high = _onset_series(result.get("ci95_high"), len(offset), metric.scale)
-            axis.plot(offset, value, marker="o", ms=3, label=metric.label)
-            axis.fill_between(offset, low, high, alpha=0.15)
-        axis.axhline(0, color="0.45", lw=0.8)
-        axis.axvline(0, color="crimson", lw=1, ls="--")
-        axis.set(title=title, ylabel=ylabel)
-        axis.legend(frameon=False)
-    axes[1].set_xlabel("Token offset from hallucination-span onset")
-    figure.suptitle("Mechanism dynamics around hallucination-span onsets")
-    figure.savefig(output, dpi=180)
-    plt.close(figure)
-
-
-def plot_population(report: dict, sample_records: list[dict], output_root: Path) -> None:
-    """Plot population effects, sample heterogeneity, and available onset dynamics."""
-
-    output_root = Path(output_root)
-    output_root.mkdir(parents=True, exist_ok=True)
-    _plot_population_effects(report, output_root / "population_effects.png")
-    _plot_sample_map(sample_records, output_root / "sample_map.png")
-
-    onset = report["matched_onset"][ONSET_METRICS[0].key]
-    if any(onset["events"]):
-        _plot_onset(report, output_root / "onset_dynamics.png")
 
 
 __all__ = ["plot_population", "plot_sample_dashboard"]

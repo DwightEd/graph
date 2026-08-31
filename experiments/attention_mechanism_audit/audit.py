@@ -20,21 +20,14 @@ VERSION = 2
 
 
 def mechanism_effects(scores: dict[str, dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
-    """Factorial same-sample effects on observed-token log probability."""
+    """Minimal same-token effects used by the fixed audit scores."""
 
     full = scores["full"]["target_logprob"]
     no_evidence = scores["evidence_removed"]["target_logprob"]
     no_response = scores["response_removed"]["target_logprob"]
-    no_context = scores["evidence_response_removed"]["target_logprob"]
     return {
         "evidence_message_effect": full - no_evidence,
         "response_message_effect": full - no_response,
-        "evidence_message_effect_without_response": no_response - no_context,
-        "response_message_effect_without_evidence": no_evidence - no_context,
-        "evidence_response_message_interaction": (
-            full - no_evidence - no_response + no_context
-        ),
-        "evidence_response_removed_logprob": no_context,
         "evidence_response_removed_margin": scores["evidence_response_removed"][
             "target_margin"
         ],
@@ -174,6 +167,7 @@ def capture_split(
                 intervention_batch=intervention_batch,
                 retain_raw=trace_level == "raw",
             )
+            scores = capture.pop("scores")
             artifact = {
                 "schema": SCHEMA,
                 "version": VERSION,
@@ -186,8 +180,8 @@ def capture_split(
                 "trace_level": trace_level,
                 "labels_used": False,
                 **capture,
+                "mechanism": mechanism_effects(scores),
             }
-            artifact["mechanism"] = mechanism_effects(artifact["scores"])
             destination = samples / f"{sample_id}.pt"
             sample.release_attention()
             if pending is not None:

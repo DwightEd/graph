@@ -1,215 +1,133 @@
-# Teacher-forced attention mechanism audit
+# Teacher-forced three-mechanism audit
 
-This experiment tests three mechanisms on real RAGTruth QA responses:
+This experiment asks whether hallucinated response tokens show three specific
+attention-message mechanisms in a frozen Llama-3.1-8B observer:
 
-1. **routing drift**: evidence-conditioned messages are replaced by messages
-   from the model's own response;
-2. **routing dispersion**: source routes spread, heads disagree about source
-   roles, or large messages cancel in the residual stream;
-3. **message-independent capture**: the observed token remains preferred when
-   evidence and response attention messages are removed, while evidence does
-   not help it. This is the operational candidate for parametric bias.
+1. **routing imbalance**: functional message mass shifts from the supplied QA
+   evidence toward the generated response history;
+2. **source dispersion**: evidence routes spread over more source tokens;
+3. **message-independent preference**: the observed token remains preferred
+   after evidence and response attention messages are removed.
 
-It is a frozen-model mechanism audit. It is not an autoencoder, a graph
-encoder, a trained hallucination detector, or the earlier controlled-pair
-workflow.
+It processes every QA response available in the formal attention archive.
+The archive happens to store files under `train` and `test`, but those names
+are storage locations only: this experiment trains nothing, evaluates no
+split separately, and pools both locations into one result.
 
-## Dynamic DAG
+Directory-level implementation constraints are recorded in `AGENTS.md`, so a
+coding agent working in this module receives the same minimal-code and exact-
+method contract instead of relying on rules stored in a sibling experiment.
 
-For response token `y_t = token_ids[P+t]`, the predictor is the previous
-position `q_t = P+t-1`. At layer `l`, head `h`, and source position `s`, the
-saved directed message is
+## Core calculation
+
+For response token `y_t`, source token `s`, layer `l`, and attention head `h`,
+the dynamic directed message is
 
 ```text
 m[l,h,t,s] = A[l,h,q_t,s] W_O[l,h] V[l,g(h),s]
 ```
 
-where `g(h)` is the Llama GQA query-head to KV-head map. This gives the actual
-edge-conditioned transformer message: attention chooses the edge at this
-sample, `V` supplies its dynamic content, and the head block of `W_O` decides
-how that content writes into the residual stream. A transformer layer updates
-the token node by
-
-```text
-r' = r + sum(h,s) m[l,h,t,s]
-r_next = r' + MLP(RMSNorm(r'))
-```
-
-The full-QA run stores the registered mechanism observables: per-head role
-messages, source entropy, cancellation, top source-token routes, and all causal
-branch scores. `TRACE_LEVEL=raw` additionally retains dense `A`, native-GQA
-`V`, residual/MLP states, and the `o_proj` input/output for selected case
-studies. Raw storage is not required to compute any registered endpoint.
-Compact sample reports show source-token marginals and head-role marginals as
-separate measurements; they do not claim that a listed source belongs to a
-listed head. Use `TRACE_LEVEL=raw` for joint head/source path reconstruction in
-selected cases.
-
-The existing `operator_geometry.pt` is an `[L,H,H]` Gram summary of frozen
-`W_O W_V` head operators. It is useful for comparing static head codes, but it
-does not contain the `[H,d,d]` `W_O` block geometry needed to measure a
-sample-specific captured `V`. This audit therefore reads `W_O` from the model
-already loaded for replay and computes that small block geometry once.
-
-The principal route magnitude is
+where `q_t` is the predictor position and `g(h)` maps a query head to its GQA
+KV head. Its edge magnitude is
 
 ```text
 e[l,h,t,s] = A[l,h,q_t,s] ||W_O[l,h] V[l,g(h),s]||_2
 ```
 
-This measures what actually enters the residual stream. The code also saves
-role edge magnitudes, source entropy, head-role routes, cancellation, and the
-largest source positions while retaining the layer and head axes. Raw-mode
-edge messages remain reconstructible from `A/V/W_O`.
+This is not an attention-only proxy: `A` chooses a route, `V` supplies its
+sample-specific content, and the head block of `W_O` writes that content into
+the residual stream.
 
-These route quantities are observational. Only the full frozen-model replay
-differences below are called end-to-end functional effects.
-
-## Same-sample causal branches
-
-At every layer and every processed query, the audit subtracts a selected
-post-softmax residual write without renormalizing the remaining attention:
+The frozen model is then replayed with evidence messages or response-history
+messages removed after softmax, without renormalizing other routes. Removed
+hidden states continue through the real MLP and every later layer. With
+`L_full`, `L_no_evidence`, and `L_no_response` denoting observed-token log
+probabilities, the four fixed label-free scores are:
 
 ```text
-removed(G) = W_O sum(h, s in G) A[h,q,s] V[g(h),s]
-attention_output' = attention_output - removed(G)
+causal_route_capture = L_no_evidence - L_no_response
+routing_imbalance    = response_message_share - evidence_message_share
+source_dispersion    = normalized entropy of source-token message magnitudes
+message_independent_preference = margin_no_evidence_or_response_messages
 ```
 
-The modified hidden states continue through the real MLP and all later layers.
-Three branches are run together:
+`causal_route_capture` is the main score. The other three values are reported
+separately as mechanism components; they are not concatenated into a learned
+classifier. The preregistered direction of source dispersion is positive; an
+AUROC below 0.5 is evidence against that hypothesis and is not flipped after
+labels are read.
 
-- `evidence_removed`: remove evidence-source messages;
-- `response_removed`: remove attention to all response tokens, including the response
-  predictor's attention diagonal; its residual token embedding is retained;
-- `evidence_response_removed`: remove both message groups.
+The final margin is a message-independent preference candidate, not a pure
+parameter-knowledge measurement: question/constraint messages, the predictor
+residual embedding, and all MLP updates remain active.
 
-For target log probability `L`, the registered effects are
+Labels are unavailable to capture and to all four score equations. They are
+opened only after both physical cache locations have been captured, to compute
+pooled token-level AUROC and AUPRC. These are post-hoc detection diagnostics,
+not a trained classifier or a calibrated deployment threshold.
 
-```text
-C_evidence  = L_full - L_evidence_removed
-C_response  = L_full - L_response_removed
-interaction = L_full - L_evidence_removed - L_response_removed
-              + L_evidence_response_removed
-```
+## One-click run
 
-The combined branch is deliberately named evidence-and-response-message
-removed. It is not
-a question-only run: teacher forcing still supplies the predictor token and
-its residual embedding. The message-independent capture signature uses the
-natural zero conditions
-
-```text
-evidence_response_removed_margin > 0
-full_margin > 0
-C_evidence <= 0
-```
-
-so it tests whether the frozen completion dynamics prefer the observed token
-despite absent grounding messages. For later response tokens this can still
-include lexical continuation from the predictor residual, so it is evidence
-for parametric bias rather than a pure parameter-only measurement. An MLP norm
-alone is never labeled "parameter knowledge."
-
-## Efficient extraction on a 24 GB RTX 4090
-
-The model is loaded once in BF16 and remains frozen. Each branch uses KV-cache
-teacher forcing in 128-token chunks, so attention memory scales as
-`branch_batch * heads * chunk * seen_tokens`, rather than `heads * N^2`.
-Per-layer value buffers retain the exact past `V` needed by message deletion.
-The three intervention branches share one batch, reducing each sample to two
-streaming replays: one raw capture and one three-branch intervention replay.
-
-Each sample is transferred to CPU and saved immediately under `traces/samples`.
-Every completed save is appended to `index.jsonl`, so an interrupted all-data
-run resumes without replaying indexed samples. Peak reserved CUDA memory is
-recorded in every sample row and the manifest.
-
-`TOKEN_CHUNK=128 INTERVENTION_BATCH=3` is the 4090 default. For an unusually
-long sample, `TOKEN_CHUNK=64 INTERVENTION_BATCH=1` performs exactly the same
-audit with lower peak memory and more runtime.
-
-## Label separation and statistical test
-
-Capture opens the formal attention archive with embedded labels sealed. It
-uses cached `token_ids` and `response_idx` as the sequence authority and reads
-`source_info.jsonl` only to mark evidence, question, constraint, and other
-prompt tokens. Labels are opened only after all traces exist.
-
-Evaluation binds each saved target sequence back to the formal cache. The
-primary comparison is within a mixed-label response and position cell. Cells
-are overlap-weighted, responses are averaged within generator/source, and
-sources receive equal weight. Source bootstrap intervals and sign-flip tests
-use 10,000 draws; the three primary endpoint p-values receive Holm correction.
-The onset analysis compares each hallucination onset with nearby all-correct
-transitions in the same response.
-
-When the RAGTruth generator differs from the Llama observer, these are the
-observer's teacher-forced processing and maintenance dynamics. A claim about
-the exact formation process requires matching generator and observer
-checkpoints.
-
-## Run
-
-From the repository root, the default script already points to the QA formal
-cache, RAGTruth source metadata, and the local Llama-3.1-8B checkpoint:
+From the repository root, first run one cached response as a smoke test:
 
 ```bash
 LIMIT=1 bash experiments/attention_mechanism_audit/run_qa.sh
 ```
 
-After the smoke run succeeds, audit every cached QA response in train and test:
+Then capture/resume and evaluate every cached QA response:
 
 ```bash
 bash experiments/attention_mechanism_audit/run_qa.sh
 ```
 
-The script intentionally does not use `set -euo pipefail`. A Python traceback
-remains visible, and evaluation is not started after capture fails.
+The script uses the local Meta-Llama-3.1-8B-Instruct checkpoint and formal QA
+cache by default. It performs only two logical stages:
 
-The existing 149 test traces are reused when `${OUT}/traces/index.jsonl`
-exists. The train split continues under `${OUT}/train/traces`.
+1. capture or resume exact traces from the physical `train` and `test` cache
+   directories;
+2. pool those traces once and produce one all-data evaluation.
 
-Outputs:
+It intentionally does not use `set -euo pipefail`. If Python fails, its full
+traceback remains visible and the next stage is not run.
 
-- `{train,test}/traces/samples/<sample_id>.pt`: exact compact mechanism trace
-  and four branch scores;
-- `traces/index.jsonl`: sample paths, sizes, and peak CUDA memory;
-- `traces/manifest.json`: extraction configuration and checkpoint;
-- `{train,test}/sample_audits/<sample_id>.json`: token, onset, layer/head, and
-  top-source evidence for every response;
-- `{train,test}/figures/samples/<sample_id>.png`: four-panel response audit;
-- `{train,test,all}/figures`: effect, heterogeneity, and onset figures;
-- `all/report.json`: train, test, and source-level combined coverage summary.
+The compact outputs are:
 
-The default evaluation output prints only the key routing-imbalance,
-dispersion, observed-token evidence-effect, capture-candidate, and onset
-results in one compact table. Calculation definitions and limitations are
-available with `--explain`; the complete diagnostic list is available with
-`--all-metrics`.
-An existing report can be summarized without replaying or reevaluating:
+- `{train,test}/traces/`: resumable exact captures for the two physical cache
+  locations;
+- `token_scores.npz`: sample/token identity, labels, the main score, and
+  the three mechanism components;
+- `report.json`: pooled coverage plus AUROC and AUPRC;
+- `figures/`: ROC/PR, mechanism distributions, and relative-position dynamics
+  computed from all pooled tokens.
 
-```bash
-python -m experiments.attention_mechanism_audit.run summarize \
-  --report experiments/attention_mechanism_audit/outputs/qa/REPORT/report.json
-```
+No per-sample figures are generated during the all-data run.
 
-Print the measured onset changes, top source tokens, and top layer/head roles
-for one response:
+## Inspect one sample on demand
+
+After capture, render one response by sample ID without rerunning the model:
 
 ```bash
-python -m experiments.attention_mechanism_audit.run summarize-sample \
-  --audit /path/to/sample_audits/SAMPLE_ID.json
+python -m experiments.attention_mechanism_audit.run plot-sample \
+  --input /path/to/train/traces /path/to/cache/train \
+  --input /path/to/test/traces /path/to/cache/test \
+  --sample-id SAMPLE_ID \
+  --output sample.png
 ```
 
-"All" means every QA response available in the formal train/test attention
-cache. Raw RAGTruth rows without a faithful attention cache are not counted as
-audited, and Summary/Data2txt require their own evidence-region definitions.
+The same command can be placed in a notebook cell and `SAMPLE_ID` changed
+interactively. `sample_explorer.ipynb` already contains both cache locations,
+so only `SAMPLE_ID` needs to change. This view is for tracing a concrete case;
+the headline plots always come from the pooled all-data evaluation.
 
-This is a post-hoc mechanism audit. It does not train or evaluate an
-unsupervised hallucination detector: there is no label-free anomaly score,
-calibrated decision threshold, AUROC, or AUPRC in this experiment.
+## Scope
 
-Focused tests:
+The audit measures how this frozen observer processes teacher-forced tokens.
+If the original response was generated by another model, it does not establish
+the original generator's exact formation process. The evidence region is the
+QA passage block supplied by the dataset, not a manually annotated minimal
+support span.
+
+Run the focused tests with:
 
 ```bash
 pytest -q experiments/attention_mechanism_audit/tests

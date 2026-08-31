@@ -267,10 +267,8 @@ def test_mechanism_trace_keeps_registered_routes_without_dense_raw_states():
 
     trace = artifact["trace"]
     assert {
-        "role_attention",
         "role_edge_magnitude",
         "source_message_entropy",
-        "message_coherence",
         "top_source_index",
         "top_source_magnitude",
         "source_role",

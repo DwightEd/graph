@@ -162,16 +162,10 @@ class FunctionalTraceReplay:
         layers = len(self.layers)
         roles = len(ROLE_NAMES)
         trace = {
-            "role_attention": torch.empty(
-                layers, response_tokens, self.heads, roles, dtype=torch.float32
-            ),
             "role_edge_magnitude": torch.empty(
                 layers, response_tokens, self.heads, roles, dtype=torch.float32
             ),
             "source_message_entropy": torch.empty(
-                layers, response_tokens, dtype=torch.float32
-            ),
-            "message_coherence": torch.empty(
                 layers, response_tokens, dtype=torch.float32
             ),
             "top_source_index": torch.full(
@@ -327,8 +321,6 @@ class FunctionalTraceReplay:
             return hook
 
         def attention_hook(index: int):
-            layer = self.layers[index]
-
             def hook(_module: Any, _args: Any, output: Any):
                 parts = list(output)
                 message, attention = parts[0], parts[1]
@@ -343,10 +335,9 @@ class FunctionalTraceReplay:
                     current_roles = roles_device[row_start:row_stop, :query_stop]
                     source_norm = source_norms[index][:query_stop]
                     edge_magnitude = a.float() * source_norm.T[None]
-                    role_attention, role_edge = [], []
+                    role_edge = []
                     for role in range(len(ROLE_NAMES)):
                         mask = (current_roles == role)[:, None, :]
-                        role_attention.append((a.float() * mask).sum(-1))
                         role_edge.append((edge_magnitude * mask).sum(-1))
                     source_magnitude = edge_magnitude.sum(1)
                     probability = source_magnitude / source_magnitude.sum(
@@ -355,9 +346,6 @@ class FunctionalTraceReplay:
                     entropy = -(
                         probability * probability.clamp_min(1e-12).log()
                     ).sum(-1)
-                    total_write = message[0, local:].float()
-                    if layer.self_attn.o_proj.bias is not None:
-                        total_write = total_write - layer.self_attn.o_proj.bias.float()
                     current_k = min(k, query_stop)
                     top_magnitude, top_index = source_magnitude.topk(
                         current_k, dim=-1
@@ -370,22 +358,11 @@ class FunctionalTraceReplay:
                         trace["attention_update"][index, row_start:row_stop] = (
                             message[0, local:].detach().cpu()
                         )
-                    trace["role_attention"][index, row_start:row_stop] = (
-                        torch.stack(role_attention, -1).detach().cpu()
-                    )
                     trace["role_edge_magnitude"][index, row_start:row_stop] = (
                         torch.stack(role_edge, -1).detach().cpu()
                     )
                     trace["source_message_entropy"][index, row_start:row_stop] = (
                         entropy.detach().cpu()
-                    )
-                    trace["message_coherence"][index, row_start:row_stop] = (
-                        (
-                            total_write.norm(dim=-1)
-                            / source_magnitude.sum(-1).clamp_min(1e-12)
-                        )
-                        .detach()
-                        .cpu()
                     )
                     trace["top_source_index"][
                         index, row_start:row_stop, :current_k

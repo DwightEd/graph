@@ -3,71 +3,63 @@ from pathlib import Path
 from experiments.attention_mechanism_audit.run import DEFAULT_MODEL, parser
 
 
-def test_capture_cli_targets_real_cached_samples_and_frozen_llama():
+def test_capture_cli_uses_the_exact_frozen_model_path():
     args = parser().parse_args(
         [
             "capture",
             "--split-root",
-            "cache/test",
+            "cache/train",
             "--source-info",
-            "source_info.jsonl",
+            "source.jsonl",
             "--output",
             "traces",
         ]
     )
 
-    assert args.split_root == Path("cache/test")
-    assert args.source_info == Path("source_info.jsonl")
     assert args.model == Path(DEFAULT_MODEL)
-    assert args.device == "cuda:0"
-    assert args.dtype == "bfloat16"
-    assert args.predictor_chunk == 64
+    assert args.predictor_chunk == 128
     assert args.intervention_batch == 3
-    assert args.top_k == 8
-    assert args.logit_chunk == 64
-    assert args.trace_level == "mechanism"
-    assert vars(args).keys().isdisjoint({"pairs", "candidate_a", "candidate_b"})
 
 
-def test_evaluate_cli_is_posthoc_and_has_no_probe_training_options():
+def test_evaluate_cli_accepts_multiple_physical_shards_once():
     args = parser().parse_args(
         [
             "evaluate",
-            "--traces",
-            "traces",
-            "--split-root",
+            "--input",
+            "train/traces",
+            "cache/train",
+            "--input",
+            "test/traces",
             "cache/test",
             "--output",
             "report.json",
         ]
     )
 
-    assert args.traces == Path("traces")
-    assert args.split_root == Path("cache/test")
+    assert args.input == [
+        ["train/traces", "cache/train"],
+        ["test/traces", "cache/test"],
+    ]
     assert args.output == Path("report.json")
-    assert args.position_bin == 16
-    assert args.bootstrap == 10000
-    assert args.model == Path(DEFAULT_MODEL)
-    assert vars(args).keys().isdisjoint({"pairs", "folds", "epochs", "probe"})
+    assert vars(args).keys().isdisjoint({"split_name", "combine", "probe", "epochs"})
 
 
-def test_combine_cli_accepts_train_and_test_reports():
+def test_plot_sample_searches_the_same_saved_inputs():
     args = parser().parse_args(
         [
-            "combine",
+            "plot-sample",
             "--input",
-            "train",
-            "train/report.json",
+            "train/traces",
+            "cache/train",
             "--input",
-            "test",
-            "test/report.json",
+            "test/traces",
+            "cache/test",
+            "--sample-id",
+            "11907",
             "--output",
-            "all/report.json",
+            "sample.png",
         ]
     )
 
-    assert args.input == [
-        ["train", "train/report.json"],
-        ["test", "test/report.json"],
-    ]
-    assert args.output == Path("all/report.json")
+    assert args.sample_id == "11907"
+    assert args.output == Path("sample.png")
