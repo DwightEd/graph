@@ -82,6 +82,19 @@ The output concatenates the two encoded node sets and contains only
 [GCN_NODE_EMBEDDING_BUNDLE.md](GCN_NODE_EMBEDDING_BUNDLE.md) for the array
 contract.
 
+To recover the exact identity of every compact row without repacking the
+embeddings, write a separate CSV index:
+
+```bash
+bash experiments/dbgnn_reference/write_gcn_row_index_qa.sh
+```
+
+`gcn_node_data_qa_rows.csv` follows the existing bundle order exactly:
+GCN calibration rows first and test rows second. It records the zero-based
+bundle row, split, sample/source IDs and response-token position. The command
+verifies both embedding segments against their original GCN indices before it
+writes the mapping; it does not modify or copy the compact embedding bundle.
+
 For the actual construction test, run the first-order GCN, causal DBGNN and the
 same DBGNN with only its high-order transitions removed. Labels open once,
 after every detector score is frozen:
