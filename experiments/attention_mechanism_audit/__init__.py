@@ -1,1 +1,1 @@
-"""Frozen-model causal-route audit."""
+"""Frozen-model mechanism-state collection, detection, and audit."""

@@ -30,12 +30,12 @@ def test_all_cli_uses_the_shared_cache_and_exact_frozen_model():
     assert args.limit is None
 
 
-def test_all_command_evaluates_each_task_from_the_same_saved_traces(
+def test_all_command_evaluates_each_task_from_the_same_saved_mechanism_states(
     tmp_path, monkeypatch
 ):
     shared = [
-        (tmp_path / "traces/train", tmp_path / "cache/train"),
-        (tmp_path / "traces/test", tmp_path / "cache/test"),
+        (tmp_path / "mechanism_state/train", tmp_path / "cache/train"),
+        (tmp_path / "mechanism_state/test", tmp_path / "cache/test"),
     ]
     captures = []
     evaluations = []
@@ -83,9 +83,9 @@ def test_plot_sample_searches_the_same_saved_inputs():
         [
             "plot-sample",
             "--input",
-            "train/traces",
+            "mechanism_state/train",
             "--input",
-            "test/traces",
+            "mechanism_state/test",
             "--sample-id",
             "11907",
             "--output",
@@ -94,7 +94,10 @@ def test_plot_sample_searches_the_same_saved_inputs():
     )
 
     assert args.sample_id == "11907"
-    assert args.input == [Path("train/traces"), Path("test/traces")]
+    assert args.input == [
+        Path("mechanism_state/train"),
+        Path("mechanism_state/test"),
+    ]
     assert args.output == Path("sample.png")
 
 
@@ -125,9 +128,7 @@ def test_report_prints_without_bootstrap_intervals(capsys):
                 "metrics": {
                     name: audit_metric
                     for name in (
-                        "evidence_share_mean",
-                        "response_share_mean",
-                        "routing_imbalance_mean",
+                        "edge_route_balance_mean",
                         "source_dispersion_mean",
                     )
                 }
@@ -136,4 +137,8 @@ def test_report_prints_without_bootstrap_intervals(capsys):
     )
     output = capsys.readouterr().out
     assert "PARTIAL-SUMMARY" in output
-    assert output.count("CI=n/a") == 12
+    assert "PRIMARY   mechanism_innovation" in output
+    assert "control   static_state" in output
+    assert "control   confidence" in output
+    assert "component" not in output
+    assert output.count("CI=n/a") == 8

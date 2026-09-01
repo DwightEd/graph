@@ -1,10 +1,15 @@
+import math
+
 import pytest
 
 torch = pytest.importorskip("torch")
 transformers = pytest.importorskip("transformers")
 from torch.nn import functional as F
 
-from experiments.attention_mechanism_audit.capture import FunctionalTraceReplay
+from experiments.attention_mechanism_audit.capture import (
+    ROLE_NAMES,
+    FunctionalTraceReplay,
+)
 
 
 def _tiny_replay(*, layers=2):
@@ -42,12 +47,27 @@ def _one_shot_scores(model, token_ids, response_start, evidence_mask, removal):
     length = len(token_ids) - 1
     kv_heads = model.config.num_key_value_heads
     repeats = model.config.num_attention_heads // kv_heads
-    removed = torch.zeros(length, dtype=torch.bool)
+    source = torch.arange(length)
+    query = torch.arange(length)
+    causal = source[None] <= query[:, None]
+    response_query = query >= response_start - 1
+    mask = torch.zeros(length, length, dtype=torch.bool)
     if removal in {"evidence", "both"}:
-        removed[:response_start] |= evidence_mask
-    if removal in {"response", "both"}:
-        removed[response_start:] = True
-    mask = torch.ones(length, length, dtype=torch.bool).tril() & removed[None]
+        evidence = torch.zeros(length, dtype=torch.bool)
+        evidence[:response_start] = evidence_mask
+        mask |= (
+            causal
+            & response_query[:, None]
+            & evidence[None]
+            & (source[None] != query[:, None])
+        )
+    if removal in {"history", "both"}:
+        mask |= (
+            causal
+            & response_query[:, None]
+            & (source[None] >= response_start)
+            & (source[None] < query[:, None])
+        )
     values, handles = [None] * len(layers), []
 
     def save_value(index):
@@ -103,7 +123,140 @@ def _one_shot_scores(model, token_ids, response_start, evidence_mask, removal):
     return selected - logits.logsumexp(1), selected - competitor
 
 
-def test_capture_keeps_only_the_exact_inputs_needed_by_the_four_scores():
+def _explicit_full_sequence_trace(
+    model, token_ids, response_start, evidence_mask, *, top_k
+):
+    """Recompute every saved trace field from raw HF attention and V tensors."""
+
+    layers = tuple(model.model.layers)
+    source_tokens = len(token_ids) - 1
+    response_tokens = len(token_ids) - response_start
+    heads = model.config.num_attention_heads
+    kv_heads = model.config.num_key_value_heads
+    head_dim = model.config.hidden_size // heads
+    repeats = heads // kv_heads
+    roles = len(ROLE_NAMES)
+    k = min(top_k, source_tokens)
+    values, handles = [None] * len(layers), []
+
+    def save_value(index):
+        def hook(_module, _args, output):
+            values[index] = (
+                output.detach()
+                .reshape(1, source_tokens, kv_heads, head_dim)[0]
+                .float()
+                .cpu()
+            )
+
+        return hook
+
+    for index, layer in enumerate(layers):
+        handles.append(layer.self_attn.v_proj.register_forward_hook(save_value(index)))
+    try:
+        with torch.inference_mode():
+            output = model.model(
+                input_ids=token_ids[:-1][None],
+                attention_mask=torch.ones(1, source_tokens, dtype=torch.long),
+                use_cache=False,
+                output_attentions=True,
+                return_dict=True,
+            )
+    finally:
+        for handle in handles:
+            handle.remove()
+
+    expected = {
+        "role_attention_mass": torch.zeros(
+            len(layers), response_tokens, heads, roles
+        ),
+        "edge_role_energy": torch.zeros(
+            len(layers), response_tokens, heads, roles
+        ),
+        "head_role_write_norm": torch.zeros(
+            len(layers), response_tokens, heads, roles
+        ),
+        "head_source_entropy": torch.zeros(
+            len(layers), response_tokens, heads
+        ),
+        "role_head_coherence": torch.zeros(
+            len(layers), response_tokens, roles
+        ),
+        "top_source_index": torch.full(
+            (len(layers), response_tokens, k), -1, dtype=torch.int32
+        ),
+        "top_source_magnitude": torch.zeros(
+            len(layers), response_tokens, k
+        ),
+    }
+    evidence_mask = evidence_mask.bool()
+    for layer_index, layer in enumerate(layers):
+        attention = output.attentions[layer_index][0].detach().float().cpu()
+        value = values[layer_index]
+        weight = layer.self_attn.o_proj.weight.detach().float().cpu()
+        blocks = [
+            weight[:, head * head_dim : (head + 1) * head_dim]
+            for head in range(heads)
+        ]
+        for row in range(response_tokens):
+            query = response_start - 1 + row
+            source_energy = torch.zeros(query + 1)
+            net_role_writes = [torch.zeros(weight.shape[0]) for _ in range(roles)]
+            for head in range(heads):
+                kv_head = head // repeats
+                role_contexts = [torch.zeros(head_dim) for _ in range(roles)]
+                head_source_energy = torch.zeros(query + 1)
+                for source in range(query + 1):
+                    if source == query:
+                        role = 3
+                    elif source < response_start:
+                        role = 0 if evidence_mask[source] else 1
+                    else:
+                        role = 2
+                    mass = attention[head, query, source]
+                    source_write = F.linear(
+                        value[source, kv_head], blocks[head], bias=None
+                    )
+                    energy = mass * source_write.norm()
+                    expected["role_attention_mass"][
+                        layer_index, row, head, role
+                    ] += mass
+                    expected["edge_role_energy"][
+                        layer_index, row, head, role
+                    ] += energy
+                    role_contexts[role] += mass * value[source, kv_head]
+                    head_source_energy[source] = energy
+                    source_energy[source] += energy
+                probability = head_source_energy / head_source_energy.sum().clamp_min(
+                    1e-12
+                )
+                expected["head_source_entropy"][layer_index, row, head] = -(
+                    probability * probability.clamp_min(1e-12).log()
+                ).sum() / math.log(max(query + 1, 2))
+                for role, context in enumerate(role_contexts):
+                    role_write = F.linear(context, blocks[head], bias=None)
+                    expected["head_role_write_norm"][
+                        layer_index, row, head, role
+                    ] = role_write.norm()
+                    net_role_writes[role] += role_write
+            for role, net_write in enumerate(net_role_writes):
+                denominator = expected["head_role_write_norm"][
+                    layer_index, row, :, role
+                ].sum()
+                expected["role_head_coherence"][layer_index, row, role] = (
+                    net_write.norm() / denominator.clamp_min(1e-12)
+                )
+            current_k = min(k, query + 1)
+            magnitude, index = source_energy.topk(current_k)
+            expected["top_source_index"][
+                layer_index, row, :current_k
+            ] = index.int()
+            expected["top_source_magnitude"][
+                layer_index, row, :current_k
+            ] = magnitude
+    return expected
+
+
+def test_capture_saves_the_rich_mechanism_state_and_all_branch_scores():
     model, replay = _tiny_replay()
     token_ids, response_start, evidence_mask = _inputs()
     predictors = torch.arange(response_start - 1, len(token_ids) - 1)
@@ -125,7 +278,7 @@ def test_capture_keeps_only_the_exact_inputs_needed_by_the_four_scores():
     expected_logprob = selected - logits.logsumexp(1)
 
     artifact = replay.capture(
-        token_ids, response_start, evidence_mask, predictor_chunk=2, top_k=3
+        token_ids, response_start, evidence_mask, predictor_chunk=2, top_k=8
     )
 
     assert artifact["response_start"] == response_start
@@ -144,32 +297,134 @@ def test_capture_keeps_only_the_exact_inputs_needed_by_the_four_scores():
     )
     assert set(artifact["score_inputs"]) == {
         "full_logprob",
+        "full_margin",
         "no_evidence_logprob",
-        "no_response_logprob",
-        "no_evidence_response_margin",
+        "no_evidence_margin",
+        "no_history_logprob",
+        "no_history_margin",
+        "no_evidence_history_logprob",
+        "no_evidence_history_margin",
     }
     assert set(artifact["trace"]) == {
-        "total_message_magnitude",
-        "evidence_message_magnitude",
-        "response_message_magnitude",
-        "source_message_entropy",
+        "role_attention_mass",
+        "edge_role_energy",
+        "head_role_write_norm",
+        "head_source_entropy",
+        "role_head_coherence",
         "top_source_index",
         "top_source_magnitude",
     }
-    assert artifact["trace"]["total_message_magnitude"].shape == (2, 4)
-    assert artifact["trace"]["source_message_entropy"].shape == (2, 4)
-    assert artifact["trace"]["top_source_index"].shape == (2, 4, 3)
+    assert ROLE_NAMES == (
+        "evidence",
+        "other_prompt",
+        "response_history",
+        "predictor_self",
+    )
+    assert artifact["trace"]["role_attention_mass"].shape == (2, 4, 4, 4)
+    assert artifact["trace"]["edge_role_energy"].shape == (2, 4, 4, 4)
+    assert artifact["trace"]["head_role_write_norm"].shape == (2, 4, 4, 4)
+    assert artifact["trace"]["head_source_entropy"].shape == (2, 4, 4)
+    assert artifact["trace"]["role_head_coherence"].shape == (2, 4, 4)
+    assert artifact["trace"]["top_source_index"].shape == (2, 4, 6)
     assert all(value.shape == (4,) for value in artifact["score_inputs"].values())
     trace = artifact["trace"]
-    assert torch.count_nonzero(trace["response_message_magnitude"][:, 0]) == 0
-    assert torch.all(trace["response_message_magnitude"][:, 1:] > 0)
-    assert torch.all(
-        trace["total_message_magnitude"] + 1e-6
-        >= trace["evidence_message_magnitude"] + trace["response_message_magnitude"]
+    evidence, other_prompt, response_history, predictor_self = range(4)
+    assert torch.count_nonzero(
+        trace["edge_role_energy"][:, :2, :, response_history]
+    ) == 0
+    assert torch.count_nonzero(
+        trace["role_attention_mass"][:, :2, :, response_history]
+    ) == 0
+    assert torch.all(trace["edge_role_energy"][:, 2:, :, response_history] > 0)
+    assert torch.all(trace["edge_role_energy"][:, :, :, predictor_self] > 0)
+    assert torch.all(trace["role_attention_mass"][:, 0, :, predictor_self] > 0)
+    assert torch.all(trace["edge_role_energy"][:, 0, :, evidence] > 0)
+    assert torch.all(trace["edge_role_energy"][:, 0, :, other_prompt] > 0)
+    assert torch.all(trace["head_role_write_norm"] >= 0)
+    assert torch.all((trace["head_source_entropy"] >= 0))
+    assert torch.all((trace["head_source_entropy"] <= 1 + 2e-3))
+    assert torch.all((trace["role_head_coherence"] >= 0))
+    assert torch.all((trace["role_head_coherence"] <= 1 + 2e-3))
+    torch.testing.assert_close(
+        trace["role_attention_mass"].float().sum(-1),
+        torch.ones(2, 4, 4),
+        atol=2e-3,
+        rtol=2e-3,
+    )
+    torch.testing.assert_close(
+        trace["edge_role_energy"].float().sum((2, 3)),
+        trace["top_source_magnitude"].float().sum(-1),
+        atol=4e-3,
+        rtol=4e-3,
     )
 
     assert all(not parameter.requires_grad for parameter in model.parameters())
     assert all(parameter.grad is None for parameter in model.parameters())
+
+
+def test_full_sequence_oracle_reconstructs_every_saved_trace_equation():
+    model, replay = _tiny_replay(layers=2)
+    token_ids, response_start, evidence_mask = _inputs()
+    artifact = replay.capture(
+        token_ids,
+        response_start,
+        evidence_mask,
+        predictor_chunk=1,
+        top_k=3,
+    )
+    expected = _explicit_full_sequence_trace(
+        model,
+        token_ids,
+        response_start,
+        evidence_mask,
+        top_k=3,
+    )
+
+    for name in (
+        "role_attention_mass",
+        "edge_role_energy",
+        "head_role_write_norm",
+        "head_source_entropy",
+        "role_head_coherence",
+        "top_source_magnitude",
+    ):
+        torch.testing.assert_close(
+            artifact["trace"][name].float(),
+            expected[name],
+            atol=3e-3,
+            rtol=3e-3,
+        )
+    assert torch.equal(
+        artifact["trace"]["top_source_index"], expected["top_source_index"]
+    )
+
+
+def test_deletions_are_symmetric_response_query_interventions():
+    _model, replay = _tiny_replay(layers=1)
+    masks = replay._removal_mask(
+        ("evidence", "history", "both"),
+        torch.tensor([True, True, True]),
+        response_start=3,
+        query_start=0,
+        query_stop=6,
+    )
+
+    evidence, history, both = masks
+    assert torch.count_nonzero(masks[:, :2]) == 0
+    assert torch.equal(
+        evidence[2], torch.tensor([True, True, False, False, False, False])
+    )
+    assert torch.count_nonzero(history[2]) == 0
+    assert torch.equal(
+        evidence[3], torch.tensor([True, True, True, False, False, False])
+    )
+    assert torch.equal(
+        history[3], torch.tensor([False, False, False, False, False, False])
+    )
+    assert torch.equal(
+        history[4], torch.tensor([False, False, False, True, False, False])
+    )
+    assert torch.equal(both, evidence | history)
 
 
 def test_interventions_project_each_layer_with_that_layers_own_o_proj():
@@ -202,7 +457,7 @@ def test_interventions_project_each_layer_with_that_layers_own_o_proj():
     assert called_layers == {0, 1}
 
 
-def test_multilayer_interventions_match_an_independent_full_sequence_oracle():
+def test_chunked_interventions_match_full_sequence_hook_replay():
     model, _ = _tiny_replay(layers=2)
     with torch.no_grad():
         model.model.layers[0].self_attn.o_proj.weight.copy_(
@@ -222,17 +477,21 @@ def test_multilayer_interventions_match_an_independent_full_sequence_oracle():
     no_evidence = _one_shot_scores(
         model, token_ids, response_start, evidence_mask, "evidence"
     )
-    no_response = _one_shot_scores(
-        model, token_ids, response_start, evidence_mask, "response"
+    no_history = _one_shot_scores(
+        model, token_ids, response_start, evidence_mask, "history"
     )
-    no_evidence_response = _one_shot_scores(
+    no_evidence_history = _one_shot_scores(
         model, token_ids, response_start, evidence_mask, "both"
     )
     expected = {
         "full_logprob": full[0],
+        "full_margin": full[1],
         "no_evidence_logprob": no_evidence[0],
-        "no_response_logprob": no_response[0],
-        "no_evidence_response_margin": no_evidence_response[1],
+        "no_evidence_margin": no_evidence[1],
+        "no_history_logprob": no_history[0],
+        "no_history_margin": no_history[1],
+        "no_evidence_history_logprob": no_evidence_history[0],
+        "no_evidence_history_margin": no_evidence_history[1],
     }
     for name, value in expected.items():
         torch.testing.assert_close(actual[name], value, atol=3e-5, rtol=3e-5)

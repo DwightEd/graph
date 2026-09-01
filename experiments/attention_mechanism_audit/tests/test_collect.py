@@ -7,7 +7,44 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-import experiments.attention_mechanism_audit.audit as audit_module
+import experiments.attention_mechanism_audit.collect as collect_module
+
+
+SCORE_INPUTS = (
+    "full_logprob",
+    "full_margin",
+    "no_evidence_logprob",
+    "no_evidence_margin",
+    "no_history_logprob",
+    "no_history_margin",
+    "no_evidence_history_logprob",
+    "no_evidence_history_margin",
+)
+
+
+def _trace(response_tokens: int = 1):
+    return {
+        "role_attention_mass": torch.zeros(2, response_tokens, 3, 4),
+        "edge_role_energy": torch.zeros(2, response_tokens, 3, 4),
+        "head_role_write_norm": torch.zeros(2, response_tokens, 3, 4),
+        "head_source_entropy": torch.zeros(2, response_tokens, 3),
+        "role_head_coherence": torch.zeros(2, response_tokens, 4),
+        "top_source_index": torch.zeros(2, response_tokens, 2, dtype=torch.int32),
+        "top_source_magnitude": torch.zeros(2, response_tokens, 2),
+    }
+
+
+def _capture(token_ids):
+    return {
+        "token_ids": token_ids.clone(),
+        "response_start": 2,
+        "peak_cuda_reserved_bytes": int(token_ids[1]),
+        "trace": _trace(),
+        "score_inputs": {
+            name: torch.tensor([-float(index + 1)])
+            for index, name in enumerate(SCORE_INPUTS)
+        },
+    }
 
 
 def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
@@ -56,18 +93,7 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
             assert evidence_mask.dtype == torch.bool
             assert evidence_mask.shape == (2,)
             capture_calls.append(int(token_ids[1]))
-            return {
-                "token_ids": token_ids.clone(),
-                "response_start": response_start,
-                "peak_cuda_reserved_bytes": int(token_ids[1]),
-                "trace": {},
-                "score_inputs": {
-                    "full_logprob": torch.tensor([-1.0]),
-                    "no_evidence_logprob": torch.tensor([-2.0]),
-                    "no_response_logprob": torch.tensor([-3.0]),
-                    "no_evidence_response_margin": torch.tensor([-0.5]),
-                },
-            }
+            return _capture(token_ids)
 
     class FakeAutoTokenizer:
         @classmethod
@@ -75,20 +101,22 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
             return cls()
 
     monkeypatch.setattr(
-        audit_module, "open_research_dataset", lambda *_args, **_kwargs: FakeDataset()
+        collect_module,
+        "open_research_dataset",
+        lambda *_args, **_kwargs: FakeDataset(),
     )
     monkeypatch.setattr(
-        audit_module,
+        collect_module,
         "load_source_info",
         lambda _path: {sample.source_id: {} for sample in samples.values()},
     )
     monkeypatch.setattr(
-        audit_module,
+        collect_module,
         "build_evidence_mask",
         lambda *_args: np.zeros(2, dtype=bool),
     )
     monkeypatch.setattr(
-        audit_module.FunctionalTraceReplay,
+        collect_module.FunctionalTraceReplay,
         "from_pretrained",
         lambda *_args, **_kwargs: FakeReplay(),
     )
@@ -98,7 +126,7 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
         SimpleNamespace(AutoTokenizer=FakeAutoTokenizer),
     )
 
-    output = tmp_path / "traces"
+    output = tmp_path / "mechanism-state"
     common = {
         "split_root": tmp_path / "train-cache",
         "source_info": tmp_path / "source_info.jsonl",
@@ -107,7 +135,7 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
         "device": "cpu",
         "dtype": torch.float32,
     }
-    first = audit_module.capture_split(**common, limit=1)
+    first = collect_module.capture_split(**common, limit=1)
 
     assert first["samples"] == 3
     assert first["resumed_samples"] == 0
@@ -115,7 +143,8 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     assert first["selected_samples_seen"] == 3
     assert first["eligible_samples"] is None
     assert first["complete"] is False
-    assert first["version"] == 4
+    assert first["version"] == 5
+    assert first["labels_used"] is False
     assert first["task_types"] == ["QA", "Summary", "Data2txt"]
     assert capture_calls == [10, 11, 12]
     first_rows = [
@@ -134,13 +163,10 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     ]
     saved = torch.load(output / "samples" / "summary.pt", weights_only=True)
     assert set(saved) == {"token_ids", "response_start", "trace", "score_inputs"}
-    assert set(saved["score_inputs"]) == {
-        "full_logprob",
-        "no_evidence_logprob",
-        "no_response_logprob",
-        "no_evidence_response_margin",
-    }
-    second = audit_module.capture_split(**common)
+    assert tuple(saved["score_inputs"]) == SCORE_INPUTS
+    assert set(saved["trace"]) == set(_trace())
+
+    second = collect_module.capture_split(**common)
 
     assert second["samples"] == 4
     assert second["resumed_samples"] == 3
@@ -169,7 +195,7 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     ]
     assert len({row["sample_id"] for row in final_rows}) == len(final_rows)
 
-    third = audit_module.capture_split(**common, limit=1)
+    third = collect_module.capture_split(**common, limit=1)
 
     assert third["complete"] is True
     assert third["eligible_samples"] == 4
@@ -178,11 +204,44 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
 
     (output / "manifest.json").unlink()
     with pytest.raises(ValueError):
-        audit_module.capture_split(**common)
+        collect_module.capture_split(**common)
     assert capture_calls == [10, 11, 12, 13]
 
     (output / "manifest.json").write_text(
-        json.dumps({"schema": audit_module.SCHEMA, "version": 3}), encoding="utf-8"
+        json.dumps(
+            {"schema": collect_module.SCHEMA, "version": collect_module.VERSION - 1}
+        ),
+        encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="changed provenance"):
-        audit_module.capture_split(**common)
+    with pytest.raises(ValueError, match="changed identity"):
+        collect_module.capture_split(**common)
+
+
+def test_input_identity_is_stable_after_relocation(tmp_path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    source_content = '{"source_id": "same"}\n'
+    for root in (first, second):
+        root.mkdir()
+        (root / "source_info.jsonl").write_text(source_content, encoding="utf-8")
+        model = root / "observer"
+        model.mkdir()
+        (model / "config.json").write_text('{"model_type": "llama"}', encoding="utf-8")
+        (model / "model.safetensors").write_bytes(b"same frozen weights")
+
+    assert collect_module._file_identity(
+        first / "source_info.jsonl"
+    ) == collect_module._file_identity(second / "source_info.jsonl")
+    first_identity = collect_module._model_identity(first / "observer")
+    second_identity = collect_module._model_identity(second / "observer")
+    assert first_identity == second_identity
+
+
+def test_save_rejects_response_misaligned_mechanism_trace(tmp_path):
+    capture = _capture(torch.tensor([1, 2, 3]))
+    capture["trace"]["head_source_entropy"] = torch.zeros(2, 2, 3)
+
+    with pytest.raises(ValueError, match="not response-token aligned"):
+        collect_module._save(tmp_path / "sample.pt", capture)
+
+    assert not (tmp_path / "sample.pt").exists()

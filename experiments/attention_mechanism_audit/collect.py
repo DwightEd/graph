@@ -1,7 +1,13 @@
-"""Capture compact causal-route traces for every RAGTruth task."""
+"""Collect resumable frozen-model mechanism states for every RAGTruth task.
+
+This module only owns dataset traversal, provenance, serialization, and resume.
+Mechanism extraction lives in :mod:`capture`; detector fitting lives in the
+evaluation path.  In particular, no hallucination label is opened here.
+"""
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Sequence
 from pathlib import Path
@@ -19,11 +25,71 @@ from .data import (
     load_source_info,
 )
 
-SCHEMA = "ragtruth-functional-message-audit"
-VERSION = 4
+SCHEMA = "ragtruth-mechanism-state"
+VERSION = 5
+
+
+def _file_identity(path: str | Path) -> str:
+    """Return a relocation-stable identity for an input file or fixture."""
+
+    path = Path(path)
+    if not path.is_file():
+        return path.name
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _model_identity(path: str | Path) -> str:
+    path = Path(path)
+    if not path.is_dir():
+        return path.name
+    digest = hashlib.sha256()
+    digest.update(path.name.encode())
+    for candidate in sorted(path.iterdir(), key=lambda item: item.name):
+        if candidate.name == "config.json" or candidate.name.endswith(
+            (".safetensors", ".bin", ".index.json")
+        ):
+            digest.update(candidate.name.encode())
+            digest.update(b"\0")
+            digest.update(str(candidate.stat().st_size).encode())
+            digest.update(b"\0")
+            if candidate.name.endswith(".json"):
+                digest.update(_file_identity(candidate).encode())
+    return digest.hexdigest()
+
+
+def _split_identity(dataset: Any) -> str:
+    """Identify the physical shard by split name and ordered sample IDs."""
+
+    digest = hashlib.sha256()
+    digest.update(str(dataset.manifest.get("split", "")).encode())
+    for sample_id in dataset.sample_ids:
+        digest.update(b"\0")
+        digest.update(str(sample_id).encode())
+    return digest.hexdigest()
+
+
+def _validate_alignment(capture: dict[str, Any]) -> None:
+    """Reject a trace whose token axis no longer matches teacher forcing."""
+
+    tokens = len(capture["token_ids"])
+    response_start = int(capture["response_start"])
+    if not 0 < response_start < tokens:
+        raise ValueError("response_start is outside token_ids")
+    response_tokens = tokens - response_start
+    for name, value in capture["score_inputs"].items():
+        if len(value) != response_tokens:
+            raise ValueError(f"score input {name} is not response-token aligned")
+    for name, value in capture["trace"].items():
+        if value.ndim >= 2 and value.shape[1] != response_tokens:
+            raise ValueError(f"mechanism trace {name} is not response-token aligned")
 
 
 def _save(path: Path, capture: dict[str, Any]) -> dict[str, Any]:
+    _validate_alignment(capture)
     peak_memory = capture.pop("peak_cuda_reserved_bytes")
     temporary = path.with_suffix(path.suffix + ".tmp")
     torch.save(capture, temporary)
@@ -51,18 +117,20 @@ def capture_split(
     logit_chunk: int = 64,
     intervention_batch: int = 3,
 ) -> dict[str, Any]:
-    """Capture every cached task sample, journaling progress for exact resume."""
+    """Collect one physical shard, journaling progress for exact resume."""
 
     from transformers import AutoTokenizer
 
-    observer_checkpoint = str(Path(model_path).resolve())
+    dataset = open_research_dataset(
+        split_root, device="cpu", retain_embedded_labels=False
+    )
     output = Path(output_root)
     samples = output / "samples"
     samples.mkdir(parents=True, exist_ok=True)
     index_path = output / "index.jsonl"
     manifest_path = output / "manifest.json"
     if index_path.is_file() and not manifest_path.is_file():
-        raise ValueError("index exists without a v4 manifest; use a new output")
+        raise ValueError("index exists without a v5 manifest; use a new output")
     previous_manifest = (
         json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest_path.is_file()
@@ -71,9 +139,9 @@ def capture_split(
     expected = {
         "schema": SCHEMA,
         "version": VERSION,
-        "split_root": str(Path(split_root).resolve()),
-        "source_info": str(Path(source_info).resolve()),
-        "observer_checkpoint": observer_checkpoint,
+        "split_identity": _split_identity(dataset),
+        "source_identity": _file_identity(source_info),
+        "observer_identity": _model_identity(model_path),
         "model_dtype": str(dtype),
         "top_k_message_sources": int(top_k),
         "task_types": list(TASK_TYPES),
@@ -86,25 +154,21 @@ def capture_split(
         ]
         if changed:
             raise ValueError(
-                "cannot resume traces with changed provenance: " + ", ".join(changed)
+                "cannot resume mechanism states with changed identity: "
+                + ", ".join(changed)
             )
         if previous_manifest.get("complete") and limit is None:
             return previous_manifest
     else:
-        initial = {
-            **expected,
-            "samples": 0,
-            "complete": False,
-            "labels_used": False,
-        }
         manifest_path.write_text(
-            json.dumps(initial, indent=2, sort_keys=True),
+            json.dumps(
+                {**expected, "samples": 0, "complete": False, "labels_used": False},
+                indent=2,
+                sort_keys=True,
+            ),
             encoding="utf-8",
         )
 
-    dataset = open_research_dataset(
-        split_root, device="cpu", retain_embedded_labels=False
-    )
     sources = load_source_info(source_info)
     tokenizer = AutoTokenizer.from_pretrained(str(model_path), local_files_only=True)
     replay = FunctionalTraceReplay.from_pretrained(
@@ -138,19 +202,15 @@ def capture_split(
             continue
 
         sample = dataset[sample_id]
-        attention = sample.attention()
         task_type = canonical_task_type(sample.task_type)
         if limit is not None and selected[task_type] >= limit:
-            sample.release_attention()
             continue
         selected[task_type] += 1
         eligible += 1
+        attention = sample.attention()
         source_id = str(sample.source_id)
         generator_model = sample.generator_model
-        print(
-            f"capture {new_samples + 1} ({task_type}): {sample_id}",
-            flush=True,
-        )
+        print(f"collect {new_samples + 1} ({task_type}): {sample_id}", flush=True)
         evidence_mask = evidence_cache.get(source_id)
         if evidence_mask is None:
             evidence_mask = torch.from_numpy(
@@ -188,8 +248,7 @@ def capture_split(
         eligible if limit is None else previous_manifest.get("eligible_samples")
     )
     manifest = {
-        "schema": SCHEMA,
-        "version": VERSION,
+        **expected,
         "samples": len(rows),
         "dataset_candidates": len(dataset.sample_ids),
         "eligible_samples": eligible_total,
@@ -198,9 +257,6 @@ def capture_split(
         "new_samples": new_samples,
         "complete": complete,
         "split": dataset.manifest.get("split"),
-        "split_root": str(Path(split_root).resolve()),
-        "source_info": str(Path(source_info).resolve()),
-        "observer_checkpoint": observer_checkpoint,
         "task_types": list(TASK_TYPES),
         "generator_models": sorted({str(row["generator_model"]) for row in rows}),
         "labels_used": False,
@@ -211,7 +267,7 @@ def capture_split(
         "max_cuda_reserved_bytes": max(
             (row["peak_cuda_reserved_bytes"] for row in rows), default=0
         ),
-        "index": str(index_path),
+        "index": index_path.name,
     }
     manifest_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
@@ -229,21 +285,21 @@ def capture_all(
     dtype: torch.dtype = torch.bfloat16,
     limit: int | None = None,
 ) -> dict[str, list[tuple[Path, Path]]]:
-    """Capture each physical shard once and return task-filtered evaluation inputs."""
+    """Collect both physical shards once and return task-filtered inputs."""
 
     pairs = []
     for split_root in map(Path, split_roots):
-        trace_root = Path(output_root) / "traces" / split_root.name
+        state_root = Path(output_root) / "mechanism_state" / split_root.name
         capture_split(
             split_root=split_root,
             source_info=source_info,
             model_path=model_path,
-            output_root=trace_root,
+            output_root=state_root,
             device=device,
             dtype=dtype,
             limit=limit,
         )
-        pairs.append((trace_root, split_root))
+        pairs.append((state_root, split_root))
     return {task: list(pairs) for task in TASK_TYPES}
 
 

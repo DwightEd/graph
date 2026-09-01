@@ -1,4 +1,4 @@
-"""CLI for the frozen-model three-mechanism audit."""
+"""CLI for frozen-model mechanism-state detection."""
 
 from __future__ import annotations
 
@@ -8,9 +8,22 @@ from pathlib import Path
 
 import torch
 
-from .audit import capture_all
+from .collect import capture_all
 from .data import TASK_TYPES
 from .evaluate import SCORE_ORDER, evaluate_all, plot_saved_sample
+
+PRINTED_AUDIT_ORDER = (
+    "edge_route_balance_mean",
+    "edge_route_velocity_mean",
+    "source_dispersion_mean",
+    "edge_head_role_jsd_mean",
+    "source_coherence_response_history_mean",
+    "head_coherence_response_history_mean",
+    "causal_evidence_support",
+    "causal_history_support",
+    "causal_interaction",
+    "remaining_context_margin",
+)
 
 DEFAULT_MODEL = Path(
     "/share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct"
@@ -33,7 +46,7 @@ def _print_report(report: dict) -> None:
         return f"[{interval[0]:.6f},{interval[1]:.6f}]"
 
     scope = "ALL" if report["capture_complete"] else "PARTIAL"
-    print(f"\n=== {scope}-{report['task_type'].upper()} THREE-MECHANISM DETECTION ===")
+    print(f"\n=== {scope}-{report['task_type'].upper()} MECHANISM DETECTION ===")
     print(
         f"samples={report['samples']} sources={report['sources']} "
         f"tokens={report['tokens']} positives={report['hallucinated_tokens']} "
@@ -42,7 +55,7 @@ def _print_report(report: dict) -> None:
     )
     for name in SCORE_ORDER:
         result = report["detection"][name]
-        role = "PRIMARY" if name == report["primary_score"] else "component"
+        role = "PRIMARY" if name == report["primary_score"] else "control"
         if result["auroc"] is None:
             print(f"{role:9s} {name:30s} AUROC=n/a AUPRC=n/a")
             continue
@@ -54,12 +67,9 @@ def _print_report(report: dict) -> None:
         )
     print("POST-HOC matched hallucinated - correct token differences")
     audit = report["group_difference_audit"]
-    for name in (
-        "evidence_share_mean",
-        "response_share_mean",
-        "routing_imbalance_mean",
-        "source_dispersion_mean",
-    ):
+    for name in PRINTED_AUDIT_ORDER:
+        if name not in audit["metrics"]:
+            continue
         result = audit["metrics"][name]
         difference = result["hallucinated_minus_correct"]
         if difference is None:
@@ -110,7 +120,7 @@ def _plot_sample(args: argparse.Namespace) -> None:
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(description="Frozen-model three-mechanism audit")
+    root = argparse.ArgumentParser(description="Frozen-model mechanism detection")
     commands = root.add_subparsers(dest="command", required=True)
 
     all_data = commands.add_parser(

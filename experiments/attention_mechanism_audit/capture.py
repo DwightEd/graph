@@ -10,6 +10,9 @@ from typing import Any
 import torch
 from torch.nn import functional as F
 
+ROLE_NAMES = ("evidence", "other_prompt", "response_history", "predictor_self")
+EVIDENCE, OTHER_PROMPT, HISTORY, SELF = range(len(ROLE_NAMES))
+
 
 @dataclass
 class BranchScores:
@@ -28,6 +31,8 @@ class FunctionalTraceReplay:
         self.heads = int(config.num_attention_heads)
         self.kv_heads = int(getattr(config, "num_key_value_heads", self.heads))
         self.head_dim = self.layers[0].self_attn.q_proj.out_features // self.heads
+        if self.heads % self.kv_heads:
+            raise ValueError("query heads must be divisible by KV heads")
         repeats = self.heads // self.kv_heads
         self.q_to_kv = torch.arange(self.heads, device=self.device) // repeats
         self.output_grams = tuple(self._output_gram(layer) for layer in self.layers)
@@ -115,6 +120,7 @@ class FunctionalTraceReplay:
         source = torch.arange(query_stop, device=self.device)
         query = torch.arange(query_start, query_stop, device=self.device)
         causal = source[None] <= query[:, None]
+        response_query = query >= response_start - 1
         evidence = torch.zeros(query_stop, dtype=torch.bool, device=self.device)
         prompt_stop = min(response_start, query_stop)
         evidence[:prompt_stop] = evidence_mask[:prompt_stop].to(self.device)
@@ -123,9 +129,19 @@ class FunctionalTraceReplay:
         for removal in removals:
             selected = torch.zeros_like(causal)
             if removal in {"evidence", "both"}:
-                selected |= causal & evidence[None]
-            if removal in {"response", "both"}:
-                selected |= causal & response[None]
+                selected |= (
+                    causal
+                    & response_query[:, None]
+                    & evidence[None]
+                    & (source[None] != query[:, None])
+                )
+            if removal in {"history", "both"}:
+                selected |= (
+                    causal
+                    & response_query[:, None]
+                    & response[None]
+                    & (source[None] < query[:, None])
+                )
             masks.append(selected)
         return torch.stack(masks)
 
@@ -135,17 +151,21 @@ class FunctionalTraceReplay:
         top_k: int,
     ) -> dict[str, torch.Tensor]:
         layers = len(self.layers)
-        shape = (layers, response_tokens)
+        head_shape = (layers, response_tokens, self.heads)
+        role_shape = (*head_shape, len(ROLE_NAMES))
         return {
-            "total_message_magnitude": torch.empty(*shape, dtype=torch.float32),
-            "evidence_message_magnitude": torch.empty(*shape, dtype=torch.float32),
-            "response_message_magnitude": torch.empty(*shape, dtype=torch.float32),
-            "source_message_entropy": torch.empty(*shape, dtype=torch.float32),
+            "role_attention_mass": torch.empty(*role_shape, dtype=torch.float16),
+            "edge_role_energy": torch.empty(*role_shape, dtype=torch.float16),
+            "head_role_write_norm": torch.empty(*role_shape, dtype=torch.float16),
+            "head_source_entropy": torch.empty(*head_shape, dtype=torch.float16),
+            "role_head_coherence": torch.empty(
+                layers, response_tokens, len(ROLE_NAMES), dtype=torch.float16
+            ),
             "top_source_index": torch.full(
                 (layers, response_tokens, top_k), -1, dtype=torch.int32
             ),
             "top_source_magnitude": torch.zeros(
-                layers, response_tokens, top_k, dtype=torch.float32
+                layers, response_tokens, top_k, dtype=torch.float16
             ),
         }
 
@@ -182,7 +202,7 @@ class FunctionalTraceReplay:
                 )
                 for _ in self.layers
             ]
-            if intervene
+            if intervene or capture
             else None
         )
         source_norms = (
@@ -216,7 +236,7 @@ class FunctionalTraceReplay:
                 current = output.reshape(
                     batch, query_stop - query_start, self.kv_heads, self.head_dim
                 )
-                if intervene:
+                if intervene or capture:
                     values[index][:, query_start:query_stop].copy_(current)
                 if capture:
                     source_norms[index][query_start:query_stop] = self._source_norm(
@@ -236,41 +256,111 @@ class FunctionalTraceReplay:
                     a = attention[0, :, local:, :query_stop].permute(1, 0, 2)
                     source_norm = source_norms[index][:query_stop]
                     edge_magnitude = a.float() * source_norm.T[None]
+                    value_by_head = values[index][
+                        0, :query_stop, self.q_to_kv, :
+                    ]
                     evidence = torch.zeros(
                         query_stop, dtype=torch.bool, device=self.device
                     )
                     prompt_stop = min(response_start, query_stop)
                     evidence[:prompt_stop] = evidence_device[:prompt_stop]
-                    response = (
-                        torch.arange(query_stop, device=self.device) >= response_start
+                    source = torch.arange(query_stop, device=self.device)
+                    query = torch.arange(
+                        query_start + local, query_stop, device=self.device
                     )
-                    source_magnitude = edge_magnitude.sum(1)
-                    probability = source_magnitude / source_magnitude.sum(
-                        -1, keepdim=True
-                    ).clamp_min(1e-12)
-                    entropy = -(probability * probability.clamp_min(1e-12).log()).sum(
-                        -1
+                    self_source = source[None] == query[:, None]
+                    evidence_role = evidence[None] & ~self_source
+                    other_prompt = (
+                        (source[None] < response_start)
+                        & ~evidence[None]
+                        & ~self_source
                     )
-                    current_k = min(k, query_stop)
-                    top_magnitude, top_index = source_magnitude.topk(current_k, dim=-1)
+                    history = (
+                        (source[None] >= response_start)
+                        & (source[None] < query[:, None])
+                    )
+                    roles = (evidence_role, other_prompt, history, self_source)
 
-                    trace["total_message_magnitude"][index, row_start:row_stop] = (
-                        source_magnitude.sum(-1).detach().cpu()
+                    role_attention = torch.stack(
+                        [(a.float() * role[:, None]).sum(-1) for role in roles],
+                        dim=-1,
                     )
-                    trace["evidence_message_magnitude"][index, row_start:row_stop] = (
-                        (edge_magnitude * evidence[None, None])
-                        .sum((1, 2))
-                        .detach()
-                        .cpu()
+                    edge_role = torch.stack(
+                        [
+                            (edge_magnitude * role[:, None]).sum(-1)
+                            for role in roles
+                        ],
+                        dim=-1,
                     )
-                    trace["response_message_magnitude"][index, row_start:row_stop] = (
-                        (edge_magnitude * response[None, None])
-                        .sum((1, 2))
-                        .detach()
-                        .cpu()
+                    head_total = edge_magnitude.sum(-1).clamp_min(1e-12)
+                    head_probability = edge_magnitude / head_total[..., None]
+                    head_entropy = -(
+                        head_probability
+                        * head_probability.clamp_min(1e-12).log()
+                    ).sum(-1)
+                    visible_sources = (query + 1).clamp_min(2).float().log()
+                    head_entropy = head_entropy / visible_sources[:, None]
+
+                    contexts = []
+                    for role in roles:
+                        contexts.append(
+                            torch.einsum(
+                                "rhs,shd->rhd",
+                                a.to(value_by_head.dtype) * role[:, None],
+                                value_by_head,
+                            )
+                        )
+                    head_write_norm = torch.stack(
+                        [
+                            torch.einsum(
+                                "rhd,hde,rhe->rh",
+                                context.float(),
+                                self.output_grams[index],
+                                context.float(),
+                            )
+                            .clamp_min(0)
+                            .sqrt()
+                            for context in contexts
+                        ],
+                        dim=-1,
                     )
-                    trace["source_message_entropy"][index, row_start:row_stop] = (
-                        entropy.detach().cpu()
+                    net_write_norm = torch.stack(
+                        [
+                            self._removed_write(index, context).float().norm(dim=-1)
+                            for context in contexts
+                        ],
+                        dim=-1,
+                    )
+                    coherence = net_write_norm / head_write_norm.sum(1).clamp_min(
+                        1e-12
+                    )
+
+                    source_magnitude = edge_magnitude.sum(1)
+                    current_k = min(k, query_stop)
+                    visible = source[None] <= query[:, None]
+                    top_magnitude, top_index = source_magnitude.masked_fill(
+                        ~visible, -torch.inf
+                    ).topk(current_k, dim=-1)
+                    valid_rank = torch.arange(
+                        current_k, device=self.device
+                    )[None] < (query + 1).clamp_max(current_k)[:, None]
+                    top_magnitude = top_magnitude.masked_fill(~valid_rank, 0)
+                    top_index = top_index.masked_fill(~valid_rank, -1)
+
+                    trace["edge_role_energy"][index, row_start:row_stop] = (
+                        edge_role.detach().half().cpu()
+                    )
+                    trace["role_attention_mass"][index, row_start:row_stop] = (
+                        role_attention.detach().half().cpu()
+                    )
+                    trace["head_role_write_norm"][index, row_start:row_stop] = (
+                        head_write_norm.detach().half().cpu()
+                    )
+                    trace["head_source_entropy"][index, row_start:row_stop] = (
+                        head_entropy.detach().half().cpu()
+                    )
+                    trace["role_head_coherence"][index, row_start:row_stop] = (
+                        coherence.detach().half().cpu()
                     )
                     trace["top_source_index"][index, row_start:row_stop, :current_k] = (
                         top_index.int().cpu()
@@ -354,10 +444,16 @@ class FunctionalTraceReplay:
         logit_chunk: int = 64,
         intervention_batch: int = 3,
     ) -> dict[str, Any]:
-        """Save compact message statistics and three causal deletion branches."""
+        """Save mechanism state and symmetric direct evidence/history deletions."""
 
         token_ids = torch.as_tensor(token_ids, dtype=torch.long, device="cpu")
         evidence_mask = torch.as_tensor(evidence_mask, dtype=torch.bool, device="cpu")
+        if token_ids.ndim != 1 or not 0 < response_start < len(token_ids):
+            raise ValueError("token_ids/response_start do not define a response")
+        if evidence_mask.shape != (response_start,):
+            raise ValueError("evidence_mask must align exactly with the prompt")
+        if min(predictor_chunk, top_k, logit_chunk, intervention_batch) <= 0:
+            raise ValueError("capture chunk sizes and top_k must be positive")
         if self.device.type == "cuda":
             torch.cuda.reset_peak_memory_stats(self.device)
         full_scores, trace = self._forward(
@@ -370,7 +466,7 @@ class FunctionalTraceReplay:
             top_k=top_k,
             logit_chunk=logit_chunk,
         )
-        removals = ("evidence", "response", "both")
+        removals = ("evidence", "history", "both")
         intervened = []
         for start in range(0, len(removals), intervention_batch):
             scores, _ = self._forward(
@@ -384,7 +480,7 @@ class FunctionalTraceReplay:
                 logit_chunk=logit_chunk,
             )
             intervened.extend(scores)
-        no_evidence, no_response, no_evidence_response = intervened
+        no_evidence, no_history, no_evidence_history = intervened
         peak = (
             int(torch.cuda.max_memory_reserved(self.device))
             if self.device.type == "cuda"
@@ -396,9 +492,13 @@ class FunctionalTraceReplay:
             "trace": trace,
             "score_inputs": {
                 "full_logprob": full_scores[0].logprob,
+                "full_margin": full_scores[0].margin,
                 "no_evidence_logprob": no_evidence.logprob,
-                "no_response_logprob": no_response.logprob,
-                "no_evidence_response_margin": no_evidence_response.margin,
+                "no_evidence_margin": no_evidence.margin,
+                "no_history_logprob": no_history.logprob,
+                "no_history_margin": no_history.margin,
+                "no_evidence_history_logprob": no_evidence_history.logprob,
+                "no_evidence_history_margin": no_evidence_history.margin,
             },
             "peak_cuda_reserved_bytes": peak,
         }

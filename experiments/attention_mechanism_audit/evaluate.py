@@ -1,10 +1,12 @@
-"""Pool saved traces by task and evaluate four fixed label-free scores."""
+"""Freeze label-free OOF scores, then evaluate and audit them with labels."""
 
 from __future__ import annotations
 
+import hashlib
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -12,52 +14,159 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 from research_dataset import open_research_dataset
 
-from .audit import SCHEMA, VERSION, load_index
+from .capture import EVIDENCE, HISTORY, ROLE_NAMES, SELF
+from .collect import SCHEMA, VERSION, load_index
 from .data import canonical_task_type
+from .detect import SCORE_DEFINITIONS, SCORE_NAMES, factorial_contrasts, score_records
 from .visualize import plot_population, plot_sample_dashboard
 
-SCORE_ORDER = (
-    "causal_route_capture",
-    "routing_imbalance",
-    "source_dispersion",
-    "message_independent_preference",
-)
-
-SCORE_DEFINITIONS = {
-    "causal_route_capture": ("logp(no evidence messages) - logp(no response messages)"),
-    "routing_imbalance": (
-        "mean_layer(response functional-message share - evidence share)"
-    ),
-    "source_dispersion": (
-        "mean_layer(normalized entropy of source-token message magnitudes)"
-    ),
-    "message_independent_preference": (
-        "observed-token margin after evidence and response messages are removed"
-    ),
+SCORE_ORDER = SCORE_NAMES
+PRIMARY_SCORE = "mechanism_innovation"
+CONTROL_SCORES = ("static_state", "confidence")
+ONSET_AUDIT_NAMES = {
+    "edge_route_balance_mean",
+    "edge_route_velocity_mean",
+    "source_dispersion_mean",
+    "edge_head_role_jsd_mean",
+    "source_coherence_evidence_mean",
+    "source_coherence_response_history_mean",
+    "head_coherence_evidence_mean",
+    "head_coherence_response_history_mean",
+    "causal_evidence_support",
+    "causal_history_support",
+    "causal_interaction",
+    "remaining_context_margin",
 }
-
-AUDIT_BASES = (
-    "evidence_share",
-    "response_share",
-    "routing_imbalance",
-    "source_dispersion",
-)
+_EPS = 1e-12
 
 
-def _layer_reductions(value: torch.Tensor, name: str) -> dict[str, np.ndarray]:
-    """Keep the old early/late audit without creating new detector features."""
+def _array(value: Any) -> np.ndarray:
+    if hasattr(value, "detach"):
+        value = value.detach().cpu().numpy()
+    return np.asarray(value)
+
+
+def _load_artifact(path: str | Path) -> Mapping[str, Any]:
+    try:
+        return torch.load(path, map_location="cpu", weights_only=True)
+    except TypeError:
+        return torch.load(path, map_location="cpu")
+
+
+def _layer_reductions(value: np.ndarray, name: str) -> dict[str, np.ndarray]:
+    """Reduce a label-free ``[layer, token]`` measurement."""
 
     width = max(value.shape[0] // 3, 1)
-    reduced = {
-        f"{name}_mean": value.mean(0),
-        f"{name}_early": value[:width].mean(0),
-        f"{name}_late": value[-width:].mean(0),
-        f"{name}_layer_shift": value[-width:].mean(0) - value[:width].mean(0),
+    early = value[:width].mean(axis=0)
+    late = value[-width:].mean(axis=0)
+    return {
+        f"{name}_mean": value.mean(axis=0).astype(np.float32),
+        f"{name}_early": early.astype(np.float32),
+        f"{name}_late": late.astype(np.float32),
+        f"{name}_layer_shift": (late - early).astype(np.float32),
     }
-    return {key: current.cpu().numpy() for key, current in reduced.items()}
 
 
-def _binary_metrics(label: np.ndarray, score: np.ndarray) -> dict[str, float | int]:
+def _aggregate_role_share(value: np.ndarray) -> np.ndarray:
+    """Aggregate heads by their actual mass, then normalize over roles."""
+
+    role = value.sum(axis=2)
+    return role / np.maximum(role.sum(axis=-1, keepdims=True), _EPS)
+
+
+def _head_role_jsd(value: np.ndarray) -> np.ndarray:
+    """Head disagreement over non-self routes, normalized to ``[0,1]``."""
+
+    nonself = value[..., :SELF]
+    mass = nonself.sum(axis=-1)
+    valid = mass > _EPS
+    probability = nonself / np.maximum(mass[..., None], _EPS)
+    count = np.maximum(valid.sum(axis=2), 1)
+    mean = (probability * valid[..., None]).sum(axis=2) / count[..., None]
+    head_entropy = -(
+        probability * np.log(np.maximum(probability, _EPS))
+    ).sum(axis=-1)
+    mean_entropy = -(mean * np.log(np.maximum(mean, _EPS))).sum(axis=-1)
+    jsd = mean_entropy - (head_entropy * valid).sum(axis=2) / count
+    return np.maximum(jsd, 0) / np.log(SELF)
+
+
+def _route_velocity(route_share: np.ndarray) -> np.ndarray:
+    """Total-variation change of the non-self route composition."""
+
+    velocity = np.zeros(route_share.shape[:2], dtype=np.float64)
+    velocity[:, 1:] = 0.5 * np.abs(np.diff(route_share, axis=1)).sum(axis=-1)
+    return velocity
+
+
+def layer_audit_metrics(artifact: Mapping[str, Any]) -> dict[str, np.ndarray]:
+    """Return head-resolved measurements used by plots and post-hoc audit."""
+
+    trace = artifact["trace"]
+    measurements = {
+        "attention": _array(trace["role_attention_mass"]).astype(np.float64),
+        "edge": _array(trace["edge_role_energy"]).astype(np.float64),
+        "write": _array(trace["head_role_write_norm"]).astype(np.float64),
+    }
+    result: dict[str, np.ndarray] = {}
+    family_shares = {}
+    for family, value in measurements.items():
+        share = _aggregate_role_share(value)
+        family_shares[family] = share
+        for role_index, role in enumerate(ROLE_NAMES):
+            result[f"{family}_{role}_share"] = share[..., role_index]
+        nonself = value[..., :SELF].sum(axis=2)
+        nonself /= np.maximum(nonself.sum(axis=-1, keepdims=True), _EPS)
+        result[f"{family}_route_balance"] = (
+            nonself[..., HISTORY] - nonself[..., EVIDENCE]
+        )
+        result[f"{family}_head_role_jsd"] = _head_role_jsd(value)
+        result[f"{family}_route_velocity"] = _route_velocity(nonself)
+    edge_role = measurements["edge"].sum(axis=2)
+    write_role = measurements["write"].sum(axis=2)
+    within_head_coherence = write_role / np.maximum(edge_role, _EPS)
+    for role_index, role in enumerate(ROLE_NAMES):
+        result[f"source_coherence_{role}"] = within_head_coherence[
+            ..., role_index
+        ]
+        result[f"edge_attention_gain_{role}"] = (
+            family_shares["edge"][..., role_index]
+            - family_shares["attention"][..., role_index]
+        )
+        result[f"write_edge_gain_{role}"] = (
+            family_shares["write"][..., role_index]
+            - family_shares["edge"][..., role_index]
+        )
+    entropy = _array(trace["head_source_entropy"]).astype(np.float64)
+    result["source_dispersion"] = entropy.mean(axis=2)
+    result["source_dispersion_head_std"] = entropy.std(axis=2)
+    coherence = _array(trace["role_head_coherence"]).astype(np.float64)
+    for role_index, role in enumerate(ROLE_NAMES):
+        result[f"head_coherence_{role}"] = coherence[..., role_index]
+    return result
+
+
+def token_audit_metrics(artifact: Mapping[str, Any]) -> dict[str, np.ndarray]:
+    """Build rich label-free audit arrays; labels never select these quantities."""
+
+    metrics: dict[str, np.ndarray] = {}
+    for name, value in layer_audit_metrics(artifact).items():
+        metrics.update(_layer_reductions(value, name))
+    contrasts = factorial_contrasts(artifact).astype(np.float32)
+    metrics.update(
+        {
+            "causal_evidence_support": contrasts[:, 0],
+            "causal_history_support": contrasts[:, 1],
+            "causal_interaction": contrasts[:, 2],
+            "remaining_context_margin": _array(
+                artifact["score_inputs"]["no_evidence_history_margin"]
+            ).astype(np.float32),
+        }
+    )
+    return metrics
+
+
+def _binary_metrics(label: np.ndarray, score: np.ndarray) -> dict[str, float]:
     prevalence = float(label.mean())
     auprc = float(average_precision_score(label, score))
     return {
@@ -89,6 +198,14 @@ def _source_bootstrap(
                 )
             )
     values = np.asarray(values)
+    if not len(values):
+        return {
+            "replicates": 0,
+            "auroc_low": None,
+            "auroc_high": None,
+            "auprc_low": None,
+            "auprc_high": None,
+        }
     return {
         "replicates": int(len(values)),
         "auroc_low": float(np.quantile(values[:, 0], 0.025)),
@@ -98,49 +215,49 @@ def _source_bootstrap(
     }
 
 
-def layer_mechanisms(artifact: dict) -> dict[str, torch.Tensor]:
-    """Return the two route mechanisms without expanding hand-built features."""
+def detection_summary(
+    label: np.ndarray,
+    scores: Mapping[str, np.ndarray],
+    source_id: np.ndarray,
+    *,
+    bootstrap: int,
+    seed: int,
+) -> dict[str, dict[str, Any]]:
+    """Evaluate frozen directions; labels never flip or refit a score."""
 
-    trace = artifact["trace"]
-    total = trace["total_message_magnitude"].float().clamp_min(1e-12)
-    evidence_share = trace["evidence_message_magnitude"].float() / total
-    response_share = trace["response_message_magnitude"].float() / total
-
-    active_sources = torch.arange(total.shape[1]) + artifact["response_start"]
-    active_sources = active_sources.float().clamp_min(2)
-    dispersion = trace["source_message_entropy"].float() / active_sources.log()[None]
-    return {
-        "routing_imbalance": response_share - evidence_share,
-        "source_dispersion": dispersion,
-        "evidence_share": evidence_share,
-        "response_share": response_share,
-    }
-
-
-def token_scores(artifact: dict) -> dict[str, np.ndarray]:
-    """Compute the fixed primary score and its three mechanism components."""
-
-    layers = layer_mechanisms(artifact)
-    inputs = artifact["score_inputs"]
-    values = {
-        "causal_route_capture": (
-            inputs["no_evidence_logprob"] - inputs["no_response_logprob"]
-        ),
-        "routing_imbalance": layers["routing_imbalance"].mean(0),
-        "source_dispersion": layers["source_dispersion"].mean(0),
-        "message_independent_preference": inputs["no_evidence_response_margin"],
-    }
-    return {name: values[name].float().cpu().numpy() for name in SCORE_ORDER}
-
-
-def token_audit_metrics(artifact: dict) -> dict[str, np.ndarray]:
-    """Measurements used only for hallucinated-vs-correct post-hoc auditing."""
-
-    layers = layer_mechanisms(artifact)
-    metrics = {}
-    for name in AUDIT_BASES:
-        metrics.update(_layer_reductions(layers[name], name))
-    return metrics
+    if np.unique(label).size != 2:
+        return {
+            name: {
+                "auroc": None,
+                "auprc": None,
+                "auprc_lift": None,
+                "auroc_ci95": [None, None],
+                "auprc_ci95": [None, None],
+            }
+            for name in SCORE_ORDER
+        }
+    results = {}
+    for offset, name in enumerate(SCORE_ORDER):
+        result: dict[str, Any] = _binary_metrics(label, scores[name])
+        if bootstrap:
+            interval = _source_bootstrap(
+                label,
+                scores[name],
+                source_id,
+                replicates=bootstrap,
+                seed=seed + offset,
+            )
+            result.update(
+                {
+                    "auroc_ci95": [interval["auroc_low"], interval["auroc_high"]],
+                    "auprc_ci95": [interval["auprc_low"], interval["auprc_high"]],
+                    "bootstrap_replicates": interval["replicates"],
+                }
+            )
+        else:
+            result.update({"auroc_ci95": [None, None], "auprc_ci95": [None, None]})
+        results[name] = result
+    return results
 
 
 def _position_match_design(
@@ -151,8 +268,6 @@ def _position_match_design(
     *,
     position_bin: int,
 ) -> list[tuple[str, np.ndarray, np.ndarray, float]]:
-    """Match labels inside one response at similar absolute/relative positions."""
-
     relative = np.minimum(
         ((token_index + 0.5) * 10 / response_length).astype(np.int16), 9
     )
@@ -160,7 +275,6 @@ def _position_match_design(
     cells: dict[tuple[str, int, int], list[int]] = {}
     for index, key in enumerate(zip(sample_id, absolute, relative)):
         cells.setdefault(key, []).append(index)
-
     matched = []
     for (sample, _absolute, _relative), rows in cells.items():
         rows = np.asarray(rows)
@@ -172,21 +286,34 @@ def _position_match_design(
     return matched
 
 
+def _source_interval(
+    source_effects: Mapping[str, Sequence[float]], *, bootstrap: int, seed: int
+) -> tuple[float | None, list[float | None], int]:
+    values = np.asarray(
+        [np.mean(current) for current in source_effects.values()], dtype=np.float64
+    )
+    if not len(values):
+        return None, [None, None], 0
+    interval: list[float | None] = [None, None]
+    if bootstrap:
+        random = np.random.default_rng(seed)
+        draws = random.choice(values, (bootstrap, len(values)), replace=True).mean(1)
+        interval = [float(x) for x in np.quantile(draws, (0.025, 0.975))]
+    return float(values.mean()), interval, int(len(values))
+
+
 def _position_matched_difference(
     value: np.ndarray,
-    matched: list[tuple[str, np.ndarray, np.ndarray, float]],
-    sample_source: dict[str, str],
+    matched: Sequence[tuple[str, np.ndarray, np.ndarray, float]],
+    sample_source: Mapping[str, str],
     *,
     bootstrap: int,
     seed: int,
 ) -> dict[str, object]:
-    """Aggregate within-response contrasts, then weight every source equally."""
-
     by_sample: dict[str, list[tuple[float, float]]] = {}
     for sample, positive, negative, weight in matched:
         effect = float(value[positive].mean() - value[negative].mean())
         by_sample.setdefault(sample, []).append((effect, weight))
-
     by_source: dict[str, list[float]] = {}
     for sample, rows in by_sample.items():
         effects = np.asarray([effect for effect, _weight in rows])
@@ -194,43 +321,101 @@ def _position_matched_difference(
         by_source.setdefault(sample_source[sample], []).append(
             float(np.average(effects, weights=weights))
         )
-    source_effects = np.asarray(
-        [np.mean(effects) for effects in by_source.values()], dtype=np.float64
+    effect, interval, sources = _source_interval(
+        by_source, bootstrap=bootstrap, seed=seed
     )
-    if not len(source_effects):
-        return {
-            "hallucinated_minus_correct": None,
-            "ci95": [None, None],
-            "sources": 0,
-            "matched_samples": 0,
-            "matched_cells": 0,
-        }
-
-    interval = [None, None]
-    if bootstrap:
-        random = np.random.default_rng(seed)
-        draws = random.choice(
-            source_effects, (bootstrap, len(source_effects)), replace=True
-        ).mean(1)
-        interval = [float(value) for value in np.quantile(draws, (0.025, 0.975))]
     return {
-        "hallucinated_minus_correct": float(source_effects.mean()),
+        "hallucinated_minus_correct": effect,
         "ci95": interval,
-        "sources": int(len(source_effects)),
+        "sources": sources,
         "matched_samples": int(len(by_sample)),
         "matched_cells": int(len(matched)),
     }
 
 
+def _onset_difference_in_difference(
+    value: np.ndarray,
+    label: np.ndarray,
+    sample_id: np.ndarray,
+    source_id: np.ndarray,
+    token_index: np.ndarray,
+    response_length: np.ndarray,
+    *,
+    position_bin: int,
+    window: int,
+    bootstrap: int,
+    seed: int,
+) -> dict[str, object]:
+    """Compare route change at hallucination onset with local correct pivots."""
+
+    by_source: dict[str, list[float]] = {}
+    events = controls = 0
+    for sample in np.unique(sample_id):
+        rows = np.flatnonzero(sample_id == sample)
+        order = rows[np.argsort(token_index[rows])]
+        y = label[order]
+        if len(order) < 2 * window + 1:
+            continue
+        relative = np.minimum(
+            ((token_index[order] + 0.5) * 10 / response_length[order]).astype(int),
+            9,
+        )
+        absolute = token_index[order] // position_bin
+        onset = np.flatnonzero(y & np.r_[True, ~y[:-1]])
+        correct = np.flatnonzero(~y)
+        for pivot in onset:
+            if pivot < window or pivot + window > len(order):
+                continue
+            before = np.arange(pivot - window, pivot)
+            after = np.arange(pivot, pivot + window)
+            if not (~y[before]).all() or not y[after].all():
+                continue
+            candidates = [
+                current
+                for current in correct
+                if current >= window
+                and current + window <= len(order)
+                and (~y[current - window : current + window]).all()
+                and relative[current] == relative[pivot]
+                and absolute[current] == absolute[pivot]
+            ]
+            if not candidates:
+                continue
+            event_change = value[order[after]].mean() - value[order[before]].mean()
+            control_changes = [
+                value[order[current : current + window]].mean()
+                - value[order[current - window : current]].mean()
+                for current in candidates
+            ]
+            source = str(source_id[order[pivot]])
+            by_source.setdefault(source, []).append(
+                float(event_change - np.mean(control_changes))
+            )
+            events += 1
+            controls += len(candidates)
+    effect, interval, sources = _source_interval(
+        by_source, bootstrap=bootstrap, seed=seed
+    )
+    return {
+        "onset_change_minus_matched_correct_change": effect,
+        "ci95": interval,
+        "sources": sources,
+        "onsets": int(events),
+        "matched_correct_pivots": int(controls),
+        "window": int(window),
+    }
+
+
 def group_difference_audit(
-    arrays: dict[str, np.ndarray],
-    audit_names: tuple[str, ...],
+    arrays: Mapping[str, np.ndarray],
+    audit_names: Sequence[str],
     *,
     position_bin: int,
     bootstrap: int,
     seed: int,
+    onset_window: int = 2,
 ) -> dict[str, object]:
-    """Compare hallucinated and correct tokens after within-response matching."""
+    """Apply labels only to matched contrasts after measurements are frozen."""
 
     label = arrays["label"]
     matched = _position_match_design(
@@ -245,6 +430,7 @@ def group_difference_audit(
         for sample, source in zip(arrays["sample_id"], arrays["source_id"])
     }
     metrics = {}
+    onset = {}
     for offset, name in enumerate(audit_names):
         value = arrays[name]
         metrics[name] = {
@@ -258,6 +444,19 @@ def group_difference_audit(
                 seed=seed + offset,
             ),
         }
+        if name in ONSET_AUDIT_NAMES:
+            onset[name] = _onset_difference_in_difference(
+                value,
+                label,
+                arrays["sample_id"],
+                arrays["source_id"],
+                arrays["token_index"],
+                arrays["response_length"],
+                position_bin=position_bin,
+                window=onset_window,
+                bootstrap=bootstrap,
+                seed=seed + len(audit_names) + offset,
+            )
     covered = sum(len(positive) for _sample, positive, _negative, _weight in matched)
     return {
         "role": "posthoc_mechanism_audit_not_score_selection",
@@ -268,177 +467,199 @@ def group_difference_audit(
         "covered_hallucinated_tokens": int(covered),
         "hallucinated_token_coverage": float(covered / max(label.sum(), 1)),
         "metrics": metrics,
+        "onset_difference_in_difference": onset,
     }
 
 
-def detection_summary(
-    label: np.ndarray,
-    scores: dict[str, np.ndarray],
-    source_id: np.ndarray,
+def _load_manifest(trace_root: Path, task_type: str | None = None) -> dict:
+    manifest = json.loads((trace_root / "manifest.json").read_text(encoding="utf-8"))
+    valid = (
+        manifest.get("schema") == SCHEMA
+        and manifest.get("version") == VERSION
+        and (task_type is None or task_type in manifest.get("task_types", []))
+    )
+    if not valid:
+        raise ValueError(f"mechanism-state manifest does not match v{VERSION}")
+    return manifest
+
+
+def _pool_records(
+    inputs: Iterable[tuple[str | Path, str | Path]], task_type: str
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Pool both physical shards as metadata before loading artifacts or labels."""
+
+    records: list[dict[str, Any]] = []
+    manifests = []
+    for shard, (trace_value, split_value) in enumerate(inputs):
+        trace_root, split_root = Path(trace_value), Path(split_value)
+        manifests.append(_load_manifest(trace_root, task_type))
+        current = []
+        for row in load_index(trace_root):
+            if canonical_task_type(row["task_type"]) != task_type:
+                continue
+            current.append(
+                {
+                    **row,
+                    "sample_id": str(row["sample_id"]),
+                    "source_id": str(row["source_id"]),
+                    "path": trace_root / "samples" / row["path"],
+                    "split_root": split_root,
+                    "physical_shard": shard,
+                }
+            )
+        if not current:
+            raise ValueError(f"no {task_type} samples in {trace_root}")
+        records.extend(current)
+    return records, manifests
+
+
+def _concatenate_label_free(
+    records: Sequence[Mapping[str, Any]],
+    scores: Mapping[str, Mapping[str, np.ndarray]],
+) -> tuple[dict[str, np.ndarray], tuple[str, ...]]:
+    """Join OOF scores and audit arrays in immutable record order."""
+
+    output: dict[str, list[np.ndarray]] = {
+        "sample_id": [],
+        "source_id": [],
+        "physical_shard": [],
+        "token_index": [],
+        "response_length": [],
+        **{name: [] for name in SCORE_ORDER},
+    }
+    audit_names: tuple[str, ...] | None = None
+    for record in records:
+        sample = str(record["sample_id"])
+        if sample not in scores:
+            raise ValueError(f"detector did not score sample {sample}")
+        current_scores = scores[sample]
+        count = len(current_scores[PRIMARY_SCORE])
+        if any(len(current_scores[name]) != count for name in SCORE_ORDER):
+            raise ValueError(f"detector score length mismatch for sample {sample}")
+        expected = record.get("response_tokens")
+        if expected is not None and int(expected) != count:
+            raise ValueError(f"artifact/index length mismatch for sample {sample}")
+        audit = token_audit_metrics(_load_artifact(record["path"]))
+        if any(len(value) != count for value in audit.values()):
+            raise ValueError(f"audit length mismatch for sample {sample}")
+        if audit_names is None:
+            audit_names = tuple(audit)
+            output.update({name: [] for name in audit_names})
+        elif tuple(audit) != audit_names:
+            raise ValueError("audit measurement schema changed between samples")
+        output["sample_id"].append(np.repeat(sample, count))
+        output["source_id"].append(np.repeat(str(record["source_id"]), count))
+        output["physical_shard"].append(
+            np.full(count, int(record["physical_shard"]), dtype=np.int8)
+        )
+        output["token_index"].append(np.arange(count, dtype=np.int32))
+        output["response_length"].append(np.full(count, count, dtype=np.int32))
+        for name in SCORE_ORDER:
+            output[name].append(np.asarray(current_scores[name], dtype=np.float32))
+        for name, value in audit.items():
+            output[name].append(np.asarray(value, dtype=np.float32))
+    if set(scores) != {str(record["sample_id"]) for record in records}:
+        raise ValueError("detector returned scores for an unknown sample")
+    return {name: np.concatenate(values) for name, values in output.items()}, (
+        audit_names or ()
+    )
+
+
+def _write_frozen(path: Path, arrays: Mapping[str, np.ndarray]) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp.npz")
+    np.savez_compressed(temporary, **arrays)
+    temporary.replace(path)
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _load_labels(
+    records: Sequence[Mapping[str, Any]], frozen: Mapping[str, np.ndarray]
+) -> np.ndarray:
+    """Open labels only after OOF arrays have been serialized and hashed."""
+
+    datasets: dict[int, tuple[Any, Any]] = {}
+    labels = []
+    offset = 0
+    for record in records:
+        shard = int(record["physical_shard"])
+        if shard not in datasets:
+            dataset = open_research_dataset(
+                record["split_root"], device="cpu", retain_embedded_labels=True
+            )
+            ids = [
+                current["sample_id"]
+                for current in records
+                if int(current["physical_shard"]) == shard
+            ]
+            datasets[shard] = (dataset, dataset.prepare_evaluation_labels(ids))
+        dataset, prepared = datasets[shard]
+        sample = dataset[record["sample_id"]]
+        token_label = prepared.response_labels(sample).cpu().numpy().astype(bool)
+        sample.release_attention()
+        count = int(frozen["response_length"][offset])
+        if len(token_label) != count:
+            raise ValueError(
+                f"frozen-score/label length mismatch for sample {record['sample_id']}"
+            )
+        labels.append(token_label)
+        offset += count
+    return np.concatenate(labels)
+
+
+def build_report(
     *,
+    task_type: str,
+    arrays: Mapping[str, np.ndarray],
+    scores: Mapping[str, np.ndarray],
+    detector: Mapping[str, Any],
     bootstrap: int,
     seed: int,
-) -> dict[str, dict]:
-    """Evaluate fixed score directions; labels never change a score or sign."""
-
-    if np.unique(label).size != 2:
-        return {
+) -> dict[str, Any]:
+    label = arrays["label"]
+    if detector.get("mechanism_scores_available", True):
+        detection = detection_summary(
+            label,
+            scores,
+            arrays["source_id"],
+            bootstrap=bootstrap,
+            seed=seed,
+        )
+    else:
+        detection = {
             name: {
                 "auroc": None,
                 "auprc": None,
                 "auprc_lift": None,
                 "auroc_ci95": [None, None],
                 "auprc_ci95": [None, None],
+                "unavailable_reason": detector.get("reason"),
             }
             for name in SCORE_ORDER
         }
-
-    results = {}
-    for offset, name in enumerate(SCORE_ORDER):
-        result = _binary_metrics(label, scores[name])
-        if bootstrap:
-            interval = _source_bootstrap(
-                label,
-                scores[name],
-                source_id,
-                replicates=bootstrap,
-                seed=seed + offset,
-            )
-            result.update(
-                {
-                    "auroc_ci95": [
-                        interval["auroc_low"],
-                        interval["auroc_high"],
-                    ],
-                    "auprc_ci95": [
-                        interval["auprc_low"],
-                        interval["auprc_high"],
-                    ],
-                    "bootstrap_replicates": interval["replicates"],
-                }
-            )
-        else:
-            result.update({"auroc_ci95": [None, None], "auprc_ci95": [None, None]})
-        results[name] = result
-    return results
-
-
-def build_report(
-    *,
-    task_type: str,
-    label: np.ndarray,
-    sample_id: np.ndarray,
-    source_id: np.ndarray,
-    scores: dict[str, np.ndarray],
-    bootstrap: int,
-    seed: int,
-) -> dict:
-    """Build the single all-data report."""
-
-    detection = detection_summary(
-        label,
-        scores,
-        source_id,
-        bootstrap=bootstrap,
-        seed=seed,
-    )
     return {
-        "schema": "ragtruth-three-mechanism-detection-v2",
+        "schema": "ragtruth-mechanism-innovation-detection-v1",
         "task_type": task_type,
-        "samples": int(np.unique(sample_id).size),
-        "sources": int(np.unique(source_id).size),
+        "samples": int(np.unique(arrays["sample_id"]).size),
+        "sources": int(np.unique(arrays["source_id"]).size),
         "tokens": int(len(label)),
         "hallucinated_tokens": int(label.sum()),
         "prevalence": float(label.mean()),
-        "primary_score": "causal_route_capture",
+        "primary_score": PRIMARY_SCORE,
+        "control_scores": list(CONTROL_SCORES),
         "score_definitions": SCORE_DEFINITIONS,
-        "score_direction": (
-            "higher means more hallucination-like; source_dispersion keeps "
-            "the original high-dispersion hypothesis"
-        ),
+        "score_direction": "higher is more hallucination-like; never label-flipped",
+        "detection_estimand": "token_micro",
+        "detection_bootstrap_unit": "source_id_cluster",
         "detection": detection,
-        "labels_used_during": "posthoc_evaluation_only",
-        "analysis_scope": (
-            "fixed-score exploratory audit over pooled captured task tokens"
-        ),
+        "detector": dict(detector),
+        "labels_used_during": "posthoc_evaluation_only_after_score_freeze",
+        "analysis_scope": "source-crossfit mechanism-state innovation by task",
     }
-
-
-def _load_scores(
-    trace_root: Path,
-    task_type: str,
-) -> list[tuple[dict, dict[str, np.ndarray]]]:
-    scored = []
-    for row in load_index(trace_root):
-        if canonical_task_type(row["task_type"]) != task_type:
-            continue
-        artifact = torch.load(
-            trace_root / "samples" / row["path"],
-            map_location="cpu",
-            weights_only=True,
-        )
-        scored.append(
-            (row, {**token_scores(artifact), **token_audit_metrics(artifact)})
-        )
-    return scored
-
-
-def _add_labels(
-    scored: list[tuple[dict, dict[str, np.ndarray]]],
-    split_root: Path,
-) -> dict[str, np.ndarray]:
-    dataset = open_research_dataset(
-        split_root,
-        device="cpu",
-        retain_embedded_labels=True,
-    )
-    labels = dataset.prepare_evaluation_labels([row["sample_id"] for row, _ in scored])
-    metric_names = tuple(scored[0][1])
-    arrays: dict[str, list[np.ndarray]] = {
-        "label": [],
-        "sample_id": [],
-        "source_id": [],
-        "token_index": [],
-        "response_length": [],
-        **{name: [] for name in metric_names},
-    }
-    for row, current in scored:
-        sample = dataset[row["sample_id"]]
-        token_label = labels.response_labels(sample).cpu().numpy().astype(bool)
-        sample.release_attention()
-        count = len(token_label)
-        if any(len(value) != count for value in current.values()):
-            raise ValueError(
-                f"trace/label length mismatch for sample {row['sample_id']}"
-            )
-        arrays["label"].append(token_label)
-        arrays["sample_id"].append(np.repeat(str(row["sample_id"]), count))
-        arrays["source_id"].append(np.repeat(str(row["source_id"]), count))
-        arrays["token_index"].append(np.arange(count, dtype=np.int32))
-        arrays["response_length"].append(np.full(count, count, dtype=np.int32))
-        for name in metric_names:
-            arrays[name].append(current[name])
-    return {name: np.concatenate(value) for name, value in arrays.items()}
-
-
-def _load_manifest(
-    trace_root: Path,
-    split_root: Path | None = None,
-    task_type: str | None = None,
-) -> dict:
-    manifest = json.loads((trace_root / "manifest.json").read_text(encoding="utf-8"))
-    valid = (
-        manifest.get("schema") == SCHEMA
-        and manifest.get("version") == VERSION
-        and (
-            split_root is None
-            or manifest.get("split_root") == str(split_root.resolve())
-        )
-        and (task_type is None or task_type in manifest.get("task_types", []))
-    )
-    if not valid:
-        raise ValueError(f"trace manifest does not match v{VERSION} or its cache")
-    return manifest
 
 
 def evaluate_all(
@@ -449,37 +670,42 @@ def evaluate_all(
     bootstrap: int = 1000,
     seed: int = 20260828,
     position_bin: int = 16,
-) -> dict:
-    """Pool physical cache shards first, then evaluate exactly once."""
+) -> dict[str, Any]:
+    """Pool physical shards, freeze one OOF detector, and only then open labels."""
 
     task_type = canonical_task_type(task_type)
-    shards, manifests = [], []
-    for trace_root, split_root in inputs:
-        trace_root = Path(trace_root)
-        split_root = Path(split_root)
-        manifests.append(_load_manifest(trace_root, split_root, task_type))
-        scores = _load_scores(trace_root, task_type)
-        if not scores:
-            raise ValueError(f"no {task_type} samples in {trace_root}")
-        shards.append((scores, split_root))
-    pieces = [_add_labels(scores, split_root) for scores, split_root in shards]
-    merged = {
-        name: np.concatenate([piece[name] for piece in pieces]) for name in pieces[0]
-    }
+    records, manifests = _pool_records(inputs, task_type)
+    detector_records = [
+        {
+            name: record[name]
+            for name in (
+                "sample_id",
+                "source_id",
+                "task_type",
+                "path",
+                "response_tokens",
+                "physical_shard",
+            )
+            if name in record
+        }
+        for record in records
+    ]
+    per_sample, detector = score_records(detector_records, seed=seed)
+    frozen, audit_names = _concatenate_label_free(records, per_sample)
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    frozen_path = output.with_name("frozen_scores.npz")
+    frozen_sha256 = _write_frozen(frozen_path, frozen)
+    label = _load_labels(records, frozen)
+    merged = {**frozen, "label": label}
     scores = {name: merged[name] for name in SCORE_ORDER}
     report = build_report(
         task_type=task_type,
-        label=merged["label"],
-        sample_id=merged["sample_id"],
-        source_id=merged["source_id"],
+        arrays=merged,
         scores=scores,
+        detector=detector,
         bootstrap=bootstrap,
         seed=seed,
-    )
-    audit_names = tuple(
-        name
-        for name in merged
-        if any(name.startswith(f"{base}_") for base in AUDIT_BASES)
     )
     report["group_difference_audit"] = group_difference_audit(
         merged,
@@ -488,12 +714,9 @@ def evaluate_all(
         bootstrap=bootstrap,
         seed=seed + len(SCORE_ORDER),
     )
-
-    output = Path(output)
-    output.parent.mkdir(parents=True, exist_ok=True)
     scores_path = output.with_name("token_scores.npz")
-    figures = output.parent / "figures"
     np.savez_compressed(scores_path, **merged)
+    figures = output.parent / "figures"
     plot_population(
         merged["label"],
         scores,
@@ -504,9 +727,11 @@ def evaluate_all(
     )
     report.update(
         {
+            "frozen_scores": str(frozen_path),
+            "frozen_scores_sha256": frozen_sha256,
             "token_scores": str(scores_path),
             "figures": str(figures),
-            "physical_cache_shards": len(pieces),
+            "physical_cache_shards": len(manifests),
             "capture_complete": all(manifest["complete"] for manifest in manifests),
         }
     )
@@ -523,45 +748,44 @@ def plot_saved_sample(
     sample_id: str,
     model_path: str | Path,
     output: str | Path,
-) -> dict:
-    """Render one saved response without replaying the model."""
+) -> dict[str, str]:
+    """Render one saved mechanism state without replaying the model or labels."""
 
     from transformers import AutoTokenizer
 
-    for trace_root_value in inputs:
-        trace_root = Path(trace_root_value)
+    for trace_value in inputs:
+        trace_root = Path(trace_value)
         _load_manifest(trace_root)
         row = next(
             (
-                row
-                for row in load_index(trace_root)
-                if str(row["sample_id"]) == str(sample_id)
+                current
+                for current in load_index(trace_root)
+                if str(current["sample_id"]) == str(sample_id)
             ),
             None,
         )
         if row is None:
             continue
-        artifact = torch.load(
-            trace_root / "samples" / row["path"],
-            map_location="cpu",
-            weights_only=True,
-        )
+        artifact = _load_artifact(trace_root / "samples" / row["path"])
         tokenizer = AutoTokenizer.from_pretrained(
-            str(model_path),
-            local_files_only=True,
+            str(model_path), local_files_only=True
         )
-        layers = layer_mechanisms(artifact)
+        layers = layer_audit_metrics(artifact)
+        layers.update(
+            {
+                "edge_history_share": layers["edge_response_history_share"],
+                "edge_self_share": layers["edge_predictor_self_share"],
+            }
+        )
         trace = artifact["trace"]
-        top_index = trace["top_source_index"].numpy()
-        top_mass = trace["top_source_magnitude"].numpy()
+        top_index = _array(trace["top_source_index"])
+        top_mass = _array(trace["top_source_magnitude"])
         response_tokens = top_index.shape[1]
         source_flow = np.zeros(
-            (response_tokens, len(artifact["token_ids"]) - 1),
-            dtype=np.float32,
+            (response_tokens, len(artifact["token_ids"]) - 1), dtype=np.float32
         )
         response_index = np.broadcast_to(
-            np.arange(response_tokens)[None, :, None],
-            top_index.shape,
+            np.arange(response_tokens)[None, :, None], top_index.shape
         )
         valid = top_index >= 0
         np.add.at(
@@ -569,28 +793,25 @@ def plot_saved_sample(
             (response_index[valid], top_index[valid]),
             top_mass[valid],
         )
-        source_flow /= trace["total_message_magnitude"].sum(0).numpy()[:, None] + 1e-12
-        shown = np.argsort(source_flow.sum(0))[-16:][::-1]
-        score_inputs = artifact["score_inputs"]
-        full = score_inputs["full_logprob"]
+        edge_total = _array(trace["edge_role_energy"]).sum(axis=(0, 2, 3))
+        source_flow /= edge_total[:, None] + _EPS
+        shown = np.argsort(source_flow.sum(axis=0))[-16:][::-1]
+        contrasts = factorial_contrasts(artifact)
+        token_ids = _array(artifact["token_ids"])
         record = {
             "sample_id": str(sample_id),
             "token_text": tokenizer.convert_ids_to_tokens(
-                artifact["token_ids"][artifact["response_start"] :].tolist()
+                token_ids[artifact["response_start"] :].tolist()
             ),
-            "evidence_effect": (full - score_inputs["no_evidence_logprob"]).numpy(),
-            "response_effect": (full - score_inputs["no_response_logprob"]).numpy(),
+            "evidence_support": contrasts[:, 0],
+            "history_support": contrasts[:, 1],
+            "route_interaction": contrasts[:, 2],
             "source_token_text": [
-                f"{index}:"
-                + tokenizer.convert_ids_to_tokens(int(artifact["token_ids"][index]))
+                f"{index}:" + tokenizer.convert_ids_to_tokens(int(token_ids[index]))
                 for index in shown
             ],
             "source_flow": source_flow[:, shown].T,
         }
-        plot_sample_dashboard(
-            record,
-            {name: value.numpy() for name, value in layers.items()},
-            Path(output),
-        )
+        plot_sample_dashboard(record, layers, Path(output))
         return {"sample_id": str(sample_id), "output": str(output)}
-    raise ValueError(f"sample {sample_id} was not found in the saved traces")
+    raise ValueError(f"sample {sample_id} was not found in the saved mechanism states")
