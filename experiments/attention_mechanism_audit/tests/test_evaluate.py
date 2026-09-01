@@ -21,18 +21,31 @@ def _artifact(tokens: int = 2) -> dict:
     coherence = torch.full((layers, tokens, roles), 0.5)
     token_ids = torch.arange(tokens + 3)
     full = torch.arange(tokens, dtype=torch.float32) - 1
+    trace = {
+        "role_attention_mass": attention,
+        "edge_role_energy": edge,
+        "head_role_write_norm": write,
+        "head_source_entropy": entropy,
+        "role_head_coherence": coherence,
+        "top_source_index": torch.zeros(layers, tokens, 1, dtype=torch.int32),
+        "top_source_magnitude": torch.ones(layers, tokens, 1),
+    }
+    for family in ("attention", "edge"):
+        for statistic in (
+            "effective_sources",
+            "mean_head_entropy",
+            "head_jsd",
+            "effective_rank",
+            "mean_top1",
+        ):
+            trace[f"prompt_{family}_{statistic}"] = torch.ones(layers, tokens)
+        trace[f"prompt_{family}_anchor_index"] = torch.zeros(
+            layers, tokens, heads, dtype=torch.int32
+        )
     return {
         "token_ids": token_ids,
         "response_start": 3,
-        "trace": {
-            "role_attention_mass": attention,
-            "edge_role_energy": edge,
-            "head_role_write_norm": write,
-            "head_source_entropy": entropy,
-            "role_head_coherence": coherence,
-            "top_source_index": torch.zeros(layers, tokens, 1, dtype=torch.int32),
-            "top_source_magnitude": torch.ones(layers, tokens, 1),
-        },
+        "trace": trace,
         "score_inputs": {
             "full_logprob": full,
             "full_margin": torch.ones(tokens),
@@ -81,15 +94,15 @@ def test_auc_direction_is_never_flipped_after_reading_labels():
         name: np.asarray([0.9, 1.0, 0.0, 0.1])
         for name in evaluate.SCORE_ORDER
     }
-    scores["static_state"] *= -1
+    scores["attention_route_collapse"] *= -1
 
     result = evaluate.detection_summary(
         label, scores, source, bootstrap=0, seed=1
     )
 
-    assert result["mechanism_innovation"]["auroc"] == 0.75
-    np.testing.assert_allclose(result["mechanism_innovation"]["auprc"], 5 / 6)
-    assert result["static_state"]["auroc"] == 0.25
+    assert result["functional_route_collapse"]["auroc"] == 0.75
+    np.testing.assert_allclose(result["functional_route_collapse"]["auprc"], 5 / 6)
+    assert result["attention_route_collapse"]["auroc"] == 0.25
 
 
 def test_group_audit_matches_labels_only_within_position_cells():
@@ -197,7 +210,7 @@ def test_pool_score_freeze_then_labels_is_the_only_evaluation_order(
 
     def write_frozen(path, arrays):
         assert "label" not in arrays
-        events.append(("freeze", len(arrays["mechanism_innovation"])))
+        events.append(("freeze", len(arrays["functional_route_collapse"])))
         return original_write(path, arrays)
 
     monkeypatch.setattr(evaluate, "_write_frozen", write_frozen)
@@ -239,12 +252,12 @@ def test_pool_score_freeze_then_labels_is_the_only_evaluation_order(
         ("label", "train"),
         ("label", "test"),
     ]
-    assert report["primary_score"] == "mechanism_innovation"
-    assert report["control_scores"] == ["static_state", "confidence"]
+    assert report["primary_score"] == "functional_route_collapse"
+    assert report["control_scores"] == ["attention_route_collapse", "confidence"]
     assert report["detection_estimand"] == "token_micro"
     assert report["detection_bootstrap_unit"] == "source_id_cluster"
     assert report["physical_cache_shards"] == 2
-    assert report["detection"]["mechanism_innovation"]["auroc"] == 0.75
+    assert report["detection"]["functional_route_collapse"]["auroc"] == 0.75
     assert report["labels_used_during"].endswith("after_score_freeze")
     frozen = output.with_name("frozen_scores.npz")
     assert frozen.is_file()

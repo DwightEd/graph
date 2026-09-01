@@ -10,17 +10,16 @@ from sklearn.metrics import precision_recall_curve, roc_curve
 
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt  # noqa: E402
-from matplotlib.colors import TwoSlopeNorm  # noqa: E402
 
-PRIMARY_SCORE = "mechanism_innovation"
+PRIMARY_SCORE = "functional_route_collapse"
 SCORE_LABELS = {
-    PRIMARY_SCORE: "Dynamic mechanism innovation",
-    "static_state": "Static mechanism state",
+    PRIMARY_SCORE: "Functional prompt-route collapse",
+    "attention_route_collapse": "Attention prompt-route collapse",
     "confidence": "Token surprisal",
 }
 COLORS = {
     PRIMARY_SCORE: "#b2182b",
-    "static_state": "#2166ac",
+    "attention_route_collapse": "#2166ac",
     "confidence": "#1b7837",
 }
 
@@ -178,37 +177,33 @@ def plot_sample_dashboard(
     )
     figure.suptitle(f"Sample {record['sample_id']}")
 
-    route = layers["edge_route_balance"]
-    bound = max(float(np.nanquantile(np.abs(route), 0.99)), 1e-6)
     image = axes[0].imshow(
-        route,
-        aspect="auto",
-        origin="lower",
-        cmap="coolwarm",
-        norm=TwoSlopeNorm(vmin=-bound, vcenter=0, vmax=bound),
-    )
-    axes[0].set(title="History − evidence functional routing", ylabel="Layer")
-    figure.colorbar(image, ax=axes[0])
-
-    image = axes[1].imshow(
-        layers["source_dispersion"],
+        layers["prompt_edge_effective_sources"],
         aspect="auto",
         origin="lower",
         cmap="viridis",
-        vmin=0,
-        vmax=1,
     )
-    axes[1].set(title="Per-head source dispersion", ylabel="Layer")
+    axes[0].set(title="Functional effective prompt carriers", ylabel="Layer")
+    figure.colorbar(image, ax=axes[0])
+
+    image = axes[1].imshow(
+        layers["prompt_edge_effective_rank"],
+        aspect="auto",
+        origin="lower",
+        cmap="viridis",
+        vmin=1,
+    )
+    axes[1].set(title="Functional cross-head route rank", ylabel="Layer")
     figure.colorbar(image, ax=axes[1])
 
     image = axes[2].imshow(
-        layers["edge_head_role_jsd"],
+        layers["prompt_edge_anchor_turnover"],
         aspect="auto",
         origin="lower",
         cmap="magma",
         vmin=0,
     )
-    axes[2].set(title="Across-head role disagreement", ylabel="Layer")
+    axes[2].set(title="Dominant prompt-carrier turnover", ylabel="Layer")
     figure.colorbar(image, ax=axes[2])
 
     image = axes[3].imshow(

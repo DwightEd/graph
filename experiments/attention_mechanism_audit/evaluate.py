@@ -21,9 +21,17 @@ from .detect import SCORE_DEFINITIONS, SCORE_NAMES, factorial_contrasts, score_r
 from .visualize import plot_population, plot_sample_dashboard
 
 SCORE_ORDER = SCORE_NAMES
-PRIMARY_SCORE = "mechanism_innovation"
-CONTROL_SCORES = ("static_state", "confidence")
+PRIMARY_SCORE = "functional_route_collapse"
+CONTROL_SCORES = ("attention_route_collapse", "confidence")
 ONSET_AUDIT_NAMES = {
+    "prompt_edge_effective_sources_mean",
+    "prompt_edge_effective_rank_mean",
+    "prompt_edge_mean_top1_mean",
+    "prompt_edge_anchor_turnover_mean",
+    "prompt_attention_effective_sources_mean",
+    "prompt_attention_effective_rank_mean",
+    "prompt_attention_mean_top1_mean",
+    "prompt_attention_anchor_turnover_mean",
     "edge_route_balance_mean",
     "edge_route_velocity_mean",
     "source_dispersion_mean",
@@ -99,6 +107,16 @@ def _route_velocity(route_share: np.ndarray) -> np.ndarray:
     return velocity
 
 
+def _anchor_turnover(anchor: np.ndarray) -> np.ndarray:
+    """Fraction of valid heads whose dominant prompt carrier changed."""
+
+    turnover = np.zeros(anchor.shape[:2], dtype=np.float64)
+    valid = (anchor[:, 1:] >= 0) & (anchor[:, :-1] >= 0)
+    changed = (anchor[:, 1:] != anchor[:, :-1]) & valid
+    turnover[:, 1:] = changed.sum(axis=2) / np.maximum(valid.sum(axis=2), 1)
+    return turnover
+
+
 def layer_audit_metrics(artifact: Mapping[str, Any]) -> dict[str, np.ndarray]:
     """Return head-resolved measurements used by plots and post-hoc audit."""
 
@@ -143,6 +161,20 @@ def layer_audit_metrics(artifact: Mapping[str, Any]) -> dict[str, np.ndarray]:
     coherence = _array(trace["role_head_coherence"]).astype(np.float64)
     for role_index, role in enumerate(ROLE_NAMES):
         result[f"head_coherence_{role}"] = coherence[..., role_index]
+    for family in ("attention", "edge"):
+        for statistic in (
+            "effective_sources",
+            "mean_head_entropy",
+            "head_jsd",
+            "effective_rank",
+            "mean_top1",
+        ):
+            result[f"prompt_{family}_{statistic}"] = _array(
+                trace[f"prompt_{family}_{statistic}"]
+            ).astype(np.float64)
+        result[f"prompt_{family}_anchor_turnover"] = _anchor_turnover(
+            _array(trace[f"prompt_{family}_anchor_index"]).astype(np.int64)
+        )
     return result
 
 
@@ -479,7 +511,7 @@ def _load_manifest(trace_root: Path, task_type: str | None = None) -> dict:
         and (task_type is None or task_type in manifest.get("task_types", []))
     )
     if not valid:
-        raise ValueError(f"mechanism-state manifest does not match v{VERSION}")
+        raise ValueError(f"routing-state manifest does not match v{VERSION}")
     return manifest
 
 
@@ -658,7 +690,7 @@ def build_report(
         "detection": detection,
         "detector": dict(detector),
         "labels_used_during": "posthoc_evaluation_only_after_score_freeze",
-        "analysis_scope": "source-crossfit mechanism-state innovation by task",
+        "analysis_scope": "source-crossfit prompt-carrier route collapse by task",
     }
 
 

@@ -34,8 +34,8 @@ def test_all_command_evaluates_each_task_from_the_same_saved_mechanism_states(
     tmp_path, monkeypatch
 ):
     shared = [
-        (tmp_path / "mechanism_state/train", tmp_path / "cache/train"),
-        (tmp_path / "mechanism_state/test", tmp_path / "cache/test"),
+        (tmp_path / "routing_state/train", tmp_path / "cache/train"),
+        (tmp_path / "routing_state/test", tmp_path / "cache/test"),
     ]
     captures = []
     evaluations = []
@@ -83,9 +83,9 @@ def test_plot_sample_searches_the_same_saved_inputs():
         [
             "plot-sample",
             "--input",
-            "mechanism_state/train",
+            "routing_state/train",
             "--input",
-            "mechanism_state/test",
+            "routing_state/test",
             "--sample-id",
             "11907",
             "--output",
@@ -95,8 +95,8 @@ def test_plot_sample_searches_the_same_saved_inputs():
 
     assert args.sample_id == "11907"
     assert args.input == [
-        Path("mechanism_state/train"),
-        Path("mechanism_state/test"),
+        Path("routing_state/train"),
+        Path("routing_state/test"),
     ]
     assert args.output == Path("sample.png")
 
@@ -137,8 +137,8 @@ def test_report_prints_without_bootstrap_intervals(capsys):
     )
     output = capsys.readouterr().out
     assert "PARTIAL-SUMMARY" in output
-    assert "PRIMARY   mechanism_innovation" in output
-    assert "control   static_state" in output
+    assert "PRIMARY   functional_route_collapse" in output
+    assert "control   attention_route_collapse" in output
     assert "control   confidence" in output
     assert "component" not in output
     assert output.count("CI=n/a") == 8

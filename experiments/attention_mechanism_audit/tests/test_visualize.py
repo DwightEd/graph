@@ -18,7 +18,11 @@ def _assert_png(path: Path) -> None:
 
 
 def test_population_figures_use_all_token_arrays(tmp_path):
-    assert SCORE_ORDER == ("mechanism_innovation", "static_state", "confidence")
+    assert SCORE_ORDER == (
+        "functional_route_collapse",
+        "attention_route_collapse",
+        "confidence",
+    )
     label = np.asarray([0, 0, 1, 1], dtype=bool)
     scores = {name: np.asarray([0.0, 0.2, 0.8, 1.0]) for name in SCORE_ORDER}
     report = {"detection": {name: {"auroc": 1.0} for name in SCORE_ORDER}}
@@ -68,9 +72,9 @@ def test_unavailable_crossfit_does_not_plot_zero_placeholder_scores(tmp_path):
 
 def test_one_sample_figure_is_only_an_explicit_call(tmp_path):
     layers = {
-        "edge_route_balance": np.asarray([[-1.0, 0.2], [-0.5, 0.4]]),
-        "source_dispersion": np.asarray([[0.1, 0.5], [0.2, 0.7]]),
-        "edge_head_role_jsd": np.asarray([[0.1, 0.3], [0.2, 0.4]]),
+        "prompt_edge_effective_sources": np.asarray([[2.0, 1.2], [3.0, 1.5]]),
+        "prompt_edge_effective_rank": np.asarray([[2.0, 1.2], [2.5, 1.4]]),
+        "prompt_edge_anchor_turnover": np.asarray([[0.1, 0.0], [0.2, 0.1]]),
         "edge_evidence_share": np.asarray([[0.8, 0.2], [0.6, 0.1]]),
         "edge_other_prompt_share": np.asarray([[0.2, 0.1], [0.3, 0.1]]),
         "edge_history_share": np.asarray([[0.0, 0.6], [0.0, 0.7]]),

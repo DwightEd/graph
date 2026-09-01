@@ -305,7 +305,7 @@ def test_capture_saves_the_rich_mechanism_state_and_all_branch_scores():
         "no_evidence_history_logprob",
         "no_evidence_history_margin",
     }
-    assert set(artifact["trace"]) == {
+    assert {
         "role_attention_mass",
         "edge_role_energy",
         "head_role_write_norm",
@@ -313,7 +313,24 @@ def test_capture_saves_the_rich_mechanism_state_and_all_branch_scores():
         "role_head_coherence",
         "top_source_index",
         "top_source_magnitude",
-    }
+    }.issubset(artifact["trace"])
+    for family in ("attention", "edge"):
+        for statistic in (
+            "effective_sources",
+            "mean_head_entropy",
+            "head_jsd",
+            "effective_rank",
+            "mean_top1",
+        ):
+            assert artifact["trace"][f"prompt_{family}_{statistic}"].shape == (
+                2,
+                4,
+            )
+        assert artifact["trace"][f"prompt_{family}_anchor_index"].shape == (
+            2,
+            4,
+            4,
+        )
     assert ROLE_NAMES == (
         "evidence",
         "other_prompt",
@@ -345,6 +362,11 @@ def test_capture_saves_the_rich_mechanism_state_and_all_branch_scores():
     assert torch.all((trace["head_source_entropy"] <= 1 + 2e-3))
     assert torch.all((trace["role_head_coherence"] >= 0))
     assert torch.all((trace["role_head_coherence"] <= 1 + 2e-3))
+    for family in ("attention", "edge"):
+        assert torch.all(trace[f"prompt_{family}_effective_sources"] >= 1)
+        assert torch.all(trace[f"prompt_{family}_effective_rank"] >= 1)
+        assert torch.all((trace[f"prompt_{family}_mean_top1"] >= 0))
+        assert torch.all((trace[f"prompt_{family}_mean_top1"] <= 1 + 2e-3))
     torch.testing.assert_close(
         trace["role_attention_mass"].float().sum(-1),
         torch.ones(2, 4, 4),
@@ -517,6 +539,18 @@ def test_source_norm_is_dynamic_value_through_each_head_output_block():
         torch.testing.assert_close(
             replay._source_norm(index, value), expected, atol=1e-5, rtol=1e-5
         )
+
+
+def test_prompt_carrier_statistics_preserve_concentration_and_head_rank():
+    mass = torch.tensor(
+        [[[0.5, 0.5, 0.0], [0.5, 0.5, 0.0]], [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]]
+    )
+    prompt = torch.ones(2, 3, dtype=torch.bool)
+    result = FunctionalTraceReplay._prompt_carriers(mass, prompt)
+    torch.testing.assert_close(result["effective_sources"], torch.tensor([2.0, 1.0]))
+    torch.testing.assert_close(result["effective_rank"], torch.ones(2))
+    torch.testing.assert_close(result["mean_top1"], torch.tensor([0.5, 1.0]))
+    assert torch.equal(result["anchor_index"], torch.zeros(2, 2, dtype=torch.long))
 
 
 def test_chunk_and_intervention_batch_sizes_do_not_change_results():

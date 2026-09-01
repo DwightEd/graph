@@ -153,7 +153,7 @@ class FunctionalTraceReplay:
         layers = len(self.layers)
         head_shape = (layers, response_tokens, self.heads)
         role_shape = (*head_shape, len(ROLE_NAMES))
-        return {
+        trace = {
             "role_attention_mass": torch.empty(*role_shape, dtype=torch.float16),
             "edge_role_energy": torch.empty(*role_shape, dtype=torch.float16),
             "head_role_write_norm": torch.empty(*role_shape, dtype=torch.float16),
@@ -167,6 +167,60 @@ class FunctionalTraceReplay:
             "top_source_magnitude": torch.zeros(
                 layers, response_tokens, top_k, dtype=torch.float16
             ),
+        }
+        for family in ("attention", "edge"):
+            for statistic in (
+                "effective_sources",
+                "mean_head_entropy",
+                "head_jsd",
+                "effective_rank",
+                "mean_top1",
+            ):
+                trace[f"prompt_{family}_{statistic}"] = torch.zeros(
+                    layers, response_tokens, dtype=torch.float16
+                )
+            trace[f"prompt_{family}_anchor_index"] = torch.full(
+                head_shape, -1, dtype=torch.int32
+            )
+        return trace
+
+    @staticmethod
+    def _prompt_carriers(
+        mass: torch.Tensor, prompt: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
+        """Summarize the exact prompt-source distribution without averaging heads.
+
+        ``mass`` is ``[response row, head, source]``.  The mixture entropy counts
+        distinct prompt carriers used by the whole head population; the Gram
+        participation ratio counts independent head-routing modes.
+        """
+
+        selected = mass.float() * prompt[:, None]
+        total = selected.sum(-1)
+        valid = total > 1e-12
+        probability = selected / total.clamp_min(1e-12)[..., None]
+        entropy = -(probability * probability.clamp_min(1e-12).log()).sum(-1)
+        count = valid.sum(1).clamp_min(1)
+        mixture = (probability * valid[..., None]).sum(1) / count[:, None]
+        mixture_entropy = -(
+            mixture * mixture.clamp_min(1e-12).log()
+        ).sum(-1)
+        mean_entropy = (entropy * valid).sum(1) / count
+        gram = probability @ probability.transpose(1, 2)
+        trace = gram.diagonal(dim1=1, dim2=2).sum(1)
+        effective_rank = trace.square() / gram.square().sum((1, 2)).clamp_min(
+            1e-12
+        )
+        top1, anchor = selected.max(-1)
+        top1 = top1 / total.clamp_min(1e-12)
+        anchor = anchor.masked_fill(~valid, -1)
+        return {
+            "effective_sources": mixture_entropy.exp(),
+            "mean_head_entropy": mean_entropy,
+            "head_jsd": (mixture_entropy - mean_entropy).clamp_min(0),
+            "effective_rank": effective_rank,
+            "mean_top1": (top1 * valid).sum(1) / count,
+            "anchor_index": anchor,
         }
 
     def _forward(
@@ -281,6 +335,12 @@ class FunctionalTraceReplay:
                     )
                     roles = (evidence_role, other_prompt, history, self_source)
 
+                    prompt = (source[None] < response_start) & ~self_source
+                    carrier_families = {
+                        "attention": self._prompt_carriers(a.float(), prompt),
+                        "edge": self._prompt_carriers(edge_magnitude, prompt),
+                    }
+
                     role_attention = torch.stack(
                         [(a.float() * role[:, None]).sum(-1) for role in roles],
                         dim=-1,
@@ -368,6 +428,17 @@ class FunctionalTraceReplay:
                     trace["top_source_magnitude"][
                         index, row_start:row_stop, :current_k
                     ] = top_magnitude.detach().cpu()
+                    for family, statistics in carrier_families.items():
+                        for name, value in statistics.items():
+                            target = trace[f"prompt_{family}_{name}"]
+                            if name == "anchor_index":
+                                target[index, row_start:row_stop] = (
+                                    value.detach().int().cpu()
+                                )
+                            else:
+                                target[index, row_start:row_stop] = (
+                                    value.detach().half().cpu()
+                                )
 
                 if remove_mask is not None:
                     value_by_head = values[index][:, :query_stop, self.q_to_kv, :]

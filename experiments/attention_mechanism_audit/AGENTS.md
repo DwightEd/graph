@@ -10,8 +10,8 @@ this directory. The rules below are mandatory for this experiment.
   layer/head `W_O` writes, and causal message deletion. Never silently replace
   it with attention-only weights, static checkpoint geometry, or scalar feature
   factories.
-- Preserve the layer, query-head, source-role, and response-token axes until
-  the formal low-rank projection. The source roles are exactly evidence, other
+- Preserve the layer, query-head, source-role, and response-token axes while
+  computing prompt-carrier distributions. The source roles are exactly evidence, other
   prompt, response history, and predictor self. Do not merge history with the
   causal diagonal.
 - Store role edge energy, exact per-head role write norm, per-head normalized
@@ -24,13 +24,15 @@ this directory. The rules below are mandatory for this experiment.
   interaction effects rather than a single asymmetric difference. Condition
   its absolute target margin on full-branch confidence using fit sources before
   it enters the primary state.
-- The formal primary detector is cross-fitted dynamic mechanism innovation.
-  Remove position and response-length nuisance trends on fit sources, learn
-  unlabeled low-rank layer/head structure, fit the response-state transition,
-  and calibrate innovation on separate unlabeled sources. Static-state and
-  confidence scores are the default controls, not alternative primary
-  implementations. Any later head-collapse or channel-ablation diagnostic must
-  remain a prespecified control and must not select the primary result.
+- The formal primary detector is functional prompt-carrier route collapse.
+  For every layer compute the effective prompt-source support of the head
+  mixture, the effective rank of the head-by-prompt route matrix, and the
+  recent temporal support of dominant prompt anchors. Their product is the
+  routing degree-of-freedom volume; fewer degrees of freedom always mean a
+  higher fixed-direction score. Remove position and response-length nuisance
+  trends on fit sources and calibrate on separate unlabeled sources. The
+  attention-only version and confidence are controls. PPCA, AR prediction,
+  reconstruction error, and generic anomaly detection are not formal paths.
 - Assign folds by source identity. A source and all of its tokens must never
   cross fit, calibration, and held-out roles. Weight sources equally while
   fitting. Evaluate the token detector as token-micro AUROC/AP with a

@@ -26,7 +26,7 @@ from .data import (
 )
 
 SCHEMA = "ragtruth-mechanism-state"
-VERSION = 5
+VERSION = 6
 
 
 def _file_identity(path: str | Path) -> str:
@@ -130,7 +130,7 @@ def capture_split(
     index_path = output / "index.jsonl"
     manifest_path = output / "manifest.json"
     if index_path.is_file() and not manifest_path.is_file():
-        raise ValueError("index exists without a v5 manifest; use a new output")
+        raise ValueError(f"index exists without a v{VERSION} manifest; use a new output")
     previous_manifest = (
         json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest_path.is_file()
@@ -289,7 +289,7 @@ def capture_all(
 
     pairs = []
     for split_root in map(Path, split_roots):
-        state_root = Path(output_root) / "mechanism_state" / split_root.name
+        state_root = Path(output_root) / "routing_state" / split_root.name
         capture_split(
             split_root=split_root,
             source_info=source_info,
