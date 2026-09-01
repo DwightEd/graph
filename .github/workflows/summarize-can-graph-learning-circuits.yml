@@ -1,0 +1,55 @@
+name: summarize-can-graph-learning-circuits
+
+on:
+  push:
+    branches:
+      - agent/research-can-graph-learning-circuits
+    paths:
+      - ".github/workflows/summarize-can-graph-learning-circuits.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/research-can-graph-learning-circuits
+      - name: Summarize matches
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from difflib import SequenceMatcher
+          import re
+
+          target = 'can graph learning learn circuits'
+          text = Path('tmp/can_graph_learning_circuits_search.txt').read_text(encoding='utf-8')
+          blocks = re.split(r'\n\s*\n', text)
+          rows=[]
+          for block in blocks:
+              fields={}
+              for line in block.splitlines():
+                  if ': ' in line:
+                      k,v=line.split(': ',1); fields[k]=v
+              title=fields.get('TITLE','').strip()
+              if not title: continue
+              norm=re.sub(r'[^a-z0-9]+',' ',title.lower()).strip()
+              score=SequenceMatcher(None,target,norm).ratio()
+              rows.append((score,title,fields.get('AUTHORS',''),fields.get('YEAR',''),fields.get('VENUE',''),fields.get('DOI',''),fields.get('URL',''),fields.get('ABSTRACT','')))
+          seen=set(); uniq=[]
+          for row in sorted(rows,reverse=True):
+              key=row[1].lower()
+              if key in seen: continue
+              seen.add(key); uniq.append(row)
+          out=[]
+          for r in uniq[:10]:
+              out.append('\t'.join(str(x).replace('\n',' ') for x in r))
+          Path('tmp/best_paper_matches.tsv').write_text('\n'.join(out),encoding='utf-8')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tmp/best_paper_matches.tsv
+          git commit -m "Summarize paper identification candidates" || true
+          git push origin HEAD:agent/research-can-graph-learning-circuits
