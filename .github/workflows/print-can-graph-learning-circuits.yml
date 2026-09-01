@@ -1,0 +1,20 @@
+name: inspect-can-graph-learning-circuits
+
+on:
+  push:
+    branches:
+      - agent/research-can-graph-learning-circuits
+    paths:
+      - ".github/workflows/print-can-graph-learning-circuits.yml"
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/research-can-graph-learning-circuits
+      - name: Print candidate matches
+        run: |
+          echo '=== BEST MATCHES ==='
+          cat tmp/best_paper_matches.tsv
