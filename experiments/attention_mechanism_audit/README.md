@@ -45,6 +45,15 @@ weight copies are not written to disk. Hallucination labels remain sealed until
 the fixed scores have been constructed; they are then used only for post-hoc
 AUROC and AUPRC.
 
+The task report also retains the mechanism-difference audit used before the
+fixed detector was introduced. For evidence share, response share, routing
+imbalance, and source dispersion it reports the all-layer mean, early third,
+late third, and late-minus-early shift. Hallucinated and correct tokens are
+compared only inside the same response and the same absolute/relative position
+cell, then aggregated with equal source weight and source-level bootstrap
+confidence intervals. These label-dependent contrasts diagnose the mechanism;
+they never select, fit, weight, or reverse a detection score.
+
 ## Run all data
 
 From the repository root, run the single foreground command:

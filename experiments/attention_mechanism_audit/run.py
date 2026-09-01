@@ -52,6 +52,23 @@ def _print_report(report: dict) -> None:
             f"AUPRC={result['auprc']:.6f} CI={ci(result['auprc_ci95'])} "
             f"lift={result['auprc_lift']:.3f}"
         )
+    print("POST-HOC matched hallucinated - correct token differences")
+    audit = report["group_difference_audit"]
+    for name in (
+        "evidence_share_mean",
+        "response_share_mean",
+        "routing_imbalance_mean",
+        "source_dispersion_mean",
+    ):
+        result = audit["metrics"][name]
+        difference = result["hallucinated_minus_correct"]
+        if difference is None:
+            print(f"audit     {name:30s} difference=n/a")
+            continue
+        print(
+            f"audit     {name:30s} difference={difference:.6f} "
+            f"CI={ci(result['ci95'])}"
+        )
 
 
 def _all(args: argparse.Namespace) -> None:

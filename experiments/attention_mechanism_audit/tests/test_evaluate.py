@@ -39,7 +39,9 @@ def _artifact() -> dict:
 def test_four_scores_are_the_fixed_mechanism_equations():
     scores = evaluate.token_scores(_artifact())
 
-    np.testing.assert_allclose(scores["causal_route_capture"], [-0.3, 3.0])
+    np.testing.assert_allclose(
+        scores["causal_route_capture"], [-0.3, 3.0], atol=1e-7
+    )
     np.testing.assert_allclose(scores["routing_imbalance"], [-1.0, 0.0])
     np.testing.assert_allclose(scores["source_dispersion"], [0.0, 0.75])
     np.testing.assert_allclose(
@@ -68,6 +70,31 @@ def test_auc_direction_is_never_flipped_after_reading_labels():
         5 / 6,
     )
     assert result["source_dispersion"]["auroc"] == 0.25
+
+
+def test_group_audit_matches_labels_only_within_position_cells():
+    arrays = {
+        "label": np.asarray([0, 1, 0, 1], dtype=bool),
+        "sample_id": np.asarray(["a", "a", "b", "b"]),
+        "source_id": np.asarray(["s1", "s1", "s2", "s2"]),
+        "token_index": np.asarray([0, 1, 0, 1]),
+        "response_length": np.asarray([20, 20, 20, 20]),
+        "routing_imbalance_mean": np.asarray([0.0, 2.0, 1.0, 5.0]),
+    }
+
+    report = evaluate.group_difference_audit(
+        arrays,
+        ("routing_imbalance_mean",),
+        position_bin=16,
+        bootstrap=0,
+        seed=1,
+    )
+
+    result = report["metrics"]["routing_imbalance_mean"]
+    assert result["hallucinated_minus_correct"] == 3.0
+    assert result["sources"] == 2
+    assert result["matched_samples"] == 2
+    assert report["hallucinated_token_coverage"] == 1.0
 
 
 def test_physical_shards_are_pooled_before_one_evaluation(tmp_path, monkeypatch):

@@ -106,6 +106,10 @@ def test_report_prints_without_bootstrap_intervals(capsys):
         "auroc_ci95": [None, None],
         "auprc_ci95": [None, None],
     }
+    audit_metric = {
+        "hallucinated_minus_correct": 0.1,
+        "ci95": [None, None],
+    }
     run._print_report(
         {
             "samples": 1,
@@ -117,8 +121,19 @@ def test_report_prints_without_bootstrap_intervals(capsys):
             "task_type": "Summary",
             "primary_score": run.SCORE_ORDER[0],
             "detection": {name: metric for name in run.SCORE_ORDER},
+            "group_difference_audit": {
+                "metrics": {
+                    name: audit_metric
+                    for name in (
+                        "evidence_share_mean",
+                        "response_share_mean",
+                        "routing_imbalance_mean",
+                        "source_dispersion_mean",
+                    )
+                }
+            },
         },
     )
     output = capsys.readouterr().out
     assert "PARTIAL-SUMMARY" in output
-    assert output.count("CI=n/a") == 8
+    assert output.count("CI=n/a") == 12

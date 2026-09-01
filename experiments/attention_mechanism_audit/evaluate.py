@@ -36,6 +36,26 @@ SCORE_DEFINITIONS = {
     ),
 }
 
+AUDIT_BASES = (
+    "evidence_share",
+    "response_share",
+    "routing_imbalance",
+    "source_dispersion",
+)
+
+
+def _layer_reductions(value: torch.Tensor, name: str) -> dict[str, np.ndarray]:
+    """Keep the old early/late audit without creating new detector features."""
+
+    width = max(value.shape[0] // 3, 1)
+    reduced = {
+        f"{name}_mean": value.mean(0),
+        f"{name}_early": value[:width].mean(0),
+        f"{name}_late": value[-width:].mean(0),
+        f"{name}_layer_shift": value[-width:].mean(0) - value[:width].mean(0),
+    }
+    return {key: current.cpu().numpy() for key, current in reduced.items()}
+
 
 def _binary_metrics(label: np.ndarray, score: np.ndarray) -> dict[str, float | int]:
     prevalence = float(label.mean())
@@ -111,6 +131,144 @@ def token_scores(artifact: dict) -> dict[str, np.ndarray]:
         "message_independent_preference": inputs["no_evidence_response_margin"],
     }
     return {name: values[name].float().cpu().numpy() for name in SCORE_ORDER}
+
+
+def token_audit_metrics(artifact: dict) -> dict[str, np.ndarray]:
+    """Measurements used only for hallucinated-vs-correct post-hoc auditing."""
+
+    layers = layer_mechanisms(artifact)
+    metrics = {}
+    for name in AUDIT_BASES:
+        metrics.update(_layer_reductions(layers[name], name))
+    return metrics
+
+
+def _position_match_design(
+    label: np.ndarray,
+    sample_id: np.ndarray,
+    token_index: np.ndarray,
+    response_length: np.ndarray,
+    *,
+    position_bin: int,
+) -> list[tuple[str, np.ndarray, np.ndarray, float]]:
+    """Match labels inside one response at similar absolute/relative positions."""
+
+    relative = np.minimum(
+        ((token_index + 0.5) * 10 / response_length).astype(np.int16), 9
+    )
+    absolute = token_index // position_bin
+    cells: dict[tuple[str, int, int], list[int]] = {}
+    for index, key in enumerate(zip(sample_id, absolute, relative)):
+        cells.setdefault(key, []).append(index)
+
+    matched = []
+    for (sample, _absolute, _relative), rows in cells.items():
+        rows = np.asarray(rows)
+        positive = rows[label[rows]]
+        negative = rows[~label[rows]]
+        if len(positive) and len(negative):
+            weight = len(positive) * len(negative) / len(rows)
+            matched.append((str(sample), positive, negative, float(weight)))
+    return matched
+
+
+def _position_matched_difference(
+    value: np.ndarray,
+    matched: list[tuple[str, np.ndarray, np.ndarray, float]],
+    sample_source: dict[str, str],
+    *,
+    bootstrap: int,
+    seed: int,
+) -> dict[str, object]:
+    """Aggregate within-response contrasts, then weight every source equally."""
+
+    by_sample: dict[str, list[tuple[float, float]]] = {}
+    for sample, positive, negative, weight in matched:
+        effect = float(value[positive].mean() - value[negative].mean())
+        by_sample.setdefault(sample, []).append((effect, weight))
+
+    by_source: dict[str, list[float]] = {}
+    for sample, rows in by_sample.items():
+        effects = np.asarray([effect for effect, _weight in rows])
+        weights = np.asarray([weight for _effect, weight in rows])
+        by_source.setdefault(sample_source[sample], []).append(
+            float(np.average(effects, weights=weights))
+        )
+    source_effects = np.asarray(
+        [np.mean(effects) for effects in by_source.values()], dtype=np.float64
+    )
+    if not len(source_effects):
+        return {
+            "hallucinated_minus_correct": None,
+            "ci95": [None, None],
+            "sources": 0,
+            "matched_samples": 0,
+            "matched_cells": 0,
+        }
+
+    interval = [None, None]
+    if bootstrap:
+        random = np.random.default_rng(seed)
+        draws = random.choice(
+            source_effects, (bootstrap, len(source_effects)), replace=True
+        ).mean(1)
+        interval = [float(value) for value in np.quantile(draws, (0.025, 0.975))]
+    return {
+        "hallucinated_minus_correct": float(source_effects.mean()),
+        "ci95": interval,
+        "sources": int(len(source_effects)),
+        "matched_samples": int(len(by_sample)),
+        "matched_cells": int(len(matched)),
+    }
+
+
+def group_difference_audit(
+    arrays: dict[str, np.ndarray],
+    audit_names: tuple[str, ...],
+    *,
+    position_bin: int,
+    bootstrap: int,
+    seed: int,
+) -> dict[str, object]:
+    """Compare hallucinated and correct tokens after within-response matching."""
+
+    label = arrays["label"]
+    matched = _position_match_design(
+        label,
+        arrays["sample_id"],
+        arrays["token_index"],
+        arrays["response_length"],
+        position_bin=position_bin,
+    )
+    sample_source = {
+        str(sample): str(source)
+        for sample, source in zip(arrays["sample_id"], arrays["source_id"])
+    }
+    metrics = {}
+    for offset, name in enumerate(audit_names):
+        value = arrays[name]
+        metrics[name] = {
+            "correct_mean": float(value[~label].mean()),
+            "hallucinated_mean": float(value[label].mean()),
+            **_position_matched_difference(
+                value,
+                matched,
+                sample_source,
+                bootstrap=bootstrap,
+                seed=seed + offset,
+            ),
+        }
+    covered = sum(len(positive) for _sample, positive, _negative, _weight in matched)
+    return {
+        "role": "posthoc_mechanism_audit_not_score_selection",
+        "matching": "sample_id + absolute_position_bin + relative_position_decile",
+        "aggregation": "matched cells -> response -> equal source",
+        "bootstrap_unit": "source_id",
+        "position_bin": int(position_bin),
+        "covered_hallucinated_tokens": int(covered),
+        "hallucinated_token_coverage": float(covered / max(label.sum(), 1)),
+        "metrics": metrics,
+    }
 
 
 def detection_summary(
@@ -219,7 +377,9 @@ def _load_scores(
             map_location="cpu",
             weights_only=True,
         )
-        scored.append((row, token_scores(artifact)))
+        scored.append(
+            (row, {**token_scores(artifact), **token_audit_metrics(artifact)})
+        )
     return scored
 
 
@@ -233,13 +393,14 @@ def _add_labels(
         retain_embedded_labels=True,
     )
     labels = dataset.prepare_evaluation_labels([row["sample_id"] for row, _ in scored])
+    metric_names = tuple(scored[0][1])
     arrays: dict[str, list[np.ndarray]] = {
         "label": [],
         "sample_id": [],
         "source_id": [],
         "token_index": [],
         "response_length": [],
-        **{name: [] for name in SCORE_ORDER},
+        **{name: [] for name in metric_names},
     }
     for row, current in scored:
         sample = dataset[row["sample_id"]]
@@ -255,7 +416,7 @@ def _add_labels(
         arrays["source_id"].append(np.repeat(str(row["source_id"]), count))
         arrays["token_index"].append(np.arange(count, dtype=np.int32))
         arrays["response_length"].append(np.full(count, count, dtype=np.int32))
-        for name in SCORE_ORDER:
+        for name in metric_names:
             arrays[name].append(current[name])
     return {name: np.concatenate(value) for name, value in arrays.items()}
 
@@ -287,6 +448,7 @@ def evaluate_all(
     output: str | Path,
     bootstrap: int = 1000,
     seed: int = 20260828,
+    position_bin: int = 16,
 ) -> dict:
     """Pool physical cache shards first, then evaluate exactly once."""
 
@@ -313,6 +475,18 @@ def evaluate_all(
         scores=scores,
         bootstrap=bootstrap,
         seed=seed,
+    )
+    audit_names = tuple(
+        name
+        for name in merged
+        if any(name.startswith(f"{base}_") for base in AUDIT_BASES)
+    )
+    report["group_difference_audit"] = group_difference_audit(
+        merged,
+        audit_names,
+        position_bin=position_bin,
+        bootstrap=bootstrap,
+        seed=seed + len(SCORE_ORDER),
     )
 
     output = Path(output)
