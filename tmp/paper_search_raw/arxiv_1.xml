@@ -1,0 +1,39 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/JFsktYxKGbSJIdvGSMiT9XwvLBY</id>
+  <title>arXiv Query: search_query=all:"Can Graph Learning Learn Circuits"&amp;id_list=&amp;start=0&amp;max_results=30</title>
+  <updated>2026-09-01T07:33:24Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=all:%22Can+Graph+Learning+Learn+Circuits%22&amp;start=0&amp;max_results=30&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>30</opensearch:itemsPerPage>
+  <opensearch:totalResults>1</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2608.08536v1</id>
+    <title>Can Graph Learning Learn Circuits?</title>
+    <updated>2026-08-09T07:14:13Z</updated>
+    <link href="https://arxiv.org/abs/2608.08536v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2608.08536v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Circuit localization is a mechanistic interpretability task whose goal is to identify a sparse subgraph of a transformer's computation graph sufficient to reproduce a particular behavior. Most established methods localize circuits independently for each model--task pair. We instead frame circuit localization as a graph machine learning problem in which the edges of a computation graph represent computational pathways, and graph neural networks (GNNs) model interactions among these pathways. We introduce Graph Circuit Learning (GCL), a supervised, amortized framework that trains a GNN across multiple model--task pairs and applies it to unseen cases. To provide sufficient data, we augment the InterpBench benchmark with additional cases derived from the TracrBench programs. Of the 14 evaluated GCL configurations, the highest scored a median edge AUROC of $0.902$ (interquartile interval $[0.861, 0.942]$) on the 16 original held-out InterpBench cases. This is close to the published InterpBench median of $0.910$ for EAP-IG while remaining below ACDC's $0.959$. Removing all message-passing edges reduces the median to $0.825$. We also adapt PGExplainer, a GNN explainability method, to circuit localization, obtaining a median edge AUROC of $0.858$ on the same cases. These preliminary results suggest that graph machine learning offers a natural and potentially powerful perspective on circuit localization, and we hope this perspective encourages closer exchange between the two communities.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-08-09T07:14:13Z</published>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Chester Tan</name>
+    </author>
+    <author>
+      <name>Moritz Lampert</name>
+    </author>
+    <author>
+      <name>Courtney Maynard</name>
+    </author>
+    <author>
+      <name>Ankit Ramakrishnan</name>
+    </author>
+    <author>
+      <name>Tina Eliassi-Rad</name>
+    </author>
+    <author>
+      <name>Ingo Scholtes</name>
+    </author>
+  </entry>
+</feed>

@@ -1,0 +1,737 @@
+=== CROSSREF ===
+TITLE: Can homeostatic circuits learn and remember?
+AUTHORS: Grant R. J. Gordon, Jaideep S. Bains
+DOI: 10.1113/jphysiol.2006.110270
+URL: https://doi.org/10.1113/jphysiol.2006.110270
+
+TITLE: Can Graph Convolution Networks Learn Spatial Relations?
+AUTHORS: Azelle Courtial, Guillaume Touya, Xiang Zhang
+DOI: 10.5194/ica-abs-3-60-2021
+URL: https://doi.org/10.5194/ica-abs-3-60-2021
+
+TITLE: Robust Learning to Learn Graph Topologies
+AUTHORS: Navid Akhavan Attar, Ali Fahim
+DOI: 10.1109/iccke60553.2023.10326280
+URL: https://doi.org/10.1109/iccke60553.2023.10326280
+
+TITLE: What Can We Learn From MIMO Graph Convolutions?
+AUTHORS: Andreas Roth, Thomas Liebig
+DOI: 10.24963/ijcai.2024/681
+URL: https://doi.org/10.24963/ijcai.2024/681
+
+TITLE: What Can We Learn From MIMO Graph Convolutions?
+AUTHORS: Andreas Roth, Thomas Liebig
+DOI: 10.24963/ijcai.2025/681
+URL: https://doi.org/10.24963/ijcai.2025/681
+
+TITLE: Preschool children can learn to transfer: Learning to learn and learning from example
+AUTHORS: Ann L Brown, Mary Jo Kane
+DOI: 10.1016/0010-0285(88)90014-x
+URL: https://doi.org/10.1016/0010-0285(88)90014-x
+
+TITLE: What We Can Learn from Invertebrate Learning
+AUTHORS: F B Krasne, D L Glanzman
+DOI: 10.1146/annurev.ps.46.020195.003101
+URL: https://doi.org/10.1146/annurev.ps.46.020195.003101
+
+TITLE: What Teachers Can Learn from Machine Learning
+AUTHORS: Christian Servin, Olga Kosheleva, Vladik Kreinovich
+DOI: 10.1007/978-3-030-82099-2_36
+URL: https://doi.org/10.1007/978-3-030-82099-2_36
+
+TITLE: What We Can Learn from Invertebrate Learning
+AUTHORS: F. Krasne
+DOI: 10.1146/annurev.psych.46.1.585
+URL: https://doi.org/10.1146/annurev.psych.46.1.585
+
+TITLE: What We Can Learn from Learning Science
+AUTHORS: 
+DOI: 10.4135/9781483332406.n2
+URL: https://doi.org/10.4135/9781483332406.n2
+
+TITLE: Can Quantum Computers Learn Like Classical Computers? A Co-Design Framework of Machine Learning and Quantum Circuits
+AUTHORS: Weiwen Jiang, Jinjun Xiong, Yiyu Shi
+DOI: 10.21203/rs.3.rs-38495/v1
+URL: https://doi.org/10.21203/rs.3.rs-38495/v1
+
+TITLE: ACES-GNN: can graph neural network learn to explain activity cliffs?
+AUTHORS: Xu Chen, Dazhou Yu, Liang Zhao, Fang Liu
+DOI: 10.1039/d5dd00012b
+URL: https://doi.org/10.1039/d5dd00012b
+
+TITLE: ACES-GNN: Can Graph Neural Network Learn to Explain Activity Cliffs?
+AUTHORS: Xu Chen, Dazhou Yu, Liang Zhao, Fang Liu
+DOI: 10.26434/chemrxiv-2025-11wfv-v2
+URL: https://doi.org/10.26434/chemrxiv-2025-11wfv-v2
+
+TITLE: Does Invariant Graph Learning via Environment Augmentation Learn Invariance?
+AUTHORS: Yongqiang Chen, Yatao Bian, Kaiwen Zhou, Binghui Xie, Bo Han, James Cheng
+DOI: 10.52202/075280-3130
+URL: https://doi.org/10.52202/075280-3130
+
+TITLE: Connect, Understand and Learn: Dynamic Knowledge Graph Transforms Learning
+AUTHORS: Marlies Morgen, Lejla Begic Fazlic, Guido Dartmann
+DOI: 10.1109/mipro60963.2024.10569675
+URL: https://doi.org/10.1109/mipro60963.2024.10569675
+
+TITLE: Can Graph Neural Networks Learn Language with Extremely Weak Text Supervision?
+AUTHORS: Zihao Li, Lecheng Zheng, Bowen Jin, Dongqi Fu, Baoyu Jing, Yikun Ban, Jingrui He, Jiawei Han
+DOI: 10.18653/v1/2025.acl-long.545
+URL: https://doi.org/10.18653/v1/2025.acl-long.545
+
+TITLE: ACES-GNN: Can Graph Neural Network Learn to Explain Activity Cliffs?
+AUTHORS: Xu Chen, Dazhou Yu, Liang Zhao, Fang Liu
+DOI: 10.26434/chemrxiv-2025-11wfv
+URL: https://doi.org/10.26434/chemrxiv-2025-11wfv
+
+TITLE: Neural Logic Circuits: An evolutionary neural architecture that can learn and generalize
+AUTHORS: Hamit Taner Ünal, Fatih Başçiftçi
+DOI: 10.1016/j.knosys.2023.110379
+URL: https://doi.org/10.1016/j.knosys.2023.110379
+
+TITLE: 6. Learning to Teach So Students Can Learn
+AUTHORS: Linda Darling-Hammond, Nicole Ramos-Beban, Rebecca Padnos Altamirano, Maria E. Hyler
+DOI: 10.65528/9780807774526-007
+URL: https://doi.org/10.65528/9780807774526-007
+
+TITLE: Learning How to Learn: Can It Be Taught?
+AUTHORS: Michael Cardy
+DOI: 10.3138/cmlr.34.4.702
+URL: https://doi.org/10.3138/cmlr.34.4.702
+
+TITLE: Learning &amp; Development: How Children Learn - Can do!
+AUTHORS: Nancy Stewart
+DOI: 10.12968/nuwa.2012.20.1.1096773
+URL: https://doi.org/10.12968/nuwa.2012.20.1.1096773
+
+TITLE: What Machine Learning Can Learn From Software Modularity
+AUTHORS: Peter Kriens, Tim Verbelen
+DOI: 10.1109/mc.2022.3160276
+URL: https://doi.org/10.1109/mc.2022.3160276
+
+TITLE: Pressures to Learn Can Be Blocks to Learning
+AUTHORS: John I. Goodlad
+DOI: 10.1080/00094056.1959.10727744
+URL: https://doi.org/10.1080/00094056.1959.10727744
+
+TITLE: What Can We Learn from the Learning Gap?
+AUTHORS: Hirotoshi Yano, Harold W. Stevenson, James W. Stigler
+DOI: 10.2307/1177306
+URL: https://doi.org/10.2307/1177306
+
+TITLE: Supervised Pretraining Can Learn In-Context Reinforcement Learning
+AUTHORS: Jonathan Lee, Annie Xie, Aldo Pacchiano, Yash Chandak, Chelsea Finn, Ofir Nachum, Emma Brunskill
+DOI: 10.52202/075280-1866
+URL: https://doi.org/10.52202/075280-1866
+
+TITLE: Can learning science help children learn to read?
+AUTHORS: 
+DOI: 10.1037/e502582021-001
+URL: https://doi.org/10.1037/e502582021-001
+
+TITLE: DynMat, a network that can learn after learning
+AUTHORS: Jung Hoon Lee
+DOI: 10.1016/j.neunet.2019.04.005
+URL: https://doi.org/10.1016/j.neunet.2019.04.005
+
+TITLE: Early Learning Standards: What Can America Learn? What Can America Teach?
+AUTHORS: Sharon Lynn Kagan, Pia Rebello Britto, Patrice Engle
+DOI: 10.1177/003172170508700309
+URL: https://doi.org/10.1177/003172170508700309
+
+TITLE: Probing Negative Sampling for Contrastive Learning to Learn Graph Representations
+AUTHORS: Shiyi Chen, Ziao Wang, Xinni Zhang, Xiaofeng Zhang, Dan Peng
+DOI: 10.1007/978-3-030-86520-7_27
+URL: https://doi.org/10.1007/978-3-030-86520-7_27
+
+TITLE: Can Graph Neural Networks Learn to Solve the MaxSAT Problem? (Student Abstract)
+AUTHORS: Minghao Liu, Pei Huang, Fuqi Jia, Fan Zhang, Yuchen Sun, Shaowei Cai, Feifei Ma, Jian Zhang
+DOI: 10.1609/aaai.v37i13.26992
+URL: https://doi.org/10.1609/aaai.v37i13.26992
+
+TITLE: Graph theory for EEG: can we learn to trust another black box?
+AUTHORS: Garnett C Smith, William C Stacey
+DOI: 10.1093/brain/awz369
+URL: https://doi.org/10.1093/brain/awz369
+
+TITLE: SL4 Cortico-cortical functional coupling: what can we learn from graph theory?
+AUTHORS: C.J. Stam
+DOI: 10.1016/s1388-2457(10)60013-2
+URL: https://doi.org/10.1016/s1388-2457(10)60013-2
+
+TITLE: LED graph circuits
+AUTHORS: R.M. Marston
+DOI: 10.1016/b978-0-7506-0157-3.50008-4
+URL: https://doi.org/10.1016/b978-0-7506-0157-3.50008-4
+
+TITLE: Bar graph circuits
+AUTHORS: Exar Integrated Systems
+DOI: 10.1016/0141-9382(81)90060-3
+URL: https://doi.org/10.1016/0141-9382(81)90060-3
+
+TITLE: Learn to unlearn: meta-learning-based knowledge graph embedding unlearning
+AUTHORS: Naixing Xu, Qian Li, Zhaochuan Li, Xu Wang, Bingchen Liu, Jabulani Brown Mpofu, Jingchen Li, Xin Li
+DOI: 10.1007/s10115-025-02407-4
+URL: https://doi.org/10.1007/s10115-025-02407-4
+
+TITLE: Learn to Think: Bootstrapping LLM Logic Through Graph Representation Learning
+AUTHORS: Hang Gao, Chenhao Zhang, Tie Wang, Junsuo Zhao, Fengge Wu, Changwen Zheng, Huaping Liu
+DOI: 10.24963/ijcai.2025/896
+URL: https://doi.org/10.24963/ijcai.2025/896
+
+TITLE: Learn to Think: Bootstrapping LLM Logic Through Graph Representation Learning
+AUTHORS: Hang Gao, Chenhao Zhang, Tie Wang, Junsuo Zhao, Fengge Wu, Changwen Zheng, Huaping Liu
+DOI: 10.24963/ijcai.2024/896
+URL: https://doi.org/10.24963/ijcai.2024/896
+
+TITLE: Can young children learn to learn?
+AUTHORS: Jillian Rodd
+DOI: 10.12968/eyed.2001.3.6.15149
+URL: https://doi.org/10.12968/eyed.2001.3.6.15149
+
+TITLE: The teaching-learning of Graph Theory with the support of Learn Graph-Ware software
+AUTHORS: Jose A. Jimenez-Murillo, Octavio Orhz-Orhz, Juan C. Olivares-Rojas, Paola Jimenez-Hernandez, Erendira M. Jimenez-Hernandez
+DOI: 10.1109/ropec.2017.8261583
+URL: https://doi.org/10.1109/ropec.2017.8261583
+
+TITLE: What Language Learning Apps Can Learn from Linguistics Theories
+AUTHORS: Zebo Zukhriddinova
+DOI: 10.62046/bhss.2025.v01i01.004
+URL: https://doi.org/10.62046/bhss.2025.v01i01.004
+
+TITLE: Can regions learn?
+AUTHORS: Hans Chr. Garmann Johnsen, Jon P. Knudsen
+DOI: 10.1093/oso/9780192865977.003.0014
+URL: https://doi.org/10.1093/oso/9780192865977.003.0014
+
+TITLE: Can Governments Learn?
+AUTHORS: 
+DOI: 10.1016/c2013-0-03771-1
+URL: https://doi.org/10.1016/c2013-0-03771-1
+
+TITLE: They Can Learn
+AUTHORS: 
+DOI: 10.1177/105345126800400201
+URL: https://doi.org/10.1177/105345126800400201
+
+TITLE: What Can We Learn from Our Learners’ Learning Styles?
+AUTHORS: Bokyung Lee, Haedong Kim
+DOI: 10.5539/elt.v7n9p118
+URL: https://doi.org/10.5539/elt.v7n9p118
+
+TITLE: What can we learn about accuracy from machine learning?
+AUTHORS: Ravit Dotan
+DOI: 10.1086/715079
+URL: https://doi.org/10.1086/715079
+
+TITLE: What can Learning Styles Research Learn from Cognitive Psychology?
+AUTHORS: Aidan Moran
+DOI: 10.1080/0144341910110303
+URL: https://doi.org/10.1080/0144341910110303
+
+TITLE: What can we learn about navigation from associative learning?
+AUTHORS: Anthony McGregor
+DOI: 10.3819/ccbr.2020.150001
+URL: https://doi.org/10.3819/ccbr.2020.150001
+
+TITLE: Machine Learning Meets Fracture Mechanics: What Can We Learn?
+AUTHORS: Xiaohu Yu, Hesong Jin, Steven Linforth, Xurui Fang, Jinlong Liu, Peiren Wang, Tuan Ngo
+DOI: 10.1007/s11831-026-10533-7
+URL: https://doi.org/10.1007/s11831-026-10533-7
+
+TITLE: Computers can learn
+AUTHORS: Iwo Białynicki-Birula, Iwona Białynicka-Birula
+DOI: 10.1093/acprof:oso/9780198531005.003.0013
+URL: https://doi.org/10.1093/acprof:oso/9780198531005.003.0013
+
+TITLE: How much can you learn? A new learning metric
+AUTHORS: Fernando Alonso‐Amo, Natalia Juristo, Luis Matè, Juan Pazos, Pedro L. Muñoz
+DOI: 10.1111/1468-0394.00083
+URL: https://doi.org/10.1111/1468-0394.00083
+
+OPENALEX ERROR <HTTPError 400: 'Bad Request'>
+=== SEMANTIC SCHOLAR ===
+TITLE: Can Graph Learning Learn Circuits?
+AUTHORS: Chester Tan, Moritz Lampert, Courtney Maynard, Ankit Ramakrishnan, Tina Eliassi-Rad, Ingo Scholtes
+YEAR: 2026
+VENUE: 
+URL: https://www.semanticscholar.org/paper/43e7129732a81f21f7b8de989fa1a27637130645
+IDS: {'ArXiv': '2608.08536', 'CorpusId': 290990266}
+ABSTRACT: Circuit localization is a mechanistic interpretability task whose goal is to identify a sparse subgraph of a transformer's computation graph sufficient to reproduce a particular behavior. Most established methods localize circuits independently for each model--task pair. We instead frame circuit localization as a graph machine learning problem in which the edges of a computation graph represent computational pathways, and graph neural networks (GNNs) model interactions among these pathways. We introduce Graph Circuit Learning (GCL), a supervised, amortized framework that trains a GNN across multiple model--task pairs and applies it to unseen cases. To provide sufficient data, we augment the InterpBench benchmark with additional cases derived from the TracrBench programs. Of the 14 evaluated GCL configurations, the highest scored a median edge AUROC of $0.902$ (interquartile interval $[0.861, 0.942]$) on the 16 original held-out InterpBench cases. This is close to the published InterpBench median of $0.910$ for EAP-IG while remaining below ACDC's $0.959$. Removing all message-passing edges reduces the median to $0.825$. We also adapt PGExplainer, a GNN explainability method, to circuit localization, obtaining a median edge AUROC of $0.858$ on the same cases. These preliminary results suggest that graph machine learning offers a natural and potentially powerful perspective on circuit localization, and we hope this perspective encourages closer exchange between the two communities.
+
+TITLE: Graph Attention-Based Symmetry Constraint Extraction for Analog Circuits
+AUTHORS: Qi Xu, Lijie Wang, Jing Wang, Lin Cheng, Song Chen, Yi Kang
+YEAR: 2023
+VENUE: IEEE Transactions on Circuits and Systems Part 1: Regular Papers
+URL: https://www.semanticscholar.org/paper/e4b6dfb016c39025024283a3f65aee73034b9512
+IDS: {'ArXiv': '2312.14405', 'DBLP': 'journals/corr/abs-2312-14405', 'DOI': '10.1109/TCSI.2024.3391187', 'CorpusId': 266520995}
+ABSTRACT: In recent years, analog circuits have received extensive attention and are widely used in many emerging applications. The high demand for analog circuits necessitates shorter circuit design cycles. To achieve the desired performance and specifications, various geometrical symmetry constraints must be carefully considered during the analog layout process. However, the manual labeling of these constraints by experienced analog engineers is a laborious and time-consuming process. To handle the costly runtime issue, we propose a graph-based learning framework to automatically extract symmetric constraints in analog circuit layout. The proposed framework leverages the connection characteristics of circuits and the devices’ information to learn the general rules of symmetric constraints, which effectively facilitates the extraction of device-level constraints on circuit netlists. The experimental results demonstrate that compared to state-of-the-art symmetric constraint detection approaches, our framework achieves higher accuracy and F1-score.
+
+TITLE: Contrastive Learning Network for Unsupervised Graph Matching
+AUTHORS: Member Ieee Yu Xie, Lianhang Luo, Tianpei Cao, Bin Yu, S. M. I. A. K. Qin
+YEAR: 2025
+VENUE: IEEE transactions on circuits and systems for video technology (Print)
+URL: https://www.semanticscholar.org/paper/4d5e0a7efb5a9eb309a4b1379aaa65e4fb8eb71f
+IDS: {'DBLP': 'journals/tcsv/XieLCYQ25', 'DOI': '10.1109/TCSVT.2024.3457575', 'CorpusId': 272592211}
+ABSTRACT: Graph matching aims to establish node correspondences between graphs, which is a classic combinatorial optimization problem. In recent years, (deep) learning-based methods have emerged as a superior alternative to traditional graph matching solvers. However, these methods typically rely on node-level correspondence labels, which can be prohibitively expensive or unrealistic. Inspired by contrastive learning that is a prevalent paradigm for self-supervised representation learning, we develop a Contrastive Learning Network for Unsupervised Graph Matching (CUGM), which is an end-to-end differentiable pipeline to learn node permutations. Specifically, we propose three-level augmentation including raw image augmentation, graph augmentation and model augmentation for generating diverse enough contrastive views to enrich training instances. Then a contrastive learning network is constructed to capture the higher-order structural information in graphs and learn the final node representations for yielding the affinity matrix to directly solve a linear assignment problem. More importantly, we propose a node-level contrastive loss with false negative cancellation for optimizing the whole network to extract the tailored node feature representations to improve graph matching accuracy. Experimental results on standard graph matching benchmarks demonstrate that our end-to-end unsupervised method achieves the competitive performance compared with state-of-the-art supervised and unsupervised graph matching methods.
+
+TITLE: Partially View-Aligned Representation Learning via Cross-View Graph Contrastive Network
+AUTHORS: Yiming Wang, Dongxia Chang, Zhiqiang Fu, Jie Wen, Yao Zhao
+YEAR: 2024
+VENUE: IEEE transactions on circuits and systems for video technology (Print)
+URL: https://www.semanticscholar.org/paper/0a4676ddade7b7278e4442eb1888293963ac64dd
+IDS: {'DBLP': 'journals/tcsv/WangCFWZ24', 'DOI': '10.1109/TCSVT.2024.3376720', 'CorpusId': 268475521}
+ABSTRACT: Multi-view representation learning, aimed at uncovering the inherent structure within multi-view data, has developed rapidly in recent years. In practice, due to temporal and spatial desynchronization, it is common that only part of the data is aligned between views, which leads to the Partial View Alignment (PVA) problem. To address the challenge of representation learning on partially view-aligned multi-view data, we propose a new cross-view graph contrastive learning network, which integrates multi-view information to align data and learn latent representations. First, view-specific autoencoders are used to construct an end-to-end multi-view representation learning framework for learning specific view representations. Furthermore, to achieve cluster-level alignment, we introduce a cross-view graph contrastive learning module to guide the learning of discriminative representations. Compared to the existing methods, the proposed cluster-level alignment method successfully extends the view alignment to more than two views. Meanwhile, the results of clustering and classification experiments on several popular multi-view datasets can also illustrate the effectiveness and superiority of the proposed method.
+
+TITLE: Learning Gate-level Netlist Testability in the Presence of Unknowns through Graph Neural Networks
+AUTHORS: Thai-Hoang Nguyen, Youngjin Ju, Dongsub Yoon, Hyojin Choi
+YEAR: 2025
+VENUE: Asia and South Pacific Design Automation Conference
+URL: https://www.semanticscholar.org/paper/a77ca7747a299e9b375ba0a668b2f3cb14b08e17
+IDS: {'DBLP': 'conf/aspdac/NguyenJYC25', 'DOI': '10.1145/3658617.3697753', 'CorpusId': 276792912}
+ABSTRACT: VLSI testing plays a critical role in designing reliable digital integrated circuits (ICs). However, as modern ICs become increasingly complex, numerous testing issues have emerged, hindering their reliability. One such challenge is the presence of unknown input values, known as the X-source inputs problem, where the inputs of a gate-level netlist are unknown. X-source inputs can render other nodes in the circuit untestable, thereby lowering test coverage. To effectively address the X-source problem, it is crucial to understand its impact on the design's testability. In this paper, we propose a Graph Neural Network (GNN)-based method to learn the impact of X-source inputs during testability analysis. Specifically, we first introduce a novel way to represent gate-level netlists as graphs, focusing on testability analysis. We then propose a GNN architecture utilizing Graph Attention Network (GAT) along with edge features to learn both the structural and functional information of a given netlist, therefore significantly aiding in predicting the impact of X-source inputs. Experimental results demonstrate that the proposed method can accurately predict the impact of X-source inputs, up to 99.5%, on the testability of a given netlist without the need for exhaustive simulations.
+
+TITLE: Layout Symmetry Annotation for Analog Circuits with Graph Neural Networks
+AUTHORS: Xiaohan Gao, Chenhui Deng, Mingjie Liu, Zhiru Zhang, D. Pan, Yibo Lin
+YEAR: 2021
+VENUE: Asia and South Pacific Design Automation Conference
+URL: https://www.semanticscholar.org/paper/5f82da3110111713478b1860a1c8350d0146e1e3
+IDS: {'DBLP': 'conf/aspdac/GaoDLZPL21', 'DOI': '10.1145/3394885.3431545', 'CorpusId': 231647129}
+ABSTRACT: The performance of analog circuits is susceptible to various layout constraints, such as symmetry, matching, etc. Modern analog placement and routing algorithms usually need to take these constraints as input for high quality solutions, while manually annotating such constraints is tedious and requires design expertise. Thus, automatic constraint annotation from circuit netlists is a critical step to analog layout automation. In this work, we propose a graph learning based framework to learn the general rules for annotation of the symmetry constraints with path-based feature extraction and label filtering techniques. Experimental results on the open-source analog circuit designs demonstrate that our framework is able to achieve significantly higher accuracy compared with the most recent works on symmetry constraint detection leveraging graph similarity and signal flow analysis techniques. The framework is general and can be extended to other pairwise constraints as well.
+
+TITLE: Graph-Guided Unsupervised Multiview Representation Learning
+AUTHORS: Qinghai Zheng, Jihua Zhu, Zhongyu Li, Haoyu Tang
+YEAR: 2023
+VENUE: IEEE transactions on circuits and systems for video technology (Print)
+URL: https://www.semanticscholar.org/paper/3b09f40bc347659016f134c3c559ef98cd99121d
+IDS: {'DBLP': 'journals/tcsv/ZhengZLT23', 'DOI': '10.1109/TCSVT.2022.3200451', 'CorpusId': 251706371}
+ABSTRACT: Without the valuable label information to guide the learning process, it is demanding to fully excavate and integrate the underlying information from different views to learn the unified multi-view representation. This paper focuses on this challenge and presents a novel method, termed Graph-guided Unsupervised Multi-view Representation Learning (GUMRL), taking full advantage of multi-view graph information during the learning process. To be specific, GUMRL jointly conducts the view-specific feature representation learning, which is under the guidance of graph information, and the unified feature representation learning, which fuses the underlying graph information of different views to learn the desired unified multi-view feature representation. Regarding downstream tasks, such as clustering and classification, the classic single-view algorithms can be directly performed on the learned unified multi-view representation. The designed objective function is effectively optimized based on an alternating direction minimization method, and experiments conducted on six real-world multi-view datasets show the effectiveness and competitiveness of our GUMRL, compared to several state-of-the-art methods.
+
+TITLE: GAIN: Global-Atomic INteraction Graph for Few-Shot Class-Incremental Learning
+AUTHORS: Fan Lyu, Linglan Zhao, Chengyan Liu, Yinying Mei, Zhang Zhang, Baoqing Yu, Tao Zhang, Fuyuan Hu, Liang Wang
+YEAR: 2026
+VENUE: IEEE transactions on circuits and systems for video technology (Print)
+URL: https://www.semanticscholar.org/paper/99f53d72dab37d4faa723c159d5a99294417db5a
+IDS: {'DBLP': 'journals/tcsv/LyuZLMZYZHW26', 'DOI': '10.1109/TCSVT.2026.3673928', 'CorpusId': 286593061}
+ABSTRACT: Few-shot class-incremental learning (FSCIL) aims to develop models that can continually learn novel classes from only a few training samples while retaining knowledge of previously learned classes. The primary challenges of FSCIL lie in the limited available data in novel sessions, which can cause severe overfitting and exacerbate the catastrophic forgetting of novel classes. Prior studies have demonstrated the effectiveness of modeling graph relationships in few-shot learning, which can alleviate overfitting through feature aggregation. Building on these insights, we extend the concept to the incremental learning scenario and propose a Global-Atomic INteraction (GAIN) graph learning framework for FSCIL. Specifically, we introduce an Atomic-session Graph Network (AGN) to capture relationships among samples within each session, enabling the aggregation of similar samples and the extraction of more representative global-session features. Additionally, we design a Global-session Graph Network (GGN) that connects global-session features across base and novel classes, facilitating knowledge transfer between sessions and enhancing overall learning performance. Finally, we utilize a multi-stage strategy for training the GAIN model, which suppresses the training challenges posed by limited data in incremental learning sessions. The multi-stage training strategy is designed to build a GAIN graph from base to novel sessions and improve the capacity via an extra pseudo-incremental stage. Extensive experiments on three widely used FSCIL benchmarks demonstrate that our approach consistently outperforms existing methods and establishes new state-of-the-art performance. Our code will be released upon acceptance.
+
+TITLE: GCN-RL Circuit Designer: Transferable Transistor Sizing with Graph Neural Networks and Reinforcement Learning
+AUTHORS: Hanrui Wang, Kuan Wang, Jiacheng Yang, Linxiao Shen, Nan Sun, Hae-Seung Lee, Song Han
+YEAR: 2020
+VENUE: Design Automation Conference
+URL: https://www.semanticscholar.org/paper/780270a7940c96b0c907103ff8e77dfe082f564f
+IDS: {'MAG': '3092618035', 'ArXiv': '2005.00406', 'DBLP': 'conf/dac/0002WYSSLH20', 'DOI': '10.1109/DAC18072.2020.9218757', 'CorpusId': 218470023}
+ABSTRACT: Automatic transistor sizing is a challenging problem in circuit design due to the large design space, complex performance tradeoffs, and fast technology advancements. Although there have been plenty of work on transistor sizing targeting on one circuit, limited research has been done on transferring the knowledge from one circuit to another to reduce the re-design overhead. In this paper, we present GCN-RL Circuit Designer, leveraging reinforcement learning (RL) to transfer the knowledge between different technology nodes and topologies. Moreover, inspired by the simple fact that circuit is a graph, we learn on the circuit topology representation with graph convolutional neural networks (GCN). The GCN-RL agent extracts features of the topology graph whose vertices are transistors, edges are wires. Our learning-based optimization consistently achieves the highest Figures of Merit (FoM) on four different circuits compared with conventional black box optimization methods (Bayesian Optimization, Evolutionary Algorithms), random search and human expert designs. Experiments on transfer learning between five technology nodes and two circuit topologies demonstrate that RL with transfer learning can achieve much higher FoMs than methods without knowledge transfer. Our transferable optimization method makes transistor sizing and design porting more effective and efficient.
+
+TITLE: Delay Prediction for ASIC HLS: Comparing Graph-Based and Nongraph-Based Learning Models
+AUTHORS: S. De, Muhammad Shafique, H. Corporaal
+YEAR: 2023
+VENUE: IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems
+URL: https://www.semanticscholar.org/paper/370d7d2a1a0d1ff1e7590ed616aea4c652571fed
+IDS: {'DBLP': 'journals/tcad/DeSC23', 'DOI': '10.1109/TCAD.2022.3197977', 'CorpusId': 251513090}
+ABSTRACT: While high-level synthesis (HLS) tools offer faster design of hardware accelerators with different area versus delay tradeoffs, HLS-based delay estimates often deviate significantly from results obtained from ASIC logic synthesis (LS) tools. Current HLS tools rely on simple additive delay models which fail to capture the downstream optimizations performed during LS and technology mapping. Inaccurate delay estimates prevent fast and accurate design-space exploration without performing time-consuming LS tasks. In this work, we exploit different machine learning models which automatically learn to map the different downstream optimizations onto the HLS critical paths. In particular, we compare graph-based and nongraph-based learning models to investigate their efficacy, devise hybrid models to get the best of the both worlds. To carry out our learning-assisted methodology, we create a dataset of different HLS benchmarks and develop an automated framework, which extends a commercial HLS toolchain, to extract essential information from LS critical path and automatically matches this information to HLS path. This is a nontrivial task to perform manually due to difference in level of abstractions. Finally, we train the proposed hybrid models through inductive learning and integrate them in the commercial HLS toolchain to improve delay prediction accuracy. Experimental results demonstrate significant improvements in delay estimation accuracy across a wide variety of benchmark designs. We demonstrate that the graph-based models can infer essential structural features from the input design, while incorporating them into traditional nongraph-based models can significantly improve the model accuracy. Such “hybrid” models can improve delay prediction accuracy by 93% compared to simple additive models and provide $175\times $ speedup compared to LS. Furthermore, we discuss key insights from our experiments, identifying the influence of different HLS features on model performance.
+
+TITLE: Equivariant quantum circuits for learning on weighted graphs
+AUTHORS: Andrea Skolik, Michele Cattelan, S. Yarkoni, Thomas Bäck, V. Dunjko
+YEAR: 2022
+VENUE: npj Quantum Information
+URL: https://www.semanticscholar.org/paper/9308361f971c94b7b22706e44005b0b3574c8374
+IDS: {'DBLP': 'journals/corr/abs-2205-06109', 'ArXiv': '2205.06109', 'DOI': '10.48550/arXiv.2205.06109', 'CorpusId': 248721738}
+ABSTRACT: Variational quantum algorithms are the leading candidate for advantage on near-term quantum hardware. When training a parametrized quantum circuit in this setting to solve a specific problem, the choice of ansatz is one of the most important factors that determines the trainability and performance of the algorithm. In quantum machine learning (QML), however, the literature on ansatzes that are motivated by the training data structure is scarce. In this work, we introduce an ansatz for learning tasks on weighted graphs that respects an important graph symmetry, namely equivariance under node permutations. We evaluate the performance of this ansatz on a complex learning task, namely neural combinatorial optimization, where a machine learning model is used to learn a heuristic for a combinatorial optimization problem. We analytically and numerically study the performance of our model, and our results strengthen the notion that symmetry-preserving ansatzes are a key to success in QML.
+
+TITLE: Multi-Graph Fusion and Learning for RGBT Image Saliency Detection
+AUTHORS: Liming Huang, Kechen Song, Jie Wang, Menghui Niu, Yunhui Yan
+YEAR: 2021
+VENUE: IEEE transactions on circuits and systems for video technology (Print)
+URL: https://www.semanticscholar.org/paper/58fe83e96d90238b933d9d92f39bb410051ec6d9
+IDS: {'MAG': '3151956566', 'DBLP': 'journals/tcsv/HuangSWNY22', 'DOI': '10.1109/TCSVT.2021.3069812', 'CorpusId': 234146371}
+ABSTRACT: RGB and thermal infrared (RGBT) image saliency detection is a relatively new direction in the field of computer vision. Combining the advantages of RGB images and T images can significantly improve detection performance. Currently, there are only a few methods to work on RGBT saliency detection, and the number of image samples cannot meet the training requirements for deep learning, so it remains valuable to propose an effective unsupervised method. In this paper, we present an unsupervised RGBT saliency detection method based on multi-graph fusion and learning. Firstly, RGB images and T images are adaptively fused based on boundary information to produce more accurate superpixels. Next, a multi-graph fusion model is proposed to selectively learn useful information from multi-modal images. Finally, we implement the theory of finding good neighbors in the graph affinity and propose different algorithms for two stages of saliency ranking. Experimental results on three RGBT datasets show that the proposed method is effective compared with the state-of-the-art algorithms.
+
+TITLE: CircuitFusion: Multimodal Circuit Representation Learning for Agile Chip Design
+AUTHORS: Wenji Fang, Shang Liu, Jing Wang, Zhiyao Xie
+YEAR: 2025
+VENUE: International Conference on Learning Representations
+URL: https://www.semanticscholar.org/paper/475502b411c743c7307bf563a2e9f2f9bac94a8d
+IDS: {'DBLP': 'journals/corr/abs-2505-02168', 'ArXiv': '2505.02168', 'DOI': '10.48550/arXiv.2505.02168', 'CorpusId': 278327821}
+ABSTRACT: The rapid advancements of AI rely on the support of ICs. However, the growing complexity of digital ICs makes the traditional IC design process costly and time-consuming. In recent years, AI-assisted IC design methods have demonstrated great potential, but most methods are task-specific or focus solely on the circuit structure in graph format, overlooking other circuit modalities with rich functional information. In this paper, we introduce CircuitFusion, the first multimodal and implementation-aware circuit encoder. It encodes circuits into general representations that support different downstream circuit design tasks. To learn from circuits, we propose to fuse three circuit modalities: hardware code, structural graph, and functionality summary. More importantly, we identify four unique properties of circuits: parallel execution, functional equivalent transformation, multiple design stages, and circuit reusability. Based on these properties, we propose new strategies for both the development and application of CircuitFusion: 1) During circuit preprocessing, utilizing the parallel nature of circuits, we split each circuit into multiple sub-circuits based on sequential-element boundaries, each sub-circuit in three modalities. 2) During CircuitFusion pre-training, we introduce three self-supervised tasks that utilize equivalent transformations both within and across modalities. 3) When applying CircuitFusion to downstream tasks, we propose a new retrieval-augmented inference method, which retrieves similar known circuits as a reference for predictions. It improves fine-tuning performance and even enables zero-shot inference. Evaluated on five different circuit design tasks, CircuitFusion consistently outperforms the SOTA supervised method specifically developed for every single task, demonstrating its generalizability and ability to learn circuits' inherent properties.
+
+TITLE: EMGraph: Fast Learning-Based Electromigration Analysis for Multi-Segment Interconnect Using Graph Convolution Networks
+AUTHORS: Wentian Jin, Liang Chen, Sheriff Sadiqbatcha, Shaoyi Peng, S. Tan
+YEAR: 2021
+VENUE: Design Automation Conference
+URL: https://www.semanticscholar.org/paper/fca92e70dc41bc758eceb83ce690aa9c8cc0853b
+IDS: {'DBLP': 'conf/dac/JinCSPT21', 'DOI': '10.1109/dac18074.2021.9586239', 'CorpusId': 243907188}
+ABSTRACT: Electromigration (EM) becomes a major concern for VLSI circuits as the technology advances in the nanometer regime. With Korhonen equations, EM assessment for VLSI circuits remains challenged due to the increasing integrated density. VLSI multisegment interconnect trees can be naturally viewed as graphs. Based on this observation, we propose a new graph convolution network (GCN) model, which is called EMGraph considering both node and edge embedding features, to estimate the transient EM stress of interconnect trees. Compared with recently proposed generative adversarial network (GAN) based stress image-generation method, EMGraph model can learn more transferable knowledge to predict stress distributions on new graphs without retraining via inductive learning. Trained on the large dataset, the model shows less than 1.5% averaged error compared to the ground truth results and is orders of magnitude faster than both COMSOL and state-of-the-art method. It also achieves smaller model size, $4\times$ accuracy and $14\times$ speedup over the GAN-based method.
+
+TITLE: Flow-Attentional Graph Neural Networks
+AUTHORS: P. Plettenberg, D. Köhler, Bernhard Sick, Josephine M. Thomas
+YEAR: 2025
+VENUE: Trans. Mach. Learn. Res.
+URL: https://www.semanticscholar.org/paper/3bc90c24a56b08f1a37ee815649a0490fd54d39e
+IDS: {'DBLP': 'journals/tmlr/PlettenbergKST25', 'ArXiv': '2506.06127', 'DOI': '10.48550/arXiv.2506.06127', 'CorpusId': 279243735}
+ABSTRACT: Graph Neural Networks (GNNs) have become essential for learning from graph-structured data. However, existing GNNs do not consider the conservation law inherent in graphs associated with a flow of physical resources, such as electrical current in power grids or traffic in transportation networks, which can lead to reduced model performance. To address this, we propose flow attention, which adapts existing graph attention mechanisms to satisfy Kirchhoff$\text{'}$s first law. Furthermore, we discuss how this modification influences the expressivity and identify sets of non-isomorphic graphs that can be discriminated by flow attention but not by standard attention. Through extensive experiments on two flow graph datasets (electronic circuits and power grids) we demonstrate that flow attention enhances the performance of attention-based GNNs on both graph-level classification and regression tasks.
+
+TITLE: Opportunities and challenges of graph neural networks in electrical engineering
+AUTHORS: Eli Chien, Mufei Li, Anthony Aportela, Kerr Ding, Shuyi Jia, S. Maji, Zhongyuan Zhao, J. Duarte, V. Fung, Cong Hao, Yunan Luo, Olgica Milenkovic, David Z. Pan, Santiago Segarra, Pan Li
+YEAR: 2024
+VENUE: Nature Reviews Electrical Engineering
+URL: https://www.semanticscholar.org/paper/2cda20b9281aa2b4171893f3659ce97765a5aa40
+IDS: {'DOI': '10.1038/s44287-024-00076-z', 'CorpusId': 271736935}
+ABSTRACT: None
+
+TITLE: Graph Attention-assisted Encoding for Time-domain Speech Separation
+AUTHORS: Meiran Li, Maoshen Jia, Xinfeng Zhang
+YEAR: 2025
+VENUE: Circuits, systems, and signal processing
+URL: https://www.semanticscholar.org/paper/c64875f9cf487bc7b1181968f8f79ae0cd5cf5be
+IDS: {'DBLP': 'journals/cssp/LiJZ25', 'DOI': '10.1007/s00034-025-03204-8', 'CorpusId': 279438976}
+ABSTRACT: None
+
+TITLE: A Novel Framework for Scene Graph Generation via Prior Knowledge
+AUTHORS: Zhenghao Wang, J. Lian, Linhui Li, Jian Zhao
+YEAR: 2024
+VENUE: IEEE transactions on circuits and systems for video technology (Print)
+URL: https://www.semanticscholar.org/paper/a57472a7362cafb59d666670c087ff83ebe0d956
+IDS: {'DBLP': 'journals/tcsv/WangLLZ24', 'DOI': '10.1109/TCSVT.2023.3319633', 'CorpusId': 263177549}
+ABSTRACT: The scene graph generation aims to recognize objects and infer the relationships between them, which can provide a comprehensive understanding of image visual perception. However, the long-tailed issue of relations remains challenging for scene graph generation. This paper proposes a novel framework based on knowledge-driven data-driven joining to address the long-tail issues in scene graph generation. The proposed framework consists of two modules: the relation inference module and the prior knowledge learning module. The relation inference module aims to learn the relational features of entity pairs in images and the structural features of scene graphs. The prior knowledge learning module aims to learn the triplet representation from the knowledge graph and use it as prior knowledge to provide logical guidance and constraints for relation inference. This provides prior bias for relation inference to transfer the bias towards head categories to reasonable categories, thereby mitigating the long-tail problem. Experiment results indicate that the proposed framework outperforms on Visual Genome datasets and that the generated scene graph relation is logically reasonable.
+
+TITLE: Semi-Supervised Cross-Media Feature Learning With Unified Patch Graph Regularization
+AUTHORS: Yuxin Peng, Xiaohua Zhai, Yunzhen Zhao, Xin Huang
+YEAR: 2016
+VENUE: IEEE transactions on circuits and systems for video technology (Print)
+URL: https://www.semanticscholar.org/paper/f7d2dc3967f7836c517de4bd4b48e39cea74aed9
+IDS: {'DBLP': 'journals/tcsv/PengZZH16', 'MAG': '2052727801', 'DOI': '10.1109/TCSVT.2015.2400779', 'CorpusId': 11177824}
+ABSTRACT: None
+
+TITLE: GNN-RE: Graph Neural Networks for Reverse Engineering of Gate-Level Netlists
+AUTHORS: Lilas Alrahis, A. Sengupta, J. Knechtel, Satwik Patnaik, H. Saleh, B. Mohammad, M. Al-Qutayri, O. Sinanoglu
+YEAR: 2022
+VENUE: IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems
+URL: https://www.semanticscholar.org/paper/9f1b9c6153223a68ee62dfc1d43e95c2ddf29e78
+IDS: {'DBLP': 'journals/tcad/AlrahisSKPSMAS22', 'MAG': '3198511427', 'DOI': '10.1109/tcad.2021.3110807', 'CorpusId': 239723723}
+ABSTRACT: This work introduces a generic, machine learning (ML)-based platform for functional reverse engineering (RE) of circuits. Our proposed platform GNN-RE leverages the notion of graph neural networks (GNNs) to: 1) represent and analyze flattened/unstructured gate-level netlists; 2) automatically identify the boundaries between the modules or subcircuits implemented in such netlists; and 3) classify the subcircuits based on their functionalities. For GNNs in general, each graph node is tailored to learn about its own features and its neighboring nodes, which is a powerful approach for the detection of any kind of subgraphs of interest. For GNN-RE, in particular, each node represents a gate and is initialized with a feature vector that reflects on the functional and structural properties of its neighboring gates. GNN-RE also learns the global structure of the circuit, which facilitates identifying the boundaries between subcircuits in a flattened netlist. Initially, to provide high-quality data for training of GNN-RE, we deploy a comprehensive dataset of foundational designs/components with differing functionalities, implementation styles, bit widths, and interconnections. GNN-RE is then tested on the unseen shares of this custom dataset, as well as the EPFL benchmarks, the ISCAS-85 benchmarks, and the 74X series benchmarks. GNN-RE achieves an average accuracy of 98.82% in terms of mapping individual gates to modules, all without any manual intervention or postprocessing. We also release our code and source data.
+
+TITLE: Pretraining Graph Neural Networks for Few-Shot Analog Circuit Modeling and Design
+AUTHORS: Kourosh Hakhamaneshi, M. Nassar, Mariano Phielipp, P. Abbeel, Vladimir M. Stojanovi'c
+YEAR: 2022
+VENUE: IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems
+URL: https://www.semanticscholar.org/paper/ebe03af0cd23a6fea9c581e00ec6c874002015b5
+IDS: {'ArXiv': '2203.15913', 'DBLP': 'journals/tcad/HakhamaneshiNPAS23', 'DOI': '10.1109/TCAD.2022.3217421', 'CorpusId': 247793139}
+ABSTRACT: Being able to predict the performance of circuits without running expensive simulations is a desired capability that can catalyze automated design. In this article, we present a supervised pretraining approach to learn circuit representations that can be adapted to new circuit topologies or unseen prediction tasks. We hypothesize that if we train a neural network (NN) that can predict the output direct current (dc) voltages of a wide range of circuit instances it will be forced to learn generalizable knowledge about the role of each circuit element and how they interact with each other. The dataset for this supervised learning objective can be easily collected at scale since the required dc simulation to get ground truth labels is relatively cheap. This representation would then be helpful for few-shot generalization to unseen circuit metrics that require more time-consuming simulations for obtaining the ground-truth labels. To cope with the variable topological structure of different circuits we describe each circuit as a graph and use graph NNs (GNNs) to learn node embeddings. We show that pretraining GNNs on prediction of output node voltages can encourage learning representations that can be adapted to new unseen topologies or prediction of new circuit-level properties with up to 10x more sample efficiency compared to a randomly initialized model. We further show that we can improve the sample efficiency of prior SoTA model-based optimization methods by $2\times $ (almost as good as using an oracle model) via fintuning pretrained GNNs as the feature extractor of the learned models.
+
+TITLE: CTRL-B: Back-End-of-Line Configuration Optimization Using Cross-Domain Transferable Reinforcement Learning
+AUTHORS: Jaeseung Lee, Sung-Yun Lee, Jinoh Cho, Daijoon Hyun, Seok-Min Kang
+YEAR: 2026
+VENUE: IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems
+URL: https://www.semanticscholar.org/paper/17e4cc9b11dfc8dc6f53d949c5bd6bf05d50c101
+IDS: {'DBLP': 'journals/tcad/LeeLCHK26', 'DOI': '10.1109/TCAD.2025.3612862', 'CorpusId': 281562916}
+ABSTRACT: In advanced technology nodes, the back-end-of-line (BEOL) process is increasingly critical for determining chip timing and power consumption. This article presents CTRL-B, a transferable reinforcement learning (RL) framework that automates and accelerates this process. CTRL-B integrates two key innovations: 1) a graph attention network (GAT)-based encoder, pretrained on out-of-domain datasets to learn generalizable circuit representations and 2) a cross-domain transfer layer that reuses knowledge from previously optimized source domains. This architecture provides the RL agent with an effective initial policy, which significantly reduces redundant exploration and accelerates convergence to high-quality solutions. We demonstrate the effectiveness of CTRL-B against conventional methods, achieving a 0.4% power, 57.6% reduction in worst negative slack (WNS), and a 41.7% reduction in total negative slack (TNS), alongside 1.58% area reductions. The practical viability of the optimized BEOL configurations is confirmed through stable static IR drop and successful design rule (DR) violation checks. A series of ablation and sensitivity analyses further validates the robustness of our architecture across various designs. These results establish CTRL-B as a robust and scalable solution for automated BEOL optimization, highlighting its potential to shorten modern chip development cycles.
+
+TITLE: A Graph-Temporal Fused Dual-Input Convolutional Neural Network for Detecting Sleep Stages from EEG Signals
+AUTHORS: Qing Cai, Zhongke Gao, Jianpeng An, Shuang Gao, C. Grebogi
+YEAR: 2021
+VENUE: IEEE Transactions on Circuits and Systems - II - Express Briefs
+URL: https://www.semanticscholar.org/paper/c6cd717c6ae13bd2dd9ce04ef2a2107409929634
+IDS: {'MAG': '3046663063', 'DBLP': 'journals/tcasII/CaiGAGG21', 'DOI': '10.1109/TCSII.2020.3014514', 'CorpusId': 225392204}
+ABSTRACT: Sleep is an essential integrant in everyone’s daily life. Thereby, it is an important but challenging problem to construct a reliable and stable system, that can monitor user’s sleep quality automatically. In this brief, we combine complex network and deep learning to propose a novel Graph-Temporal fused dual-input Convolutional Neural Network (CNN) method to detect sleep stages by using the Sleep-EDF database. Firstly, we segment each single-channel EEG signal into non-overlapping 30s epochs to set up the network. For that, we map each epoch into a Limited Penetrable Visibility Graph (LPVG) and obtain the corresponding Degree Sequence (DS) by calculating the node degree. Finally, the DSs and the 30s EEG epochs are combined as inputs of the novel Graph-Temporal fused dual-input CNN to learn about the graph topology and about the temporal feature representations of the raw data for the purpose of classifying the sleep stages into the two-, three-, four-, five-, and six-state. Notably, the classification accuracy of six-state stage detection is 87.21% and the corresponding Kappa value is 0.80. The results demonstrate the effectiveness of our model structure in detecting sleep states, whereby they further provide a basic strategy for future sleep research.
+
+TITLE: Quarl: A Learning-Based Quantum Circuit Optimizer
+AUTHORS: Zikun Li, Jinjun Peng, Yixuan Mei, Sina Lin, Yi Wu, Oded Padon, Zhi-Long Jia
+YEAR: 2023
+VENUE: Proc. ACM Program. Lang.
+URL: https://www.semanticscholar.org/paper/8610810e7b2f06d4493f43959950d6f93819a97e
+IDS: {'DBLP': 'journals/pacmpl/LiPMLWPJ24', 'ArXiv': '2307.10120', 'DOI': '10.1145/3649831', 'CorpusId': 259982860}
+ABSTRACT: Optimizing quantum circuits is challenging due to the very large search space of functionally equivalent circuits and the necessity of applying transformations that temporarily decrease performance to achieve a final performance improvement. This paper presents Quarl, a learning-based quantum circuit optimizer. Applying reinforcement learning (RL) to quantum circuit optimization raises two main challenges: the large and varying action space and the non-uniform state representation. Quarl addresses these issues with a novel neural architecture and RL-training procedure. Our neural architecture decomposes the action space into two parts and leverages graph neural networks in its state representation, both of which are guided by the intuition that optimization decisions can be mostly guided by local reasoning while allowing global circuit-wide reasoning. Our evaluation shows that Quarl significantly outperforms existing circuit optimizers on almost all benchmark circuits. Surprisingly, Quarl can learn to perform rotation merging—a complex, non-local circuit optimization implemented as a separate pass in existing optimizers.
+
+TITLE: Quantum Graph Convolutional Neural Networks
+AUTHORS: Jin Zheng, Qing Gao, Yan-Xuan Lu
+YEAR: 2021
+VENUE: Cybersecurity and Cyberforensics Conference
+URL: https://www.semanticscholar.org/paper/29918dc941309a2791b47e907fe9e9b28b24c710
+IDS: {'ArXiv': '2107.03257', 'DOI': '10.23919/CCC52363.2021.9550372', 'CorpusId': 235755505}
+ABSTRACT: At present, there are a large number of quantum neural network models to deal with Euclidean spatial data, while little research have been conducted on non-Euclidean spatial data. In this paper, we propose a novel quantum graph convolutional neural network (QGCN) model based on quantum parametric circuits and utilize the computing power of quantum systems to accomplish graph classification tasks in traditional machine learning. The proposed QGCN model has a similar architecture as the classical graph convolutional neural networks, which can illustrate the topology of the graph type data and efficiently learn the hidden layer representation of node features as well. Numerical simulation results on a graph dataset demonstrate that the proposed model can be effectively trained and has good performance in graph level classification tasks.
+
+TITLE: Learning with sparse reward in a gap junction network inspired by the insect mushroom body
+AUTHORS: Tianqi Wei, Qinghai Guo, Barbara Webb
+YEAR: 2024
+VENUE: PLoS Comput. Biol.
+URL: https://www.semanticscholar.org/paper/20475efd49eacc823190da399cd740ab755f0619
+IDS: {'PubMedCentral': '11152299', 'DBLP': 'journals/ploscb/WeiGW24', 'DOI': '10.1371/journal.pcbi.1012086', 'CorpusId': 269985973, 'PubMed': '38781280'}
+ABSTRACT: Animals can learn in real-life scenarios where rewards are often only available when a goal is achieved. This ‘distal’ or ‘sparse’ reward problem remains a challenge for conventional reinforcement learning algorithms. Here we investigate an algorithm for learning in such scenarios, inspired by the possibility that axo-axonal gap junction connections, observed in neural circuits with parallel fibres such as the insect mushroom body, could form a resistive network. In such a network, an active node represents the task state, connections between nodes represent state transitions and their connection to actions, and current flow to a target state can guide decision making. Building on evidence that gap junction weights are adaptive, we propose that experience of a task can modulate the connections to form a graph encoding the task structure. We demonstrate that the approach can be used for efficient reinforcement learning under sparse rewards, and discuss whether it is plausible as an account of the insect mushroom body.
+
+TITLE: Logic Synthesis Optimization Sequence Tuning Using RL-Based LSTM and Graph Isomorphism Network
+AUTHORS: Chenghao Yang, Yinshui Xia, Zhufei Chu, Xiaojing Zha
+YEAR: 2022
+VENUE: IEEE Transactions on Circuits and Systems - II - Express Briefs
+URL: https://www.semanticscholar.org/paper/038c8e89657d334d51d4f6742865d4c34427d1af
+IDS: {'DBLP': 'journals/tcasII/YangXCZ22', 'DOI': '10.1109/tcsii.2022.3168344', 'CorpusId': 248273118}
+ABSTRACT: As a key step in the IC design flow, logic synthesis involves various logic optimization algorithms to be iteratively applied to the circuit. However, how these algorithms are used is usually determined by heuristics, and it does not always yield well optimizations on all circuits. To achieve well optimized results, engineers need to tune the sequence consisting of these logic optimization algorithms based on their knowledge. To overcome this limitation, in this brief, reinforcement learning (RL) proximal policy optimization (PPO) is proposed to train an agent to tune the optimization sequence. Specifically, graph isomorphic network with edge feature aggregation capability (GINE) is used to learn circuit representations and use circuit representations as state representations for the reinforcement learning agent. Furthermore, to enable the agent learning from historical operations, the Long Short-Term Memory (LSTM) is further embedded in reinforcement learning. The evaluation of the EPFL arithmetic benchmark shows that our model improves the area optimization under the delay constraint by 21.21% over existing methods.
+
+TITLE: Circuit Learning: From Decision Trees to Decision Graphs
+AUTHORS: Yu-Shan Huang, J. H. Jiang
+YEAR: 2023
+VENUE: IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems
+URL: https://www.semanticscholar.org/paper/89758b535822ed990fd511e4de3b45b35ad7d980
+IDS: {'DBLP': 'journals/tcad/HuangJ23', 'DOI': '10.1109/TCAD.2023.3258747', 'CorpusId': 257618873}
+ABSTRACT: Circuit learning has gained significant attention due to machine learning advancements and approximate synthesis applications. The task is to learn a circuit to model an unknown Boolean function subject to different design constraints. When circuit size is hard constrained, decision-tree-based learning plays a crucial role in state-of-the-art methods. However, it can be ineffective due to its structural restriction. This work proposes graph learning to overcome the limitation, provide tradeoffs between circuit size and accuracy, and enrich the portfolio of circuit learning tools. Experimental results show the superiority of our approach to prior work in accuracy, training time, and circuit size.
+
+TITLE: Learning from the Implicit Functional Hierarchy in an Analog Netlist
+AUTHORS: H. Graeb, Markus Leibl
+YEAR: 2023
+VENUE: ACM International Symposium on Physical Design
+URL: https://www.semanticscholar.org/paper/7febb586ec306ba1150c6d953386ee20a075c23c
+IDS: {'DBLP': 'conf/ispd/GraebL23', 'DOI': '10.1145/3569052.3578921', 'CorpusId': 257666391}
+ABSTRACT: Analog circuit design is characterized by a plethora of implicit design and technology aspects available to the experienced designer. In order to create useful computer-aided design methods, this implicit knowledge has to be captured in a systematic and hierarchical way. A key approach to this goal is to "learn" the knowledge from the netlist of an analog circuit. This requires a library of structural and functional blocks for analog circuits together with their individual constraints and performance equations, graph homomorphism techniques to recognize blocks that can have different structural implementations and I/O pins, as well as synthesis methods that exploit the learned knowledge. In this contribution, we will present how to make use of the functional and structural hierarchy of operational amplifiers. As an application, we explore the capabilities of machine learning in the context of structural and functional properties and show that the results can be substantially improved by pre-processing data with traditional methods for functional block analysis. This claim is validated on a data set of roughly 100,000 readily sized and simulated operational amplifiers.
+
+TITLE: A Digital Neuromorphic Architecture for Unsupervised Shortest Path Computation on Real-World Graphs
+AUTHORS: Arghavan Mohammadhassani, Shadi Matinizadeh, M. L. Varshika, Anup Das
+YEAR: 2025
+VENUE: International Symposium on Circuits and Systems
+URL: https://www.semanticscholar.org/paper/15d50aeca3a7a14860b5165ccec5ebd60796c5df
+IDS: {'DBLP': 'conf/iscas/Mohammadhassani25', 'DOI': '10.1109/ISCAS56072.2025.11043988', 'CorpusId': 279610827}
+ABSTRACT: Graphs are popular tools for analyzing interconnected data entities. We propose SENTIENCE, a novel approach to computing the shortest path in a graph in an unsupervised manner drawing inspiration from the hippocampus. SENTIENCE uses laterally-connected neurons to represent nodes and synapses to represent edges. The strength of a synaptic connection is encoded as the axonal delay. When a neuron (source) is excited, a wavefront of neural activity is created that propagates through the graph via the connected nodes. SENTIENCE uses the Eligibility Propagation (E-Prop) algorithm to learn the sequence of wave movement through the shortest path in a graph, which can be obtained by identifying earliest firing (eligible) neighbors by tracing back in time from when the wavefront reaches a destination. We introduce a lightweight hardware design for the axonal plasticity and the E-Prop learning mechanism of SENTIENCE. We propose a tile-based architecture to address the scalability of SENTIENCE for real-world graphs with irregular data dependency. We evaluate SENTIENCE on a Versal VPK 180 FPGA and show that SENTIENCE consumes on average 10× less resources and 12× less power compared to a state-of-the-art.
+
+TITLE: Influence Maximization of Social Networks Using DRL
+AUTHORS: D. Negi, Gaurav Pandey, I. Anand, A. Tyagi
+YEAR: 2026
+VENUE: IEEE International Conference on Circuits and Systems for Communications
+URL: https://www.semanticscholar.org/paper/971be44bf0dfc5ce3a4eae23a35c4ba43e7a9d36
+IDS: {'DOI': '10.1109/ICCSC67078.2026.11468578', 'CorpusId': 287481871}
+ABSTRACT: Influence Maximization can be defined as identifying highly influential individuals in a social network in such a strategic way that it achieves the maximum coverage of information spreading. The problem with existing methods is that they consist of computationally intensive strategies involving greedy algorithms or are simplistic representations of reality. Recently, advancements in graph representation learning and decision-making have emerged as effective alternatives for existing methods. The current study proposes utilizing GNNs coupled with DRL for influence maximization. Rather it should learn from the structure of the network itself how it can select the seed set of users who have the largest effect. The authors applied their framework on real-world networks such as Facebook and Epinions, sourced from the SNAP dataset, employing the Independent Cascade information spread process on a diffusion model. The results are encouraging. GNN-DRL provides better performance compared to other simplistic approaches, including Degree Centrality. It does so in a more computationally efficient manner and also shows the ability to be scalable and flexible. The most noticeable aspect of this particular method would be its ability to learn the actual spread of influence in the network as it gains experience from the network itself. This work will not only make influence maximization more effective but also open up broad future directions of work on adaptive graphbased optimization techniques.
+
+TITLE: Exploiting Semantic Structured Relationships Using Graph Models for Semantic Annotations
+AUTHORS: Yuhua Fan, Liya Fan
+YEAR: 2018
+VENUE: International Conference on Communications, Circuits and Systems
+URL: https://www.semanticscholar.org/paper/7873446d3d4125aefbeea4f6988110d6c74b3382
+IDS: {'MAG': '2965965307', 'DOI': '10.1109/ICCCAS.2018.8769236', 'CorpusId': 198931942}
+ABSTRACT: This paper proposes a novel and efficient approach to exploit semantic relationships using semantic modeling for semantic annotation tasks. The existing methods learn knowledge of concepts and their relationships based on context cues. Starting with a large set of objects detectors, the proposed method refines the initial annotation results using the learned semantic relationships, which can preserve the consistency and effective of the annotation over a semantic graph. Different from the existing graph learning methods which capture relations among data instances, the semantic graphs treat concepts as nodes and concept affinities as the weights of edges. Particularly, the proposed method can not only learn the semantic cues effectively through the semantic graph models to improve the annotation results, but also can adapt the concept affinities to unseen images. The method provides a means to handle structured relationship change between training and test data, which occurs very often in semantic annotation tasks. Our experiments on NYUv2 demonstrate that the proposed approach outperform the state-of-the-art algorithms.
+
+TITLE: Multimodal imaging of brain connectivity reveals predictors of individual decision strategy in statistical learning
+AUTHORS: Vasilis M. Karlaftis, Joseph Giorgio, P. Vértes, Rui Wang, Yuan Shen, P. Tiňo, A. Welchman, Z. Kourtzi
+YEAR: 2019
+VENUE: Nature Human Behaviour
+URL: https://www.semanticscholar.org/paper/e59abe4085368f36a492a0ac23a016b0afa0bb32
+IDS: {'MAG': '2905203326', 'PubMedCentral': '6413944', 'DOI': '10.1038/s41562-018-0503-4', 'CorpusId': 86819810, 'PubMed': '30873437'}
+ABSTRACT: Successful human behaviour depends on the brain’s ability to extract meaningful structure from information streams and make predictions about future events. Individuals can differ markedly in the decision strategies they use to learn the environment’s statistics, yet we have little idea why. Here, we investigate whether the brain networks involved in learning temporal sequences without explicit reward differ depending on the decision strategy that individuals adopt. We demonstrate that individuals alter their decision strategy in response to changes in temporal statistics and engage dissociable circuits: extracting the exact sequence statistics relates to plasticity in motor corticostriatal circuits, while selecting the most probable outcomes relates to plasticity in visual, motivational and executive corticostriatal circuits. Combining graph metrics of functional and structural connectivity, we provide evidence that learning-dependent changes in these circuits predict individual decision strategy. Our findings propose brain plasticity mechanisms that mediate individual ability for interpreting the structure of variable environments. Combining behavioural modelling with functional and structural brain connectivity, Karlaftis et al. show that individuals learn the structure of variable environments by employing alternate decision strategies that engage distinct brain networks.
+
+TITLE: Electric circuits exercise and learning assessment system using databases
+AUTHORS: G. Komori, N. Aikawa, Y. Nishida
+YEAR: 2010
+VENUE: ICSES 2010 International Conference on Signals and Electronic Circuits
+URL: https://www.semanticscholar.org/paper/570a5dbee9a1e7386e68285bd19e01e601f14650
+IDS: {'MAG': '1692462443', 'CorpusId': 42593434}
+ABSTRACT: None
+
+TITLE: GECS: Graph Embedding Using Connection Subgraphs
+AUTHORS: Saba A. Al-Sayouri, Pravallika Devineni, Sarah S. Lam, E. Papalexakis, Danai Koutra
+YEAR: 2017
+VENUE: 
+URL: https://www.semanticscholar.org/paper/01f551ea48a68214478778b7c82ed1e4499e8889
+IDS: {'CorpusId': 3654619}
+ABSTRACT: None
+
+TITLE: University of Birmingham Multimodal imaging of brain connectivity reveals predictors of individual decision strategy in statistical learning
+AUTHORS: Vasilis M. Karlaftis, Joseph Giorgio, P. Vértes, Rui Wang, Yuan Shen, P. Tiňo, A. Welchman, Z. Kourtzi
+YEAR: 2018
+VENUE: 
+URL: https://www.semanticscholar.org/paper/deeaead248636cb194a8d4661d4c6007c8a1a401
+IDS: {'CorpusId': 54070485}
+ABSTRACT: None
+
+TITLE: A Complete Probabilistic Framework for Learning Input Models for Power and Crosstalk Estimation in VLSI Circuits
+AUTHORS: Nirmal Ramalingam
+YEAR: 2004
+VENUE: 
+URL: https://www.semanticscholar.org/paper/4f92804deb20d7e48c9131871ef420b40b13c520
+IDS: {'MAG': '2136253214', 'CorpusId': 61168447}
+ABSTRACT: None
+
+TITLE: SambaNova SN10 RDU: A 7nm Dataflow Architecture to Accelerate Software 2.0
+AUTHORS: R. Prabhakar, Sumti Jairath, Jinuk Luke Shin
+YEAR: 2022
+VENUE: IEEE International Solid-State Circuits Conference
+URL: https://www.semanticscholar.org/paper/b9299077b33b16e90532b12f8931676f891b8ee5
+IDS: {'DBLP': 'conf/isscc/PrabhakarJS22', 'DOI': '10.1109/ISSCC42614.2022.9731612', 'CorpusId': 247523272}
+ABSTRACT: The availability of large amounts of data and advances in modern machine-learning algorithms are pushing the limits of computing systems and redefining the way software is written. This new software paradigm, termed “Software 2.0”, is a departure from deterministic computing - centered around exact specifications and expert-created algorithms to accomplish a task - to probabilistic computing, centered around methods that learn to accomplish the same task using several examples. Software 2.0 contains a graph of operations that is rich in data locality and has abundant data, task, and hierarchical pipeline parallelism. Consequently, Software 2.0 can be accelerated by building custom dataflow pipelines. However, conventional GPU systems provide limited flexibility to build such dataflow pipelines. As a result, they suffer from poor device utilization and require a high-bandwidth off-chip memory system, which results in lower memory capacity. Memory capacity limitations impose serious challenges for increasingly larger models and data sets common in the fields of Natural Language Processing (NLP), high-resolution computer vision, and large recommender systems. SambaNova Systems Cardinal SN10 is a Reconfigurable Dataflow Unit (RDU) that enables accelerating Software 2.0 with the flexibility to build custom dataflow pipelines as well as large memory capacity to run big models efficiently [1].
+
+TITLE: Multimodal imaging of brain connectivity reveals predictors of individual decision 1 strategy in statistical learning 2 3
+AUTHORS: Vasilis M. Karlaftis, Joseph Giorgio, P. Vértes, Rui Wang, Yuan Shen, Peter Tino, A. Welchman, Zoe Kourtzi
+YEAR: 2018
+VENUE: 
+URL: https://www.semanticscholar.org/paper/bca20ef1083fa9921ea12da58b07e3728cda70f0
+IDS: {'CorpusId': 284052689}
+ABSTRACT: None
+
+TITLE: Explicit Local Coupling Global Structure Clustering
+AUTHORS: Haoran Li, Yulan Guo, Zhenwen Ren, F. Yu, Jiali You, Xiaojian You
+YEAR: 2023
+VENUE: IEEE transactions on circuits and systems for video technology (Print)
+URL: https://www.semanticscholar.org/paper/e09dc6171cc7c451c4f5332c103a7d2f9c6ae9ee
+IDS: {'DBLP': 'journals/tcsv/LiGRYYY23', 'DOI': '10.1109/TCSVT.2023.3266283', 'CorpusId': 258086837}
+ABSTRACT: Graph-based clustering has become an active topic due to the efficiency in characterizing the relationships between the samples via graph. To improve the quality of graph, recent works propose to utilize global and local information. However, existing methods may lead to a degenerated graph when facing noisy and uneven distributed data. Since 1) they preserve the local information by referring the similarity between each sample-pair, whose confidence is easily disturbed by the poor quality samples; and 2) although the global information is relatively robust to the noisy, existing methods have island effect that lies between local and global structures learning, such that the information of both can not be utilized mutually. To alleviate these issues, this paper presents explicit local coupling global structure clustering (ELGSC) to explicitly learn the local structure and global structure information via a coupling scheme. To be specific, we learn $l(\ll n)$ pseudo samples as the anchors to reflect local hot spots distribution, where $n$ is the number of samples. By referring the relationship between each anchor-sample pair, ELGSC is capable of obtaining an effective local bipartite graph to capture the local structure. Meanwhile, the self-expressiveness learning is adopted to pursue a lower-rank global affinity graph. Finally, a higher-order coupling learning framework is proposed to couple the learning of global affinity graph and local bipartite graph. Thus, local and global structure information could be propagated each other on both graphs. The experimental results on real datasets demonstrate the efficacy of the proposed method over state-of-the-arts.
+
+TITLE: Inference of Infrastructure Network Flows via Physics-Inspired Implicit Neural Networks
+AUTHORS: Francesco Seccamonte, Ambuj K. Singh, Francesco Bullo
+YEAR: 2023
+VENUE: Conference on Control Technology and Applications
+URL: https://www.semanticscholar.org/paper/0c601da18b340b4a4101102707c58a5001afa969
+IDS: {'DBLP': 'conf/ccta/SeccamonteSB23', 'DOI': '10.1109/CCTA54093.2023.10252477', 'CorpusId': 262130830}
+ABSTRACT: We study the problem of inferring edge flows and nodal injections in infrastructure networks. Leveraging the Thomson’s Principle from the electric circuits literature, we setup a framework to jointly learn network parameters and missing states. Despite being application agnostic, the proposed approach captures the fundamental physics of the infrastructure, and is able to handle partial observation, node and edge features as well as operational constraints. The physics inspired learning framework leads to a bilevel optimization problem, which is NP hard in general. By exploiting convexity properties, we reformulate the problem as a single level optimization, composed of a graph neural network and an additional implicit layer. The resulting architecture can be trained using standard gradient-based methods. We assess the validity of the proposed approach on two different infrastructure networks (power and traffic), and show it outperforms the current state of the art.
+
+TITLE: Edinburgh Research Explorer Learning with sparse reward in a gap junction network inspired by the insect mushroom body
+AUTHORS: Tianqi Wei, Qinghai Guo, Barbara Webb
+YEAR: None
+VENUE: 
+URL: https://www.semanticscholar.org/paper/f54394be656d3261c60eed5c72a6ab6fd295116f
+IDS: {'CorpusId': 271822010}
+ABSTRACT: None
+
+TITLE: Machine learning for neuroscience
+AUTHORS: Geoffrey E. Hinton
+YEAR: 2011
+VENUE: Neural Systems & Circuits
+URL: https://www.semanticscholar.org/paper/78c6ada93d06ee849b9efc23a3d99d3013b87600
+IDS: {'PubMedCentral': '3278390', 'MAG': '2124751123', 'DOI': '10.1186/2042-1001-1-12', 'CorpusId': 40617017, 'PubMed': '22330889'}
+ABSTRACT: What is machine learning? Machine learning is a type of statistics that places particular emphasis on the use of advanced computational algorithms. As computers become more powerful, and modern experimental methods in areas such as imaging generate vast bodies of data, machine learning is becoming ever more important for extracting reliable and meaningful relationships and for making accurate predictions. Key strands of modern machine learning grew out of attempts to understand how large numbers of interconnected, more or less neuron-like elements could learn to achieve behaviourally meaningful computations and to extract useful features from images or sound waves. By the 1990s, key approaches had converged on an elegant framework called ‘graphical models’, explained in Koller and Friedman, in which the nodes of a graph represent variables such as edges and corners in an image, or phonemes and words in speech. The probabilistic relationships between nodes are represented by conditional probability tables or simple functions whose parameters are learned from the data. There are three main problems in fitting graphical models to data: inference, parameter learning and structure learning. The inference problem is how to infer the probable values of unobserved variables when the values of a subset of the variables have been observed, and is a problem that perceptual systems need to solve if they are to infer the hidden causes of their sensory input. The parameter-learning problem is how to adjust the parameters governing the way in which one variable influences another, so that the graphical model is a better fit to some observed data. In the brain, this is presumably done by changing synapse strengths. The structure-learning problem is how to decide which unobserved variables are needed and how they must be connected to model the correlations between observed variables. In the brain, evolution and early pruning of connections presumably have a large role to play in determining the structure. Could you provide a brief description of the methods of machine learning? Machine learning can be divided into three parts: 1) in supervised learning, the aim is to predict a class label or a real value from an input (classifying objects in images or predicting the future value of a stock are examples of this type of learning); 2) in unsupervised learning, the aim is to discover good features for representing the input data; and 3) in reinforcement learning, the aim is to discover what action should be performed next in order to maximize the eventual payoff.
+
+TITLE: Radian Measure
+AUTHORS: 
+YEAR: 2021
+VENUE: Learning Trigonometry by Problem Solving
+URL: https://www.semanticscholar.org/paper/f3041461eb5146013b1a3b55446d3c55ec27f039
+IDS: {'DOI': '10.1142/9789811231216_0010', 'CorpusId': 241855941}
+ABSTRACT: Trigonometric functions have many real-life applications. The applications listed below represent a small sample of the applications in this chapter. ■ Sports, Exercise 95, page 267 ■ Electrical Circuits, Exercise 73, page 275 ■ Machine Shop Calculations, Exercise 83, page 287 ■ Meteorology, Exercise 109, page 296 ■ Sales, Exercise 72, page 306 ■ Predator-Prey Model, Exercise 59, page 317 ■ Photography, Exercise 83, page 329 ■ Airplane Ascent, Exercises 29 and 30, page 339 ■ Harmonic Motion, Exercises 55–58, page 341 The six trigonometric functions can be defined from a right triangle perspective and as functions of real numbers. In Chapter 4, you will use both perspectives to graph trigonometric functions and solve application problems involving angles and triangles. You will also learn how to graph and evaluate inverse trigonometric functions.
+
+TITLE: Using Scan Side Channel for Detecting IP Theft
+AUTHORS: Leonid Azriel, R. Ginosar, S. Gueron, A. Mendelson
+YEAR: 2016
+VENUE: Hardware and Architectural Support for Security and Privacy
+URL: https://www.semanticscholar.org/paper/afc645a739f573c57a357df971ebdabfbc68c9bd
+IDS: {'DBLP': 'conf/isca/AzrielGGM16', 'MAG': '2500678391', 'DOI': '10.1145/2948618.2948619', 'CorpusId': 15487849}
+ABSTRACT: None
+
+TITLE: SMART: Graph Learning-Boosted Subcircuit Matching for Large-Scale Analog Circuits
+AUTHORS: Jindong Tu, Yapeng Li, Pengjia Li, Peng Xu, Qianru Zhang, Sanping Wan, Yongsheng Sun, Bei Yu, Tinghuan Chen
+YEAR: 2025
+VENUE: IEEE Transactions on Computer-Aided Design of Integrated Circuits and Systems
+URL: https://www.semanticscholar.org/paper/01bff83a193b6ef7171142d2d3b963ad942511b8
+IDS: {'DBLP': 'journals/tcad/TuLLXZWSYC25', 'DOI': '10.1109/TCAD.2025.3549701', 'CorpusId': 276956834}
+ABSTRACT: Subcircuit matching in a large-scale analog circuit is a fundamental problem in VLSI computer-aided design (CAD). Existing approaches suffer from a poor scalability issue for a large-scale analog circuit. In this article, we propose a graph learning-boosted subcircuit matching framework for large-scale analog circuits named SMART, consisting of two stages. In the first stage, we customize hypergraph neural networks to map circuit topology for embedding space. Then, coarse subcircuit recognition is directly performed in the embedding space by geometric relations between the query circuit and all candidate subcircuits within the target circuit. In the second stage, a radial matching method, including device attribute matching, connection relationship matching and uniqueness-based matching, is customized to perform fine matching and obtain matches between interconnections and devices in the query circuit and candidate subcircuits. Experimental results show our SMART can outperform state-of-the-art search-based method VF3 and learning-based method NeuroMatch, and achieve the fastest speed. Specifically, using our framework for subcircuit matching can achieve up to $135\times $ speedup with slight accuracy loss, and up to $7\times $ speedup while maintaining 100% accuracy.
+
+TITLE: Between Linear and Sinusoidal: Rethinking the Time Encoder in Dynamic Graph Learning
+AUTHORS: Hsing-Huan Chung, Shravan Chaudhari, Xing Han, Yoav Wald, S. Saria, Joydeep Ghosh
+YEAR: 2025
+VENUE: Trans. Mach. Learn. Res.
+URL: https://www.semanticscholar.org/paper/54c5c47a76547675509c68737394fa4b2d86bf00
+IDS: {'DBLP': 'journals/tmlr/ChungCHWSG25', 'ArXiv': '2504.08129', 'DOI': '10.48550/arXiv.2504.08129', 'CorpusId': 277741333}
+ABSTRACT: Dynamic graph learning is essential for applications involving temporal networks and requires effective modeling of temporal relationships. Seminal attention-based models like TGAT and DyGFormer rely on sinusoidal time encoders to capture temporal dependencies between edge events. Prior work justified sinusoidal encodings because their inner products depend on the time spans between events, which are crucial features for modeling inter-event relations. However, sinusoidal encodings inherently lose temporal information due to their many-to-one nature and therefore require high dimensions. In this paper, we rigorously study a simpler alternative: the linear time encoder, which avoids temporal information loss caused by sinusoidal functions and reduces the need for high-dimensional time encoders. We show that the self-attention mechanism can effectively learn to compute time spans between events from linear time encodings and extract relevant temporal patterns. Through extensive experiments on six dynamic graph datasets, we demonstrate that the linear time encoder improves the performance of TGAT and DyGFormer in most cases. Moreover, the linear time encoder can lead to significant savings in model parameters with minimal performance loss. For example, compared to a 100-dimensional sinusoidal time encoder, TGAT with a 2-dimensional linear time encoder saves 43% of parameters and achieves higher average precision on five datasets. While both encoders can be used simultaneously, our study highlights the often-overlooked advantages of linear time features in modern dynamic graph models. These findings can positively impact the design choices of various dynamic graph learning architectures and eventually benefit temporal network applications such as recommender systems, communication networks, and traffic forecasting.
+
+TITLE: Flexible and Parameter-Free Graph Learning for Multi-View Spectral Clustering
+AUTHORS: Qinghai Zheng
+YEAR: 2024
+VENUE: IEEE transactions on circuits and systems for video technology (Print)
+URL: https://www.semanticscholar.org/paper/44877aa90660b3145880f55374ef555db8e0f8a3
+IDS: {'DBLP': 'journals/tcsv/Zheng24', 'DOI': '10.1109/TCSVT.2024.3382761', 'CorpusId': 268825994}
+ABSTRACT: With the extensive use of multi-view data in practice, multi-view spectral clustering has received a lot of attention. In this work, we focus on the following two challenges, namely, how to deal with the partially contradictory graph information among different views and how to conduct clustering without the parameter selection. To this end, we establish a novel graph learning framework, which avoids the linear combination of the partially contradictory graph information among different views and learns a unified graph for clustering without the parameter selection. Specifically, we introduce a flexible graph degeneration with a structured graph constraint to address the aforementioned challenging issues. Besides, our method can be employed to deal with large-scale data by using the bipartite graph. Experimental results show the effectiveness and competitiveness of our method, compared to several state-of-the-art methods.
+
+TITLE: Fast and Accurate Aging-Aware Cell Timing Model via Graph Learning
+AUTHORS: Yuyang Ye, Tinghuan Chen, Zicheng Wang, Hao Yan, Bei Yu, L. Shi
+YEAR: 2024
+VENUE: IEEE Transactions on Circuits and Systems - II - Express Briefs
+URL: https://www.semanticscholar.org/paper/24910e86550dcb74d0b3cfa9a3ad32fa2d9c67ad
+IDS: {'DBLP': 'journals/tcasII/YeCWYYS24', 'DOI': '10.1109/TCSII.2023.3298917', 'CorpusId': 260235757}
+ABSTRACT: With transistors scaling down, aging effects become increasingly significant in circuit design. Thus, the aging-aware cell timing model is necessary for evaluating the aging-induced delay degradation and their impact on circuit performance. However, the tradeoff between accuracy and efficiency becomes a bottleneck in traditional methods. In this brief, we propose a fast and accurate aging-aware cell timing model via graph learning. The information of multi-typed devices on different arcs can be embedded by heterogeneous graph attention networks (H-GAT) and the embedded results help improve the accuracy of our aging-aware timing model. The experimental results indicate the proposed timing model can achieve high accuracy efficiently.
+
+TITLE: Equivariant Graph Learning for High-density Crowd Trajectories Modeling
+AUTHORS: Yang Liu, Zinan Zheng, Yu Rong, Jia Li
+YEAR: 2024
+VENUE: Trans. Mach. Learn. Res.
+URL: https://www.semanticscholar.org/paper/5a0573ab2bc699c0b54b67be2053973a14e60e66
+IDS: {'DBLP': 'journals/tmlr/0245Z0024', 'CorpusId': 273874241}
+ABSTRACT: None
+
+=== ARXIV ===
+QUERY: Can Graph Learning Learn Circuits?
+TITLE: Can Graph Learning Learn Circuits?
+AUTHORS: Chester Tan, Moritz Lampert, Courtney Maynard, Ankit Ramakrishnan, Tina Eliassi-Rad, Ingo Scholtes
+URL: http://arxiv.org/abs/2608.08536v1
+ABSTRACT: Circuit localization is a mechanistic interpretability task whose goal is to identify a sparse subgraph of a transformer's computation graph sufficient to reproduce a particular behavior. Most established methods localize circuits independently for each model--task pair. We instead frame circuit localization as a graph machine learning problem in which the edges of a computation graph represent computational pathways, and graph neural networks (GNNs) model interactions among these pathways. We introduce Graph Circuit Learning (GCL), a supervised, amortized framework that trains a GNN across multiple model--task pairs and applies it to unseen cases. To provide sufficient data, we augment the InterpBench benchmark with additional cases derived from the TracrBench programs. Of the 14 evaluated GCL configurations, the highest scored a median edge AUROC of $0.902$ (interquartile interval $[0.861, 0.942]$) on the 16 original held-out InterpBench cases. This is close to the published InterpBench median of $0.910$ for EAP-IG while remaining below ACDC's $0.959$. Removing all message-passing edges reduces the median to $0.825$. We also adapt PGExplainer, a GNN explainability method, to circuit localization, obtaining a median edge AUROC of $0.858$ on the same cases. These preliminary results suggest that graph machine learning offers a natural and potentially powerful perspective on circuit localization, and we hope this perspective encourages closer exchange between the two communities.
+
+QUERY: Can Graph Learning Learn Circuits
+TITLE: Can Graph Learning Learn Circuits?
+AUTHORS: Chester Tan, Moritz Lampert, Courtney Maynard, Ankit Ramakrishnan, Tina Eliassi-Rad, Ingo Scholtes
+URL: http://arxiv.org/abs/2608.08536v1
+ABSTRACT: Circuit localization is a mechanistic interpretability task whose goal is to identify a sparse subgraph of a transformer's computation graph sufficient to reproduce a particular behavior. Most established methods localize circuits independently for each model--task pair. We instead frame circuit localization as a graph machine learning problem in which the edges of a computation graph represent computational pathways, and graph neural networks (GNNs) model interactions among these pathways. We introduce Graph Circuit Learning (GCL), a supervised, amortized framework that trains a GNN across multiple model--task pairs and applies it to unseen cases. To provide sufficient data, we augment the InterpBench benchmark with additional cases derived from the TracrBench programs. Of the 14 evaluated GCL configurations, the highest scored a median edge AUROC of $0.902$ (interquartile interval $[0.861, 0.942]$) on the 16 original held-out InterpBench cases. This is close to the published InterpBench median of $0.910$ for EAP-IG while remaining below ACDC's $0.959$. Removing all message-passing edges reduces the median to $0.825$. We also adapt PGExplainer, a GNN explainability method, to circuit localization, obtaining a median edge AUROC of $0.858$ on the same cases. These preliminary results suggest that graph machine learning offers a natural and potentially powerful perspective on circuit localization, and we hope this perspective encourages closer exchange between the two communities.
+
+=== OPENREVIEW ===
+OPENREVIEW ERROR <HTTPError 403: 'Forbidden'>
+OPENREVIEW ERROR <HTTPError 403: 'Forbidden'>
+OPENREVIEW ERROR <HTTPError 403: 'Forbidden'>
+=== GITHUB ===
+KIND: code
+NAME: readme.md
+PATH: readme.md
+URL: https://github.com/AI-in-Transportation-Lab/awesome-mechanistic-interpretability/blob/0a90f98bf128f811aa877e1ae263f1aef236e8e5/readme.md
+
+KIND: code
+NAME: README.md
+PATH: README.md
+URL: https://github.com/graph-learning-circuits/graph-learning-circuits/blob/a5663b41825dad89df430b43ca47372c8cebe621/README.md
+
+KIND: code
+NAME: 2026-08-11.md
+PATH: digests/2026-08-11.md
+URL: https://github.com/tongchen2010/daily-ai-papers/blob/03f2478c0b9380c89f72e2a904f742bf4fe394d2/digests/2026-08-11.md
+
+KIND: code
+NAME: arxiv-cs-lg.md
+PATH: feed-entries/2026-08-11/arxiv-cs-lg.md
+URL: https://github.com/sifted-network/sifted-awesome-ai-agents/blob/bfb1955a3dfc42e9134a7fa3c45e5b82843e2664/feed-entries/2026-08-11/arxiv-cs-lg.md
+
+KIND: code
+NAME: 2026-08-11-Arxiv-Daily-Paper.md
+PATH: Arxiv_Daily_Notice/2026-08-11-Arxiv-Daily-Paper.md
+URL: https://github.com/zhuhu00/Paper-digest/blob/f8ca62259c243ec67b1975b60fb2a2649aa814cb/Arxiv_Daily_Notice/2026-08-11-Arxiv-Daily-Paper.md
+
+KIND: code
+NAME: 2026-08-09_07-14-13Z_CanGraphLearningLearnCircuits.md
+PATH: raw/papers/2026-08-09_07-14-13Z_CanGraphLearningLearnCircuits.md
+URL: https://github.com/flybfree/AI-Wiki/blob/2fbe8021c9830daaa3d61bc3c5205577c190e6a3/raw/papers/2026-08-09_07-14-13Z_CanGraphLearningLearnCircuits.md
+
+KIND: code
+NAME: SUMMARY_PAPER_2026-08-10_Can_Graph_Learning_Learn_Circuits_.md
+PATH: raw/summaries/SUMMARY_PAPER_2026-08-10_Can_Graph_Learning_Learn_Circuits_.md
+URL: https://github.com/flybfree/AI-Wiki/blob/2fbe8021c9830daaa3d61bc3c5205577c190e6a3/raw/summaries/SUMMARY_PAPER_2026-08-10_Can_Graph_Learning_Learn_Circuits_.md
+
+KIND: code
+NAME: SUMMARY_PAPER_2026-08-11_Can_Graph_Learning_Learn_Circuits_.md
+PATH: raw/summaries/SUMMARY_PAPER_2026-08-11_Can_Graph_Learning_Learn_Circuits_.md
+URL: https://github.com/flybfree/AI-Wiki/blob/2fbe8021c9830daaa3d61bc3c5205577c190e6a3/raw/summaries/SUMMARY_PAPER_2026-08-11_Can_Graph_Learning_Learn_Circuits_.md
+
+KIND: code
+NAME: landscape.md
+PATH: data/editing-reliability-evaluation/2026-W33/landscape.md
+URL: https://github.com/TengJiao33/ArXiv_Daily_Digest/blob/4b0471ec3d90890ca1bfd8d38d3b2e3325b7e698/data/editing-reliability-evaluation/2026-W33/landscape.md
+
+KIND: code
+NAME: graph-neural-networks.txt
+PATH: tag/graph-neural-networks.txt
+URL: https://github.com/cyk1337/paper-daily-site/blob/0186698605a52818c46f05b30dbea102315459d9/tag/graph-neural-networks.txt
+
+KIND: code
+NAME: __next._full.txt
+PATH: tag/graph-neural-networks/__next._full.txt
+URL: https://github.com/cyk1337/paper-daily-site/blob/0186698605a52818c46f05b30dbea102315459d9/tag/graph-neural-networks/__next._full.txt
+
+KIND: code
+NAME: __next.tag.$d$tag.__PAGE__.txt
+PATH: tag/graph-neural-networks/__next.tag.$d$tag.__PAGE__.txt
+URL: https://github.com/cyk1337/paper-daily-site/blob/0186698605a52818c46f05b30dbea102315459d9/tag/graph-neural-networks/__next.tag.$d$tag.__PAGE__.txt
+
+KIND: code
+NAME: papers.jsonl
+PATH: data/editing-reliability-evaluation/2026-W33/papers.jsonl
+URL: https://github.com/TengJiao33/ArXiv_Daily_Digest/blob/4b0471ec3d90890ca1bfd8d38d3b2e3325b7e698/data/editing-reliability-evaluation/2026-W33/papers.jsonl
+
+=== DUCKDUCKGO ===
