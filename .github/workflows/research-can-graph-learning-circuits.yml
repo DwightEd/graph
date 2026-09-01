@@ -1,0 +1,151 @@
+name: identify-can-graph-learning-circuits
+
+on:
+  push:
+    branches:
+      - agent/research-can-graph-learning-circuits
+    paths:
+      - ".github/workflows/research-can-graph-learning-circuits.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  identify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/research-can-graph-learning-circuits
+      - name: Query scholarly and web indexes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json, re, urllib.parse, urllib.request, xml.etree.ElementTree as ET
+          from pathlib import Path
+
+          title = 'Can Graph Learning Learn Circuits?'
+          variants = [
+              title,
+              'Can Graph Learning Learn Circuits',
+              'Can Graph Learning Discover Circuits',
+              'Can Graph Neural Networks Learn Circuits',
+              'graph learning circuit discovery mechanistic interpretability',
+          ]
+          headers = {'User-Agent': 'paper-identification/1.0 contact@example.com'}
+
+          def get(url):
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=30) as r:
+                  return r.read()
+
+          lines = []
+          raw_dir = Path('tmp/paper_search_raw')
+          raw_dir.mkdir(parents=True, exist_ok=True)
+
+          # Crossref
+          try:
+              url = 'https://api.crossref.org/works?' + urllib.parse.urlencode({'query.title': title, 'rows': 50})
+              raw = get(url); (raw_dir/'crossref.json').write_bytes(raw)
+              data = json.loads(raw)
+              lines.append('=== CROSSREF ===')
+              for item in data.get('message',{}).get('items',[]):
+                  t = ' '.join((item.get('title') or [''])[0].split())
+                  a = ', '.join(' '.join(filter(None,[x.get('given'),x.get('family')])) for x in item.get('author',[]))
+                  lines += [f'TITLE: {t}', f'AUTHORS: {a}', f'DOI: {item.get("DOI","")}', f'URL: {item.get("URL","")}', '']
+          except Exception as e: lines.append('CROSSREF ERROR '+repr(e))
+
+          # OpenAlex
+          try:
+              url = 'https://api.openalex.org/works?' + urllib.parse.urlencode({'search': title, 'per-page': 50})
+              raw = get(url); (raw_dir/'openalex.json').write_bytes(raw)
+              data = json.loads(raw)
+              lines.append('=== OPENALEX ===')
+              for item in data.get('results',[]):
+                  t = ' '.join((item.get('display_name') or '').split())
+                  a = ', '.join(x.get('author',{}).get('display_name','') for x in item.get('authorships',[]))
+                  lines += [f'TITLE: {t}', f'AUTHORS: {a}', f'DOI: {item.get("doi","")}', f'URL: {item.get("id","")}', f'YEAR: {item.get("publication_year","")}', '']
+          except Exception as e: lines.append('OPENALEX ERROR '+repr(e))
+
+          # Semantic Scholar
+          try:
+              url = 'https://api.semanticscholar.org/graph/v1/paper/search?' + urllib.parse.urlencode({'query': title, 'limit': 50, 'fields':'title,authors,year,url,externalIds,abstract,venue'})
+              raw = get(url); (raw_dir/'semantic.json').write_bytes(raw)
+              data = json.loads(raw)
+              lines.append('=== SEMANTIC SCHOLAR ===')
+              for item in data.get('data',[]):
+                  lines += [f'TITLE: {item.get("title","")}', f'AUTHORS: {", ".join(a.get("name","") for a in item.get("authors",[]))}', f'YEAR: {item.get("year","")}', f'VENUE: {item.get("venue","")}', f'URL: {item.get("url","")}', f'IDS: {item.get("externalIds",{})}', f'ABSTRACT: {item.get("abstract","")}', '']
+          except Exception as e: lines.append('SEMANTIC ERROR '+repr(e))
+
+          # arXiv API variants
+          lines.append('=== ARXIV ===')
+          for qi, q in enumerate(variants):
+              try:
+                  query = f'all:"{q}"'
+                  url = 'https://export.arxiv.org/api/query?' + urllib.parse.urlencode({'search_query':query,'start':0,'max_results':30})
+                  raw = get(url); (raw_dir/f'arxiv_{qi}.xml').write_bytes(raw)
+                  root = ET.fromstring(raw)
+                  ns = {'a':'http://www.w3.org/2005/Atom'}
+                  for e in root.findall('a:entry',ns):
+                      t=' '.join((e.findtext('a:title','',ns) or '').split())
+                      summ=' '.join((e.findtext('a:summary','',ns) or '').split())
+                      authors=', '.join(x.findtext('a:name','',ns) for x in e.findall('a:author',ns))
+                      lines += [f'QUERY: {q}',f'TITLE: {t}',f'AUTHORS: {authors}',f'URL: {e.findtext("a:id","",ns)}',f'ABSTRACT: {summ}','']
+              except Exception as e: lines.append(f'ARXIV ERROR {q}: {e!r}')
+
+          # OpenReview API, exact and search endpoints
+          lines.append('=== OPENREVIEW ===')
+          openreview_urls = [
+              'https://api2.openreview.net/notes?' + urllib.parse.urlencode({'content.title': title, 'limit':100}),
+              'https://api2.openreview.net/notes?' + urllib.parse.urlencode({'content.title': title.rstrip('?'), 'limit':100}),
+              'https://api.openreview.net/notes?' + urllib.parse.urlencode({'content.title': title, 'limit':100}),
+          ]
+          for oi,url in enumerate(openreview_urls):
+              try:
+                  raw=get(url); (raw_dir/f'openreview_{oi}.json').write_bytes(raw)
+                  data=json.loads(raw)
+                  lines.append('ENDPOINT: '+url)
+                  for n in data.get('notes',[]):
+                      c=n.get('content',{})
+                      def val(k):
+                          x=c.get(k,'')
+                          return x.get('value','') if isinstance(x,dict) else x
+                      lines += [f'TITLE: {val("title")}',f'AUTHORS: {val("authors")}',f'ABSTRACT: {val("abstract")}',f'ID: {n.get("id","")}',f'FORUM: {n.get("forum","")}','']
+              except Exception as e: lines.append('OPENREVIEW ERROR '+repr(e))
+
+          # GitHub API code and repository search
+          lines.append('=== GITHUB ===')
+          for kind in ['repositories','code']:
+              try:
+                  q='"Can Graph Learning Learn Circuits"'
+                  url=f'https://api.github.com/search/{kind}?' + urllib.parse.urlencode({'q':q,'per_page':100})
+                  req=urllib.request.Request(url,headers={**headers,'Authorization':'Bearer '+__import__('os').environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
+                  with urllib.request.urlopen(req,timeout=30) as r: raw=r.read()
+                  (raw_dir/f'github_{kind}.json').write_bytes(raw)
+                  data=json.loads(raw)
+                  for it in data.get('items',[]):
+                      lines += [f'KIND: {kind}',f'NAME: {it.get("full_name") or it.get("name")}',f'PATH: {it.get("path","")}',f'URL: {it.get("html_url","")}','']
+              except Exception as e: lines.append(f'GITHUB {kind} ERROR {e!r}')
+
+          # DuckDuckGo HTML (best effort)
+          lines.append('=== DUCKDUCKGO ===')
+          for qi,q in enumerate(variants):
+              try:
+                  url='https://html.duckduckgo.com/html/?'+urllib.parse.urlencode({'q':'"'+q+'"'})
+                  raw=get(url); (raw_dir/f'ddg_{qi}.html').write_bytes(raw)
+                  text=raw.decode('utf-8','ignore')
+                  for href,label in re.findall(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',text,re.S):
+                      label=re.sub('<.*?>','',label); label=' '.join(label.split())
+                      lines += [f'QUERY: {q}',f'TITLE: {label}',f'URL: {href}','']
+              except Exception as e: lines.append(f'DDG ERROR {q}: {e!r}')
+
+          Path('tmp/can_graph_learning_circuits_search.txt').write_text('\n'.join(lines),encoding='utf-8')
+          PY
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tmp
+          git commit -m "Record paper identification results" || true
+          git push origin HEAD:agent/research-can-graph-learning-circuits
