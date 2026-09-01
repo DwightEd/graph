@@ -8,18 +8,24 @@ import matplotlib
 import numpy as np
 from sklearn.metrics import precision_recall_curve, roc_curve
 
-matplotlib.use("Agg")
-from matplotlib import pyplot as plt  # noqa: E402
+from .detect import SCORE_NAMES
 
-PRIMARY_SCORE = "functional_route_collapse"
+matplotlib.use("Agg")
+from matplotlib import pyplot as plt
+
+PRIMARY_SCORE = SCORE_NAMES[0]
 SCORE_LABELS = {
-    PRIMARY_SCORE: "Functional prompt-route collapse",
-    "attention_route_collapse": "Attention prompt-route collapse",
+    "unsupported_history_takeover": "Unsupported-history takeover",
+    "evidence_bypass": "Evidence bypass",
+    "evidence_route_contraction": "Evidence-route contraction",
+    "history_route_contraction": "History-route contraction",
     "confidence": "Token surprisal",
 }
 COLORS = {
     PRIMARY_SCORE: "#b2182b",
-    "attention_route_collapse": "#2166ac",
+    "evidence_bypass": "#ef8a62",
+    "evidence_route_contraction": "#2166ac",
+    "history_route_contraction": "#762a83",
     "confidence": "#1b7837",
 }
 
@@ -140,9 +146,14 @@ def plot_population(
     for path in (*generated, unavailable):
         path.unlink(missing_ok=True)
     detector = report.get("detector", {})
-    if not detector.get("mechanism_scores_available", True):
+    if not len(label) or not detector.get("mechanism_scores_available", True):
+        reason = detector.get("reason") or (
+            "no response token has strict-history support yet"
+            if not len(label)
+            else "mechanism scores are unavailable"
+        )
         unavailable.write_text(
-            str(detector.get("reason", "mechanism scores are unavailable")) + "\n",
+            str(reason) + "\n",
             encoding="utf-8",
         )
         return
@@ -160,9 +171,10 @@ def plot_population(
 def plot_sample_dashboard(
     record: dict,
     layers: dict[str, np.ndarray],
+    graph,
     output: Path,
 ) -> None:
-    """Plot one saved response's rich mechanism state without labels."""
+    """Plot one response's explicit routes and attention/MLP pathway state."""
 
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -177,47 +189,70 @@ def plot_sample_dashboard(
     )
     figure.suptitle(f"Sample {record['sample_id']}")
 
-    image = axes[0].imshow(
-        layers["prompt_edge_effective_sources"],
-        aspect="auto",
-        origin="lower",
-        cmap="viridis",
+    graph_layer = np.asarray(graph.layer)
+    row_layer = np.asarray(graph.row_layer)
+    last_layer = int(row_layer.max()) if len(row_layer) else 0
+    selected = graph_layer == last_layer
+    magnitude = np.asarray(graph.magnitude)[selected]
+    scale = (
+        magnitude / max(float(magnitude.max()), 1e-12) if len(magnitude) else magnitude
     )
-    axes[0].set(title="Functional effective prompt carriers", ylabel="Layer")
-    figure.colorbar(image, ax=axes[0])
-
-    image = axes[1].imshow(
-        layers["prompt_edge_effective_rank"],
-        aspect="auto",
-        origin="lower",
-        cmap="viridis",
-        vmin=1,
+    scatter = axes[0].scatter(
+        np.asarray(graph.target)[selected] - int(record["predictor_position"][0]),
+        np.asarray(graph.source)[selected],
+        c=np.asarray(graph.head)[selected],
+        s=2 + 18 * np.sqrt(scale),
+        alpha=0.35,
+        cmap="turbo",
+        linewidths=0,
     )
-    axes[1].set(title="Functional cross-head route rank", ylabel="Layer")
-    figure.colorbar(image, ax=axes[1])
-
-    image = axes[2].imshow(
-        layers["prompt_edge_anchor_turnover"],
-        aspect="auto",
-        origin="lower",
-        cmap="magma",
-        vmin=0,
+    row_selected = row_layer == last_layer
+    remainder = np.asarray(graph.remainder)[row_selected]
+    remainder_mean = float(remainder.mean()) if len(remainder) else 0.0
+    axes[0].set(
+        title=(
+            f"Explicit evidence/history source-head routes at layer {last_layer} "
+            f"(mean adaptive-cover remainder {remainder_mean:.3f})"
+        ),
+        ylabel="Absolute source token",
     )
-    axes[2].set(title="Dominant prompt-carrier turnover", ylabel="Layer")
-    figure.colorbar(image, ax=axes[2])
+    if len(magnitude):
+        figure.colorbar(scatter, ax=axes[0], label="Head")
 
+    for axis, key, title in (
+        (axes[1], "edge_evidence_head_entropy", "Evidence route entropy by head"),
+        (axes[2], "edge_history_head_entropy", "History route entropy by head"),
+    ):
+        image = axis.imshow(
+            layers[key][-1].T,
+            aspect="auto",
+            origin="lower",
+            cmap="viridis",
+            vmin=0,
+        )
+        axis.set(title=title, ylabel="Head")
+        figure.colorbar(image, ax=axis)
+
+    pathway = layers["pathway_mlp_projection"]
+    pathway_image = np.concatenate(
+        [pathway[..., index] for index in range(pathway.shape[-1])], axis=0
+    )
+    finite = np.abs(pathway_image[np.isfinite(pathway_image)])
+    limit = max(float(finite.max()), 1e-12) if len(finite) else 1.0
     image = axes[3].imshow(
-        record["source_flow"],
+        pathway_image,
         aspect="auto",
-        origin="upper",
-        cmap="magma",
-        vmin=0,
+        origin="lower",
+        cmap="coolwarm",
+        vmin=-limit,
+        vmax=limit,
     )
-    axes[3].set(title="Retained top-k functional source flow", ylabel="Source token")
-    axes[3].set_yticks(
-        np.arange(len(record["source_token_text"])),
-        record["source_token_text"],
-        fontsize=7,
+    layer_count = pathway.shape[0]
+    for boundary in (layer_count - 0.5, 2 * layer_count - 0.5):
+        axes[3].axhline(boundary, color="black", lw=0.5)
+    axes[3].set(
+        title="MLP projection on evidence / history / interaction pathways",
+        ylabel="Contrast × layer",
     )
     figure.colorbar(image, ax=axes[3])
 
@@ -232,14 +267,13 @@ def plot_sample_dashboard(
     axes[4].legend(frameon=False, ncols=3)
 
     for name, color, label in (
-        ("edge_evidence_share", "#1b9e77", "Evidence"),
-        ("edge_other_prompt_share", "#7570b3", "Other prompt"),
-        ("edge_history_share", "#d95f02", "History"),
-        ("edge_self_share", "#666666", "Predictor self"),
+        ("evidence_route_contraction", "#2166ac", "Evidence routes"),
+        ("history_route_contraction", "#762a83", "History routes"),
     ):
-        axes[5].plot(x, layers[name].mean(0), color=color, label=label)
-    axes[5].set(title="Functional role shares", ylabel="Share")
-    axes[5].legend(frameon=False, ncols=4)
+        axes[5].plot(x, record[name], color=color, label=label)
+    axes[5].axhline(0, color="0.55", lw=0.8)
+    axes[5].set(title="Fixed-window route contraction", ylabel="Contraction")
+    axes[5].legend(frameon=False, ncols=2)
 
     stride = max(1, int(np.ceil(len(token_text) / 24)))
     ticks = np.arange(0, len(token_text), stride)

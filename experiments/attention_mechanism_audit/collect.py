@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Sequence
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +18,13 @@ import torch
 
 from research_dataset import open_research_dataset
 
-from .capture import FunctionalTraceReplay
+from .capture import (
+    BRANCH_NAMES,
+    PATHWAY_CONTRAST_NAMES,
+    ROLE_NAMES,
+    ROUTE_ROLE_NAMES,
+    FunctionalTraceReplay,
+)
 from .data import (
     TASK_TYPES,
     build_evidence_mask,
@@ -26,7 +33,17 @@ from .data import (
 )
 
 SCHEMA = "ragtruth-mechanism-state"
-VERSION = 6
+VERSION = 7
+_MODEL_SUFFIXES = {
+    ".bin",
+    ".json",
+    ".model",
+    ".pt",
+    ".pth",
+    ".safetensors",
+    ".tiktoken",
+    ".txt",
+}
 
 
 def _file_identity(path: str | Path) -> str:
@@ -42,30 +59,88 @@ def _file_identity(path: str | Path) -> str:
     return digest.hexdigest()
 
 
+@lru_cache(maxsize=8)
+def _digest_model_files(root: str, metadata: tuple[tuple[str, int, int], ...]) -> str:
+    """Hash model/tokenizer contents once per unchanged local checkpoint."""
+
+    digest = hashlib.sha256()
+    base = Path(root)
+    for relative, expected_size, expected_mtime in metadata:
+        candidate = base / relative
+        digest.update(relative.encode())
+        digest.update(b"\0")
+        with candidate.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        stat = candidate.stat()
+        if (stat.st_size, stat.st_mtime_ns) != (expected_size, expected_mtime):
+            raise RuntimeError("observer checkpoint changed while it was hashed")
+    return digest.hexdigest()
+
+
 def _model_identity(path: str | Path) -> str:
     path = Path(path)
     if not path.is_dir():
         return path.name
-    digest = hashlib.sha256()
-    digest.update(path.name.encode())
-    for candidate in sorted(path.iterdir(), key=lambda item: item.name):
-        if candidate.name == "config.json" or candidate.name.endswith(
-            (".safetensors", ".bin", ".index.json")
-        ):
-            digest.update(candidate.name.encode())
-            digest.update(b"\0")
-            digest.update(str(candidate.stat().st_size).encode())
-            digest.update(b"\0")
-            if candidate.name.endswith(".json"):
-                digest.update(_file_identity(candidate).encode())
-    return digest.hexdigest()
+    files = sorted(
+        candidate
+        for candidate in path.rglob("*")
+        if candidate.is_file() and candidate.suffix.casefold() in _MODEL_SUFFIXES
+    )
+    metadata = tuple(
+        (
+            candidate.relative_to(path).as_posix(),
+            candidate.stat().st_size,
+            candidate.stat().st_mtime_ns,
+        )
+        for candidate in files
+    )
+    return _digest_model_files(str(path.resolve()), metadata)
+
+
+def _capture_spec(top_k: int, route_cover_mass: float) -> dict[str, Any]:
+    """Describe only the scientific state saved by capture, not chunking knobs."""
+
+    return {
+        "branches": list(BRANCH_NAMES),
+        "pathway_contrasts": list(PATHWAY_CONTRAST_NAMES),
+        "source_roles": list(ROLE_NAMES),
+        "route_roles": list(ROUTE_ROLE_NAMES),
+        "route_cover_mass": float(route_cover_mass),
+        "top_k": int(top_k),
+    }
+
+
+def target_response_sha256(token_ids: Any, response_start: int) -> str:
+    """Hash the exact target-token sequence in a platform-independent encoding."""
+
+    target = torch.as_tensor(token_ids, dtype=torch.long, device="cpu")[
+        response_start:
+    ].tolist()
+    payload = json.dumps(target, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def token_ids_sha256(token_ids: Any) -> str:
+    values = torch.as_tensor(token_ids, dtype=torch.long, device="cpu").tolist()
+    payload = json.dumps(values, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def evidence_mask_sha256(evidence_mask: Any) -> str:
+    values = torch.as_tensor(evidence_mask, dtype=torch.bool, device="cpu").to(
+        torch.uint8
+    )
+    return hashlib.sha256(bytes(values.tolist())).hexdigest()
 
 
 def _split_identity(dataset: Any) -> str:
     """Identify the physical shard by split name and ordered sample IDs."""
 
     digest = hashlib.sha256()
-    digest.update(str(dataset.manifest.get("split", "")).encode())
+    digest.update(
+        json.dumps(dataset.manifest, sort_keys=True, default=str).encode("utf-8")
+    )
     for sample_id in dataset.sample_ids:
         digest.update(b"\0")
         digest.update(str(sample_id).encode())
@@ -79,6 +154,9 @@ def _validate_alignment(capture: dict[str, Any]) -> None:
     response_start = int(capture["response_start"])
     if not 0 < response_start < tokens:
         raise ValueError("response_start is outside token_ids")
+    evidence_mask = torch.as_tensor(capture["evidence_mask"])
+    if evidence_mask.dtype != torch.bool or evidence_mask.shape != (response_start,):
+        raise ValueError("evidence_mask is not prompt-token aligned")
     response_tokens = tokens - response_start
     for name, value in capture["score_inputs"].items():
         if len(value) != response_tokens:
@@ -88,19 +166,81 @@ def _validate_alignment(capture: dict[str, Any]) -> None:
             raise ValueError(f"mechanism trace {name} is not response-token aligned")
 
 
-def _save(path: Path, capture: dict[str, Any]) -> dict[str, Any]:
+def _save(
+    path: Path,
+    capture: dict[str, Any],
+    *,
+    artifact_contract: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     _validate_alignment(capture)
+    if artifact_contract is not None:
+        capture["artifact_contract"] = artifact_contract
     peak_memory = capture.pop("peak_cuda_reserved_bytes")
+    response_start = int(capture["response_start"])
+    evidence_mask = torch.as_tensor(capture["evidence_mask"])
     temporary = path.with_suffix(path.suffix + ".tmp")
     torch.save(capture, temporary)
     temporary.replace(path)
-    return {
+    saved = {
         "path": path.name,
         "tokens": len(capture["token_ids"]),
-        "response_tokens": len(capture["token_ids"]) - capture["response_start"],
+        "prompt_tokens": response_start,
+        "evidence_tokens": int(evidence_mask.sum()),
+        "response_tokens": len(capture["token_ids"]) - response_start,
+        "target_response_sha256": target_response_sha256(
+            capture["token_ids"], response_start
+        ),
+        "token_ids_sha256": token_ids_sha256(capture["token_ids"]),
+        "evidence_mask_sha256": evidence_mask_sha256(evidence_mask),
         "bytes": path.stat().st_size,
         "peak_cuda_reserved_bytes": int(peak_memory),
     }
+    if artifact_contract is not None:
+        saved["artifact_contract"] = artifact_contract
+    return saved
+
+
+def validate_saved_artifact(
+    artifact: dict[str, Any] | Any, record: dict[str, Any] | Any
+) -> None:
+    """Check a loaded artifact against its journal row before using values."""
+
+    expected_contract = record.get("artifact_contract")
+    if (
+        expected_contract is not None
+        and artifact.get("artifact_contract") != expected_contract
+    ):
+        raise ValueError("artifact contract does not match its index row")
+    expected_tokens = record.get("token_ids_sha256")
+    if expected_tokens is not None and token_ids_sha256(artifact["token_ids"]) != str(
+        expected_tokens
+    ):
+        raise ValueError("artifact token IDs do not match its index row")
+    expected_evidence = record.get("evidence_mask_sha256")
+    if expected_evidence is not None and evidence_mask_sha256(
+        artifact["evidence_mask"]
+    ) != str(expected_evidence):
+        raise ValueError("artifact evidence mask does not match its index row")
+
+
+def _validate_resume_index(root: Path, rows: Sequence[dict[str, Any]]) -> None:
+    """Validate the journal boundary before any indexed sample is skipped."""
+
+    sample_ids = [str(row["sample_id"]) for row in rows]
+    if len(sample_ids) != len(set(sample_ids)):
+        raise ValueError("resume index contains duplicate sample IDs")
+    missing = []
+    changed = []
+    for row in rows:
+        path = root / "samples" / str(row["path"])
+        if not path.is_file():
+            missing.append(str(row["sample_id"]))
+        elif row.get("bytes") is not None and path.stat().st_size != int(row["bytes"]):
+            changed.append(str(row["sample_id"]))
+    if missing:
+        raise ValueError("resume index references a missing sample artifact")
+    if changed:
+        raise ValueError("resume index references a size-changed sample artifact")
 
 
 def capture_split(
@@ -115,7 +255,7 @@ def capture_split(
     predictor_chunk: int = 128,
     top_k: int = 8,
     logit_chunk: int = 64,
-    intervention_batch: int = 3,
+    route_cover_mass: float = 0.8,
 ) -> dict[str, Any]:
     """Collect one physical shard, journaling progress for exact resume."""
 
@@ -130,7 +270,9 @@ def capture_split(
     index_path = output / "index.jsonl"
     manifest_path = output / "manifest.json"
     if index_path.is_file() and not manifest_path.is_file():
-        raise ValueError(f"index exists without a v{VERSION} manifest; use a new output")
+        raise ValueError(
+            f"index exists without a v{VERSION} manifest; use a new output"
+        )
     previous_manifest = (
         json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest_path.is_file()
@@ -143,8 +285,13 @@ def capture_split(
         "source_identity": _file_identity(source_info),
         "observer_identity": _model_identity(model_path),
         "model_dtype": str(dtype),
-        "top_k_message_sources": int(top_k),
+        "capture_spec": _capture_spec(top_k, route_cover_mass),
         "task_types": list(TASK_TYPES),
+    }
+    artifact_contract = {
+        "schema": SCHEMA,
+        "version": VERSION,
+        "capture_spec": expected["capture_spec"],
     }
     if previous_manifest:
         changed = [
@@ -157,8 +304,6 @@ def capture_split(
                 "cannot resume mechanism states with changed identity: "
                 + ", ".join(changed)
             )
-        if previous_manifest.get("complete") and limit is None:
-            return previous_manifest
     else:
         manifest_path.write_text(
             json.dumps(
@@ -169,12 +314,21 @@ def capture_split(
             encoding="utf-8",
         )
 
+    rows = load_index(output) if index_path.is_file() else []
+    _validate_resume_index(output, rows)
+    recorded_samples = int(previous_manifest.get("samples", 0))
+    if len(rows) < recorded_samples or (
+        previous_manifest.get("complete") and len(rows) != recorded_samples
+    ):
+        raise ValueError("resume manifest and index sample counts disagree")
+    if previous_manifest.get("complete") and limit is None:
+        return previous_manifest
+
     sources = load_source_info(source_info)
     tokenizer = AutoTokenizer.from_pretrained(str(model_path), local_files_only=True)
     replay = FunctionalTraceReplay.from_pretrained(
         model_path, device=device, dtype=dtype
     )
-    rows = load_index(output) if index_path.is_file() else []
     indexed = {str(row["sample_id"]): row["task_type"] for row in rows}
     resumed = len(rows)
     new_samples = 0
@@ -229,10 +383,14 @@ def capture_split(
             predictor_chunk=predictor_chunk,
             top_k=top_k,
             logit_chunk=logit_chunk,
-            intervention_batch=intervention_batch,
+            route_cover_mass=route_cover_mass,
         )
         sample.release_attention()
-        saved = _save(samples / f"{sample_id}.pt", capture)
+        saved = _save(
+            samples / f"{sample_id}.pt",
+            capture,
+            artifact_contract=artifact_contract,
+        )
         record(
             {
                 "sample_id": str(sample_id),
@@ -257,13 +415,10 @@ def capture_split(
         "new_samples": new_samples,
         "complete": complete,
         "split": dataset.manifest.get("split"),
-        "task_types": list(TASK_TYPES),
         "generator_models": sorted({str(row["generator_model"]) for row in rows}),
         "labels_used": False,
-        "model_dtype": str(dtype),
         "predictor_chunk": int(predictor_chunk),
-        "intervention_batch": int(intervention_batch),
-        "top_k_message_sources": int(top_k),
+        "logit_chunk": int(logit_chunk),
         "max_cuda_reserved_bytes": max(
             (row["peak_cuda_reserved_bytes"] for row in rows), default=0
         ),
@@ -289,7 +444,7 @@ def capture_all(
 
     pairs = []
     for split_root in map(Path, split_roots):
-        state_root = Path(output_root) / "routing_state" / split_root.name
+        state_root = Path(output_root) / "mechanism_state" / split_root.name
         capture_split(
             split_root=split_root,
             source_info=source_info,

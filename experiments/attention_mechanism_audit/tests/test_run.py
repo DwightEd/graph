@@ -5,7 +5,7 @@ import pytest
 
 pytest.importorskip("torch")
 
-import experiments.attention_mechanism_audit.run as run
+from experiments.attention_mechanism_audit import run
 
 
 def test_all_cli_uses_the_shared_cache_and_exact_frozen_model():
@@ -34,8 +34,8 @@ def test_all_command_evaluates_each_task_from_the_same_saved_mechanism_states(
     tmp_path, monkeypatch
 ):
     shared = [
-        (tmp_path / "routing_state/train", tmp_path / "cache/train"),
-        (tmp_path / "routing_state/test", tmp_path / "cache/test"),
+        (tmp_path / "mechanism_state/train", tmp_path / "cache/train"),
+        (tmp_path / "mechanism_state/test", tmp_path / "cache/test"),
     ]
     captures = []
     evaluations = []
@@ -104,10 +104,10 @@ def test_plot_sample_searches_the_same_saved_inputs():
 def test_report_prints_without_bootstrap_intervals(capsys):
     metric = {
         "auroc": 0.5,
-        "auprc": 0.2,
-        "auprc_lift": 1.0,
+        "average_precision": 0.2,
+        "ap_lift": 1.0,
         "auroc_ci95": [None, None],
-        "auprc_ci95": [None, None],
+        "average_precision_ci95": [None, None],
     }
     audit_metric = {
         "hallucinated_minus_correct": 0.1,
@@ -119,6 +119,10 @@ def test_report_prints_without_bootstrap_intervals(capsys):
             "sources": 1,
             "tokens": 2,
             "hallucinated_tokens": 1,
+            "evaluated_samples": 1,
+            "evaluated_sources": 1,
+            "evaluated_tokens": 1,
+            "evaluated_positives": 1,
             "prevalence": 0.5,
             "capture_complete": False,
             "task_type": "Summary",
@@ -128,8 +132,12 @@ def test_report_prints_without_bootstrap_intervals(capsys):
                 "metrics": {
                     name: audit_metric
                     for name in (
-                        "edge_route_balance_mean",
-                        "source_dispersion_mean",
+                        "causal_evidence_support",
+                        "unsupported_history_takeover_raw",
+                        "edge_evidence_route_contraction",
+                        "edge_evidence_head_top1_mean",
+                        "pathway_evidence_mlp_projection_mean",
+                        "pathway_evidence_valid_mean",
                     )
                 }
             },
@@ -137,8 +145,17 @@ def test_report_prints_without_bootstrap_intervals(capsys):
     )
     output = capsys.readouterr().out
     assert "PARTIAL-SUMMARY" in output
-    assert "PRIMARY   functional_route_collapse" in output
-    assert "control   attention_route_collapse" in output
+    assert "tokens=2 positives=1 evaluated_samples=1 evaluated_sources=1" in output
+    assert "evaluated_tokens=1 evaluated_positives=1" in output
+    assert "PRIMARY   unsupported_history_takeover" in output
+    assert "control   evidence_bypass" in output
+    assert "control   evidence_route_contraction" in output
+    assert "control   history_route_contraction" in output
     assert "control   confidence" in output
     assert "component" not in output
-    assert output.count("CI=n/a") == 8
+    assert output.count("CI=n/a") == 16
+    assert "causal_evidence_support" in output
+    assert "unsupported_history_takeover_raw" in output
+    assert "edge_evidence_head_top1_mean" in output
+    assert "pathway_evidence_mlp_projection_mean" in output
+    assert "pathway_evidence_valid_mean" in output

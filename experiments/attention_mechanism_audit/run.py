@@ -13,16 +13,30 @@ from .data import TASK_TYPES
 from .evaluate import SCORE_ORDER, evaluate_all, plot_saved_sample
 
 PRINTED_AUDIT_ORDER = (
-    "edge_route_balance_mean",
-    "edge_route_velocity_mean",
-    "source_dispersion_mean",
-    "edge_head_role_jsd_mean",
-    "source_coherence_response_history_mean",
-    "head_coherence_response_history_mean",
     "causal_evidence_support",
     "causal_history_support",
     "causal_interaction",
-    "remaining_context_margin",
+    "direct_evidence_support_with_history",
+    "history_support_under_direct_evidence_cut",
+    "unsupported_history_takeover_raw",
+    "edge_evidence_route_contraction",
+    "edge_response_history_route_contraction",
+    "edge_evidence_mass_contraction",
+    "edge_response_history_mass_contraction",
+    "edge_evidence_effective_routes_mean",
+    "edge_response_history_effective_routes_mean",
+    "edge_evidence_effective_rank_mean",
+    "edge_response_history_effective_rank_mean",
+    "edge_evidence_head_cover_size_mean",
+    "edge_response_history_head_cover_size_mean",
+    "edge_evidence_anchor_persistence_mean",
+    "edge_response_history_anchor_persistence_mean",
+    "edge_evidence_head_top1_mean",
+    "edge_response_history_head_top1_mean",
+    "pathway_evidence_mlp_projection_mean",
+    "pathway_history_mlp_projection_mean",
+    "pathway_interaction_mlp_projection_mean",
+    "pathway_evidence_valid_mean",
 )
 
 DEFAULT_MODEL = Path(
@@ -46,24 +60,32 @@ def _print_report(report: dict) -> None:
         return f"[{interval[0]:.6f},{interval[1]:.6f}]"
 
     scope = "ALL" if report["capture_complete"] else "PARTIAL"
+    prevalence = (
+        f"{report['prevalence']:.4%}" if report["prevalence"] is not None else "n/a"
+    )
     print(f"\n=== {scope}-{report['task_type'].upper()} MECHANISM DETECTION ===")
     print(
         f"samples={report['samples']} sources={report['sources']} "
         f"tokens={report['tokens']} positives={report['hallucinated_tokens']} "
-        f"prevalence={report['prevalence']:.4%} "
+        f"evaluated_samples={report['evaluated_samples']} "
+        f"evaluated_sources={report['evaluated_sources']} "
+        f"evaluated_tokens={report['evaluated_tokens']} "
+        f"evaluated_positives={report['evaluated_positives']} "
+        f"prevalence={prevalence} "
         f"capture_complete={report['capture_complete']}"
     )
     for name in SCORE_ORDER:
         result = report["detection"][name]
         role = "PRIMARY" if name == report["primary_score"] else "control"
         if result["auroc"] is None:
-            print(f"{role:9s} {name:30s} AUROC=n/a AUPRC=n/a")
+            print(f"{role:9s} {name:30s} AUROC=n/a AP=n/a")
             continue
         print(
             f"{role:9s} {name:30s} "
             f"AUROC={result['auroc']:.6f} CI={ci(result['auroc_ci95'])} "
-            f"AUPRC={result['auprc']:.6f} CI={ci(result['auprc_ci95'])} "
-            f"lift={result['auprc_lift']:.3f}"
+            f"AP={result['average_precision']:.6f} "
+            f"CI={ci(result['average_precision_ci95'])} "
+            f"lift={result['ap_lift']:.3f}"
         )
     print("POST-HOC matched hallucinated - correct token differences")
     audit = report["group_difference_audit"]
@@ -76,8 +98,7 @@ def _print_report(report: dict) -> None:
             print(f"audit     {name:30s} difference=n/a")
             continue
         print(
-            f"audit     {name:30s} difference={difference:.6f} "
-            f"CI={ci(result['ci95'])}"
+            f"audit     {name:30s} difference={difference:.6f} CI={ci(result['ci95'])}"
         )
 
 

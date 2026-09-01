@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -19,8 +20,10 @@ def _assert_png(path: Path) -> None:
 
 def test_population_figures_use_all_token_arrays(tmp_path):
     assert SCORE_ORDER == (
-        "functional_route_collapse",
-        "attention_route_collapse",
+        "unsupported_history_takeover",
+        "evidence_bypass",
+        "evidence_route_contraction",
+        "history_route_contraction",
         "confidence",
     )
     label = np.asarray([0, 0, 1, 1], dtype=bool)
@@ -72,25 +75,40 @@ def test_unavailable_crossfit_does_not_plot_zero_placeholder_scores(tmp_path):
 
 def test_one_sample_figure_is_only_an_explicit_call(tmp_path):
     layers = {
-        "prompt_edge_effective_sources": np.asarray([[2.0, 1.2], [3.0, 1.5]]),
-        "prompt_edge_effective_rank": np.asarray([[2.0, 1.2], [2.5, 1.4]]),
-        "prompt_edge_anchor_turnover": np.asarray([[0.1, 0.0], [0.2, 0.1]]),
-        "edge_evidence_share": np.asarray([[0.8, 0.2], [0.6, 0.1]]),
-        "edge_other_prompt_share": np.asarray([[0.2, 0.1], [0.3, 0.1]]),
-        "edge_history_share": np.asarray([[0.0, 0.6], [0.0, 0.7]]),
-        "edge_self_share": np.asarray([[0.0, 0.1], [0.1, 0.1]]),
+        "edge_evidence_head_entropy": np.asarray(
+            [[[0.2, 0.5], [0.1, 0.4]], [[0.3, 0.6], [0.2, 0.5]]]
+        ),
+        "edge_history_head_entropy": np.asarray(
+            [[[0.0, 0.0], [0.4, 0.2]], [[0.0, 0.0], [0.3, 0.1]]]
+        ),
+        "pathway_mlp_projection": np.asarray(
+            [
+                [[0.1, 0.2, -0.1], [0.2, 0.1, -0.2]],
+                [[0.3, 0.1, -0.2], [0.4, 0.2, -0.3]],
+            ]
+        ),
     }
     record = {
         "sample_id": "11907",
         "token_text": ["A", "B"],
+        "predictor_position": np.asarray([2, 3]),
         "evidence_support": np.asarray([0.5, -0.2]),
         "history_support": np.asarray([0.1, 0.8]),
         "route_interaction": np.asarray([0.0, -0.1]),
-        "source_token_text": ["0:A", "1:B"],
-        "source_flow": np.asarray([[0.8, 0.2], [0.1, 0.7]]),
+        "evidence_route_contraction": np.asarray([0.0, 0.4]),
+        "history_route_contraction": np.asarray([0.0, -0.2]),
     }
+    graph = SimpleNamespace(
+        source=np.asarray([0, 1, 0, 2]),
+        target=np.asarray([2, 2, 3, 3]),
+        layer=np.asarray([0, 0, 1, 1]),
+        head=np.asarray([0, 1, 0, 1]),
+        magnitude=np.asarray([0.5, 0.4, 0.7, 0.2]),
+        row_layer=np.asarray([0, 0, 0, 0, 1, 1, 1, 1]),
+        remainder=np.zeros(8),
+    )
     output = tmp_path / "11907.png"
 
-    plot_sample_dashboard(record, layers, output)
+    plot_sample_dashboard(record, layers, graph, output)
 
     _assert_png(output)

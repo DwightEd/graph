@@ -6,8 +6,7 @@ import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
-
-import experiments.attention_mechanism_audit.collect as collect_module
+collect_module = pytest.importorskip("experiments.attention_mechanism_audit.collect")
 
 
 SCORE_INPUTS = (
@@ -24,20 +23,28 @@ SCORE_INPUTS = (
 
 def _trace(response_tokens: int = 1):
     return {
-        "role_attention_mass": torch.zeros(2, response_tokens, 3, 4),
-        "edge_role_energy": torch.zeros(2, response_tokens, 3, 4),
+        "attention_role_mass": torch.zeros(2, response_tokens, 3, 4),
+        "edge_role_mass": torch.zeros(2, response_tokens, 3, 4),
         "head_role_write_norm": torch.zeros(2, response_tokens, 3, 4),
-        "head_source_entropy": torch.zeros(2, response_tokens, 3),
         "role_head_coherence": torch.zeros(2, response_tokens, 4),
-        "top_source_index": torch.zeros(2, response_tokens, 2, dtype=torch.int32),
-        "top_source_magnitude": torch.zeros(2, response_tokens, 2),
+        "route_source_index": torch.zeros(
+            2, response_tokens, 3, 2, 2, dtype=torch.int32
+        ),
+        "route_source_magnitude": torch.zeros(2, response_tokens, 3, 2, 2),
+        "route_source_remainder": torch.zeros(2, response_tokens, 3, 2),
+        "route_source_cover_size": torch.zeros(
+            2, response_tokens, 3, 2, dtype=torch.int32
+        ),
     }
 
 
-def _capture(token_ids):
+def _capture(token_ids, evidence_mask=None):
+    if evidence_mask is None:
+        evidence_mask = torch.zeros(2, dtype=torch.bool)
     return {
         "token_ids": token_ids.clone(),
         "response_start": 2,
+        "evidence_mask": torch.as_tensor(evidence_mask, dtype=torch.bool).clone(),
         "peak_cuda_reserved_bytes": int(token_ids[1]),
         "trace": _trace(),
         "score_inputs": {
@@ -80,8 +87,9 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     }
 
     class FakeDataset:
-        sample_ids = list(samples)
-        manifest = {"split": "train"}
+        def __init__(self):
+            self.sample_ids = list(samples)
+            self.manifest = {"split": "train"}
 
         def __getitem__(self, sample_id):
             return samples[sample_id]
@@ -89,11 +97,25 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     capture_calls = []
 
     class FakeReplay:
-        def capture(self, token_ids, response_start, evidence_mask, **kwargs):
+        def capture(
+            self,
+            token_ids,
+            response_start,
+            evidence_mask,
+            *,
+            predictor_chunk,
+            top_k,
+            logit_chunk,
+            route_cover_mass,
+        ):
             assert evidence_mask.dtype == torch.bool
             assert evidence_mask.shape == (2,)
+            assert predictor_chunk == 128
+            assert top_k == 8
+            assert logit_chunk == 64
+            assert route_cover_mass == 0.8
             capture_calls.append(int(token_ids[1]))
-            return _capture(token_ids)
+            return _capture(token_ids, evidence_mask)
 
     class FakeAutoTokenizer:
         @classmethod
@@ -143,9 +165,23 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     assert first["selected_samples_seen"] == 3
     assert first["eligible_samples"] is None
     assert first["complete"] is False
-    assert first["version"] == collect_module.VERSION
+    assert first["version"] == collect_module.VERSION == 7
     assert first["labels_used"] is False
     assert first["task_types"] == ["QA", "Summary", "Data2txt"]
+    assert first["capture_spec"] == {
+        "branches": ["full", "no_evidence", "no_history", "no_evidence_history"],
+        "pathway_contrasts": ["evidence", "history", "interaction"],
+        "source_roles": [
+            "evidence",
+            "other_prompt",
+            "response_history",
+            "predictor_self",
+        ],
+        "route_roles": ["evidence", "response_history"],
+        "route_cover_mass": 0.8,
+        "top_k": 8,
+    }
+    assert "intervention_batch" not in first
     assert capture_calls == [10, 11, 12]
     first_rows = [
         json.loads(line)
@@ -161,8 +197,26 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
         "QA",
         "Data2txt",
     ]
+    assert first_rows[0]["prompt_tokens"] == 2
+    assert first_rows[0]["evidence_tokens"] == 0
+    assert first_rows[0]["response_tokens"] == 1
+    assert first_rows[0]["target_response_sha256"] == (
+        "c713558bfa07123bfbdeec433f51384cc214f60e3f4484222f750e8bf1454652"
+    )
+    assert first_rows[0]["artifact_contract"]["version"] == 7
+    assert first_rows[0]["token_ids_sha256"]
+    assert first_rows[0]["evidence_mask_sha256"]
     saved = torch.load(output / "samples" / "summary.pt", weights_only=True)
-    assert set(saved) == {"token_ids", "response_start", "trace", "score_inputs"}
+    assert set(saved) == {
+        "artifact_contract",
+        "token_ids",
+        "response_start",
+        "evidence_mask",
+        "trace",
+        "score_inputs",
+    }
+    assert saved["evidence_mask"].dtype == torch.bool
+    assert saved["evidence_mask"].shape == (2,)
     assert tuple(saved["score_inputs"]) == SCORE_INPUTS
     assert set(saved["trace"]) == set(_trace())
 
@@ -202,12 +256,25 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     assert third["selected_samples_seen"] == 3
     assert capture_calls == [10, 11, 12, 13]
 
-    (output / "manifest.json").unlink()
+    manifest_path = output / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    draft = json.loads(json.dumps(manifest))
+    del draft["capture_spec"]["route_roles"]
+    manifest_path.write_text(json.dumps(draft), encoding="utf-8")
+    with pytest.raises(ValueError, match="changed identity"):
+        collect_module.capture_split(**common)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="changed identity"):
+        collect_module.capture_split(**common, route_cover_mass=0.9)
+    assert capture_calls == [10, 11, 12, 13]
+
+    manifest_path.unlink()
     with pytest.raises(ValueError):
         collect_module.capture_split(**common)
     assert capture_calls == [10, 11, 12, 13]
 
-    (output / "manifest.json").write_text(
+    manifest_path.write_text(
         json.dumps(
             {"schema": collect_module.SCHEMA, "version": collect_module.VERSION - 1}
         ),
@@ -221,10 +288,10 @@ def test_input_identity_is_stable_after_relocation(tmp_path):
     first = tmp_path / "first"
     second = tmp_path / "second"
     source_content = '{"source_id": "same"}\n'
-    for root in (first, second):
+    for index, root in enumerate((first, second)):
         root.mkdir()
         (root / "source_info.jsonl").write_text(source_content, encoding="utf-8")
-        model = root / "observer"
+        model = root / f"observer-{index}"
         model.mkdir()
         (model / "config.json").write_text('{"model_type": "llama"}', encoding="utf-8")
         (model / "model.safetensors").write_bytes(b"same frozen weights")
@@ -232,9 +299,13 @@ def test_input_identity_is_stable_after_relocation(tmp_path):
     assert collect_module._file_identity(
         first / "source_info.jsonl"
     ) == collect_module._file_identity(second / "source_info.jsonl")
-    first_identity = collect_module._model_identity(first / "observer")
-    second_identity = collect_module._model_identity(second / "observer")
+    first_identity = collect_module._model_identity(first / "observer-0")
+    second_identity = collect_module._model_identity(second / "observer-1")
     assert first_identity == second_identity
+
+    (second / "observer-1" / "model.safetensors").write_bytes(b"different frozen wt")
+    assert len(b"different frozen wt") == len(b"same frozen weights")
+    assert collect_module._model_identity(second / "observer-1") != first_identity
 
 
 def test_save_rejects_response_misaligned_mechanism_trace(tmp_path):
@@ -245,3 +316,34 @@ def test_save_rejects_response_misaligned_mechanism_trace(tmp_path):
         collect_module._save(tmp_path / "sample.pt", capture)
 
     assert not (tmp_path / "sample.pt").exists()
+
+
+def test_save_rejects_prompt_misaligned_evidence_mask(tmp_path):
+    capture = _capture(torch.tensor([1, 2, 3]))
+    capture["evidence_mask"] = torch.zeros(3, dtype=torch.bool)
+
+    with pytest.raises(ValueError, match="evidence_mask is not prompt-token aligned"):
+        collect_module._save(tmp_path / "sample.pt", capture)
+
+    assert not (tmp_path / "sample.pt").exists()
+
+
+def test_resume_index_requires_unique_ids_and_existing_artifacts(tmp_path):
+    root = tmp_path / "state"
+    samples = root / "samples"
+    samples.mkdir(parents=True)
+    (samples / "first.pt").write_bytes(b"artifact")
+    row = {"sample_id": "first", "path": "first.pt"}
+
+    collect_module._validate_resume_index(root, [row])
+    with pytest.raises(ValueError, match="duplicate sample IDs"):
+        collect_module._validate_resume_index(root, [row, row])
+    with pytest.raises(ValueError, match="missing sample artifact"):
+        collect_module._validate_resume_index(
+            root, [{"sample_id": "missing", "path": "missing.pt"}]
+        )
+    with pytest.raises(ValueError, match="size-changed"):
+        collect_module._validate_resume_index(
+            root,
+            [{"sample_id": "first", "path": "first.pt", "bytes": 1}],
+        )
