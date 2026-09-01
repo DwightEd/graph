@@ -143,7 +143,7 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     assert first["selected_samples_seen"] == 3
     assert first["eligible_samples"] is None
     assert first["complete"] is False
-    assert first["version"] == 5
+    assert first["version"] == collect_module.VERSION
     assert first["labels_used"] is False
     assert first["task_types"] == ["QA", "Summary", "Data2txt"]
     assert capture_calls == [10, 11, 12]

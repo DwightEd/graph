@@ -368,7 +368,8 @@ def test_sample_plot_consumes_only_the_new_compact_trace(tmp_path, monkeypatch):
     )
     assert result["sample_id"] == "sample"
     assert seen["record"]["token_text"] == ["t3", "t4"]
-    assert seen["record"]["source_flow"].shape == (2, 2)
+    assert seen["record"]["source_flow"].shape == (1, 2)
+    assert seen["record"]["source_token_text"] == ["0:t0"]
     assert "route_interaction" in seen["record"]
     assert "history_support" in seen["record"]
     assert seen["layers"]["edge_route_balance"].shape == (3, 2)

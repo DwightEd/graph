@@ -827,7 +827,11 @@ def plot_saved_sample(
         )
         edge_total = _array(trace["edge_role_energy"]).sum(axis=(0, 2, 3))
         source_flow /= edge_total[:, None] + _EPS
-        shown = np.argsort(source_flow.sum(axis=0))[-16:][::-1]
+        source_strength = source_flow.sum(axis=0)
+        active_sources = np.flatnonzero(source_strength > 0)
+        shown = active_sources[
+            np.argsort(source_strength[active_sources], kind="stable")[-16:][::-1]
+        ]
         contrasts = factorial_contrasts(artifact)
         token_ids = _array(artifact["token_ids"])
         record = {
