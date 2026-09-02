@@ -1,32 +1,36 @@
-"""Single-pass teacher-forced capture of exact local route messages."""
+"""One teacher-forced replay of the residual-register route graph."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import torch
 
+from .graph import GraphSequence, gram, mlp_relation, route_topology
 from .messages import (
-    MessageStatistics,
-    MLPDiagnostics,
     PromptCarriers,
-    message_statistics,
-    mlp_diagnostics,
-    output_projection_blocks,
     output_projection_gram,
     prompt_carriers,
-    reconstruction_error,
-    selected_chunk_messages,
     source_write_norms,
+)
+from .registers import (
+    ENDOGENOUS,
+    ORIGIN_NAMES,
+    add_attention,
+    add_mlp,
+    final_readout_contributions,
+    initialize_registers,
+    project_register_values,
+    rmsnorm_registers,
+    route_register_values,
 )
 
 
 @dataclass(frozen=True)
 class PredictionEvents:
-    """Physical predictor coordinates and the response tokens they predict."""
+    """Physical query positions and the response tokens they predict."""
 
     query_position: torch.Tensor
     prediction_position: torch.Tensor
@@ -34,75 +38,49 @@ class PredictionEvents:
 
 
 @dataclass(frozen=True)
-class RouteMessageChunk:
-    """Short-lived exact route factors emitted once per layer and query chunk."""
+class PromptRouteControl:
+    """The earlier prompt-route collapse geometry, retained as a control."""
 
-    layer: int
-    query_position: torch.Tensor
-    prediction_position: torch.Tensor
-    statistics: MessageStatistics
-    post_attention_state: torch.Tensor
-    reconstruction_max_abs: torch.Tensor
-    reconstruction_relative_l2: torch.Tensor
-    mlp: MLPDiagnostics
-    attention: torch.Tensor
-    values: torch.Tensor
-    output_blocks: torch.Tensor
-
-    def selected_messages(
-        self,
-        query: torch.Tensor,
-        head: torch.Tensor,
-        source: torch.Tensor,
-    ) -> torch.Tensor:
-        """Materialize selected vectors; ``query`` indexes this local chunk."""
-
-        return selected_chunk_messages(
-            self.attention,
-            self.values,
-            self.output_blocks,
-            query,
-            head,
-            source,
-        )
+    attention: PromptCarriers
+    functional: PromptCarriers
 
 
 @dataclass(frozen=True)
-class ResponseTrace:
-    """Compact response-only diagnostics from one frozen observer replay."""
+class RegisterGraphTrace:
+    """Graph state and native output controls from one observed forward pass."""
 
     token_ids: torch.Tensor
     response_start: int
     events: PredictionEvents
+    graph: GraphSequence
     target_logprob: torch.Tensor
     target_confidence: torch.Tensor
     target_margin: torch.Tensor
-    reconstruction_max_abs: torch.Tensor
-    reconstruction_relative_l2: torch.Tensor
-    mlp_write_norm: torch.Tensor
-    mlp_relative_norm: torch.Tensor
-    mlp_state_cosine: torch.Tensor
-    attention_prompt: PromptCarriers
-    functional_prompt: PromptCarriers
+    prompt_route: PromptRouteControl
+    attention_write_error: torch.Tensor
+    register_closure_error: torch.Tensor
 
 
 def prediction_events(
-    token_ids: Sequence[int] | torch.Tensor,
+    token_ids: torch.Tensor,
     response_start: int,
 ) -> PredictionEvents:
-    """Map response token ``p`` to its physical predictor query ``q=p-1``."""
+    """Map response token ``p`` to its causal predictor query ``p - 1``."""
 
     ids = torch.as_tensor(token_ids, dtype=torch.long, device="cpu")
     prediction = torch.arange(response_start, len(ids), dtype=torch.long)
-    return PredictionEvents(
-        query_position=prediction - 1,
-        prediction_position=prediction,
-        target_id=ids[prediction],
-    )
+    return PredictionEvents(prediction - 1, prediction, ids[prediction])
 
 
-class RouteMessageReplay:
-    """Replay a frozen bias-free Llama once and stream exact route chunks."""
+def relative_error(derived: torch.Tensor, native: torch.Tensor) -> torch.Tensor:
+    """Per-row relative L2 error used to expose, not hide, ledger closure."""
+
+    difference = derived.float() - native.float()
+    return difference.norm(dim=-1) / native.float().norm(dim=-1).clamp_min(1e-12)
+
+
+class RegisterGraphReplay:
+    """Stream an additive origin ledger through a frozen bias-free Llama."""
 
     def __init__(self, model: Any) -> None:
         self.model = model.eval()
@@ -113,11 +91,15 @@ class RouteMessageReplay:
         self.kv_heads = int(getattr(config, "num_key_value_heads", self.heads))
         self.head_dim = self.layers[0].self_attn.v_proj.out_features // self.kv_heads
         if int(getattr(config, "pretraining_tp", 1)) != 1:
-            raise ValueError("pretraining_tp must be one for exact value hooks")
+            raise ValueError("pretraining_tp must be one")
         if self.heads % self.kv_heads:
             raise ValueError("query heads must be divisible by KV heads")
-        if any(layer.self_attn.o_proj.bias is not None for layer in self.layers):
-            raise ValueError("exact edge reconstruction requires bias-free W_O")
+        if any(
+            layer.self_attn.v_proj.bias is not None
+            or layer.self_attn.o_proj.bias is not None
+            for layer in self.layers
+        ):
+            raise ValueError("the additive ledger requires bias-free V and W_O")
         self.output_grams = tuple(
             output_projection_gram(
                 layer.self_attn.o_proj.weight,
@@ -134,7 +116,7 @@ class RouteMessageReplay:
         *,
         device: str = "cuda:0",
         dtype: torch.dtype = torch.bfloat16,
-    ) -> RouteMessageReplay:
+    ) -> RegisterGraphReplay:
         from transformers import AutoModelForCausalLM
 
         model = AutoModelForCausalLM.from_pretrained(
@@ -149,88 +131,97 @@ class RouteMessageReplay:
     def device(self) -> torch.device:
         return self.model.get_input_embeddings().weight.device
 
-    def target_scores(
+    def score_targets(
         self,
         hidden: torch.Tensor,
-        target_id: torch.Tensor,
-        chunk_size: int,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Score observed targets with the model's native LM-head arithmetic."""
+        target: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Use the native LM head to score observed response tokens."""
 
-        logprob, confidence, margin = [], [], []
-        weight_dtype = self.model.lm_head.weight.dtype
-        for start in range(0, len(hidden), chunk_size):
-            stop = min(start + chunk_size, len(hidden))
-            logits = self.model.lm_head(hidden[start:stop].to(weight_dtype)).float()
-            target = target_id[start:stop]
-            selected = logits.gather(1, target[:, None]).squeeze(1)
-            competitor = logits.scatter(1, target[:, None], -torch.inf).max(1).values
-            selected_logprob = selected - logits.logsumexp(1)
-            logprob.append(selected_logprob.cpu())
-            confidence.append(selected_logprob.exp().cpu())
-            margin.append((selected - competitor).cpu())
-        return torch.cat(logprob), torch.cat(confidence), torch.cat(margin)
+        logits = self.model.lm_head(hidden.to(self.model.lm_head.weight.dtype)).float()
+        target = target.to(logits.device)
+        selected = logits.gather(1, target[:, None]).squeeze(1)
+        alternatives = logits.clone()
+        alternatives.scatter_(1, target[:, None], -torch.inf)
+        competitor = alternatives.argmax(1)
+        competitor_logit = logits.gather(1, competitor[:, None]).squeeze(1)
+        logprob = selected - logits.logsumexp(1)
+        return logprob, logprob.exp(), selected - competitor_logit, competitor
 
     def capture(
         self,
-        token_ids: Sequence[int] | torch.Tensor,
+        token_ids: torch.Tensor,
         response_start: int,
+        evidence_mask: torch.Tensor,
         *,
-        predictor_chunk: int = 64,
-        logit_chunk: int = 32,
-        consume_chunk: Callable[[RouteMessageChunk], None] | None = None,
-    ) -> ResponseTrace:
-        """Capture every predictor row and retain only response diagnostics.
+        predictor_chunk: int = 16,
+    ) -> RegisterGraphTrace:
+        """Build one graph sequence without reading a hallucination label.
 
-        ``consume_chunk`` runs synchronously while dense scalar accounts and
-        AVWO factors are live.  It must sparsify/propagate prompt rows before
-        returning; retaining the chunk would defeat bounded-memory replay.
+        The dense source axis is consumed while attention and dynamic values are
+        live. The saved object contains the exact register ledger plus the graph
+        geometry fixed by the method; no top-k edge controls its score.
         """
 
         token_ids = torch.as_tensor(token_ids, dtype=torch.long, device="cpu")
+        evidence_mask = torch.as_tensor(evidence_mask, dtype=torch.bool, device="cpu")
         if token_ids.ndim != 1 or not 0 < response_start < len(token_ids):
-            raise ValueError("token_ids/response_start do not define a response")
-        if min(predictor_chunk, logit_chunk) <= 0:
-            raise ValueError("chunk sizes must be positive")
+            raise ValueError("token_ids and response_start do not define a response")
+        if evidence_mask.shape != (response_start,):
+            raise ValueError("evidence_mask must describe the complete prompt")
+        if predictor_chunk <= 0:
+            raise ValueError("predictor_chunk must be positive")
 
         events = prediction_events(token_ids, response_start)
         response_tokens = len(events.target_id)
         source_tokens = len(token_ids) - 1
         layer_count = len(self.layers)
+        channels = len(ORIGIN_NAMES)
+        hidden_size = int(self.model.config.hidden_size)
         ids = token_ids.to(self.device)
-        value_dtype = self.model.get_input_embeddings().weight.dtype
 
-        values = [
+        value_cache = [
             torch.empty(
                 source_tokens,
+                channels,
                 self.kv_heads,
                 self.head_dim,
-                dtype=value_dtype,
-                device=self.device,
-            )
-            for _ in self.layers
-        ]
-        source_norm = [
-            torch.empty(
-                self.heads,
-                source_tokens,
                 dtype=torch.float32,
                 device=self.device,
             )
             for _ in self.layers
         ]
 
-        response_shape = (layer_count, response_tokens)
-        reconstruction_max_abs = torch.empty(response_shape)
-        reconstruction_relative_l2 = torch.empty(response_shape)
-        mlp_write_norm = torch.empty(response_shape)
-        mlp_relative_norm = torch.empty(response_shape)
-        mlp_state_cosine = torch.empty(response_shape)
+        node_embedding = torch.empty(response_tokens, channels, hidden_size)
+        residual_gram = torch.empty(
+            response_tokens, layer_count + 1, channels, channels
+        )
+        head_write_gram = torch.empty(
+            response_tokens,
+            layer_count,
+            self.heads,
+            channels,
+            channels,
+        )
+        topology = torch.empty(
+            response_tokens,
+            layer_count,
+            self.heads,
+            channels,
+            7,
+        )
+        mlp_geometry = torch.empty(response_tokens, layer_count, channels + 1)
+        margin_contribution = torch.empty(response_tokens, channels)
+        target_logprob = torch.empty(response_tokens)
+        target_confidence = torch.empty(response_tokens)
+        target_margin = torch.empty(response_tokens)
+        attention_write_error = torch.empty(layer_count, response_tokens)
+        register_closure_error = torch.empty(layer_count + 1, response_tokens)
 
         def empty_carriers() -> PromptCarriers:
             return PromptCarriers(
-                effective_sources=torch.empty(response_shape),
-                effective_rank=torch.empty(response_shape),
+                effective_sources=torch.empty(layer_count, response_tokens),
+                effective_rank=torch.empty(layer_count, response_tokens),
                 anchor_source=torch.empty(
                     layer_count, response_tokens, self.heads, dtype=torch.int32
                 ),
@@ -238,158 +229,198 @@ class RouteMessageReplay:
 
         attention_prompt = empty_carriers()
         functional_prompt = empty_carriers()
-        target_logprob = torch.empty(response_tokens)
-        target_confidence = torch.empty(response_tokens)
-        target_margin = torch.empty(response_tokens)
 
-        attention_by_layer: list[torch.Tensor | None] = [None] * layer_count
-        native_write_by_layer: list[torch.Tensor | None] = [None] * layer_count
-        mid_by_layer: list[torch.Tensor | None] = [None] * layer_count
-        blocks_by_layer: list[torch.Tensor | None] = [None] * layer_count
+        current: torch.Tensor | None = None
+        layer_input: torch.Tensor | None = None
+        final_registers: torch.Tensor | None = None
+        native_head_context: list[torch.Tensor | None] = [None] * layer_count
         query_start = query_stop = 0
         handles = []
 
-        def response_window() -> tuple[int, int, int] | None:
-            local_start = max(response_start - 1 - query_start, 0)
-            if query_start + local_start >= query_stop:
-                return None
-            row_start = query_start + local_start - (response_start - 1)
-            row_stop = row_start + query_stop - query_start - local_start
-            return local_start, row_start, row_stop
+        def response_rows() -> tuple[torch.Tensor, torch.Tensor]:
+            position = torch.arange(query_start, query_stop, device=self.device)
+            local = torch.nonzero(position >= response_start - 1, as_tuple=True)[0]
+            slots = position[local] - response_start + 1
+            return local, slots
 
-        def value_hook(index: int):
-            def hook(_module: Any, _args: Any, output: torch.Tensor) -> None:
-                current = output[0].reshape(
-                    query_stop - query_start, self.kv_heads, self.head_dim
+        def input_norm_hook(index: int):
+            def hook(module: Any, args: tuple[torch.Tensor, ...], output: Any) -> None:
+                nonlocal current, layer_input
+                native = args[0][0]
+                position = torch.arange(query_start, query_stop, device=self.device)
+                if index == 0:
+                    current = initialize_registers(
+                        native,
+                        position,
+                        evidence_mask,
+                        response_start,
+                    )
+                assert current is not None
+                current[:, ENDOGENOUS] += native.float() - current.sum(1)
+                layer_input = native
+                normalized = rmsnorm_registers(current, native, module)
+                value_projection = self.layers[index].self_attn.v_proj
+                native_value = value_projection(output[0])
+                value_cache[index][query_start:query_stop].copy_(
+                    project_register_values(
+                        normalized,
+                        value_projection,
+                        self.kv_heads,
+                        self.head_dim,
+                        native_value,
+                    )
                 )
-                values[index][query_start:query_stop].copy_(current)
-                blocks = output_projection_blocks(
-                    self.layers[index].self_attn.o_proj.weight,
-                    self.heads,
-                    self.head_dim,
-                )
-                blocks_by_layer[index] = blocks
-                source_norm[index][:, query_start:query_stop].copy_(
-                    source_write_norms(current, self.output_grams[index])
-                )
+                local, slots = response_rows()
+                if len(local):
+                    slot = slots.cpu()
+                    residual_gram[slot, index] = gram(current[local]).detach().cpu()
+                    register_closure_error[index, slot] = (
+                        relative_error(current[local].sum(1), native[local])
+                        .detach()
+                        .cpu()
+                    )
 
             return hook
 
         def attention_hook(index: int):
             def hook(_module: Any, _args: Any, output: Any) -> None:
-                native_write_by_layer[index] = output[0][0]
-                attention_by_layer[index] = output[1][0, :, :, :query_stop]
+                nonlocal current
+                assert current is not None and layer_input is not None
+                attention = output[1][0, :, :, :query_stop]
+                native_write = output[0][0]
+                prefix_values = value_cache[index][:query_stop]
+                writes, head_context = route_register_values(
+                    attention,
+                    prefix_values,
+                    self.layers[index].self_attn.o_proj.weight,
+                    native_head_context[index],
+                )
+                native_mid = layer_input + native_write
+                local, slots = response_rows()
+                if len(local):
+                    slot = slots.cpu()
+                    metric = self.output_grams[index]
+                    head_gram = torch.einsum(
+                        "qhcd,hde,qhfe->qhcf",
+                        head_context.float(),
+                        metric.float(),
+                        head_context.float(),
+                    )
+                    head_write_gram[slot, index] = head_gram[local].detach().cpu()
+                    response_position = torch.arange(
+                        query_start, query_stop, device=self.device
+                    )[local]
+                    topology[slot, index] = (
+                        route_topology(
+                            attention[:, local],
+                            prefix_values,
+                            metric,
+                            response_position,
+                            response_start,
+                        )
+                        .detach()
+                        .cpu()
+                    )
+                    attention_write_error[index, slot] = (
+                        relative_error(writes[local].sum(1), native_write[local])
+                        .detach()
+                        .cpu()
+                    )
+
+                    raw = prompt_carriers(
+                        attention[:, local].float().permute(1, 0, 2),
+                        response_position,
+                        response_start,
+                    )
+                    total_values = prefix_values.sum(1)
+                    source_norm = source_write_norms(total_values, metric)
+                    capacity = (
+                        attention[:, local].float().permute(1, 0, 2)
+                        * source_norm[None, :, :query_stop]
+                    )
+                    functional = prompt_carriers(
+                        capacity,
+                        response_position,
+                        response_start,
+                    )
+                    for target, observed in (
+                        (attention_prompt, raw),
+                        (functional_prompt, functional),
+                    ):
+                        target.effective_sources[index, slot] = (
+                            observed.effective_sources.detach().cpu()
+                        )
+                        target.effective_rank[index, slot] = (
+                            observed.effective_rank.detach().cpu()
+                        )
+                        target.anchor_source[index, slot] = (
+                            observed.anchor_source.to(torch.int32).detach().cpu()
+                        )
+
+                current = add_attention(current, writes, native_mid)
 
             return hook
 
-        def post_attention_hook(index: int):
+        def output_projection_hook(index: int):
             def hook(_module: Any, args: tuple[torch.Tensor, ...]) -> None:
-                mid_by_layer[index] = args[0][0]
+                native_head_context[index] = args[0][0].reshape(
+                    query_stop - query_start,
+                    self.heads,
+                    self.head_dim,
+                )
 
             return hook
 
         def mlp_hook(index: int):
             def hook(_module: Any, _args: Any, output: torch.Tensor) -> None:
-                attention = attention_by_layer[index]
-                native_write = native_write_by_layer[index]
-                mid = mid_by_layer[index]
-                blocks = blocks_by_layer[index]
-                if any(
-                    value is None for value in (attention, native_write, mid, blocks)
-                ):
-                    raise RuntimeError("decoder hooks did not capture one route layer")
-
-                prefix_values = values[index][:query_stop]
-                statistics = message_statistics(
-                    attention,
-                    prefix_values,
-                    blocks,
-                    mid,
-                    source_norm[index][:, :query_stop],
-                )
-                maximum, relative = reconstruction_error(
-                    statistics.attention_write, native_write
-                )
-                mlp = mlp_diagnostics(mid, output[0])
-                query = torch.arange(
-                    query_start, query_stop, dtype=torch.long, device=self.device
-                )
-
-                if consume_chunk is not None:
-                    consume_chunk(
-                        RouteMessageChunk(
-                            layer=index,
-                            query_position=query,
-                            prediction_position=query + 1,
-                            statistics=statistics,
-                            post_attention_state=mid.float(),
-                            reconstruction_max_abs=maximum,
-                            reconstruction_relative_l2=relative,
-                            mlp=mlp,
-                            attention=attention,
-                            values=prefix_values,
-                            output_blocks=blocks,
-                        )
+                nonlocal current
+                assert current is not None
+                native_mlp = output[0]
+                local, slots = response_rows()
+                if len(local):
+                    mlp_geometry[slots.cpu(), index] = (
+                        mlp_relation(current[local], native_mlp[local]).detach().cpu()
                     )
-
-                window = response_window()
-                if window is not None:
-                    local, row_start, row_stop = window
-                    location = (index, slice(row_start, row_stop))
-                    reconstruction_max_abs[location].copy_(maximum[local:].cpu())
-                    reconstruction_relative_l2[location].copy_(relative[local:].cpu())
-                    mlp_write_norm[location].copy_(mlp.write_norm[local:].cpu())
-                    mlp_relative_norm[location].copy_(mlp.relative_norm[local:].cpu())
-                    mlp_state_cosine[location].copy_(mlp.state_cosine[local:].cpu())
-
-                    response_query = query[local:]
-                    families = (
-                        (
-                            attention_prompt,
-                            prompt_carriers(
-                                attention[:, local:].float().permute(1, 0, 2),
-                                response_query,
-                                response_start,
-                            ),
-                        ),
-                        (
-                            functional_prompt,
-                            prompt_carriers(
-                                statistics.capacity[local:],
-                                response_query,
-                                response_start,
-                            ),
-                        ),
+                native_mid = current.sum(1).to(native_mlp.dtype)
+                native_output = (native_mid + native_mlp).float()
+                current = add_mlp(current, native_mlp, native_output)
+                if len(local):
+                    slot = slots.cpu()
+                    residual_gram[slot, index + 1] = gram(current[local]).detach().cpu()
+                    register_closure_error[index + 1, slot] = (
+                        relative_error(current[local].sum(1), native_output[local])
+                        .detach()
+                        .cpu()
                     )
-                    for target, observed in families:
-                        target.effective_sources[location].copy_(
-                            observed.effective_sources.cpu()
-                        )
-                        target.effective_rank[location].copy_(
-                            observed.effective_rank.cpu()
-                        )
-                        target.anchor_source[location].copy_(
-                            observed.anchor_source.to(dtype=torch.int32, device="cpu")
-                        )
-
-                attention_by_layer[index] = None
-                native_write_by_layer[index] = None
-                mid_by_layer[index] = None
-                blocks_by_layer[index] = None
 
             return hook
+
+        def final_norm_hook(
+            module: Any,
+            args: tuple[torch.Tensor, ...],
+            _output: Any,
+        ) -> None:
+            nonlocal current, final_registers
+            assert current is not None
+            native = args[0][0]
+            current[:, ENDOGENOUS] += native.float() - current.sum(1)
+            final_registers = rmsnorm_registers(current, native, module)
+            local, slots = response_rows()
+            if len(local):
+                node_embedding[slots.cpu()] = final_registers[local].detach().cpu()
 
         for index, layer in enumerate(self.layers):
             handles.extend(
                 (
-                    layer.self_attn.v_proj.register_forward_hook(value_hook(index)),
-                    layer.self_attn.register_forward_hook(attention_hook(index)),
-                    layer.post_attention_layernorm.register_forward_pre_hook(
-                        post_attention_hook(index)
+                    layer.input_layernorm.register_forward_hook(input_norm_hook(index)),
+                    layer.self_attn.o_proj.register_forward_pre_hook(
+                        output_projection_hook(index)
                     ),
+                    layer.self_attn.register_forward_hook(attention_hook(index)),
                     layer.mlp.register_forward_hook(mlp_hook(index)),
                 )
             )
+        handles.append(self.model.model.norm.register_forward_hook(final_norm_hook))
 
         try:
             from transformers.cache_utils import DynamicCache
@@ -398,6 +429,8 @@ class RouteMessageReplay:
             with torch.inference_mode():
                 for query_start in range(0, source_tokens, predictor_chunk):
                     query_stop = min(query_start + predictor_chunk, source_tokens)
+                    current = None
+                    final_registers = None
                     output = self.model.model(
                         input_ids=ids[None, query_start:query_stop],
                         attention_mask=torch.ones(
@@ -410,34 +443,57 @@ class RouteMessageReplay:
                         return_dict=True,
                     )
                     past = output.past_key_values
-
-                    window = response_window()
-                    if window is None:
+                    local, slots = response_rows()
+                    if not len(local):
                         continue
-                    local, row_start, row_stop = window
-                    target = ids[response_start + row_start : response_start + row_stop]
-                    scores = self.target_scores(
-                        output.last_hidden_state[0, local:], target, logit_chunk
+                    assert final_registers is not None
+                    slot = slots.cpu()
+                    target = events.target_id[slot].to(self.device)
+                    logprob, confidence, margin, competitor = self.score_targets(
+                        output.last_hidden_state[0, local],
+                        target,
                     )
-                    target_logprob[row_start:row_stop].copy_(scores[0])
-                    target_confidence[row_start:row_stop].copy_(scores[1])
-                    target_margin[row_start:row_stop].copy_(scores[2])
+                    target_logprob[slot] = logprob.detach().cpu()
+                    target_confidence[slot] = confidence.detach().cpu()
+                    target_margin[slot] = margin.detach().cpu()
+                    contribution = final_readout_contributions(
+                        final_registers[local],
+                        self.model.lm_head.weight,
+                        target,
+                        competitor,
+                    )
+                    contribution[:, ENDOGENOUS] += margin - contribution.sum(1)
+                    margin_contribution[slot] = contribution.detach().cpu()
         finally:
             for handle in handles:
                 handle.remove()
 
-        return ResponseTrace(
+        valid = torch.zeros(response_tokens, dtype=torch.bool)
+        valid[2:] = True
+        graph = GraphSequence(
+            query_position=events.query_position,
+            prediction_position=events.prediction_position,
+            node_embedding=node_embedding,
+            residual_gram=residual_gram,
+            head_write_gram=head_write_gram,
+            route_topology=topology,
+            mlp_relation=mlp_geometry,
+            margin_contribution=margin_contribution,
+            valid=valid,
+        )
+        return RegisterGraphTrace(
             token_ids=token_ids,
             response_start=response_start,
             events=events,
+            graph=graph,
             target_logprob=target_logprob,
             target_confidence=target_confidence,
             target_margin=target_margin,
-            reconstruction_max_abs=reconstruction_max_abs,
-            reconstruction_relative_l2=reconstruction_relative_l2,
-            mlp_write_norm=mlp_write_norm,
-            mlp_relative_norm=mlp_relative_norm,
-            mlp_state_cosine=mlp_state_cosine,
-            attention_prompt=attention_prompt,
-            functional_prompt=functional_prompt,
+            prompt_route=PromptRouteControl(attention_prompt, functional_prompt),
+            attention_write_error=attention_write_error,
+            register_closure_error=register_closure_error,
         )
+
+
+# Narrow import compatibility alias; there is still only one implementation.
+RouteMessageReplay = RegisterGraphReplay

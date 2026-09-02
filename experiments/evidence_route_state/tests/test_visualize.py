@@ -2,12 +2,13 @@ from pathlib import Path
 
 import numpy as np
 
+from experiments.evidence_route_state.registers import ORIGIN_NAMES
 from experiments.evidence_route_state.visualize import (
+    choose_prediction,
+    frame_view,
     plot_sample,
     read_capture,
-    read_posterior,
-    route_matrices,
-    source_labels,
+    read_score,
 )
 
 
@@ -16,45 +17,40 @@ class Tokenizer:
         return [f"t{token_id}" for token_id in token_ids]
 
 
-def sample_arrays() -> dict[str, np.ndarray]:
-    layers, tokens, heads = 2, 3, 2
-    direct = np.zeros((layers, tokens, heads), dtype=np.float32)
-    relay = np.zeros_like(direct)
-    feedback = np.zeros_like(direct)
-    predictor = np.zeros_like(direct)
-    unknown = np.zeros_like(direct)
-    direct[:, 2] = [[0.30, 0.10], [0.20, 0.15]]
-    relay[:, 2] = [[0.20, 0.15], [0.10, 0.20]]
-    feedback[:, 2] = [[0.10, 0.35], [0.40, 0.20]]
-    predictor[:, 2] = 0.05
-    unknown[:, 2] = [[0.10, 0.05], [0.05, 0.10]]
+def grams(vectors: np.ndarray) -> np.ndarray:
+    return vectors @ np.swapaxes(vectors, -1, -2)
 
-    # Rows are ordered by layer, then prediction.  Only positions 5 use the
-    # explicit edges below; source 2 is intentionally absent in the tail.
-    unknown_capacity = np.zeros((6, heads), dtype=np.float32)
-    unknown_capacity[2] = [0.10, 0.20]
-    unknown_capacity[5] = [0.25, 0.35]
+
+def sample_arrays() -> dict[str, np.ndarray]:
+    tokens, layers, heads, channels, hidden = 3, 2, 2, 4, 3
+    node = np.arange(tokens * channels * hidden, dtype=np.float32).reshape(
+        tokens, channels, hidden
+    )
+    residual_vectors = np.arange(
+        tokens * (layers + 1) * channels * hidden, dtype=np.float32
+    ).reshape(tokens, layers + 1, channels, hidden)
+    head_vectors = np.arange(
+        tokens * layers * heads * channels * hidden, dtype=np.float32
+    ).reshape(tokens, layers, heads, channels, hidden)
+    topology = np.arange(
+        tokens * layers * heads * channels * 7, dtype=np.float32
+    ).reshape(tokens, layers, heads, channels, 7)
+    topology[..., 1] = np.log1p(topology[..., 1])
     return {
         "token_ids": np.arange(10, 16),
-        "response_start": np.asarray(3),
-        "prompt_token_unit": np.array([0, 1, 1]),
-        "evidence_name": np.array(["document sentence"]),
+        "query_position": np.array([2, 3, 4]),
         "prediction_position": np.array([3, 4, 5]),
-        "raw_route_contraction": np.array([0.2, 0.6, 0.9]),
-        "takeover": np.array([0.0, 0.2, 0.8]),
         "valid": np.array([False, False, True]),
-        "prompt_evidence": direct,
-        "grounded_response_relay": relay,
-        "unrooted_response_feedback": feedback,
-        "predictor_self": predictor,
-        "unknown_route": unknown,
-        "graph_row_layer": np.array([0, 0, 0, 1, 1, 1]),
-        "graph_row_prediction_position": np.array([3, 4, 5, 3, 4, 5]),
-        "graph_edge_start": np.array([0, 0, 0, 3, 3, 3, 5]),
-        "graph_edge_head": np.array([0, 0, 1, 0, 1]),
-        "graph_edge_source": np.array([0, 3, 4, 1, 4]),
-        "graph_edge_capacity": np.array([0.3, 0.4, 0.5, 0.6, 0.7]),
-        "graph_unknown_capacity": unknown_capacity,
+        "node_embedding": node,
+        "residual_gram": grams(residual_vectors),
+        "head_write_gram": grams(head_vectors),
+        "route_topology": topology,
+        "mlp_relation": np.arange(
+            tokens * layers * (channels + 1), dtype=np.float32
+        ).reshape(tokens, layers, channels + 1),
+        "margin_contribution": np.arange(tokens * channels, dtype=np.float32).reshape(
+            tokens, channels
+        ),
     }
 
 
@@ -62,60 +58,61 @@ def write_capture(path: Path) -> None:
     np.savez(path, **sample_arrays())
 
 
-def test_route_view_keeps_exact_sources_and_endpoint_free_tail(tmp_path):
+def test_frame_view_preserves_every_graph_axis(tmp_path):
     path = tmp_path / "sample.npz"
     write_capture(path)
     capture = read_capture(path)
-    view = route_matrices(capture, prediction_position=5)
+    view = frame_view(capture, prediction_position=5)
 
-    assert view["account_name"] == (
-        "prompt-carried evidence",
-        "grounded relay",
-        "unrooted feedback",
-        "predictor self",
-        "unknown",
+    assert view.query_position == 4
+    assert view.prediction_position == 5
+    assert view.node_norm.shape == (len(ORIGIN_NAMES),)
+    assert view.residual_cosine.shape == (3, 4, 4)
+    assert view.head_write_cosine.shape == (2, 2, 4, 4)
+    assert view.route_topology.shape == (2, 2, 4, 7)
+    assert view.mlp_relation.shape == (2, 5)
+    assert view.margin_contribution.shape == (4,)
+    np.testing.assert_array_equal(
+        view.route_topology,
+        capture["route_topology"][2],
     )
-    np.testing.assert_allclose(view["account"][1], [0.10, 0.15, 0.35, 0.05, 0.05])
-    assert view["source_position"] == (0, 1, 3, 4, None)
-    assert 2 not in view["source_position"]
-
-    endpoint = view["endpoint_share"]
-    np.testing.assert_allclose(endpoint[0, [0, 2, 4]], [0.375, 0.5, 0.125])
-    np.testing.assert_allclose(endpoint[3, [3, 4]], [0.7 / 1.05, 0.35 / 1.05])
-    assert endpoint[:, 1].sum() > 0  # exact evidence endpoint at source 1
-
-    labels = source_labels(
-        capture,
-        view["source_position"],
-        Tokenizer().convert_ids_to_tokens(capture["token_ids"].tolist()),
-        query_position=4,
+    np.testing.assert_allclose(
+        np.diagonal(view.head_write_cosine, axis1=-2, axis2=-1),
+        1.0,
+        atol=2e-7,
     )
-    assert labels[0].endswith("other prompt")
-    assert labels[1].endswith("document sentence")
-    assert labels[2].endswith("history r0")
-    assert labels[3].endswith("predictor self")
-    assert labels[-1] == "unknown tail\n(no endpoint)"
+    assert not any(name.startswith("graph_edge") for name in capture)
 
 
-def test_sample_figure_reads_capture_and_optional_frozen_posterior(tmp_path):
-    capture = tmp_path / "sample.npz"
-    output = tmp_path / "sample.png"
+def test_prediction_choice_uses_only_valid_frozen_scores():
+    capture = sample_arrays()
+
+    assert choose_prediction(capture, None) == 5
+    assert choose_prediction(capture, np.array([100.0, 50.0, 1.0])) == 5
+
+
+def test_read_score_restores_response_order(tmp_path):
     scores = tmp_path / "scores.npz"
-    write_capture(capture)
     np.savez(
         scores,
         sample_id=np.array(["other", "sample", "sample", "sample"]),
         token_index=np.array([0, 2, 0, 1]),
-        captured_posterior=np.array([0.0, 0.95, 0.05, 0.3]),
+        conditional_graph_energy=np.array([0.0, 0.95, 0.05, 0.3]),
     )
 
-    posterior = read_posterior(scores, "sample")
-    np.testing.assert_array_equal(posterior, [0.05, 0.3, 0.95])
+    np.testing.assert_array_equal(read_score(scores, "sample"), [0.05, 0.3, 0.95])
+
+
+def test_sample_figure_renders_compact_graph_state(tmp_path):
+    capture = tmp_path / "sample.npz"
+    output = tmp_path / "sample.png"
+    write_capture(capture)
+
     result = plot_sample(
         capture,
         Tokenizer(),
         output,
-        captured_posterior=posterior,
+        graph_score=np.array([0.05, 0.3, 0.95]),
         sample_name="sample",
     )
 

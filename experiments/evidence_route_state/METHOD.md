@@ -1,360 +1,640 @@
-# Evidence-conditioned route-state graph
+# Registered information-route graph
 
 ## Research question
 
-The method tests one mechanism, rather than treating every hallucination as the
-same failure:
+The method does not assume that hallucination has one scalar signature. A
+focused route can be correct in extractive QA, span summarization, or
+record-to-text generation; an answer-dominated representation can likewise be
+either a valid completion or an unsupported one. The question is therefore:
 
-> Does a generated token enter a narrow route state that is sustained by
-> response history lacking prompt-evidence ancestry?
+> Is the complete information-route graph at the current prediction a normal
+> next state for this task, position, prompt scale, and the two preceding route
+> states?
 
-A narrow route alone is not anomalous. Extractive QA, a summary of one source
-span, and verbalization of one structured field all require narrow routing.
-The distinction is whether that focus remains evidence-rooted or becomes an
-unrooted autoregressive feedback chain.
+The graph separates where information originated, where attention selected it,
+what was actually written into the residual stream, what the MLP added, and
+which origin supported the final token margin. The detector models the normal
+multimodal transitions of that graph without hallucination labels.
 
-The output is a token-level mechanism-risk score. It is neither a proof of
-factual error nor a complete causal decomposition of the model.
+The two-pathway observation in prior work motivates multimodality; it does not
+justify forcing samples into two discrete pathway classes. This method uses
+neither a truthfulness probe nor probe-loss gradients.
 
-### Frozen predictions
+## Frozen claims and boundaries
 
-The method is worth keeping only if the following predictions survive held-out
-evaluation; they are not adjusted after reading hallucination labels.
+The proposed contribution is the combination of:
 
-| Prediction | Required comparison | Failure meaning |
-|---|---|---|
-| Actual writes matter in the inherited collapse audit | equation-locked AVWO collapse beats equation-locked raw-attention collapse | Values and `W_O` add no useful information to that inherited topology |
-| Ancestry matters | captured posterior beats locked route collapse | The new graph only renames concentration |
-| Narrow focus can be correct | captured posterior stays low on correct tokens whose inherited collapse control is already in its top decile | The method still confuses legitimate focus with hallucination |
-| Exact endpoints matter | endpoint/weight controls degrade after independent state fitting | Graph topology is not doing work |
-| Capture is temporal | sticky state beats an independent-token state assignment | Persistence is unnecessary |
-| MLP is only a diagnostic | MLP amplification repeats on a frozen subset without defining the primary score | Otherwise no claim is made about MLP injection |
+1. an exact additive origin ledger for the observed forward pass;
+2. a head- and layer-resolved graph frame derived from actual dynamic
+   `A`, `V`, and the matching `W_O` block;
+3. exact final-readout attribution to those additive origins; and
+4. a label-free conditional energy score over multiple actual graph
+   transitions instead of a single normal center.
 
-## 1. Prediction events and computation nodes
+"Exact" refers to an additive accounting conditioned on the gates observed in
+the native forward pass. Attention weights, RMS scales, and nonlinear MLP
+activations would change under an intervention. The registers are therefore
+not Shapley values and are not claimed to be counterfactual causal effects.
 
-Let `P` be the first response position. Response token `y_t = x[P+t]` is
-predicted at
+The endogenous register is not "parameter knowledge." It contains native MLP
+writes and any small affine or floating-point closure remainder. A high
+endogenous contribution can occur in correct or incorrect computation.
+
+## 1. Prediction events
+
+Let `P0` be the first response position in the cached sequence. The response
+token
 
 \[
-q_t=P-1+t.
+y_t=x_{P0+t}
 \]
 
-The physical graph edge targets query position `q_t`. The score and eventual
-label belong to prediction position `q_t+1`. These coordinates must never be
-collapsed into one token index.
-
-For decoder layer `l`, nodes distinguish the pre-attention residual, the
-post-attention residual, and the layer output:
+is predicted at query position
 
 \[
-r^{mid}_{l,q}=r^{in}_{l,q}+u^{attn}_{l,q},
+q_t=P0-1+t.
+\]
+
+The physical graph is attached to `q_t`; the score and label belong to
+`q_t + 1`. Both coordinates are stored. The source set for this event is only
+`s <= q_t`, so the current target embedding is never visible to its own score.
+
+## 2. Four additive origins
+
+The origin order is fixed:
+
+\[
+\mathcal C=(E,P,R,M),
+\]
+
+where:
+
+- `E` is external evidence from passages, documents, or structured records;
+- `P` is the remaining prompt: question, task instruction, system text, and
+  chat template;
+- `R` is a response token embedding already available in the teacher-forced
+  prefix;
+- `M` is endogenous nonlinear state introduced by model computation.
+
+For every token position `s`, the input embedding `e_s` is initialized as
+
+\[
+X^E_{0,s}=e_s\mathbf 1[s\text{ is external evidence}],
+\]
+
+\[
+X^P_{0,s}=e_s\mathbf 1[s<P0\text{ and is not evidence}],
+\]
+
+\[
+X^R_{0,s}=e_s\mathbf 1[s\ge P0],
 \qquad
-r^{out}_{l,q}=r^{mid}_{l,q}+u^{mlp}_{l,q}.
+X^M_{0,s}=0.
 \]
 
-MLP is a same-position nonlinear update. The graph does not invent a
-cross-token MLP edge or call it a parameter-knowledge source.
-
-## 2. Exact local attention-write edges
-
-For query head `h`, source `s`, and its GQA KV head `g(h)`, define
+At every decoder boundary,
 
 \[
-m_{l,q,h,s}
-=A_{l,h,q,s}\,W^O_{l,h}V_{l,g(h),s}.
+x_{l,s}=\sum_{c\in\mathcal C}X^c_{l,s}.
 \]
 
-With a bias-free Llama output projection,
+This differs from a prompt-versus-response attention ratio. Once evidence has
+entered a response position, it remains in the `E` register when that response
+position relays it later. Conversely, the lexical response embedding remains
+in `R`. Each response token keeps its physical source endpoint; the method
+does not merge all response tokens into one root.
+
+## 3. Propagation through observed attention gates
+
+For native RMSNorm input `x`, define the observed scale
 
 \[
-u^{attn}_{l,q}=\sum_h\sum_{s\le q}m_{l,q,h,s}.
+\alpha_{l,s}
+=
+\left(
+\operatorname{mean}(x_{l,s}^{2})+\epsilon
+\right)^{-1/2}.
 \]
 
-This identity is checked against the tensor returned by the frozen model. It
-is a local additive decomposition of the attention residual write. It does not
-attribute how Q/K produced `A`, and it is not a final-logit causal effect.
-
-Each edge has two distinct accounts:
+The normalized contribution of register `c` is
 
 \[
-w_e=\lVert m_e\rVert_2
+\widetilde X^c_{l,s}
+=
+\gamma_l\odot\alpha_{l,s}X^c_{l,s}.
 \]
 
-for nonnegative route capacity, and
+Because `alpha` is the one scalar observed on the complete native state,
 
 \[
-c_e=\frac{\langle m_e,r^{mid}_{l,q}\rangle}
-{\lVert r^{mid}_{l,q}\rVert_2^2+\epsilon}
+\sum_c\widetilde X^c_{l,s}=\operatorname{RMSNorm}_l(x_{l,s}).
 \]
 
-for signed support of the actual post-attention state. Capacity describes
-topology; positive and negative support describe construction and
-cancellation. They are never substituted for each other.
-
-The frozen model runs in its checkpoint dtype. Derived geometry converts both
-operands to FP32 before projection, so FP32 attention arithmetic is never
-multiplied by an unconverted BF16 `W_O`.
-
-## 3. Sparse storage without invented paths
-
-The detector consumes the complete dense scalar accounts over every causal
-source token and every head. No top-k operation, sparse tail, or graph-storage
-setting can change ancestry, contraction, takeover, or the primary score.
-
-The persisted inspection graph is deliberately smaller. Independently for
-each `(layer, query, head)`, it stores at most `K=2` exact source endpoints,
-chosen by joint capacity and positive-support coverage. Omitted capacity,
-support, and net write remain an `unknown` tail. The tail has no token endpoint
-and therefore cannot be expanded into a fabricated path. Increasing `K` only
-changes inspection resolution and disk use.
-
-Prompt-query rows are used transiently during ancestry propagation. Response
-prediction rows and their exact endpoint/head identities are persisted for
-inspection and graph controls.
-
-## 4. Evidence units and multi-hop ancestry
-
-The prompt is divided before model replay into external evidence units:
-
-- QA: retrieved passage blocks;
-- Summary: document sentences;
-- Data2txt: records or field-value units;
-- question, instruction, system, and template text: other-prompt context.
-
-At the input boundary, every prompt token starts in its evidence unit or the
-other-prompt unit. Response positions start in a response-root unit.
-
-At each additive attention node, positive support from every causal source is
-normalized into a route transition. Residual self support carries the current
-node ancestry. Processing the causal layer/token DAG in topological order gives
-a boundary-hitting distribution `Pi[l,q]`. The formal dense graph has no
-omitted tail; `unknown` is reserved for sparse small-graph oracles and the
-inspection artifact.
-
-This is an operational route lineage conditioned on the observed forward pass.
-Because RMSNorm, attention gates, and MLPs are input-dependent nonlinear
-operations, it is not claimed to be a Shapley value or complete causal
-provenance.
-
-## 5. Grounded relay versus unrooted feedback
-
-For a strict response-history source `s < q`, its incoming message is divided
-by the already-computed ancestry of the source node:
+For KV head `k`, the registered dynamic value is
 
 \[
-\widetilde c^+_{l,q,h,s}=
-\frac{\max(c_{l,q,h,s},0)}
-{\max(c^{res}_{l,q},0)+\sum_{j,u}\max(c_{l,q,j,u},0)}.
+V^c_{l,k,s}=W^V_{l,k}\widetilde X^c_{l,s}.
 \]
 
+For query head `h` and its actual GQA KV head `g(h)`, the registered local
+message is
+
 \[
-G_{l,q,h}=\sum_{P\le s<q}\widetilde c^+_{l,q,h,s}\,\Pi_{l-1,s}(E),
+m^c_{l,q,h,s}
+=
+A_{l,h,q,s}
+W^O_{l,h}
+V^c_{l,g(h),s}.
 \]
 
-\[
-U_{l,q,h}=\sum_{P\le s<q}\widetilde c^+_{l,q,h,s}\,\Pi_{l-1,s}(R).
-\]
-
-`G` is evidence-rooted response relay. `U` is unrooted response feedback.
-Prompt-carried evidence support is `D`: its physical endpoint is in the prompt
-and that endpoint has evidence ancestry. It may already include an earlier
-prompt-to-prompt relay, so it is not called a purely direct causal effect.
-Source `s=q` is predictor self and belongs to neither history term.
-
-This is the central distinction missing from a prompt-versus-response ratio:
-a response token may be carrying prompt evidence rather than replacing it.
-
-## 6. Route capacity inherited from the QA finding
-
-For every layer and prediction event, define a head-by-physical-source-token
-matrix
+The per-head and total writes are
 
 \[
-M_{h,s}=w_{l,q,h,s}\,\Pi_{l-1,s}(E),\qquad s<q.
-\]
-
-This retains the token-level narrowing behind the earlier QA result while also
-allowing an evidence-rooted response token to act as a grounded carrier. It is
-not collapsed to passage, sentence, or field units, and heads remain separate.
-Every active head is normalized before heads are compared:
-
-\[
-\widehat M_{h,s}=\frac{M_{h,s}}{\sum_u M_{h,u}},
+U^c_{l,q,h}=\sum_{s\le q}m^c_{l,q,h,s},
 \qquad
-\bar M_s=\frac{1}{|H_{active}|}\sum_{h\in H_{active}}\widehat M_{h,s}.
+U^c_{l,q}=\sum_hU^c_{l,q,h}.
 \]
 
-Three related degrees of freedom are read from these normalized rows:
+For bias-free Llama projections, linearity under the observed RMS scale gives
 
 \[
-N_{source}=\exp H(\bar M),
+\sum_cV^c_{l,k,s}=V^{native}_{l,k,s}.
 \]
+
+The implementation derives `E`, `P`, and `R` values directly and obtains `M`
+as the native-value complement. This both preserves the identity under BF16
+arithmetic and assigns any projection bias or numerical remainder to the
+declared endogenous account. It also captures the native pre-`W_O` head
+context and closes the four head contexts to that observed tensor before
+forming the head Gram.
+
+All geometric products use FP32 operands. Consequently their sum equals the
+FP32 linear expansion of the native head context. A BF16 fused output
+projection can still differ slightly from that expansion. The implementation
+saves this relative reconstruction error and assigns the layer-boundary
+difference to `M`; it does not falsely describe the FP32 per-head expansion as
+a bit-exact decomposition of a fused BF16 kernel.
+
+The attention matrix is an observed routing gate. The method does not
+decompose how Q/K produced that gate and does not replace attention with a
+static `W_O W_V` operator.
+
+## 4. Residual and MLP updates
+
+After attention,
 
 \[
-N_{head}=\frac{\operatorname{tr}(\widehat M\widehat M^T)^2}
-{\lVert\widehat M\widehat M^T\rVert_F^2+\epsilon},
+X^{c,mid}_{l,q}=X^c_{l,q}+U^c_{l,q}.
 \]
 
-and `N_anchor`, the effective number of per-head evidence anchors in the recent
-causal window. Their log volume is
+Let the native MLP write be
 
 \[
-V=\log N_{source}+\log N_{head}+\log N_{anchor}.
+F_{l,q}=r^{out}_{l,q}-r^{mid}_{l,q}.
 \]
 
-The earlier QA route-collapse result is retained as an equation-locked
-control. It preserves the f7344e2 volume equation, lower-volume score
-direction, source-equal nuisance WLS, robust residual scale, and position-wise
-ECDF, but it is not a numerical reproduction of that run. The old protocol
-rotated three nuisance-fit folds, one calibration fold, and one test fold.
-Here the physical train/test halves must remain intact. Sorted sources in each
-training half use a fixed modulo-four partition (approximately 3:1) for
-nuisance fitting and ECDF calibration before the untouched opposite half is
-scored. The new state uses the same topology after conditioning response
-carriers on their evidence ancestry.
-
-Each term is also normalized by its attainable physical-source/head/window
-size at that query.
-The resulting absolute deficit is saved only as a capture diagnostic:
+The three input-derived registers pass through unchanged at this same-token
+update:
 
 \[
-C^{raw}_t=1-\frac{1}{L}\sum_l \widetilde V_{l,t}.
+X^c_{l+1,q}=X^{c,mid}_{l,q},
+\qquad c\in\{E,P,R\}.
 \]
 
-The HMM instead uses the equation-locked relative contraction. Source-equal
-WLS predicts each layer's log volume from normalized response position,
-position squared, and prompt-plus-response length. With robust training scale
-`s_l`, the uncalibrated lower-tail score is
+The endogenous register receives the native nonlinear write:
 
 \[
-R_t=\frac{1}{L}\sum_l
-\max\left(\frac{\widehat V_{l,t}-V_{l,t}}{s_l},0\right).
+X^M_{l+1,q}=X^{M,mid}_{l,q}+F_{l,q}.
 \]
 
-An independent source-disjoint calibration subset maps `R_t` through the
-matching response-position-bin ECDF. The primary contraction coordinate is
+Numerically, `M` is closed from the native state:
 
 \[
-C_t=\widehat F^{cal}_{b(t)}(R_t).
+X^M_{l+1,q}
+=
+r^{out}_{l,q}
+-X^E_{l+1,q}
+-X^P_{l+1,q}
+-X^R_{l+1,q}.
 \]
 
-The takeover coordinate is
+The relative attention reconstruction and layer closure errors are saved and
+tested. A large remainder is an implementation failure, not a signal that may
+silently be called endogenous information.
+
+At later layers, all four registers go through the same observed RMS, dynamic
+value, attention, and output projection construction. Consequently an MLP
+write made at a prompt or response position can later travel across token
+edges while retaining `M` origin.
+
+## 5. Dense graph and compact graph frame
+
+The conceptual multiplex DAG has nodes `(layer, token, origin)` and edges
+`(layer, query, head, source, origin)`. Every causal source participates.
+Materializing every edge as a hidden-size vector would require
+`O(L T H S D)` storage, so the implementation evaluates the dense edge field
+online and saves the following fixed frame. No top-k edge controls a score.
+
+Let `C=4`, `D` be hidden size, `L` the number of layers, `H` the number of
+query heads, and `T` the number of response prediction events.
+
+### 5.1 Final registered node embeddings
+
+The four final residual registers pass through the final observed RMS gate:
 
 \[
-T_t=\frac{U_t}{D_t+G_t+U_t+\epsilon}.
+Z^c_t
+=
+\gamma_f\odot\alpha_{f,q_t}X^c_{L,q_t}.
 \]
 
-This task-internal position/length baseline absorbs systematic narrow focus in
-Summary and Data2txt. A locally unusual but legitimate narrow span can still
-have high `C` and low `T`; a captured route requires both high calibrated
-contraction and high unrooted takeover.
-
-## 7. Label-free temporal states
-
-The observation for each valid response token is only
+They satisfy
 
 \[
-o_t=(C_t,T_t).
+\sum_cZ^c_t=h^{final}_{q_t}.
 \]
 
-A three-state sticky Gaussian HMM is fitted separately per task, without
-hallucination labels:
+They are saved without PCA, random projection, or a learned adapter:
 
-1. `exploration`: lowest mean contraction;
-2. `grounded_focus`: narrow routes with lower takeover;
-3. `captured`: narrow routes with the highest takeover.
+```text
+node_embedding [T, C, D]
+```
 
-State identities are fixed by these structural constraints, not by test AUROC.
-The transition fit uses one pseudocount for every transition and ten additional
-self-transition pseudocounts. This weak, fixed regularizer prevents a short
-training sequence from erasing a state; it is negligible relative to the full
-task token count and is never tuned on labels.
-The primary online score is the filtered posterior
+### 5.2 Residual Gram across layer boundaries
 
 \[
-S_t=P(z_t=\text{captured}\mid o_{1:t}).
+G^X_{t,l}[c,c']
+=
+\langle X^c_{l,q_t},X^{c'}_{l,q_t}\rangle.
 \]
 
-The first two answer tokens have no strict response history separate from
-predictor self and are excluded from history-state fitting and comparison.
-Smoothed posteriors may be plotted but are not the online primary score.
-The same fitted emissions are also evaluated with token order removed. Learned
-self-transition probabilities and expected dwell times are saved with every
-fold. Persistence is supported only if the filtered score improves over this
-independent-token control on paired held-out tokens; a sticky prior alone is
-not treated as evidence.
+```text
+residual_gram [T, L+1, C, C]
+```
 
-## 8. What the current intervention audit becomes
+This preserves origin magnitudes, alignment, and cancellation through the
+ordered residual trajectory.
 
-The old four-branch deletion experiment is not imported. Its scientific role
-is an optional, separate mechanism audit: on a small frozen subset, test
-whether tokens assigned high captured posterior are more sensitive to evidence
-or history interventions. It never supplies the production detector score.
+### 5.3 Per-layer, per-head write Gram
 
-## 9. Label boundary and evaluation
+After summing every physical source separately within an origin, but before
+heads are combined:
 
-`data`, `capture`, `messages`, `graph`, `lineage`, `state`, and `detector` do
-not open hallucination labels. `evaluate.py` joins frozen scores to labels and
-reports task-specific token AUROC, average precision, source-cluster bootstrap
-intervals, and the locked confidence/route-collapse controls.
+\[
+G^U_{t,l,h}[c,c']
+=
+\langle U^c_{l,q_t,h},U^{c'}_{l,q_t,h}\rangle.
+\]
 
-Three required dense graph controls rebuild lineage and fit their own contraction
-calibration and HMM before labels are opened:
+```text
+head_write_gram [T, L, H, C, C]
+```
 
-- one-hop ancestry in place of multi-hop ancestry;
-- endpoint rewiring with row/head/role mass preserved;
-- weight shuffling with endpoints preserved;
+Thus the detector sees whether individual heads reinforce or oppose evidence,
+prompt, response, and endogenous writes. It never treats a head mean as the
+input graph. Residual and head-write Gram tensors are persisted in FP32 so a
+large inner product cannot overflow the FP16 range; the other compact graph
+blocks use FP16 storage and are restored for FP64 distance accumulation.
 
-A no-message graph is tested as a structural boundary: it has no identifiable
-route state and is not forced into a three-state model. Primary-minus-control
-AUROC/AP comparisons use the exact intersection of valid tokens and paired
-source-cluster bootstrap intervals. A separate post-hoc audit reports the
-source-equal captured posterior on correct tokens whose equation-locked
-functional-collapse score is at least the predeclared `0.9`; this is the direct
-check that legitimate narrow focus is not automatically called hallucination.
+### 5.4 Dense endpoint topology
 
-The method is supported only if multi-hop ancestry improves over the old
-collapse control, attention-only routes, and the topology controls, especially
-on correct narrow-focus Summary and Data2txt tokens.
+For an origin-specific source message, define route capacity
 
-## 10. Claim boundary
+\[
+w^c_{t,l,h,s}=\lVert m^c_{l,q_t,h,s}\rVert_2.
+\]
 
-The defensible candidate contribution is:
+It is computed without a `[source, hidden]` tensor through
 
-> head-resolved attention-write route lineage that divides response-history
-> messages by their multi-hop evidence ancestry and detects the transition from
-> grounded focus to persistent unrooted capture without hallucination labels.
+\[
+(w^c)^2
+=
+A^2
+(V^c)^T
+\left((W^O_{l,h})^TW^O_{l,h}\right)
+V^c.
+\]
 
-AVWO decomposition, graph dynamic programming, and HMMs are established tools.
-No claim of novelty attaches to them individually. No result may claim that
-route capture is necessary or sufficient for hallucination, that MLP equals
-parameter knowledge, or that an observer replay recovers the generator's
-original causal mechanism.
+For a nonempty row,
 
-## 11. Relation to prior work
+\[
+p^c_s=\frac{w^c_s}{\sum_uw^c_u}.
+\]
 
-The implementation deliberately treats its ingredients as established unless
-the combination changes the scientific question:
+The physical source roles are mutually exclusive:
 
-- [Attention is Not Only a Weight](https://aclanthology.org/2020.emnlp-main.574/)
-  motivates using transformed values rather than raw attention alone.
-- [ALTI](https://aclanthology.org/2022.emnlp-main.595/) includes the attention
-  block, residual connection, and layer normalization in layer-wise context
-  mixing. Therefore neither AVWO accounting nor layer-wise propagation is
-  claimed as new here.
-- [Information Flow Routes](https://aclanthology.org/2024.emnlp-main.965/)
-  extracts attribution routes from a single forward pass. The present method
-  must consequently earn its value from ancestry-conditioned response-history
-  decomposition and token-level state dynamics, not from merely drawing a
-  route graph.
-- [(How) Do Language Models Track State?](https://arxiv.org/abs/2503.02854)
-  studies exact latent state in permutation-composition tasks. We borrow its
-  discipline of defining a state and testing multiple predictions of that
-  state; we do not claim that the model contains two literal hallucination
-  registers.
+- `prompt`: `s < P0` and `s != q_t`;
+- `history`: `P0 <= s < q_t`;
+- `self`: `s = q_t`.
 
-The proposed research contribution is therefore conditional: multi-hop
-evidence ancestry should distinguish legitimate narrow focus from persistent
-unrooted response capture on held-out tasks and topology controls. If it does
-not, the graph remains an audit representation rather than a successful
-detector.
+The seven topology entries are fixed as
+
+\[
+\left(
+\log(1+\sum_sw_s),
+\log(1+\exp H(p)),
+\max_sp_s,
+f_{prompt},
+f_{history},
+f_{self},
+c_{head}
+\right).
+\]
+
+The three fractions are capacity fractions and sum to one. For head
+consensus, let
+
+\[
+\bar p_s=\frac{1}{H_{active}}\sum_{h\in active}p_{h,s}
+\]
+
+and retain each head's Bhattacharyya overlap
+
+\[
+c_{head}=\sum_s\sqrt{p_{h,s}\bar p_s}.
+\]
+
+```text
+route_topology [T, L, H, C, 7]
+```
+
+Every dense endpoint contributes before these fixed graph statistics are
+formed. Exact source IDs may additionally be retained for visualization, but
+they are not substituted for the dense calculation.
+
+### 5.5 MLP relation
+
+For the native MLP write `F` and each post-attention registered residual:
+
+\[
+a^c_{t,l}
+=
+\frac{
+\langle F_{l,q_t},X^{c,mid}_{l,q_t}\rangle
+}{
+\lVert F_{l,q_t}\rVert
+\lVert X^{c,mid}_{l,q_t}\rVert+\epsilon
+}.
+\]
+
+The final entry records relative MLP update size:
+
+\[
+a^{scale}_{t,l}
+=
+\log\left(
+1+
+\frac{\lVert F_{l,q_t}\rVert}
+{\lVert r^{mid}_{l,q_t}\rVert+\epsilon}
+\right).
+\]
+
+```text
+mlp_relation [T, L, C+1]
+```
+
+These values describe an observed nonlinear update. They do not establish
+that the MLP injected a fact or caused an error.
+
+### 5.6 Exact final margin contribution
+
+For the observed target `y_t`, let the strongest native competing token be
+
+\[
+\hat y_t=\arg\max_{v\ne y_t}z_t(v).
+\]
+
+The registered contribution to its target-versus-competitor margin is
+
+\[
+\mu^c_t
+=
+W_U[y_t]Z^c_t-W_U[\hat y_t]Z^c_t.
+\]
+
+Therefore
+
+\[
+\sum_c\mu^c_t
+=
+z_t(y_t)-z_t(\hat y_t).
+\]
+
+```text
+margin_contribution [T, C]
+```
+
+The complete signed contribution vector enters the graph metric. Native token
+surprisal remains a control; the method can claim a route contribution only if
+its held-out gain survives that control.
+
+## 6. Full-tensor product metric
+
+A graph frame is
+
+\[
+\mathcal G_t=
+\{Z_t,G^X_t,G^U_t,T^{route}_t,A^{mlp}_t,\mu_t\}.
+\]
+
+The detector does not convert it into a short hand-built feature vector. Each
+block retains its complete named axes. For block `j`, its raw distance is the
+root-mean-square difference over corresponding tensor entries:
+
+\[
+r_j(G,G')
+=
+\sqrt{
+\frac{1}{|G_j|}
+\sum_a(G_{j,a}-G'_{j,a})^2
+}.
+\]
+
+Its scale `s_j` is the median strictly positive `r_j` over label-free
+reference frame pairs. The fixed product-space distance is
+
+\[
+d(G,G')
+=
+\frac{1}{6}
+\sum_{j=1}^{6}
+\frac{r_j(G,G')}{s_j}.
+\]
+
+All six blocks receive equal weight. There is no correlation transform,
+learned block weight, supervised scaling, or preliminary feature selection. A
+layer coordinate is compared only with the same ordered layer coordinate, and
+a head only with the same head in that layer. The RMS is the final reduction
+after all corresponding tensor entries have been compared.
+
+The conditional detector converts this distance to a product-space kernel
+
+\[
+K(G,G')=\exp\left(-d(G,G')/\tau\right),
+\]
+
+where `tau` is fixed from label-free reference distances.
+
+## 7. Multimodal conditional transition model
+
+The normal object is a three-frame transition window
+
+\[
+W_t=(\mathcal G_{t-2},\mathcal G_{t-1})\rightarrow\mathcal G_t.
+\]
+
+The context width is frozen at two preceding graph frames. The first two
+answer events are still captured and available for mechanism inspection, but
+they have no complete two-frame context and therefore receive no primary
+conditional-transition score. Reported `evaluated_tokens` must make this
+exclusion explicit.
+
+Reference windows are stratified without labels by:
+
+```text
+task type x response-position decile x prompt-length quartile
+```
+
+If a finite reference or calibration split has no observation in the exact
+cell, the closest populated cell is used under Manhattan distance on the two
+declared bin coordinates, with deterministic ties. This is an explicit
+finite-sample conditioning rule, not a score-dependent fallback.
+
+Within each stratum, retain `K=8` actual source windows, or all windows if the
+stratum contains fewer than eight. Candidates use stable source/position
+order. The first candidate is selected first; each subsequent prototype is the
+candidate whose minimum distance to the selected set is greatest. This
+deterministic farthest-first traversal uses the full product metric. A
+prototype is always an observed two-frame context and its observed next graph,
+never an averaged feature vector, optimized medoid, or learned centroid. This
+permits evidence-anchored focus, answer-local completion, and other normal
+modes to coexist.
+
+For a query context `W`, prototype `k` has context `W_k`, next state `Y_k`, and
+empirical cluster weight `pi_k`. Context distance is the mean distance across
+the two preceding frames; the joint window distance used for prototype
+selection and bandwidth is context distance plus next-frame distance. Its
+context-conditioned weight is
+
+\[
+\omega_k(W)
+=
+\frac{
+\pi_k\exp(-d(W,W_k)/\tau)
+}{
+\sum_j\pi_j\exp(-d(W,W_j)/\tau)
+}.
+\]
+
+The cluster weights are the label-free fractions of reference windows assigned
+to each prototype. `tau` is the median positive assignment distance in that
+stratum. Let `d` be the distance induced by the full-tensor metric. The raw
+conditional transition energy is
+
+\[
+a_t
+=
+-\log
+\sum_k
+\omega_k(W_t)
+\exp\left(-d(\mathcal G_t,Y_k)/\tau\right).
+\]
+
+Equivalently, this is the difference between the context-only and joint
+context-plus-next-state log kernel energies. A token receives low energy if
+any context-compatible observed mode explains its next graph; the eight next
+states are never averaged into one center. The model does not decide
+beforehand that low entropy, response dominance, or a large MLP write is
+hallucination.
+
+Prototype sources, calibration sources, and evaluated sources are disjoint.
+To score both physical halves, their roles are reversed. Source ordering, not
+file hashing or labels, defines any required deterministic subdivision.
+
+Calibration windows are scored with the frozen prototype bank. In the same
+task/position/length stratum, each calibration source receives equal total
+weight. If `v_i` is the reciprocal of the number of calibration tokens from
+the same source in that stratum, the primary score is the weighted empirical
+upper-tail rank
+
+\[
+S_t
+=
+\frac{
+\sum_{i\in cal(t)}v_i\mathbf 1[a_i\le a_t]
+}{
+\sum_{i\in cal(t)}v_i
+}.
+\]
+
+No label determines metric scales, prototypes, score direction, or
+calibration.
+
+## 8. Interpretation after scoring
+
+The primary score says only that the route graph made an unusual conditional
+transition. Its tensors can then distinguish candidate explanations:
+
+- evidence never entered the residual ledger;
+- evidence entered but head writes opposed or cancelled it;
+- evidence was relayed through response nodes normally;
+- response-origin state became locally self-sustaining;
+- endogenous MLP state aligned against an evidence-origin residual;
+- final token margin was mainly supported by `R` or `M` rather than `E`/`P`.
+
+None is individually necessary or sufficient for hallucination. Mechanism
+names are assigned after inspecting the physical ledger, not encoded as fixed
+positive weights in the detector.
+
+## 9. Label boundary
+
+Data reconstruction, register propagation, graph framing, product-metric
+scales, prototype selection, conditional energy, and calibration never open
+hallucination labels. `evaluate.py` is the only label-opening module. It joins
+frozen scores to annotations and reports token AUROC, average precision,
+source-cluster bootstrap intervals, paired differences, and task-specific
+results.
+
+The observer experiment remains a teacher-forced replay of existing responses.
+It does not claim to recover the generator model's original hidden state when
+the observer and generator differ.
+
+## 10. Implemented locked controls
+
+The executable report contains four controls whose equations are fixed before
+labels are opened:
+
+- independent-frame graph energy, using the same prototypes but removing the
+  two-frame context;
+- the historical functional `AVW_O` prompt-route-collapse equation;
+- the matching raw-attention prompt-route-collapse equation; and
+- native token surprisal (`-log p(y_t)`).
+
+The old QA functional-route-collapse result, approximately
+`AUROC=0.7337`, is a locked baseline rather than an ingredient in the primary
+score. Endpoint rewiring, value shuffling, layer shuffling, and block removal
+remain predeclared follow-up ablations. They are not reported by the current
+run and are not described as completed evidence.
+
+## 11. Stop gates
+
+The current implementation is a candidate method, not a validated detection
+contribution. It is retained only if held-out, source-clustered comparisons
+support the following central claims:
+
+1. two-frame conditioning improves on independent-token matching;
+2. the registered graph improves on both locked route-collapse controls;
+3. the MLP/readout blocks add information beyond confidence rather than merely
+   copying it;
+4. QA is competitive with the locked `0.7337` route-collapse baseline;
+5. correct narrow-focus Summary and Data2txt tokens are not systematically
+   assigned high risk;
+6. follow-up endpoint and layer-order ablations support the claimed graph
+   interpretation before a paper makes those claims.
+7. gains repeat beyond a smoke-test subset and their paired source-bootstrap
+   intervals exclude zero.
+
+If these gates fail, the additive register capture remains a mechanism-audit
+tool. The detector must not be rescued by reading labels, reversing score
+direction, selecting favorable heads, adding a supervised combiner, or
+renaming a failed statistic.

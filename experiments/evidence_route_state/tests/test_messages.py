@@ -3,11 +3,8 @@ import torch.nn.functional as F
 
 from experiments.evidence_route_state.messages import (
     attention_messages,
-    message_statistics,
-    output_projection_blocks,
     prompt_carriers,
     reconstruct_attention_write,
-    selected_chunk_messages,
 )
 
 
@@ -59,40 +56,17 @@ def test_each_avwo_edge_and_its_sum_match_the_native_attention_write():
         reconstruct_attention_write(messages), native, rtol=1e-5, atol=1e-6
     )
 
-    post_attention_state = native + 0.25
-    statistics = message_statistics(
-        attention,
-        values,
-        output_projection_blocks(output_weight, query_heads=4, head_dim=2),
-        post_attention_state,
-    )
-    torch.testing.assert_close(statistics.attention_write, native, rtol=1e-5, atol=1e-6)
-    torch.testing.assert_close(statistics.capacity, messages.norm(dim=-1))
-    expected_support = (
-        torch.einsum("qhsd,qd->qhs", messages, post_attention_state)
-        / post_attention_state.square().sum(-1)[:, None, None]
-    )
-    torch.testing.assert_close(statistics.support, expected_support)
-
 
 def test_derived_bf16_geometry_uses_one_dtype_and_exports_float32():
     attention, values, output_weight = exact_inputs(torch.bfloat16)
 
     messages = attention_messages(attention, values, output_weight)
     native = native_attention_write(attention, values, output_weight)
-    statistics = message_statistics(
-        attention,
-        values,
-        output_projection_blocks(output_weight, query_heads=4, head_dim=2),
-        native + 0.25,
-    )
 
     assert messages.dtype == torch.float32
-    assert statistics.attention_write.dtype == torch.float32
     torch.testing.assert_close(
         reconstruct_attention_write(messages), native, rtol=1e-5, atol=1e-6
     )
-    torch.testing.assert_close(statistics.attention_write, native, rtol=1e-5, atol=1e-6)
 
 
 def test_gqa_mapping_keeps_each_query_head_and_source_distinct():
@@ -123,26 +97,6 @@ def test_opposing_head_messages_cancel_only_after_edges_are_retained():
     torch.testing.assert_close(messages[0, 1, 0], torch.tensor([-1.0]))
     torch.testing.assert_close(reconstruct_attention_write(messages), torch.zeros(1, 1))
     torch.testing.assert_close(messages.norm(dim=-1).sum(), torch.tensor(2.0))
-
-
-def test_chunk_selected_edges_equal_the_same_dense_avwo_edges():
-    attention, values, output_weight = exact_inputs()
-    blocks = output_projection_blocks(output_weight, query_heads=4, head_dim=2)
-    dense = attention_messages(attention, values, output_weight)
-    query = torch.tensor([0, 1, 1, 0])
-    head = torch.tensor([0, 1, 2, 3])
-    source = torch.tensor([2, 1, 0, 2])
-
-    selected = selected_chunk_messages(
-        attention,
-        values,
-        blocks,
-        query,
-        head,
-        source,
-    )
-
-    torch.testing.assert_close(selected, dense[query, head, source])
 
 
 def test_locked_prompt_carriers_exclude_predictor_self_and_keep_head_anchors():

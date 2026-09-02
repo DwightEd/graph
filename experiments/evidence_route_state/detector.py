@@ -1,339 +1,529 @@
-"""Label-free temporal state inference for route observations.
-
-The detector sees only ``(contraction, takeover)`` observations.  It fits one
-sticky diagonal-Gaussian HMM per task and names the fitted states from their
-route geometry, never from hallucination labels.
-"""
+"""Label-free conditional innovation on complete register-graph sequences."""
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
 
-STATE_NAMES = ("exploration", "grounded_focus", "captured")
+from .graph import GraphSequence
+from .metric import BLOCK_NAMES, RouteMetric, as_array
+
+HISTORY = 2
+POSITION_BINS = 10
 
 
-def logsumexp(
-    values: np.ndarray, axis: int | tuple[int, ...] | None = None
-) -> np.ndarray:
-    maximum = np.max(values, axis=axis, keepdims=True)
-    summed = maximum + np.log(np.exp(values - maximum).sum(axis=axis, keepdims=True))
-    if axis is None:
-        return summed.reshape(())
-    return np.squeeze(summed, axis=axis)
+def nearest_condition(
+    available: Sequence[tuple[int, int]], requested: tuple[int, int]
+) -> tuple[int, int]:
+    """Use the closest populated position/length cell in finite references."""
+
+    return min(
+        available,
+        key=lambda key: (
+            abs(key[0] - requested[0]) + abs(key[1] - requested[1]),
+            abs(key[0] - requested[0]),
+            key,
+        ),
+    )
 
 
-def valid_runs(
-    sequence: np.ndarray, valid_mask: np.ndarray | None = None
-) -> list[tuple[slice, np.ndarray]]:
-    """Return contiguous finite runs without bridging excluded early tokens."""
+@dataclass(frozen=True)
+class GraphRecord:
+    """One label-free graph sequence and its sampling coordinates."""
 
-    sequence = np.asarray(sequence, dtype=np.float64)
-    if sequence.ndim != 2 or sequence.shape[1] != 2:
-        raise ValueError("route observations must have shape [tokens, 2]")
-
-    valid = np.isfinite(sequence).all(axis=1)
-    if valid_mask is not None:
-        valid &= np.asarray(valid_mask, dtype=bool)
-    changes = np.flatnonzero(np.diff(np.r_[False, valid, False]))
-    return [
-        (slice(start, stop), sequence[start:stop])
-        for start, stop in changes.reshape(-1, 2)
-    ]
+    source_id: str
+    prompt_length: int
+    sequence: GraphSequence
 
 
-class StickyRouteHMM:
-    """Three-state unsupervised HMM for route contraction and takeover."""
+@dataclass(frozen=True)
+class CandidateWindow:
+    source_id: str
+    prompt_length: int
+    sequence: GraphSequence
+    end: int
+    position_bin: int
+    length_bin: int
 
-    exploration_state = 0
-    grounded_state = 1
-    captured_state = 2
-    state_names = STATE_NAMES
 
-    def __init__(
-        self,
-        n_iter: int = 100,
-        stickiness: float = 10.0,
-        tolerance: float = 1e-5,
-        variance_floor: float = 1e-4,
-    ) -> None:
-        self.n_iter = n_iter
-        self.stickiness = stickiness
-        self.tolerance = tolerance
-        self.variance_floor = variance_floor
+@dataclass(frozen=True)
+class PrototypeBank:
+    """Actual observed windows retained as a small multimodal reference bank."""
 
-        self.initial_: np.ndarray | None = None
-        self.transition_: np.ndarray | None = None
-        self.means_: np.ndarray | None = None
-        self.variances_: np.ndarray | None = None
+    tensor: dict[str, np.ndarray]
+    weight: np.ndarray
+    bandwidth: float
 
-    def fit(
-        self,
-        sequences: Sequence[np.ndarray],
-        valid_masks: Sequence[np.ndarray] | None = None,
-    ) -> StickyRouteHMM:
-        """Fit from unlabeled sequences; invalid rows are excluded events."""
+    @property
+    def count(self) -> int:
+        return len(self.weight)
 
-        if valid_masks is None:
-            valid_masks = [None] * len(sequences)
-        runs = [
-            run
-            for sequence, valid in zip(sequences, valid_masks, strict=True)
-            for _, run in valid_runs(sequence, valid)
+
+def response_position_bin(sequence: GraphSequence, token: int) -> int:
+    position = as_array(sequence.prediction_position)
+    relative = (float(position[token] - position[0]) + 0.5) / len(position)
+    return min(int(relative * POSITION_BINS), POSITION_BINS - 1)
+
+
+def prompt_length_edges(records: Sequence[GraphRecord]) -> np.ndarray:
+    """Quartiles use one prompt length per source, so prolific sources do not win."""
+
+    by_source: dict[str, int] = {}
+    for record in sorted(records, key=lambda item: item.source_id):
+        by_source.setdefault(record.source_id, int(record.prompt_length))
+    if not by_source:
+        raise ValueError("at least one reference source is required")
+    return np.quantile(
+        np.asarray(tuple(by_source.values()), dtype=np.float64),
+        (0.25, 0.5, 0.75),
+    )
+
+
+def prompt_length_bin(prompt_length: int, edges: np.ndarray) -> int:
+    return int(np.searchsorted(edges, prompt_length, side="right"))
+
+
+def valid_window(sequence: GraphSequence, end: int) -> bool:
+    valid = as_array(sequence.valid)
+    return end >= HISTORY and bool(valid[end])
+
+
+def candidate_windows(
+    records: Sequence[GraphRecord], length_edges: np.ndarray
+) -> list[CandidateWindow]:
+    """Choose one valid token per source and response-position decile."""
+
+    selected: dict[tuple[str, int], tuple[float, CandidateWindow]] = {}
+    for record in records:
+        sequence = record.sequence
+        for token in range(HISTORY, len(sequence.valid)):
+            if not valid_window(sequence, token):
+                continue
+            position_bin = response_position_bin(sequence, token)
+            position = as_array(sequence.prediction_position)
+            relative = (float(position[token] - position[0]) + 0.5) / len(
+                sequence.valid
+            )
+            candidate = CandidateWindow(
+                source_id=record.source_id,
+                prompt_length=record.prompt_length,
+                sequence=sequence,
+                end=token,
+                position_bin=position_bin,
+                length_bin=prompt_length_bin(record.prompt_length, length_edges),
+            )
+            error = abs(relative - (position_bin + 0.5) / POSITION_BINS)
+            key = (record.source_id, position_bin)
+            previous = selected.get(key)
+            if previous is None or error < previous[0]:
+                selected[key] = (error, candidate)
+    return [value[1] for _, value in sorted(selected.items(), key=lambda item: item[0])]
+
+
+def frame_pairs(
+    candidates: Sequence[CandidateWindow],
+) -> list[tuple[tuple[GraphSequence, int], tuple[GraphSequence, int]]]:
+    """Deterministic cross-source pairs used only to normalize metric blocks."""
+
+    groups: dict[tuple[int, int], list[CandidateWindow]] = defaultdict(list)
+    for candidate in candidates:
+        groups[(candidate.position_bin, candidate.length_bin)].append(candidate)
+
+    pairs = []
+    for group in groups.values():
+        ordered = sorted(group, key=lambda item: item.source_id)
+        pairs.extend(
+            ((left.sequence, left.end), (right.sequence, right.end))
+            for left, right in zip(ordered[::2], ordered[1::2], strict=False)
+        )
+    return pairs
+
+
+def window_distance(
+    metric: RouteMetric, left: CandidateWindow, right: CandidateWindow
+) -> float:
+    context = np.mean(
+        [
+            metric.distance(
+                (left.sequence, left.end - lag),
+                (right.sequence, right.end - lag),
+            )
+            for lag in range(HISTORY, 0, -1)
         ]
-        if not runs:
-            raise ValueError("at least one valid route observation is required")
+    )
+    current = metric.distance((left.sequence, left.end), (right.sequence, right.end))
+    return float(context + current)
 
-        observations = np.concatenate(runs)
-        if len(observations) < 3:
-            raise ValueError("three route states require at least three observations")
 
-        self.initial_, self.transition_, self.means_, self.variances_ = (
-            self._initialize(observations)
+def window_batch(candidates: Sequence[CandidateWindow]) -> dict[str, np.ndarray]:
+    return {
+        name: np.stack(
+            [
+                as_array(getattr(item.sequence, name))[
+                    item.end - HISTORY : item.end + 1
+                ]
+                for item in candidates
+            ]
         )
+        for name in BLOCK_NAMES
+    }
 
-        previous_likelihood = -np.inf
-        for _ in range(self.n_iter):
-            initial_counts = np.zeros(3)
-            transition_counts = np.zeros((3, 3))
-            state_counts = np.zeros(3)
-            state_sums = np.zeros((3, 2))
-            state_squares = np.zeros((3, 2))
-            likelihood = 0.0
 
-            for run in runs:
-                emission = self._log_emission(run)
-                forward, run_likelihood = self._forward(emission)
-                backward = self._backward(emission)
-                posterior = np.exp(forward + backward - logsumexp(forward[-1], axis=0))
-
-                initial_counts += posterior[0]
-                state_counts += posterior.sum(axis=0)
-                state_sums += posterior.T @ run
-                state_squares += posterior.T @ np.square(run)
-                likelihood += run_likelihood
-
-                if len(run) > 1:
-                    pair_log = (
-                        forward[:-1, :, None]
-                        + np.log(self.transition_)[None, :, :]
-                        + emission[1:, None, :]
-                        + backward[1:, None, :]
-                    )
-                    pair_log -= logsumexp(pair_log, axis=(1, 2))[:, None, None]
-                    transition_counts += np.exp(pair_log).sum(axis=0)
-
-            self.initial_ = (initial_counts + 1.0) / (initial_counts.sum() + 3.0)
-            transition_prior = np.ones((3, 3)) + self.stickiness * np.eye(3)
-            self.transition_ = transition_counts + transition_prior
-            self.transition_ /= self.transition_.sum(axis=1, keepdims=True)
-
-            occupied = state_counts > 1e-8
-            self.means_[occupied] = state_sums[occupied] / state_counts[occupied, None]
-            self.variances_[occupied] = state_squares[occupied] / state_counts[
-                occupied, None
-            ] - np.square(self.means_[occupied])
-            self.variances_ = np.maximum(self.variances_, self.variance_floor)
-
-            if (
-                np.isfinite(previous_likelihood)
-                and abs(likelihood - previous_likelihood) < self.tolerance
-            ):
-                break
-            previous_likelihood = likelihood
-
-        self._name_states()
-        return self
-
-    def filtered_posterior(
-        self, sequence: np.ndarray, valid_mask: np.ndarray | None = None
-    ) -> np.ndarray:
-        """Return online posteriors; each row depends only on its prefix."""
-
-        self._require_fit()
-        sequence = np.asarray(sequence, dtype=np.float64)
-        posterior = np.full((len(sequence), 3), np.nan)
-        for location, run in valid_runs(sequence, valid_mask):
-            forward, _ = self._forward(self._log_emission(run))
-            forward -= logsumexp(forward, axis=1)[:, None]
-            posterior[location] = np.exp(forward)
-        return posterior
-
-    def smoothed_posterior(
-        self, sequence: np.ndarray, valid_mask: np.ndarray | None = None
-    ) -> np.ndarray:
-        """Return full-sequence posteriors for diagnostics and plots."""
-
-        self._require_fit()
-        sequence = np.asarray(sequence, dtype=np.float64)
-        posterior = np.full((len(sequence), 3), np.nan)
-        for location, run in valid_runs(sequence, valid_mask):
-            emission = self._log_emission(run)
-            forward, _ = self._forward(emission)
-            backward = self._backward(emission)
-            joint = forward + backward
-            joint -= logsumexp(joint, axis=1)[:, None]
-            posterior[location] = np.exp(joint)
-        return posterior
-
-    def score(
-        self, sequence: np.ndarray, valid_mask: np.ndarray | None = None
-    ) -> np.ndarray:
-        """Primary online mechanism-risk score: filtered captured posterior."""
-
-        return self.filtered_posterior(sequence, valid_mask)[:, self.captured_state]
-
-    def independent_posterior(
-        self, sequence: np.ndarray, valid_mask: np.ndarray | None = None
-    ) -> np.ndarray:
-        """Posterior from the same emissions with token order removed."""
-
-        self._require_fit()
-        sequence = np.asarray(sequence, dtype=np.float64)
-        posterior = np.full((len(sequence), 3), np.nan)
-        prior = self.stationary_probability()
-        for location, run in valid_runs(sequence, valid_mask):
-            value = self._log_emission(run) + np.log(prior)[None, :]
-            value -= logsumexp(value, axis=1)[:, None]
-            posterior[location] = np.exp(value)
-        return posterior
-
-    def independent_score(
-        self, sequence: np.ndarray, valid_mask: np.ndarray | None = None
-    ) -> np.ndarray:
-        """Captured-state control without transition or persistence evidence."""
-
-        return self.independent_posterior(sequence, valid_mask)[:, self.captured_state]
-
-    def stationary_probability(self) -> np.ndarray:
-        """Return the fitted chain's state occupancy used by the token control."""
-
-        self._require_fit()
-        probability = np.full(3, 1.0 / 3.0)
-        for _ in range(1000):
-            updated = probability @ self.transition_
-            if np.max(np.abs(updated - probability)) < 1e-12:
-                break
-            probability = updated
-        return probability / probability.sum()
-
-    def expected_dwell_time(self) -> np.ndarray:
-        """Expected consecutive tokens in each fitted state."""
-
-        self._require_fit()
-        diagonal = np.diag(self.transition_)
-        return 1.0 / np.maximum(1.0 - diagonal, 1e-12)
-
-    def save(self, path: str | Path) -> None:
-        self._require_fit()
-        np.savez(
-            path,
-            initial=self.initial_,
-            transition=self.transition_,
-            means=self.means_,
-            variances=self.variances_,
-            expected_dwell_time=self.expected_dwell_time(),
+def window_distances_to_batch(
+    metric: RouteMetric,
+    candidate: CandidateWindow,
+    batch: dict[str, np.ndarray],
+) -> np.ndarray:
+    distance = np.zeros(len(next(iter(batch.values()))), dtype=np.float64)
+    for step in range(HISTORY):
+        distance += (
+            metric.distances_to_batch(
+                candidate.sequence,
+                candidate.end - HISTORY + step,
+                {name: value[:, step] for name, value in batch.items()},
+            )
+            / HISTORY
         )
+    distance += metric.distances_to_batch(
+        candidate.sequence,
+        candidate.end,
+        {name: value[:, HISTORY] for name, value in batch.items()},
+    )
+    return distance
+
+
+def select_prototypes(
+    candidates: Sequence[CandidateWindow],
+    metric: RouteMetric,
+    count: int,
+) -> tuple[CandidateWindow, ...]:
+    """Deterministic farthest-first coreset of actual observed windows."""
+
+    ordered = sorted(candidates, key=lambda item: (item.source_id, item.end))
+    batch = window_batch(ordered)
+    selected = [ordered[0]]
+    nearest = window_distances_to_batch(metric, selected[0], batch)
+    while len(selected) < min(count, len(ordered)):
+        next_index = int(np.argmax(nearest))
+        if nearest[next_index] <= 1e-12:
+            break
+        selected.append(ordered[next_index])
+        distance = window_distances_to_batch(metric, selected[-1], batch)
+        nearest = np.minimum(nearest, distance)
+    return tuple(selected)
+
+
+def prototype_bank(
+    candidates: Sequence[CandidateWindow],
+    metric: RouteMetric,
+    count: int,
+) -> PrototypeBank:
+    prototypes = select_prototypes(candidates, metric, count)
+    tensor = window_batch(prototypes)
+    candidates_batch = window_batch(candidates)
+    distance = np.stack(
+        [
+            window_distances_to_batch(metric, prototype, candidates_batch)
+            for prototype in prototypes
+        ]
+    )
+    assignment = np.argmin(distance, axis=0)
+    assigned_distance = distance[assignment, np.arange(len(candidates))]
+    count_by_prototype = np.bincount(assignment, minlength=len(prototypes)).astype(
+        np.float64
+    )
+    weight = count_by_prototype / count_by_prototype.sum()
+
+    positive = np.asarray(assigned_distance)
+    positive = positive[positive > 1e-12]
+    if not len(positive):
+        adjacent = [
+            window_distance(metric, left, right) for left, right in pairwise(prototypes)
+        ]
+        positive = np.asarray([value for value in adjacent if value > 1e-12])
+    bandwidth = float(np.median(positive)) if len(positive) else 1.0
+    return PrototypeBank(tensor=tensor, weight=weight, bandwidth=bandwidth)
+
+
+def row_logsumexp(value: np.ndarray) -> np.ndarray:
+    maximum = np.max(value, axis=1)
+    return maximum + np.log(np.exp(value - maximum[:, None]).sum(axis=1))
+
+
+@dataclass(frozen=True)
+class SourceECDF:
+    """Source-equal empirical calibration tables for raw innovation energy."""
+
+    table: dict[tuple[int, int], tuple[np.ndarray, np.ndarray]]
+    length_edges: np.ndarray
 
     @classmethod
-    def load(cls, path: str | Path) -> StickyRouteHMM:
-        model = cls()
-        with np.load(path) as parameters:
-            model.initial_ = parameters["initial"]
-            model.transition_ = parameters["transition"]
-            model.means_ = parameters["means"]
-            model.variances_ = parameters["variances"]
-        return model
-
-    def _initialize(
-        self, observations: np.ndarray
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        scale = np.maximum(observations.std(axis=0), np.sqrt(self.variance_floor))
-        standardized = (observations - observations.mean(axis=0)) / scale
-
-        exploration_count = max(1, len(observations) // 3)
-        low_contraction = np.argsort(observations[:, 0])[:exploration_count]
-        remaining = np.setdiff1d(np.arange(len(observations)), low_contraction)
-        takeover_order = remaining[np.argsort(observations[remaining, 1])]
-        centers = observations[
-            [
-                low_contraction[len(low_contraction) // 2],
-                takeover_order[len(takeover_order) // 4],
-                takeover_order[(3 * len(takeover_order)) // 4],
-            ]
-        ]
-
-        assignments = np.full(len(observations), -1, dtype=np.int64)
-        for _ in range(20):
-            distances = np.square(
-                standardized[:, None, :]
-                - (centers - observations.mean(axis=0))[None, :, :] / scale
-            ).sum(axis=2)
-            updated = np.argmin(distances, axis=1)
-            if np.array_equal(updated, assignments):
-                break
-            assignments = updated
-            for state in range(3):
-                if np.any(assignments == state):
-                    centers[state] = observations[assignments == state].mean(axis=0)
-
-        global_variance = np.maximum(observations.var(axis=0), self.variance_floor)
-        variances = np.repeat(global_variance[None, :], 3, axis=0)
-        for state in range(3):
-            selected = observations[assignments == state]
-            if len(selected) > 1:
-                variances[state] = np.maximum(selected.var(axis=0), self.variance_floor)
-
-        initial = np.full(3, 1.0 / 3.0)
-        transition = np.ones((3, 3)) + self.stickiness * np.eye(3)
-        transition /= transition.sum(axis=1, keepdims=True)
-        return initial, transition, centers, variances
-
-    def _log_emission(self, observations: np.ndarray) -> np.ndarray:
-        difference = observations[:, None, :] - self.means_[None, :, :]
-        return -0.5 * (
-            2.0 * np.log(2.0 * np.pi)
-            + np.log(self.variances_).sum(axis=1)[None, :]
-            + (np.square(difference) / self.variances_[None, :, :]).sum(axis=2)
+    def fit(
+        cls,
+        records: Sequence[GraphRecord],
+        scores: Sequence[np.ndarray],
+        length_edges: np.ndarray,
+    ) -> SourceECDF:
+        grouped: dict[tuple[int, int], dict[str, list[float]]] = defaultdict(
+            lambda: defaultdict(list)
         )
+        for record, score in zip(records, scores, strict=True):
+            for token, value in enumerate(np.asarray(score, dtype=np.float64)):
+                if not np.isfinite(value):
+                    continue
+                key = (
+                    response_position_bin(record.sequence, token),
+                    prompt_length_bin(record.prompt_length, length_edges),
+                )
+                grouped[key][record.source_id].append(float(value))
 
-    def _forward(self, emission: np.ndarray) -> tuple[np.ndarray, float]:
-        forward = np.empty_like(emission)
-        forward[0] = np.log(self.initial_) + emission[0]
-        log_transition = np.log(self.transition_)
-        for token in range(1, len(emission)):
-            forward[token] = emission[token] + logsumexp(
-                forward[token - 1, :, None] + log_transition, axis=0
+        tables = {}
+        for key, sources in grouped.items():
+            value = []
+            weight = []
+            for source_values in sources.values():
+                value.extend(source_values)
+                weight.extend([1.0 / len(source_values)] * len(source_values))
+            value_array = np.asarray(value, dtype=np.float64)
+            weight_array = np.asarray(weight, dtype=np.float64)
+            order = np.argsort(value_array, kind="stable")
+            value_array = value_array[order]
+            cumulative = np.cumsum(weight_array[order]) / weight_array.sum()
+            tables[key] = (value_array, cumulative)
+        if not tables:
+            raise ValueError("calibration records contain no finite scores")
+        return cls(tables, np.asarray(length_edges, dtype=np.float64))
+
+    def transform(self, record: GraphRecord, score: np.ndarray) -> np.ndarray:
+        calibrated = np.full(len(score), np.nan, dtype=np.float32)
+        available = tuple(self.table)
+        for token, value in enumerate(np.asarray(score, dtype=np.float64)):
+            if not np.isfinite(value):
+                continue
+            key = (
+                response_position_bin(record.sequence, token),
+                prompt_length_bin(record.prompt_length, self.length_edges),
             )
-        likelihood = float(logsumexp(forward[-1], axis=0))
-        return forward, likelihood
+            reference, cumulative = self.table[nearest_condition(available, key)]
+            location = np.searchsorted(reference, value, side="right")
+            calibrated[token] = cumulative[location - 1] if location else 0.0
+        return calibrated
 
-    def _backward(self, emission: np.ndarray) -> np.ndarray:
-        backward = np.zeros_like(emission)
-        log_transition = np.log(self.transition_)
-        for token in range(len(emission) - 2, -1, -1):
-            backward[token] = logsumexp(
-                log_transition
-                + emission[token + 1][None, :]
-                + backward[token + 1][None, :],
-                axis=1,
+
+class TransitionDetector:
+    """Conditional kernel energy over full, multimodal graph-state windows."""
+
+    def __init__(self, prototype_count: int = 8) -> None:
+        self.prototype_count = max(1, min(int(prototype_count), 8))
+        self.metric: RouteMetric | None = None
+        self.length_edges: np.ndarray | None = None
+        self.reference: dict[tuple[int, int], PrototypeBank] = {}
+        self.reference_sources: frozenset[str] = frozenset()
+        self.calibrator: SourceECDF | None = None
+        self.independent_calibrator: SourceECDF | None = None
+
+    def fit(self, records: Sequence[GraphRecord]) -> TransitionDetector:
+        records = tuple(records)
+        if not records:
+            raise ValueError("at least one reference record is required")
+        self.reference_sources = frozenset(record.source_id for record in records)
+        self.length_edges = prompt_length_edges(records)
+        candidates = candidate_windows(records, self.length_edges)
+        if not candidates:
+            raise ValueError("reference records contain no valid two-step windows")
+        self.metric = RouteMetric.fit(frame_pairs(candidates))
+
+        grouped: dict[tuple[int, int], list[CandidateWindow]] = defaultdict(list)
+        for candidate in candidates:
+            grouped[(candidate.position_bin, candidate.length_bin)].append(candidate)
+        self.reference = {
+            key: prototype_bank(group, self.metric, self.prototype_count)
+            for key, group in grouped.items()
+        }
+        return self
+
+    def raw_scores(self, record: GraphRecord) -> tuple[np.ndarray, np.ndarray]:
+        metric, length_edges = self._fitted()
+        sequence = record.sequence
+        conditional = np.full(len(sequence.valid), np.nan, dtype=np.float32)
+        independent = np.full(len(sequence.valid), np.nan, dtype=np.float32)
+
+        grouped: dict[tuple[int, int], list[int]] = defaultdict(list)
+        for token in range(HISTORY, len(sequence.valid)):
+            if not valid_window(sequence, token):
+                continue
+            key = (
+                response_position_bin(sequence, token),
+                prompt_length_bin(record.prompt_length, length_edges),
             )
-        return backward
+            grouped[key].append(token)
 
-    def _name_states(self) -> None:
-        exploration = int(np.argmin(self.means_[:, 0]))
-        remaining = [state for state in range(3) if state != exploration]
-        captured = max(remaining, key=lambda state: self.means_[state, 1])
-        grounded = next(state for state in remaining if state != captured)
-        order = np.array([exploration, grounded, captured])
+        available = tuple(self.reference)
+        for key, token_list in grouped.items():
+            bank = self.reference[nearest_condition(available, key)]
+            token = np.asarray(token_list, dtype=np.int64)
+            context = np.zeros((len(token), bank.count), dtype=np.float64)
+            for step in range(HISTORY):
+                prototype = {
+                    name: value[:, step] for name, value in bank.tensor.items()
+                }
+                context += (
+                    metric.distances_from_indices_to_batch(
+                        sequence, token - HISTORY + step, prototype
+                    )
+                    / HISTORY
+                )
+            current = metric.distances_from_indices_to_batch(
+                sequence,
+                token,
+                {name: value[:, HISTORY] for name, value in bank.tensor.items()},
+            )
+            log_weight = np.log(bank.weight)[None]
+            past_energy = row_logsumexp(log_weight - context / bank.bandwidth)
+            joint_energy = row_logsumexp(
+                log_weight - (context + current) / bank.bandwidth
+            )
+            conditional[token] = past_energy - joint_energy
+            independent[token] = -row_logsumexp(log_weight - current / bank.bandwidth)
+        return conditional, independent
 
-        self.initial_ = self.initial_[order]
-        self.transition_ = self.transition_[order][:, order]
-        self.means_ = self.means_[order]
-        self.variances_ = self.variances_[order]
+    def raw_score(self, record: GraphRecord) -> np.ndarray:
+        return self.raw_scores(record)[0]
 
-    def _require_fit(self) -> None:
-        if self.means_ is None:
-            raise RuntimeError("fit the route-state model before scoring")
+    def calibrate(self, records: Sequence[GraphRecord]) -> TransitionDetector:
+        _, length_edges = self._fitted()
+        records = tuple(records)
+        overlap = self.reference_sources.intersection(
+            record.source_id for record in records
+        )
+        if overlap:
+            raise ValueError("reference and calibration sources must be disjoint")
+        raw = [self.raw_scores(record) for record in records]
+        self.calibrator = SourceECDF.fit(
+            records, [primary for primary, _ in raw], length_edges
+        )
+        self.independent_calibrator = SourceECDF.fit(
+            records, [control for _, control in raw], length_edges
+        )
+        return self
+
+    def score(self, record: GraphRecord) -> np.ndarray:
+        if self.calibrator is None:
+            raise RuntimeError("calibrate the detector before scoring")
+        return self.calibrator.transform(record, self.raw_score(record))
+
+    def independent_score(self, record: GraphRecord) -> np.ndarray:
+        if self.independent_calibrator is None:
+            raise RuntimeError("calibrate the detector before scoring")
+        return self.independent_calibrator.transform(record, self.raw_scores(record)[1])
+
+    def save(self, path: str | Path) -> None:
+        metric, length_edges = self._fitted()
+        keys = sorted(self.reference)
+        starts = [0]
+        prototype_weight = []
+        block = {name: [] for name in BLOCK_NAMES}
+        bandwidth = []
+        for key in keys:
+            bank = self.reference[key]
+            starts.append(starts[-1] + bank.count)
+            prototype_weight.append(bank.weight)
+            bandwidth.append(bank.bandwidth)
+            for name in BLOCK_NAMES:
+                block[name].append(bank.tensor[name])
+
+        arrays = {
+            **metric.arrays(),
+            "prototype_count": np.asarray(self.prototype_count, dtype=np.int32),
+            "length_edges": length_edges,
+            "reference_source": np.asarray(sorted(self.reference_sources)),
+            "reference_key": np.asarray(keys, dtype=np.int8),
+            "reference_start": np.asarray(starts, dtype=np.int32),
+            "reference_bandwidth": np.asarray(bandwidth, dtype=np.float64),
+            "prototype_weight": np.concatenate(prototype_weight),
+            **{
+                f"prototype_{name}": np.concatenate(values)
+                for name, values in block.items()
+            },
+        }
+        if self.calibrator is not None:
+            arrays.update(self._calibration_arrays("primary", self.calibrator))
+        if self.independent_calibrator is not None:
+            arrays.update(
+                self._calibration_arrays("independent", self.independent_calibrator)
+            )
+        np.savez_compressed(path, **arrays)
+
+    @classmethod
+    def load(cls, path: str | Path) -> TransitionDetector:
+        with np.load(path) as stored:
+            arrays = {name: stored[name] for name in stored.files}
+        detector = cls(int(arrays["prototype_count"]))
+        detector.metric = RouteMetric.from_arrays(arrays)
+        detector.length_edges = np.asarray(arrays["length_edges"], dtype=np.float64)
+        detector.reference_sources = frozenset(
+            str(value) for value in arrays["reference_source"]
+        )
+        keys = [tuple(map(int, key)) for key in arrays["reference_key"]]
+        starts = arrays["reference_start"]
+        detector.reference = {}
+        for number, key in enumerate(keys):
+            location = slice(int(starts[number]), int(starts[number + 1]))
+            detector.reference[key] = PrototypeBank(
+                tensor={
+                    name: arrays[f"prototype_{name}"][location] for name in BLOCK_NAMES
+                },
+                weight=arrays["prototype_weight"][location],
+                bandwidth=float(arrays["reference_bandwidth"][number]),
+            )
+        if "primary_calibration_key" in arrays:
+            detector.calibrator = detector._load_calibrator(arrays, "primary")
+        if "independent_calibration_key" in arrays:
+            detector.independent_calibrator = detector._load_calibrator(
+                arrays, "independent"
+            )
+        return detector
+
+    def _fitted(self) -> tuple[RouteMetric, np.ndarray]:
+        if self.metric is None or self.length_edges is None or not self.reference:
+            raise RuntimeError("fit the detector before scoring")
+        return self.metric, self.length_edges
+
+    @staticmethod
+    def _calibration_arrays(
+        prefix: str, calibrator: SourceECDF
+    ) -> dict[str, np.ndarray]:
+        keys = sorted(calibrator.table)
+        starts = [0]
+        value = []
+        cumulative = []
+        for key in keys:
+            current_value, current_cumulative = calibrator.table[key]
+            starts.append(starts[-1] + len(current_value))
+            value.append(current_value)
+            cumulative.append(current_cumulative)
+        return {
+            f"{prefix}_calibration_key": np.asarray(keys, dtype=np.int8),
+            f"{prefix}_calibration_start": np.asarray(starts, dtype=np.int32),
+            f"{prefix}_calibration_value": np.concatenate(value),
+            f"{prefix}_calibration_cumulative": np.concatenate(cumulative),
+        }
+
+    def _load_calibrator(
+        self, arrays: dict[str, np.ndarray], prefix: str
+    ) -> SourceECDF:
+        keys = [tuple(map(int, key)) for key in arrays[f"{prefix}_calibration_key"]]
+        starts = arrays[f"{prefix}_calibration_start"]
+        table = {}
+        for number, key in enumerate(keys):
+            location = slice(int(starts[number]), int(starts[number + 1]))
+            table[key] = (
+                arrays[f"{prefix}_calibration_value"][location],
+                arrays[f"{prefix}_calibration_cumulative"][location],
+            )
+        return SourceECDF(table, np.asarray(self.length_edges, dtype=np.float64))

@@ -3,29 +3,50 @@
 Read and follow `../grounded_route/iclr/ENGINEERING_RULES.md` before changing
 this directory.
 
-- This project has one method: a single-forward, head-resolved attention-write
-  DAG followed by label-free route-state tracking.
-- The computation edge targets query position `q`; the evaluated token is
-  position `q + 1`. Keep both indices explicit.
-- A local edge is derived from the actual dynamic `A`, `V`, GQA mapping, and
-  the matching head block of the current layer's `W_O`. Reconstruct the native
-  attention write before using the edge.
-- Never average heads before head/source routes have been constructed. Never
-  infer a cross-layer head identity.
-- Propagate prompt ancestry through actual graph endpoints. Split response
-  history into evidence-rooted relay and unrooted feedback; predictor self is
-  a separate route.
-- Route concentration is not a hallucination label. The primary state is the
-  conjunction of route contraction and persistent unrooted feedback.
-- MLP is a same-token nonlinear update, not a parameter-knowledge source.
-  MLP quantities are diagnostic unless an explicit experiment validates them.
-- Capture, graph construction, state fitting, and scoring must not read
-  hallucination labels. `evaluate.py` is the only label-opening module.
-- Keep the code path `data -> capture -> messages -> graph -> lineage -> state
-  -> detector`; `run.py` only orchestrates it.
-- Do not add file hashes, model-directory scans, schema migration, duplicate
-  pipelines, defensive utility layers, supervised regressors, AE/GNN variants,
-  or four-branch intervention code.
-- Tests must target predictor alignment, AVWO reconstruction, BF16 arithmetic,
-  GQA/head identity, multi-hop ancestry, legitimate narrow focus, topology
-  controls, and label isolation.
+- This directory contains one formal method. Do not add `v2`, `new`, legacy,
+  or parallel detector paths.
+- The computation event is query position `q`; its evaluated token is `q + 1`.
+  Keep `query_position` and `prediction_position` explicit everywhere.
+- The four origins are fixed and ordered as `evidence`, `prompt`, `response`,
+  and `endogenous`. They form an additive residual ledger, not four latent
+  classes and not hallucination labels.
+- Initialize evidence and other-prompt token embeddings in their matching
+  registers, prior response-token embeddings in `response`, and zero in
+  `endogenous`.
+- Propagate registers through the observed native RMS scale, dynamic `V`,
+  native attention gates, GQA mapping, and the matching per-layer/head `W_O`.
+  The four channel writes must reconstruct the native attention write.
+- Put the native MLP write into `endogenous`. This register is internal
+  nonlinear state, not a claim about parameter knowledge. Keep an explicit
+  numerical closure check at every layer boundary.
+- Never average heads or layers before constructing the registered route and
+  its Gram tensor. Never infer a cross-layer head identity.
+- Every causal source endpoint contributes to `route_topology`. Sparse edges
+  are allowed only for visualization and cannot affect the detector.
+- The detector consumes the complete structured graph frame: final registered
+  node embeddings, residual Gram, head-write Gram, route topology, MLP
+  relation, and readout-margin contribution. Do not replace this frame with a
+  feature list, PCA, random projection, learned adapter, HMM, supervised
+  regressor, autoencoder, or GNN.
+- The primary score is a source-disjoint, label-free conditional transition
+  energy under the full-tensor product metric. It must preserve eight actual
+  next-state prototypes per task, position decile, and prompt-length quartile
+  instead of averaging them into one center.
+- `data.py`, capture, register construction, graph construction, metric
+  fitting, neighbor selection, and calibration must not open hallucination
+  labels. `evaluate.py` is the only label-opening module.
+- Teacher forcing uses the one observed response only. Do not add response
+  pairs, knockout branches, patching, deletion replay, or counterfactual
+  generation to the primary pipeline.
+- The historical QA functional-route-collapse equation remains a locked
+  control. It is not an input to the primary detector and is not renamed as a
+  new mechanism.
+- Keep the formal path readable as `data -> capture -> registered messages ->
+  graph frame -> product metric -> conditional energy -> evaluate`; `run.py`
+  only orchestrates it.
+- Do not add file hashes, model-directory scans, schema migration, defensive
+  utility layers, duplicate pipelines, or hidden fallbacks.
+- Tests must cover predictor alignment, exact register closure, native AVWO
+  reconstruction, BF16 arithmetic, GQA/head identity, MLP assignment, dense
+  endpoint use, layer order, source isolation, label isolation, and a correct
+  narrow-focus example.
