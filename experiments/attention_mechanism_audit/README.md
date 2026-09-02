@@ -151,7 +151,8 @@ The shell file contains only:
 
 Outputs are written under
 `experiments/attention_mechanism_audit/outputs/<observer-model>/`. Capture
-artifacts live in `mechanism_state/train/` and `mechanism_state/test/`, while
+artifacts live in `evidence_adoption_state/train/` and
+`evidence_adoption_state/test/`, while
 `qa/`, `summary/`, and `data2txt/` each receive their own `report.json`,
 `token_scores.npz`, and population figures.
 

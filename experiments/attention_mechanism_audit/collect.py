@@ -34,6 +34,7 @@ from .data import (
 
 SCHEMA = "ragtruth-mechanism-state"
 VERSION = 7
+STATE_DIRECTORY = "evidence_adoption_state"
 _MODEL_SUFFIXES = {
     ".bin",
     ".json",
@@ -444,7 +445,7 @@ def capture_all(
 
     pairs = []
     for split_root in map(Path, split_roots):
-        state_root = Path(output_root) / "mechanism_state" / split_root.name
+        state_root = Path(output_root) / STATE_DIRECTORY / split_root.name
         capture_split(
             split_root=split_root,
             source_info=source_info,

@@ -308,6 +308,38 @@ def test_input_identity_is_stable_after_relocation(tmp_path):
     assert collect_module._model_identity(second / "observer-1") != first_identity
 
 
+def test_capture_all_uses_its_formal_state_directory_without_touching_old_states(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "output"
+    old_manifest = output / "mechanism_state" / "train" / "manifest.json"
+    old_manifest.parent.mkdir(parents=True)
+    old_contents = b'{"schema":"old-mechanism-state","version":5}\n'
+    old_manifest.write_bytes(old_contents)
+    cache = tmp_path / "cache"
+    calls = []
+
+    def capture_split(**kwargs):
+        calls.append(kwargs["output_root"])
+
+    monkeypatch.setattr(collect_module, "capture_split", capture_split)
+    result = collect_module.capture_all(
+        split_roots=(cache / "train", cache / "test"),
+        source_info=tmp_path / "source_info.jsonl",
+        model_path=tmp_path / "model",
+        output_root=output,
+    )
+
+    expected = [
+        output / collect_module.STATE_DIRECTORY / "train",
+        output / collect_module.STATE_DIRECTORY / "test",
+    ]
+    pairs = list(zip(expected, (cache / "train", cache / "test"), strict=True))
+    assert calls == expected
+    assert result == {task: pairs for task in collect_module.TASK_TYPES}
+    assert old_manifest.read_bytes() == old_contents
+
+
 def test_save_rejects_response_misaligned_mechanism_trace(tmp_path):
     capture = _capture(torch.tensor([1, 2, 3]))
     capture["trace"]["head_source_entropy"] = torch.zeros(2, 2, 3)

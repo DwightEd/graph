@@ -34,8 +34,8 @@ def test_all_command_evaluates_each_task_from_the_same_saved_mechanism_states(
     tmp_path, monkeypatch
 ):
     shared = [
-        (tmp_path / "mechanism_state/train", tmp_path / "cache/train"),
-        (tmp_path / "mechanism_state/test", tmp_path / "cache/test"),
+        (tmp_path / "evidence_adoption_state/train", tmp_path / "cache/train"),
+        (tmp_path / "evidence_adoption_state/test", tmp_path / "cache/test"),
     ]
     captures = []
     evaluations = []
@@ -83,9 +83,9 @@ def test_plot_sample_searches_the_same_saved_inputs():
         [
             "plot-sample",
             "--input",
-            "routing_state/train",
+            "evidence_adoption_state/train",
             "--input",
-            "routing_state/test",
+            "evidence_adoption_state/test",
             "--sample-id",
             "11907",
             "--output",
@@ -95,8 +95,8 @@ def test_plot_sample_searches_the_same_saved_inputs():
 
     assert args.sample_id == "11907"
     assert args.input == [
-        Path("routing_state/train"),
-        Path("routing_state/test"),
+        Path("evidence_adoption_state/train"),
+        Path("evidence_adoption_state/test"),
     ]
     assert args.output == Path("sample.png")
 
