@@ -178,6 +178,11 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     )
 
     output = tmp_path / "dual-register-state"
+    output.mkdir()
+    (output / "manifest.json").write_text(
+        json.dumps({"schema": "old", "version": 7, "samples": 0}),
+        encoding="utf-8",
+    )
     common = {
         "split_root": tmp_path / "train-cache",
         "source_info": tmp_path / "source_info.jsonl",
@@ -236,12 +241,8 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     assert first_rows[0]["prompt_tokens"] == 2
     assert first_rows[0]["evidence_tokens"] == 0
     assert first_rows[0]["response_tokens"] == 1
-    assert first_rows[0]["target_response_sha256"] == (
-        "c713558bfa07123bfbdeec433f51384cc214f60e3f4484222f750e8bf1454652"
-    )
+    assert first_rows[0]["target_token_ids"] == [63]
     assert first_rows[0]["artifact_contract"]["version"] == 8
-    assert first_rows[0]["token_ids_sha256"]
-    assert first_rows[0]["evidence_mask_sha256"]
     saved = torch.load(output / "samples" / "summary.pt", weights_only=True)
     assert set(saved) == {
         "artifact_contract",
@@ -320,7 +321,7 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
         collect_module.capture_split(**common)
 
 
-def test_input_identity_is_stable_after_relocation(tmp_path):
+def test_input_stamps_are_readable_and_detect_changes(tmp_path):
     first = tmp_path / "first"
     second = tmp_path / "second"
     source_content = '{"source_id": "same"}\n'
@@ -332,16 +333,18 @@ def test_input_identity_is_stable_after_relocation(tmp_path):
         (model / "config.json").write_text('{"model_type": "llama"}', encoding="utf-8")
         (model / "model.safetensors").write_bytes(b"same frozen weights")
 
-    assert collect_module._file_identity(
-        first / "source_info.jsonl"
-    ) == collect_module._file_identity(second / "source_info.jsonl")
-    first_identity = collect_module._model_identity(first / "observer-0")
-    second_identity = collect_module._model_identity(second / "observer-1")
-    assert first_identity == second_identity
+    source_stamp = collect_module.file_stamp(first / "source_info.jsonl")
+    assert source_stamp["path"].endswith("source_info.jsonl")
+    assert source_stamp["size"] == len(source_content.encode())
+    first_identity = collect_module.model_stamp(first / "observer-0")
+    second_identity = collect_module.model_stamp(second / "observer-1")
+    assert first_identity["path"] != second_identity["path"]
+    assert [entry[:2] for entry in first_identity["files"]] == [
+        entry[:2] for entry in second_identity["files"]
+    ]
 
-    (second / "observer-1" / "model.safetensors").write_bytes(b"different frozen wt")
-    assert len(b"different frozen wt") == len(b"same frozen weights")
-    assert collect_module._model_identity(second / "observer-1") != first_identity
+    (second / "observer-1" / "model.safetensors").write_bytes(b"changed weights")
+    assert collect_module.model_stamp(second / "observer-1") != second_identity
 
 
 def test_capture_all_uses_its_formal_state_directory_without_touching_old_states(

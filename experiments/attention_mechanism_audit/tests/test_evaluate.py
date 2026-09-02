@@ -1,4 +1,3 @@
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -300,11 +299,7 @@ def _write_shard(root: Path, split: str, sample: str) -> None:
                 "prompt_tokens": 3,
                 "evidence_tokens": 1,
                 "artifact_contract": artifact_contract,
-                "token_ids_sha256": evaluate.token_ids_sha256(np.arange(5)),
-                "evidence_mask_sha256": "evidence-digest",
-                "target_response_sha256": evaluate.target_response_sha256(
-                    np.arange(5), 3
-                ),
+                "target_token_ids": [3, 4],
             }
         )
         + "\n",
@@ -428,10 +423,7 @@ def test_pool_score_freeze_then_labels_is_the_only_evaluation_order(
         assert arrays["detection_valid"].all()
         for name in evaluate.SCORE_ORDER:
             assert arrays[f"{name}__valid"].all()
-    assert (
-        report["frozen_scores_sha256"]
-        == hashlib.sha256(frozen.read_bytes()).hexdigest()
-    )
+    assert "frozen_scores_sha256" not in report
     with np.load(output.with_name("token_scores.npz")) as arrays:
         assert arrays["label"].tolist() == [False, True, False, True]
     json.loads(output.read_text(encoding="utf-8"))
@@ -556,12 +548,11 @@ def test_sample_identity_checks_metadata_and_exact_target_token_ids():
         "source_id": "source",
         "task_type": "Summary",
         "generator_model": "generator",
-        "target_response_sha256": evaluate.target_response_sha256(torch.arange(5), 3),
-        "token_ids_sha256": evaluate.token_ids_sha256(torch.arange(5)),
+        "target_token_ids": [3, 4],
     }
     assert evaluate._validate_sample_identity(record, sample) is attention
 
-    changed = {**record, "target_response_sha256": "not-the-target-digest"}
+    changed = {**record, "target_token_ids": [3, 9]}
     with pytest.raises(ValueError, match="response token IDs changed"):
         evaluate._validate_sample_identity(changed, sample)
 
@@ -571,8 +562,7 @@ def test_sample_identity_checks_metadata_and_exact_target_token_ids():
     changed_sample = SimpleNamespace(
         **{**sample.__dict__, "attention": lambda: prompt_changed}
     )
-    with pytest.raises(ValueError, match="prompt or response token IDs changed"):
-        evaluate._validate_sample_identity(record, changed_sample)
+    assert evaluate._validate_sample_identity(record, changed_sample) is prompt_changed
 
 
 def test_sample_plot_consumes_only_the_new_compact_trace(tmp_path, monkeypatch):

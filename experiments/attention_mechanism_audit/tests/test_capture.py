@@ -15,7 +15,7 @@ from experiments.attention_mechanism_audit.capture import (
 )
 
 
-def _tiny_replay(*, layers=2):
+def _tiny_replay(*, layers=2, dtype=torch.float32):
     torch.manual_seed(41)
     config = transformers.LlamaConfig(
         vocab_size=64,
@@ -31,7 +31,7 @@ def _tiny_replay(*, layers=2):
         pad_token_id=0,
     )
     config._attn_implementation = "eager"
-    model = transformers.LlamaForCausalLM(config)
+    model = transformers.LlamaForCausalLM(config).to(dtype=dtype)
     if hasattr(model, "set_attn_implementation"):
         model.set_attn_implementation("eager")
     return model, FunctionalTraceReplay(model)
@@ -283,6 +283,17 @@ def test_capture_uses_one_four_branch_pass_and_saves_aligned_state():
     assert torch.all(trace["register_attention_edge_error"] < 1e-5)
     assert all(not parameter.requires_grad for parameter in model.parameters())
     assert all(parameter.grad is None for parameter in model.parameters())
+
+
+def test_bfloat16_capture_keeps_route_diagnostics_dtype_aligned():
+    model, replay = _tiny_replay(layers=1, dtype=torch.bfloat16)
+    artifact = replay.capture(*_inputs(), predictor_chunk=2, top_k=3)
+    trace = artifact["trace"]
+
+    assert model.model.layers[0].self_attn.o_proj.weight.dtype == torch.bfloat16
+    assert torch.any(trace["register_route_cover_size"] > 0)
+    assert torch.all(torch.isfinite(trace["register_role_mass"]))
+    assert torch.all(trace["register_attention_edge_error"] < 2e-3)
 
 
 def test_tiny_full_sequence_oracle_matches_all_four_branch_scores():

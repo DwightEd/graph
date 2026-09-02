@@ -7,10 +7,8 @@ evaluation path.  In particular, no hallucination label is opened here.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Sequence
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -47,56 +45,35 @@ _MODEL_SUFFIXES = {
 }
 
 
-def _file_identity(path: str | Path) -> str:
-    """Return a relocation-stable identity for an input file or fixture."""
-
+def file_stamp(path: str | Path) -> dict[str, Any]:
     path = Path(path)
-    if not path.is_file():
-        return path.name
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    stamp: dict[str, Any] = {"path": str(path.resolve())}
+    if path.is_file():
+        stat = path.stat()
+        stamp.update(size=stat.st_size, modified_ns=stat.st_mtime_ns)
+    return stamp
 
 
-@lru_cache(maxsize=8)
-def _digest_model_files(root: str, metadata: tuple[tuple[str, int, int], ...]) -> str:
-    """Hash model/tokenizer contents once per unchanged local checkpoint."""
-
-    digest = hashlib.sha256()
-    base = Path(root)
-    for relative, expected_size, expected_mtime in metadata:
-        candidate = base / relative
-        digest.update(relative.encode())
-        digest.update(b"\0")
-        with candidate.open("rb") as stream:
-            for block in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(block)
-        stat = candidate.stat()
-        if (stat.st_size, stat.st_mtime_ns) != (expected_size, expected_mtime):
-            raise RuntimeError("observer checkpoint changed while it was hashed")
-    return digest.hexdigest()
-
-
-def _model_identity(path: str | Path) -> str:
+def model_stamp(path: str | Path) -> dict[str, Any]:
     path = Path(path)
     if not path.is_dir():
-        return path.name
+        return {"path": str(path.resolve()), "files": []}
     files = sorted(
         candidate
         for candidate in path.rglob("*")
         if candidate.is_file() and candidate.suffix.casefold() in _MODEL_SUFFIXES
     )
-    metadata = tuple(
-        (
-            candidate.relative_to(path).as_posix(),
-            candidate.stat().st_size,
-            candidate.stat().st_mtime_ns,
-        )
-        for candidate in files
-    )
-    return _digest_model_files(str(path.resolve()), metadata)
+    return {
+        "path": str(path.resolve()),
+        "files": [
+            [
+                candidate.relative_to(path).as_posix(),
+                candidate.stat().st_size,
+                candidate.stat().st_mtime_ns,
+            ]
+            for candidate in files
+        ],
+    }
 
 
 def _capture_spec(top_k: int, route_cover_mass: float) -> dict[str, Any]:
@@ -112,40 +89,19 @@ def _capture_spec(top_k: int, route_cover_mass: float) -> dict[str, Any]:
     }
 
 
-def target_response_sha256(token_ids: Any, response_start: int) -> str:
-    """Hash the exact target-token sequence in a platform-independent encoding."""
-
-    target = torch.as_tensor(token_ids, dtype=torch.long, device="cpu")[
+def target_token_ids(token_ids: Any, response_start: int) -> list[int]:
+    return torch.as_tensor(token_ids, dtype=torch.long, device="cpu")[
         response_start:
     ].tolist()
-    payload = json.dumps(target, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
 
 
-def token_ids_sha256(token_ids: Any) -> str:
-    values = torch.as_tensor(token_ids, dtype=torch.long, device="cpu").tolist()
-    payload = json.dumps(values, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
-
-
-def evidence_mask_sha256(evidence_mask: Any) -> str:
-    values = torch.as_tensor(evidence_mask, dtype=torch.bool, device="cpu").to(
-        torch.uint8
-    )
-    return hashlib.sha256(bytes(values.tolist())).hexdigest()
-
-
-def _split_identity(dataset: Any) -> str:
-    """Identify the physical shard by split name and ordered sample IDs."""
-
-    digest = hashlib.sha256()
-    digest.update(
-        json.dumps(dataset.manifest, sort_keys=True, default=str).encode("utf-8")
-    )
-    for sample_id in dataset.sample_ids:
-        digest.update(b"\0")
-        digest.update(str(sample_id).encode())
-    return digest.hexdigest()
+def split_stamp(dataset: Any, path: str | Path) -> dict[str, Any]:
+    manifest = json.loads(json.dumps(dataset.manifest, default=str))
+    return {
+        "path": str(Path(path).resolve()),
+        "manifest": manifest,
+        "samples": len(dataset.sample_ids),
+    }
 
 
 def _validate_alignment(capture: dict[str, Any]) -> None:
@@ -188,11 +144,7 @@ def _save(
         "prompt_tokens": response_start,
         "evidence_tokens": int(evidence_mask.sum()),
         "response_tokens": len(capture["token_ids"]) - response_start,
-        "target_response_sha256": target_response_sha256(
-            capture["token_ids"], response_start
-        ),
-        "token_ids_sha256": token_ids_sha256(capture["token_ids"]),
-        "evidence_mask_sha256": evidence_mask_sha256(evidence_mask),
+        "target_token_ids": target_token_ids(capture["token_ids"], response_start),
         "bytes": path.stat().st_size,
         "peak_cuda_reserved_bytes": int(peak_memory),
     }
@@ -212,16 +164,12 @@ def validate_saved_artifact(
         and artifact.get("artifact_contract") != expected_contract
     ):
         raise ValueError("artifact contract does not match its index row")
-    expected_tokens = record.get("token_ids_sha256")
-    if expected_tokens is not None and token_ids_sha256(artifact["token_ids"]) != str(
-        expected_tokens
-    ):
-        raise ValueError("artifact token IDs do not match its index row")
-    expected_evidence = record.get("evidence_mask_sha256")
-    if expected_evidence is not None and evidence_mask_sha256(
-        artifact["evidence_mask"]
-    ) != str(expected_evidence):
-        raise ValueError("artifact evidence mask does not match its index row")
+    expected_tokens = record.get("target_token_ids")
+    actual_tokens = target_token_ids(
+        artifact["token_ids"], int(artifact["response_start"])
+    )
+    if expected_tokens is not None and actual_tokens != expected_tokens:
+        raise ValueError("artifact target tokens do not match its index row")
 
 
 def _validate_resume_index(root: Path, rows: Sequence[dict[str, Any]]) -> None:
@@ -279,12 +227,13 @@ def capture_split(
         if manifest_path.is_file()
         else {}
     )
+    rows = load_index(output) if index_path.is_file() else []
     expected = {
         "schema": SCHEMA,
         "version": VERSION,
-        "split_identity": _split_identity(dataset),
-        "source_identity": _file_identity(source_info),
-        "observer_identity": _model_identity(model_path),
+        "split_identity": split_stamp(dataset, split_root),
+        "source_identity": file_stamp(source_info),
+        "observer_identity": model_stamp(model_path),
         "model_dtype": str(dtype),
         "capture_spec": _capture_spec(top_k, route_cover_mass),
         "task_types": list(TASK_TYPES),
@@ -301,11 +250,13 @@ def capture_split(
             if previous_manifest.get(name) != value
         ]
         if changed:
-            raise ValueError(
-                "cannot resume mechanism states with changed identity: "
-                + ", ".join(changed)
-            )
-    else:
+            if rows or int(previous_manifest.get("samples", 0)):
+                raise ValueError(
+                    "cannot resume mechanism states with changed identity: "
+                    + ", ".join(changed)
+                )
+            previous_manifest = {}
+    if not previous_manifest:
         manifest_path.write_text(
             json.dumps(
                 {**expected, "samples": 0, "complete": False, "labels_used": False},
@@ -315,7 +266,6 @@ def capture_split(
             encoding="utf-8",
         )
 
-    rows = load_index(output) if index_path.is_file() else []
     _validate_resume_index(output, rows)
     recorded_samples = int(previous_manifest.get("samples", 0))
     if len(rows) < recorded_samples or (

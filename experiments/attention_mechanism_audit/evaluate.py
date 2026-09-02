@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -23,8 +22,7 @@ from .collect import (
     SCHEMA,
     VERSION,
     load_index,
-    target_response_sha256,
-    token_ids_sha256,
+    target_token_ids,
     validate_saved_artifact,
 )
 from .data import canonical_task_type
@@ -829,16 +827,11 @@ def _concatenate_label_free(
     )
 
 
-def _write_frozen(path: Path, arrays: Mapping[str, np.ndarray]) -> str:
+def _write_frozen(path: Path, arrays: Mapping[str, np.ndarray]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp.npz")
     np.savez_compressed(temporary, **arrays)
     temporary.replace(path)
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def _validate_sample_identity(record: Mapping[str, Any], sample: Any) -> Any:
@@ -865,19 +858,11 @@ def _validate_sample_identity(record: Mapping[str, Any], sample: Any) -> Any:
         raise ValueError(
             "prompt token count changed between mechanism state and labels"
         )
-    expected_digest = record.get("target_response_sha256")
-    if expected_digest is not None and target_response_sha256(
-        attention.token_ids, int(attention.response_idx)
-    ) != str(expected_digest):
+    expected_tokens = record.get("target_token_ids")
+    actual_tokens = target_token_ids(attention.token_ids, int(attention.response_idx))
+    if expected_tokens is not None and actual_tokens != expected_tokens:
         raise ValueError(
             "response token IDs changed between mechanism state and labels"
-        )
-    expected_all_tokens = record.get("token_ids_sha256")
-    if expected_all_tokens is not None and token_ids_sha256(attention.token_ids) != str(
-        expected_all_tokens
-    ):
-        raise ValueError(
-            "prompt or response token IDs changed between state and labels"
         )
     return attention
 
@@ -885,7 +870,7 @@ def _validate_sample_identity(record: Mapping[str, Any], sample: Any) -> Any:
 def _load_labels(
     records: Sequence[Mapping[str, Any]], frozen: Mapping[str, np.ndarray]
 ) -> np.ndarray:
-    """Open labels only after score arrays have been serialized and hashed."""
+    """Open labels only after label-free score arrays have been written."""
 
     datasets: dict[int, tuple[Any, Any]] = {}
     labels = []
@@ -1012,8 +997,7 @@ def evaluate_all(
                 "response_tokens",
                 "physical_shard",
                 "artifact_contract",
-                "token_ids_sha256",
-                "evidence_mask_sha256",
+                "target_token_ids",
             )
             if name in record
         }
@@ -1024,7 +1008,7 @@ def evaluate_all(
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     frozen_path = output.with_name("frozen_scores.npz")
-    frozen_sha256 = _write_frozen(frozen_path, frozen)
+    _write_frozen(frozen_path, frozen)
     label = _load_labels(records, frozen)
     merged = {**frozen, "label": label}
     scores = {name: merged[name] for name in SCORE_ORDER}
@@ -1057,7 +1041,6 @@ def evaluate_all(
     report.update(
         {
             "frozen_scores": str(frozen_path),
-            "frozen_scores_sha256": frozen_sha256,
             "token_scores": str(scores_path),
             "figures": str(figures),
             "physical_cache_shards": len(manifests),

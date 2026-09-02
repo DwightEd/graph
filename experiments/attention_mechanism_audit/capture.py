@@ -467,7 +467,7 @@ class FunctionalTraceReplay:
             context = torch.einsum("rhs,shd->rhd", a1, v1) - torch.einsum(
                 "rhs,shd->rhd", a0, v0
             )
-            reconstruction = self._removed_write(index, context)
+            reconstruction = F.linear(context.flatten(-2), weight)
             edge_errors.append((complete - reconstruction.float()).norm(dim=-1))
             magnitudes.append(magnitude)
             contributions.append(contribution)
