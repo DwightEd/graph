@@ -16,27 +16,26 @@ PRINTED_AUDIT_ORDER = (
     "causal_evidence_support",
     "causal_history_support",
     "causal_interaction",
-    "direct_evidence_support_with_history",
-    "history_support_under_direct_evidence_cut",
-    "unsupported_history_takeover_raw",
-    "edge_evidence_route_contraction",
-    "edge_response_history_route_contraction",
-    "edge_evidence_mass_contraction",
-    "edge_response_history_mass_contraction",
-    "edge_evidence_effective_routes_mean",
-    "edge_response_history_effective_routes_mean",
-    "edge_evidence_effective_rank_mean",
-    "edge_response_history_effective_rank_mean",
-    "edge_evidence_head_cover_size_mean",
-    "edge_response_history_head_cover_size_mean",
-    "edge_evidence_anchor_persistence_mean",
-    "edge_response_history_anchor_persistence_mean",
-    "edge_evidence_head_top1_mean",
-    "edge_response_history_head_top1_mean",
-    "pathway_evidence_mlp_projection_mean",
-    "pathway_history_mlp_projection_mean",
-    "pathway_interaction_mlp_projection_mean",
-    "pathway_evidence_valid_mean",
+    "raw_evidence_bypass",
+    "raw_history_after_cut",
+    "raw_old_symmetric",
+    "raw_takeover",
+    "raw_interaction",
+    "prompt_edge_log_volume_mean",
+    "prompt_attention_log_volume_mean",
+    "register_evidence_adoption_step_principal_energy",
+    "register_autonomous_history_step_principal_energy",
+    "register_evidence_adoption_terminal_norm",
+    "register_autonomous_history_terminal_norm",
+    "register_evidence_adoption_mlp_alignment_mean",
+    "register_autonomous_history_mlp_alignment_mean",
+    "register_evidence_adoption_response_history_mass_mean",
+    "register_autonomous_history_response_history_mass_mean",
+    "register_evidence_adoption_response_history_carrier_contribution_mean",
+    "register_evidence_adoption_response_history_gate_contribution_mean",
+    "register_autonomous_history_response_history_root_contribution_mean",
+    "register_evidence_adoption_response_history_effective_routes_mean",
+    "register_autonomous_history_response_history_effective_routes_mean",
 )
 
 DEFAULT_MODEL = Path(
@@ -51,6 +50,7 @@ DEFAULT_SOURCE_INFO = Path(
     "/share/home/tm902089733300000/a903202310/lys/data/"
     "RAGTruth/dataset/source_info.jsonl"
 )
+REPORT_DIRECTORY = "dual_register_v8"
 
 
 def _print_report(report: dict) -> None:
@@ -116,7 +116,7 @@ def _all(args: argparse.Namespace) -> None:
         limit=args.limit,
     )
     for task in TASK_TYPES:
-        task_output = output / task.casefold()
+        task_output = output / REPORT_DIRECTORY / task.casefold()
         report = evaluate_all(
             inputs=inputs[task],
             task_type=task,

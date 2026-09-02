@@ -3,13 +3,13 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from experiments.attention_mechanism_audit.detect import SCORE_NAMES
 from experiments.attention_mechanism_audit.visualize import (
-    SCORE_LABELS,
     plot_population,
     plot_sample_dashboard,
 )
 
-SCORE_ORDER = tuple(SCORE_LABELS)
+SCORE_ORDER = SCORE_NAMES
 
 
 def _assert_png(path: Path) -> None:
@@ -20,10 +20,10 @@ def _assert_png(path: Path) -> None:
 
 def test_population_figures_use_all_token_arrays(tmp_path):
     assert SCORE_ORDER == (
-        "unsupported_history_takeover",
         "evidence_bypass",
-        "evidence_route_contraction",
-        "history_route_contraction",
+        "symmetric_route_capture",
+        "unsupported_history_takeover",
+        "provenance_takeover",
         "confidence",
     )
     label = np.asarray([0, 0, 1, 1], dtype=bool)
@@ -74,20 +74,17 @@ def test_unavailable_crossfit_does_not_plot_zero_placeholder_scores(tmp_path):
 
 
 def test_one_sample_figure_is_only_an_explicit_call(tmp_path):
-    layers = {
-        "edge_evidence_head_entropy": np.asarray(
-            [[[0.2, 0.5], [0.1, 0.4]], [[0.3, 0.6], [0.2, 0.5]]]
-        ),
-        "edge_history_head_entropy": np.asarray(
-            [[[0.0, 0.0], [0.4, 0.2]], [[0.0, 0.0], [0.3, 0.1]]]
-        ),
-        "pathway_mlp_projection": np.asarray(
-            [
-                [[0.1, 0.2, -0.1], [0.2, 0.1, -0.2]],
-                [[0.3, 0.1, -0.2], [0.4, 0.2, -0.3]],
-            ]
-        ),
-    }
+    layers = {}
+    for register, scale in (("evidence_adoption", 1.0), ("autonomous_history", 2.0)):
+        for statistic in ("attention_norm", "mlp_norm", "output_norm"):
+            layers[f"register_{register}_{statistic}"] = scale * np.asarray(
+                [[0.1, 0.2], [0.3, 0.4]]
+            )
+        layers[f"register_{register}_mlp_alignment"] = scale * np.asarray(
+            [[-0.1, 0.2], [0.3, -0.4]]
+        )
+    layers["register_conservation_error"] = np.zeros((2, 2, 2))
+    layers["register_attention_edge_error"] = np.zeros((2, 2, 2))
     record = {
         "sample_id": "11907",
         "token_text": ["A", "B"],
@@ -95,17 +92,26 @@ def test_one_sample_figure_is_only_an_explicit_call(tmp_path):
         "evidence_support": np.asarray([0.5, -0.2]),
         "history_support": np.asarray([0.1, 0.8]),
         "route_interaction": np.asarray([0.0, -0.1]),
-        "evidence_route_contraction": np.asarray([0.0, 0.4]),
-        "history_route_contraction": np.asarray([0.0, -0.2]),
+        "evidence_bypass": np.asarray([-0.5, 0.2]),
+        "symmetric_route_capture": np.asarray([-0.4, 0.6]),
     }
     graph = SimpleNamespace(
         source=np.asarray([0, 1, 0, 2]),
         target=np.asarray([2, 2, 3, 3]),
         layer=np.asarray([0, 0, 1, 1]),
         head=np.asarray([0, 1, 0, 1]),
+        register=np.asarray(
+            [
+                "evidence_adoption",
+                "autonomous_history",
+                "evidence_adoption",
+                "autonomous_history",
+            ]
+        ),
         magnitude=np.asarray([0.5, 0.4, 0.7, 0.2]),
-        row_layer=np.asarray([0, 0, 0, 0, 1, 1, 1, 1]),
-        remainder=np.zeros(8),
+        contribution=np.asarray([0.2, -0.1, 0.4, -0.3]),
+        row_layer=np.asarray([0, 0, 1, 1]),
+        remainder_magnitude=np.zeros(4),
     )
     output = tmp_path / "11907.png"
 

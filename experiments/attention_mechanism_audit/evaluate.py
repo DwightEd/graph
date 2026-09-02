@@ -1,4 +1,4 @@
-"""Freeze label-free OOF scores, then evaluate and audit them with labels."""
+"""Freeze label-free raw scores, then evaluate and audit them with labels."""
 
 from __future__ import annotations
 
@@ -15,10 +15,8 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from research_dataset import open_research_dataset
 
 from .capture import (
-    EVIDENCE,
-    HISTORY,
-    PATHWAY_CONTRAST_NAMES,
-    PATHWAY_STAGE_NAMES,
+    REGISTER_NAMES,
+    REGISTER_STAGE_NAMES,
     ROLE_NAMES,
 )
 from .collect import (
@@ -31,93 +29,35 @@ from .collect import (
 )
 from .data import canonical_task_type
 from .detect import SCORE_DEFINITIONS, SCORE_NAMES, factorial_contrasts, score_records
-from .graph import build_graph, route_contraction, route_mass_contraction
+from .graph import build_graph
 from .visualize import plot_population, plot_sample_dashboard
 
 SCORE_ORDER = SCORE_NAMES
 PRIMARY_SCORE = SCORE_NAMES[0]
 CONTROL_SCORES = SCORE_NAMES[1:]
-ROUTE_FIELDS = {
-    "attention": "attention_role_mass",
-    "edge": "edge_role_mass",
-}
-PATHWAY_ATTENTION = PATHWAY_STAGE_NAMES.index("attention")
-POPULATION_LAYER_AUDITS = (
+OBSERVED_LAYER_AUDITS = (
     *(
-        f"edge_{role}_{statistic}"
-        for role in ("evidence", "response_history")
+        f"prompt_{family}_{statistic}"
+        for family in ("attention", "edge")
         for statistic in (
-            "mass_share",
-            "effective_routes",
+            "effective_sources",
             "effective_rank",
-            "head_entropy",
-            "head_entropy_spread",
-            "head_top1",
-            "head_top1_spread",
-        )
-    ),
-    "evidence_within_head_cancellation",
-    "response_history_within_head_cancellation",
-    "head_coherence_evidence",
-    "head_coherence_response_history",
-    *(
-        f"attention_{role}_{statistic}"
-        for role in ("evidence", "response_history")
-        for statistic in (
-            "mass_share",
-            "effective_routes",
-        )
-    ),
-    *(
-        f"pathway_{contrast}_{statistic}"
-        for contrast in PATHWAY_CONTRAST_NAMES
-        for statistic in (
-            "attention_norm",
-            "mlp_projection",
-            "output_gain",
-            "output_cosine",
-        )
-    ),
-    *(
-        f"edge_{role}_{statistic}"
-        for role in ("evidence", "response_history")
-        for statistic in (
-            "head_cover_size",
-            "head_cover_size_spread",
-            "anchor_persistence",
+            "anchor_support",
+            "log_volume",
         )
     ),
 )
 ONSET_AUDITS = {
-    "edge_evidence_mass_share_mean",
-    "edge_response_history_mass_share_mean",
-    "edge_evidence_mass_contraction",
-    "edge_response_history_mass_contraction",
-    "edge_evidence_head_cover_size_mean",
-    "edge_response_history_head_cover_size_mean",
-    "edge_evidence_head_cover_size_spread_mean",
-    "edge_response_history_head_cover_size_spread_mean",
-    "edge_evidence_anchor_persistence_mean",
-    "edge_response_history_anchor_persistence_mean",
-    *(
-        f"edge_{role}_{statistic}_mean"
-        for role in ("evidence", "response_history")
-        for statistic in (
-            "effective_routes",
-            "effective_rank",
-            "head_entropy",
-            "head_top1",
-        )
-    ),
-    *(
-        f"attention_{role}_effective_routes_mean"
-        for role in ("evidence", "response_history")
-    ),
-    "pathway_evidence_mlp_projection_mean",
+    "prompt_edge_log_volume_mean",
+    "prompt_attention_log_volume_mean",
     "causal_evidence_support",
     "causal_history_support",
     "causal_interaction",
-    "unsupported_history_takeover_raw",
+    "raw_evidence_bypass",
+    "raw_old_symmetric",
+    "raw_takeover",
+    *(f"register_{register}_terminal_norm" for register in REGISTER_NAMES),
+    *(f"register_{register}_step_principal_energy" for register in REGISTER_NAMES),
 }
 _EPS = 1e-12
 
@@ -164,165 +104,204 @@ def _layer_reductions(
     }
 
 
-def _weighted_head_summary(
-    value: np.ndarray, mass: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    """Summarize heads without giving a negligible route equal weight."""
+def _temporal_anchor_support(anchor: np.ndarray, window: int = 4) -> np.ndarray:
+    """Effective prompt anchors across heads and recent response positions."""
 
-    total = mass.sum(axis=2)
-    mean = (value * mass).sum(axis=2) / np.maximum(total, _EPS)
-    variance = (np.square(value - mean[:, :, None, :]) * mass).sum(axis=2) / np.maximum(
-        total, _EPS
-    )
-    return mean, np.sqrt(np.maximum(variance, 0.0))
-
-
-def _anchor_persistence(anchor: np.ndarray, mass: np.ndarray) -> np.ndarray:
-    persistence = np.zeros(anchor.shape[:2], dtype=np.float64)
-    valid = (anchor[:, 1:] >= 0) & (anchor[:, :-1] >= 0)
-    weight = mass[:, 1:] * valid
-    persistence[:, 1:] = (weight * (anchor[:, 1:] == anchor[:, :-1])).sum(
-        axis=2
-    ) / np.maximum(weight.sum(axis=2), _EPS)
-    return persistence
+    layers, tokens, _heads = anchor.shape
+    support = np.ones((layers, tokens), dtype=np.float64)
+    for layer in range(layers):
+        for token in range(tokens):
+            values = anchor[layer, max(0, token - window + 1) : token + 1].ravel()
+            values = values[values >= 0]
+            if len(values):
+                counts = np.unique(values, return_counts=True)[1].astype(np.float64)
+                probability = counts / counts.sum()
+                support[layer, token] = np.exp(
+                    -(probability * np.log(probability)).sum()
+                )
+    return support
 
 
 def layer_audit_metrics(artifact: Mapping[str, Any]) -> dict[str, np.ndarray]:
-    """Reduce only the reporting copy of head-resolved route measurements."""
+    """Expose observed routes and the propagated registers by layer."""
 
     trace = artifact["trace"]
     result: dict[str, np.ndarray] = {}
-    for family, mass_field in ROUTE_FIELDS.items():
-        mass = _array(trace[mass_field]).astype(np.float64)
-        role_mass = mass.sum(axis=2)
-        share = role_mass / np.maximum(role_mass.sum(axis=-1, keepdims=True), _EPS)
-        effective_routes = _array(trace[f"{family}_role_effective_routes"]).astype(
+    for family in ("attention", "edge"):
+        prompt_sources = _array(trace[f"prompt_{family}_effective_sources"]).astype(
             np.float64
         )
-        effective_rank = _array(trace[f"{family}_role_effective_rank"]).astype(
+        prompt_rank = _array(trace[f"prompt_{family}_effective_rank"]).astype(
             np.float64
         )
-        entropy = _array(trace[f"{family}_role_source_entropy"]).astype(np.float64)
-        top1 = _array(trace[f"{family}_role_top1"]).astype(np.float64)
-        entropy_mean, entropy_spread = _weighted_head_summary(entropy, mass)
-        top1_mean, top1_spread = _weighted_head_summary(top1, mass)
-        for role_index, role in enumerate(ROLE_NAMES):
-            prefix = f"{family}_{role}"
-            result[f"{prefix}_mass_share"] = share[..., role_index]
-            result[f"{prefix}_effective_routes"] = effective_routes[..., role_index]
-            result[f"{prefix}_effective_rank"] = effective_rank[..., role_index]
-            result[f"{prefix}_head_entropy"] = entropy_mean[..., role_index]
-            result[f"{prefix}_head_entropy_spread"] = entropy_spread[..., role_index]
-            result[f"{prefix}_head_top1"] = top1_mean[..., role_index]
-            result[f"{prefix}_head_top1_spread"] = top1_spread[..., role_index]
-
-    edge_head_mass = _array(trace["edge_role_mass"]).astype(np.float64)
-    edge_mass = edge_head_mass.sum(axis=2)
-    write_norm = _array(trace["head_role_write_norm"]).astype(np.float64).sum(axis=2)
-    coherence = _array(trace["role_head_coherence"]).astype(np.float64)
-    for role_index, role in enumerate(ROLE_NAMES):
-        mass = edge_mass[..., role_index]
-        cancellation = np.zeros_like(mass)
-        valid = mass > _EPS
-        cancellation[valid] = 1.0 - np.minimum(
-            write_norm[..., role_index][valid] / mass[valid], 1.0
+        prompt_anchor = _array(trace[f"prompt_{family}_anchor_index"]).astype(np.int64)
+        anchor_support = _temporal_anchor_support(prompt_anchor)
+        result[f"prompt_{family}_effective_sources"] = prompt_sources
+        result[f"prompt_{family}_effective_rank"] = prompt_rank
+        result[f"prompt_{family}_anchor_support"] = anchor_support
+        result[f"prompt_{family}_log_volume"] = (
+            np.log(np.maximum(prompt_sources, 1.0))
+            + np.log(np.maximum(prompt_rank, 1.0))
+            + np.log(np.maximum(anchor_support, 1.0))
         )
-        result[f"{role}_within_head_cancellation"] = cancellation
-        result[f"head_coherence_{role}"] = coherence[..., role_index]
 
-    route_roles = (EVIDENCE, HISTORY)
-    cover_size = _array(trace["route_source_cover_size"]).astype(np.float64)
-    cover_mean, cover_spread = _weighted_head_summary(
-        cover_size, edge_head_mass[..., route_roles]
+    register_norm = _array(trace["register_norm"]).astype(np.float64)
+    mlp_alignment = _array(trace["register_mlp_alignment"]).astype(np.float64)
+    role_mass = _array(trace["register_role_mass"]).astype(np.float64)
+    role_contribution = _array(trace["register_role_contribution"]).astype(np.float64)
+    role_components = {
+        name: _array(trace[f"register_role_{name}_contribution"]).astype(np.float64)
+        for name in ("root", "carrier", "gate")
+    }
+    effective_routes = _array(trace["register_role_effective_routes"]).astype(
+        np.float64
     )
-    edge_anchor = _array(trace["edge_role_anchor_index"]).astype(np.int64)
-    for route_index, role_index in enumerate(route_roles):
-        role = ROLE_NAMES[role_index]
-        result[f"edge_{role}_head_cover_size"] = cover_mean[..., route_index]
-        result[f"edge_{role}_head_cover_size_spread"] = cover_spread[..., route_index]
-        result[f"edge_{role}_anchor_persistence"] = _anchor_persistence(
-            edge_anchor[..., role_index], edge_head_mass[..., role_index]
+    if register_norm.ndim != 4:
+        raise ValueError("register norm must be [layer, token, register, stage]")
+    layers, tokens = register_norm.shape[:2]
+    expected_norm = (layers, tokens, len(REGISTER_NAMES), len(REGISTER_STAGE_NAMES))
+    expected_role = (
+        layers,
+        tokens,
+        role_mass.shape[2],
+        len(REGISTER_NAMES),
+        len(ROLE_NAMES),
+    )
+    if register_norm.shape != expected_norm:
+        raise ValueError("register norm must be [layer, token, register, stage]")
+    if mlp_alignment.shape != expected_norm[:-1]:
+        raise ValueError("register MLP alignment must be [layer, token, register]")
+    if role_mass.shape != expected_role or any(
+        value.shape != expected_role
+        for value in (role_contribution, *role_components.values())
+    ):
+        raise ValueError(
+            "register role measurements must preserve layer/token/head/register/role"
         )
+    if not np.allclose(role_contribution, sum(role_components.values()), atol=2e-5):
+        raise ValueError("register route components do not reconstruct contribution")
+    if effective_routes.shape != (*expected_norm[:-1], len(ROLE_NAMES)):
+        raise ValueError(
+            "register effective routes must be [layer, token, register, role]"
+        )
+    interaction_norm = _array(trace["interaction_norm"]).astype(np.float64)
+    if interaction_norm.shape != (*expected_norm[:2], len(REGISTER_STAGE_NAMES)):
+        raise ValueError("interaction norm must be [layer, token, stage]")
+    for stage_index, stage in enumerate(("input", "attention", "mlp", "output")):
+        result[f"interaction_{stage}_norm"] = interaction_norm[..., stage_index]
 
-    effect_norm = _array(trace["pathway_effect_norm"]).astype(np.float64)
-    projection = _array(trace["pathway_mlp_projection"]).astype(np.float64)
-    output_gain = _array(trace["pathway_pre_output_gain"]).astype(np.float64)
-    output_cosine = _array(trace["pathway_pre_output_cosine"]).astype(np.float64)
-    pathway_valid = _array(trace["pathway_valid"]).astype(bool)
-    cosine_valid = _array(trace["pathway_cosine_valid"]).astype(bool)
-    for contrast_index, contrast in enumerate(PATHWAY_CONTRAST_NAMES):
-        prefix = f"pathway_{contrast}"
-        result[f"{prefix}_attention_norm"] = effect_norm[
-            ..., contrast_index, PATHWAY_ATTENTION
-        ]
-        result[f"{prefix}_mlp_projection"] = projection[..., contrast_index]
-        result[f"{prefix}_output_gain"] = output_gain[..., contrast_index]
-        result[f"{prefix}_output_cosine"] = output_cosine[..., contrast_index]
-        result[f"{prefix}_valid"] = pathway_valid[..., contrast_index]
-        result[f"{prefix}_cosine_valid"] = cosine_valid[..., contrast_index]
+    for register_index, register in enumerate(REGISTER_NAMES):
+        prefix = f"register_{register}"
+        for stage_index, stage in enumerate(("input", "attention", "mlp", "output")):
+            result[f"{prefix}_{stage}_norm"] = register_norm[
+                ..., register_index, stage_index
+            ]
+        result[f"{prefix}_mlp_alignment"] = mlp_alignment[..., register_index]
+        for role_index, role in enumerate(ROLE_NAMES):
+            role_prefix = f"{prefix}_{role}"
+            result[f"{role_prefix}_mass"] = role_mass[
+                ..., register_index, role_index
+            ].sum(axis=2)
+            result[f"{role_prefix}_contribution"] = role_contribution[
+                ..., register_index, role_index
+            ].sum(axis=2)
+            for component, value in role_components.items():
+                result[f"{role_prefix}_{component}_contribution"] = value[
+                    ..., register_index, role_index
+                ].sum(axis=2)
+            result[f"{role_prefix}_effective_routes"] = effective_routes[
+                ..., register_index, role_index
+            ]
     return result
 
 
+def _step_principal_energy(gram: np.ndarray) -> np.ndarray:
+    """Return the largest eigenvalue for each token/register step Gram."""
+
+    gram = np.asarray(gram, dtype=np.float64)
+    if gram.ndim != 4 or gram.shape[0] != gram.shape[-1]:
+        raise ValueError("register step Gram must be [layer, token, register, layer]")
+    matrices = np.transpose(gram, (1, 2, 0, 3))
+    matrices = 0.5 * (matrices + matrices.swapaxes(-1, -2))
+    return np.maximum(np.linalg.eigvalsh(matrices)[..., -1], 0.0)
+
+
 def token_audit_metrics(artifact: Mapping[str, Any]) -> dict[str, np.ndarray]:
-    """Build fixed route, pathway, and endpoint diagnostics before labels open."""
+    """Build fixed observed, register, and causal diagnostics before labels open."""
 
     metrics: dict[str, np.ndarray] = {}
     layers = layer_audit_metrics(artifact)
-    for name in POPULATION_LAYER_AUDITS:
-        valid = None
-        if name.startswith("pathway_") and name.endswith("_output_cosine"):
-            contrast = name.split("_", 2)[1]
-            valid = layers[f"pathway_{contrast}_cosine_valid"]
-        elif name.startswith("pathway_") and name.endswith(
-            ("_mlp_projection", "_output_gain")
+    for name in OBSERVED_LAYER_AUDITS:
+        metrics.update(_layer_reductions(layers[name], name))
+    for statistic in ("attention_norm", "mlp_norm", "output_norm"):
+        name = f"interaction_{statistic}"
+        metrics.update(_layer_reductions(layers[name], name))
+    terminal = _array(artifact["trace"]["final_register_norm"]).astype(np.float64)
+    if terminal.shape != (1, next(iter(layers.values())).shape[1], len(REGISTER_NAMES)):
+        raise ValueError("final register norm must be [1, token, register]")
+    for register in REGISTER_NAMES:
+        prefix = f"register_{register}"
+        register_index = REGISTER_NAMES.index(register)
+        metrics[f"{prefix}_terminal_norm"] = terminal[0, :, register_index]
+        for statistic in ("attention_norm", "mlp_norm", "mlp_alignment"):
+            name = f"{prefix}_{statistic}"
+            metrics.update(_layer_reductions(layers[name], name))
+        for role in ROLE_NAMES:
+            statistics = ["mass", "contribution", "effective_routes"]
+            if role in {"evidence", "response_history"}:
+                statistics.extend(
+                    (
+                        "root_contribution",
+                        "carrier_contribution",
+                        "gate_contribution",
+                    )
+                )
+            for statistic in statistics:
+                name = f"{prefix}_{role}_{statistic}"
+                metrics[f"{name}_mean"] = layers[name].mean(axis=0).astype(np.float32)
+
+    trace = artifact["trace"]
+    principal = _step_principal_energy(_array(trace["register_step_gram"]))
+    conservation = np.abs(
+        _array(trace["register_conservation_error"]).astype(np.float64)
+    )
+    edge_error = np.abs(
+        _array(trace["register_attention_edge_error"]).astype(np.float64)
+    )
+    if conservation.shape != edge_error.shape or conservation.ndim != 3:
+        raise ValueError("register errors must be [layer, token, register]")
+    for register_index, register in enumerate(REGISTER_NAMES):
+        prefix = f"register_{register}"
+        metrics[f"{prefix}_step_principal_energy"] = principal[..., register_index]
+        for error_name, error in (
+            ("conservation_error", conservation),
+            ("attention_edge_error", edge_error),
         ):
-            contrast = name.split("_", 2)[1]
-            valid = layers[f"pathway_{contrast}_valid"]
-        metrics.update(_layer_reductions(layers[name], name, valid))
-    for contrast in PATHWAY_CONTRAST_NAMES:
-        metrics[f"pathway_{contrast}_valid_mean"] = (
-            layers[f"pathway_{contrast}_valid"]
-            .mean(axis=0, dtype=np.float64)
-            .astype(np.float32)
-        )
-        metrics[f"pathway_{contrast}_cosine_valid_mean"] = (
-            layers[f"pathway_{contrast}_cosine_valid"]
-            .mean(axis=0, dtype=np.float64)
-            .astype(np.float32)
-        )
-    for role in ("evidence", "response_history"):
-        route_value, route_valid = route_contraction(
-            artifact, role=role, return_valid=True
-        )
-        mass_value, mass_valid = route_mass_contraction(
-            artifact, role=role, return_valid=True
-        )
-        route_name = f"edge_{role}_route_contraction"
-        mass_name = f"edge_{role}_mass_contraction"
-        metrics[route_name] = route_value.astype(np.float32)
-        metrics[f"{route_name}__valid"] = route_valid
-        metrics[mass_name] = mass_value.astype(np.float32)
-        metrics[f"{mass_name}__valid"] = mass_valid
+            selected = error[..., register_index]
+            metrics[f"{prefix}_{error_name}_mean"] = selected.mean(axis=0)
+            metrics[f"{prefix}_{error_name}_max"] = selected.max(axis=0)
+
     contrasts = factorial_contrasts(artifact).astype(np.float32)
     inputs = artifact["score_inputs"]
     full = _array(inputs["full_logprob"]).astype(np.float32)
     no_evidence = _array(inputs["no_evidence_logprob"]).astype(np.float32)
+    no_history = _array(inputs["no_history_logprob"]).astype(np.float32)
     no_neither = _array(inputs["no_evidence_history_logprob"]).astype(np.float32)
-    direct_evidence_with_history = full - no_evidence
-    history_under_evidence_cut = no_evidence - no_neither
     metrics.update(
         {
-            "causal_evidence_support": contrasts[:, 0],
-            "causal_history_support": contrasts[:, 1],
+            "causal_evidence_support": full - no_evidence,
+            "causal_history_support": full - no_history,
             "causal_interaction": contrasts[:, 2],
-            "direct_evidence_support_with_history": direct_evidence_with_history,
-            "history_support_under_direct_evidence_cut": history_under_evidence_cut,
-            "unsupported_history_takeover_raw": (
-                history_under_evidence_cut - direct_evidence_with_history
-            ),
+            "raw_evidence_bypass": no_evidence - full,
+            "raw_history_after_cut": no_evidence - no_neither,
+            "raw_old_symmetric": no_evidence - no_history,
+            "raw_takeover": 2 * no_evidence - full - no_neither,
+            "raw_interaction": contrasts[:, 2],
         }
     )
-    return metrics
+    return {
+        name: np.asarray(value, dtype=np.float32) for name, value in metrics.items()
+    }
 
 
 def _binary_metrics(label: np.ndarray, score: np.ndarray) -> dict[str, float]:
@@ -584,7 +563,10 @@ def _has_onset_audit(name: str) -> bool:
 
 
 def _requires_strict_history(name: str) -> bool:
-    return "history" in name or "interaction" in name
+    return any(
+        marker in name
+        for marker in ("history", "autonomous", "interaction", "takeover", "symmetric")
+    )
 
 
 def group_difference_audit(
@@ -784,7 +766,7 @@ def _concatenate_label_free(
     records: Sequence[Mapping[str, Any]],
     scores: Mapping[str, Mapping[str, np.ndarray]],
 ) -> tuple[dict[str, np.ndarray], tuple[str, ...]]:
-    """Join OOF scores and audit arrays in immutable record order."""
+    """Join frozen scores and audit arrays in immutable record order."""
 
     output: dict[str, list[np.ndarray]] = {
         "sample_id": [],
@@ -794,6 +776,7 @@ def _concatenate_label_free(
         "response_length": [],
         "detection_valid": [],
         **{name: [] for name in SCORE_ORDER},
+        **{f"{name}__valid": [] for name in SCORE_ORDER},
     }
     audit_schema: tuple[str, ...] | None = None
     audit_names: tuple[str, ...] | None = None
@@ -832,6 +815,10 @@ def _concatenate_label_free(
         output["detection_valid"].append(detection_valid)
         for name in SCORE_ORDER:
             output[name].append(np.asarray(current_scores[name], dtype=np.float32))
+            score_valid = np.asarray(current_scores[f"{name}__valid"], dtype=bool)
+            if score_valid.shape != (count,):
+                raise ValueError(f"detector validity mismatch for {sample}/{name}")
+            output[f"{name}__valid"].append(score_valid)
         for name, value in audit.items():
             dtype = bool if name.endswith("__valid") else np.float32
             output[name].append(np.asarray(value, dtype=dtype))
@@ -898,7 +885,7 @@ def _validate_sample_identity(record: Mapping[str, Any], sample: Any) -> Any:
 def _load_labels(
     records: Sequence[Mapping[str, Any]], frozen: Mapping[str, np.ndarray]
 ) -> np.ndarray:
-    """Open labels only after OOF arrays have been serialized and hashed."""
+    """Open labels only after score arrays have been serialized and hashed."""
 
     datasets: dict[int, tuple[Any, Any]] = {}
     labels = []
@@ -971,7 +958,7 @@ def build_report(
             }
         )
     return {
-        "schema": "ragtruth-route-adoption-detection-v1",
+        "schema": "ragtruth-register-provenance-detection-v1",
         "task_type": task_type,
         "samples": int(np.unique(arrays["sample_id"]).size),
         "sources": int(np.unique(arrays["source_id"]).size),
@@ -988,16 +975,15 @@ def build_report(
         "score_definitions": SCORE_DEFINITIONS,
         "score_direction": "higher is more hallucination-like; never label-flipped",
         "detection_estimand": "token_micro",
-        "detection_token_scope": (
-            "strict_history_eligible_response_tokens_token_index_ge_2"
-        ),
+        "detection_token_scope": "intersection_of_fixed_score_validity_masks",
         "detection_bootstrap_unit": "source_id_cluster",
         "detection": detection,
         "detector": dict(detector),
         "labels_used_during": "posthoc_evaluation_only_after_score_freeze",
         "analysis_scope": (
-            "source-crossfit unsupported-history takeover with head-resolved "
-            "route and attention/MLP pathway audit by task"
+            "label-free finite-difference evidence-adoption versus autonomous-"
+            "history registers with raw causal controls and posthoc mechanism "
+            "audit by task"
         ),
     }
 
@@ -1011,7 +997,7 @@ def evaluate_all(
     seed: int = 20260828,
     position_bin: int = 16,
 ) -> dict[str, Any]:
-    """Pool physical shards, freeze one OOF detector, and only then open labels."""
+    """Pool physical shards, freeze raw scores, and only then open labels."""
 
     task_type = canonical_task_type(task_type)
     records, manifests = _pool_records(inputs, task_type)
@@ -1115,16 +1101,21 @@ def plot_saved_sample(
         )
         layers = layer_audit_metrics(artifact)
         trace = artifact["trace"]
-        layers["edge_evidence_head_entropy"] = _array(
-            trace["edge_role_source_entropy"]
-        )[..., EVIDENCE]
-        layers["edge_history_head_entropy"] = _array(trace["edge_role_source_entropy"])[
-            ..., HISTORY
-        ]
-        projection = _array(trace["pathway_mlp_projection"]).astype(np.float64)
-        projection[~_array(trace["pathway_valid"]).astype(bool)] = np.nan
-        layers["pathway_mlp_projection"] = projection
-        contrasts = factorial_contrasts(artifact)
+        layers["register_conservation_error"] = _array(
+            trace["register_conservation_error"]
+        )
+        layers["register_attention_edge_error"] = _array(
+            trace["register_attention_edge_error"]
+        )
+        full, no_evidence, no_history, neither = (
+            _array(artifact["score_inputs"][name]).astype(np.float64)
+            for name in (
+                "full_logprob",
+                "no_evidence_logprob",
+                "no_history_logprob",
+                "no_evidence_history_logprob",
+            )
+        )
         token_ids = _array(artifact["token_ids"])
         response_start = int(artifact["response_start"])
         record = {
@@ -1133,15 +1124,11 @@ def plot_saved_sample(
                 token_ids[response_start:].tolist()
             ),
             "predictor_position": np.arange(response_start - 1, len(token_ids) - 1),
-            "evidence_support": contrasts[:, 0],
-            "history_support": contrasts[:, 1],
-            "route_interaction": contrasts[:, 2],
-            "evidence_route_contraction": route_contraction(
-                artifact, role="evidence", family="edge"
-            ),
-            "history_route_contraction": route_contraction(
-                artifact, role="response_history", family="edge"
-            ),
+            "evidence_support": full - no_evidence,
+            "history_support": full - no_history,
+            "route_interaction": full - no_evidence - no_history + neither,
+            "evidence_bypass": no_evidence - full,
+            "symmetric_route_capture": no_evidence - no_history,
         }
         plot_sample_dashboard(record, layers, build_graph(artifact), Path(output))
         return {"sample_id": str(sample_id), "output": str(output)}

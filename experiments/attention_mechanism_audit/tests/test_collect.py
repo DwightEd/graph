@@ -22,20 +22,49 @@ SCORE_INPUTS = (
 
 
 def _trace(response_tokens: int = 1):
-    return {
-        "attention_role_mass": torch.zeros(2, response_tokens, 3, 4),
-        "edge_role_mass": torch.zeros(2, response_tokens, 3, 4),
-        "head_role_write_norm": torch.zeros(2, response_tokens, 3, 4),
-        "role_head_coherence": torch.zeros(2, response_tokens, 4),
-        "route_source_index": torch.zeros(
-            2, response_tokens, 3, 2, 2, dtype=torch.int32
+    layers, heads, registers, roles, top_k = 2, 3, 2, 4, 2
+    route = (layers, response_tokens, registers, top_k)
+    register = (layers, response_tokens, registers)
+    role = (layers, response_tokens, heads, registers, roles)
+    trace = {
+        "register_route_source_index": torch.full(route, -1, dtype=torch.int32),
+        "register_route_head_index": torch.full(route, -1, dtype=torch.int16),
+        "register_route_magnitude": torch.zeros(route),
+        "register_route_contribution": torch.zeros(route),
+        "register_route_root_contribution": torch.zeros(route),
+        "register_route_carrier_contribution": torch.zeros(route),
+        "register_route_gate_contribution": torch.zeros(route),
+        "register_route_remainder_magnitude": torch.zeros(register),
+        "register_route_remainder_contribution": torch.zeros(register),
+        "register_route_remainder_root_contribution": torch.zeros(register),
+        "register_route_remainder_carrier_contribution": torch.zeros(register),
+        "register_route_remainder_gate_contribution": torch.zeros(register),
+        "register_route_cover_size": torch.zeros(register, dtype=torch.int32),
+        "register_role_mass": torch.zeros(role),
+        "register_role_contribution": torch.zeros(role),
+        "register_role_root_contribution": torch.zeros(role),
+        "register_role_carrier_contribution": torch.zeros(role),
+        "register_role_gate_contribution": torch.zeros(role),
+        "register_role_effective_routes": torch.zeros(
+            layers, response_tokens, registers, roles
         ),
-        "route_source_magnitude": torch.zeros(2, response_tokens, 3, 2, 2),
-        "route_source_remainder": torch.zeros(2, response_tokens, 3, 2),
-        "route_source_cover_size": torch.zeros(
-            2, response_tokens, 3, 2, dtype=torch.int32
-        ),
+        "register_norm": torch.zeros(layers, response_tokens, registers, 4),
+        "register_mlp_alignment": torch.zeros(register),
+        "register_conservation_error": torch.zeros(register),
+        "register_attention_edge_error": torch.zeros(register),
+        "register_step_gram": torch.zeros(layers, response_tokens, registers, layers),
+        "interaction_norm": torch.zeros(layers, response_tokens, 4),
+        "final_register_norm": torch.zeros(1, response_tokens, registers),
     }
+    for family in ("attention", "edge"):
+        trace[f"prompt_{family}_effective_sources"] = torch.zeros(
+            layers, response_tokens
+        )
+        trace[f"prompt_{family}_effective_rank"] = torch.zeros(layers, response_tokens)
+        trace[f"prompt_{family}_anchor_index"] = torch.full(
+            (layers, response_tokens, heads), -1, dtype=torch.int32
+        )
+    return trace
 
 
 def _capture(token_ids, evidence_mask=None):
@@ -148,7 +177,7 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
         SimpleNamespace(AutoTokenizer=FakeAutoTokenizer),
     )
 
-    output = tmp_path / "mechanism-state"
+    output = tmp_path / "dual-register-state"
     common = {
         "split_root": tmp_path / "train-cache",
         "source_info": tmp_path / "source_info.jsonl",
@@ -156,6 +185,8 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
         "output_root": output,
         "device": "cpu",
         "dtype": torch.float32,
+        "predictor_chunk": 128,
+        "top_k": 8,
     }
     first = collect_module.capture_split(**common, limit=1)
 
@@ -165,19 +196,24 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     assert first["selected_samples_seen"] == 3
     assert first["eligible_samples"] is None
     assert first["complete"] is False
-    assert first["version"] == collect_module.VERSION == 7
+    assert first["version"] == collect_module.VERSION == 8
     assert first["labels_used"] is False
     assert first["task_types"] == ["QA", "Summary", "Data2txt"]
     assert first["capture_spec"] == {
         "branches": ["full", "no_evidence", "no_history", "no_evidence_history"],
-        "pathway_contrasts": ["evidence", "history", "interaction"],
+        "registers": ["evidence_adoption", "autonomous_history"],
+        "register_stages": [
+            "input_state",
+            "attention_write",
+            "mlp_write",
+            "output_state",
+        ],
         "source_roles": [
             "evidence",
             "other_prompt",
             "response_history",
             "predictor_self",
         ],
-        "route_roles": ["evidence", "response_history"],
         "route_cover_mass": 0.8,
         "top_k": 8,
     }
@@ -203,7 +239,7 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     assert first_rows[0]["target_response_sha256"] == (
         "c713558bfa07123bfbdeec433f51384cc214f60e3f4484222f750e8bf1454652"
     )
-    assert first_rows[0]["artifact_contract"]["version"] == 7
+    assert first_rows[0]["artifact_contract"]["version"] == 8
     assert first_rows[0]["token_ids_sha256"]
     assert first_rows[0]["evidence_mask_sha256"]
     saved = torch.load(output / "samples" / "summary.pt", weights_only=True)
@@ -259,7 +295,7 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     manifest_path = output / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     draft = json.loads(json.dumps(manifest))
-    del draft["capture_spec"]["route_roles"]
+    del draft["capture_spec"]["registers"]
     manifest_path.write_text(json.dumps(draft), encoding="utf-8")
     with pytest.raises(ValueError, match="changed identity"):
         collect_module.capture_split(**common)
@@ -311,6 +347,7 @@ def test_input_identity_is_stable_after_relocation(tmp_path):
 def test_capture_all_uses_its_formal_state_directory_without_touching_old_states(
     tmp_path, monkeypatch
 ):
+    assert collect_module.STATE_DIRECTORY == "dual_register_state"
     output = tmp_path / "output"
     old_manifest = output / "mechanism_state" / "train" / "manifest.json"
     old_manifest.parent.mkdir(parents=True)

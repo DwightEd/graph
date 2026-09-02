@@ -8,6 +8,7 @@ import matplotlib
 import numpy as np
 from sklearn.metrics import precision_recall_curve, roc_curve
 
+from .capture import REGISTER_NAMES
 from .detect import SCORE_NAMES
 
 matplotlib.use("Agg")
@@ -15,17 +16,17 @@ from matplotlib import pyplot as plt
 
 PRIMARY_SCORE = SCORE_NAMES[0]
 SCORE_LABELS = {
-    "unsupported_history_takeover": "Unsupported-history takeover",
+    "provenance_takeover": "Autonomous-history provenance takeover",
     "evidence_bypass": "Evidence bypass",
-    "evidence_route_contraction": "Evidence-route contraction",
-    "history_route_contraction": "History-route contraction",
+    "symmetric_route_capture": "Symmetric route capture",
+    "unsupported_history_takeover": "Unsupported-history takeover",
     "confidence": "Token surprisal",
 }
 COLORS = {
-    PRIMARY_SCORE: "#b2182b",
-    "evidence_bypass": "#ef8a62",
-    "evidence_route_contraction": "#2166ac",
-    "history_route_contraction": "#762a83",
+    "evidence_bypass": "#b2182b",
+    "symmetric_route_capture": "#2166ac",
+    "unsupported_history_takeover": "#762a83",
+    "provenance_takeover": "#ef8a62",
     "confidence": "#1b7837",
 }
 
@@ -58,7 +59,7 @@ def _detection_curves(
         axis.set_ylim(0, 1)
         axis.grid(alpha=0.18)
     axes[1].legend(frameon=False, fontsize=8)
-    figure.suptitle("Frozen out-of-fold token scores")
+    figure.suptitle("Frozen raw token scores")
     figure.savefig(output, dpi=180)
     plt.close(figure)
 
@@ -174,19 +175,13 @@ def plot_sample_dashboard(
     graph,
     output: Path,
 ) -> None:
-    """Plot one response's explicit routes and attention/MLP pathway state."""
+    """Plot explicit provenance edges and both layer-wise register states."""
 
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     token_text = list(record["token_text"])
     x = np.arange(len(token_text))
-    figure, axes = plt.subplots(
-        6,
-        1,
-        figsize=(14, 18),
-        sharex=True,
-        constrained_layout=True,
-    )
+    figure, axes = plt.subplots(6, 1, figsize=(14, 19), constrained_layout=True)
     figure.suptitle(f"Sample {record['sample_id']}")
 
     graph_layer = np.asarray(graph.layer)
@@ -194,96 +189,106 @@ def plot_sample_dashboard(
     last_layer = int(row_layer.max()) if len(row_layer) else 0
     selected = graph_layer == last_layer
     magnitude = np.asarray(graph.magnitude)[selected]
+    contribution = np.asarray(graph.contribution)[selected]
     scale = (
         magnitude / max(float(magnitude.max()), 1e-12) if len(magnitude) else magnitude
     )
-    scatter = axes[0].scatter(
-        np.asarray(graph.target)[selected] - int(record["predictor_position"][0]),
-        np.asarray(graph.source)[selected],
-        c=np.asarray(graph.head)[selected],
-        s=2 + 18 * np.sqrt(scale),
-        alpha=0.35,
-        cmap="turbo",
-        linewidths=0,
+    limit = max(float(np.abs(contribution).max()), 1e-12) if len(contribution) else 1
+    scatter = None
+    edge_register = np.asarray(graph.register)[selected]
+    edge_head = np.asarray(graph.head)[selected]
+    head_scale = max(int(edge_head.max()), 1) if len(edge_head) else 1
+    source_with_head = np.asarray(graph.source)[selected] + 0.3 * (
+        edge_head / head_scale - 0.5
     )
+    for register, marker in zip(REGISTER_NAMES, ("o", "^")):
+        current = edge_register == register
+        if not current.any():
+            continue
+        scatter = axes[0].scatter(
+            np.asarray(graph.target)[selected][current]
+            - int(record["predictor_position"][0]),
+            source_with_head[current],
+            c=contribution[current],
+            s=3 + 22 * np.sqrt(scale[current]),
+            marker=marker,
+            alpha=0.5,
+            cmap="coolwarm",
+            vmin=-limit,
+            vmax=limit,
+            linewidths=0,
+            label=register.replace("_", " "),
+        )
     row_selected = row_layer == last_layer
-    remainder = np.asarray(graph.remainder)[row_selected]
+    remainder = np.asarray(graph.remainder_magnitude)[row_selected]
     remainder_mean = float(remainder.mean()) if len(remainder) else 0.0
     axes[0].set(
         title=(
-            f"Explicit evidence/history source-head routes at layer {last_layer} "
-            f"(mean adaptive-cover remainder {remainder_mean:.3f})"
+            f"Explicit head-resolved provenance edges at layer {last_layer}; "
+            f"omitted tail remains endpoint-free (mean magnitude {remainder_mean:.3f})"
         ),
-        ylabel="Absolute source token",
+        xlabel="Response target token",
+        ylabel="Absolute source token (head jitter)",
     )
-    if len(magnitude):
-        figure.colorbar(scatter, ax=axes[0], label="Head")
+    if scatter is not None:
+        figure.colorbar(scatter, ax=axes[0], label="Signed register contribution")
+        axes[0].legend(frameon=False, ncols=2)
 
-    for axis, key, title in (
-        (axes[1], "edge_evidence_head_entropy", "Evidence route entropy by head"),
-        (axes[2], "edge_history_head_entropy", "History route entropy by head"),
-    ):
-        image = axis.imshow(
-            layers[key][-1].T,
-            aspect="auto",
-            origin="lower",
-            cmap="viridis",
-            vmin=0,
+    def register_image(axis, statistic: str, title: str, *, signed: bool = False):
+        values = np.concatenate(
+            [layers[f"register_{register}_{statistic}"] for register in REGISTER_NAMES]
         )
-        axis.set(title=title, ylabel="Head")
+        kwargs = {"cmap": "viridis", "vmin": 0.0}
+        if signed:
+            bound = max(float(np.abs(values).max()), 1e-12)
+            kwargs = {"cmap": "coolwarm", "vmin": -bound, "vmax": bound}
+        image = axis.imshow(values, aspect="auto", origin="lower", **kwargs)
+        layer_count = values.shape[0] // len(REGISTER_NAMES)
+        axis.axhline(
+            layer_count - 0.5,
+            color="white" if not signed else "black",
+            lw=0.8,
+        )
+        axis.set(title=title, xlabel="Response token", ylabel="Register × layer")
         figure.colorbar(image, ax=axis)
 
-    pathway = layers["pathway_mlp_projection"]
-    pathway_image = np.concatenate(
-        [pathway[..., index] for index in range(pathway.shape[-1])], axis=0
+    register_image(axes[1], "attention_norm", "Attention-stage register norm")
+    register_image(axes[2], "mlp_norm", "MLP-stage register norm")
+    register_image(axes[3], "output_norm", "Output register norm")
+    register_image(
+        axes[4], "mlp_alignment", "MLP alignment with each register", signed=True
     )
-    finite = np.abs(pathway_image[np.isfinite(pathway_image)])
-    limit = max(float(finite.max()), 1e-12) if len(finite) else 1.0
-    image = axes[3].imshow(
-        pathway_image,
-        aspect="auto",
-        origin="lower",
-        cmap="coolwarm",
-        vmin=-limit,
-        vmax=limit,
-    )
-    layer_count = pathway.shape[0]
-    for boundary in (layer_count - 0.5, 2 * layer_count - 0.5):
-        axes[3].axhline(boundary, color="black", lw=0.5)
-    axes[3].set(
-        title="MLP projection on evidence / history / interaction pathways",
-        ylabel="Contrast × layer",
-    )
-    figure.colorbar(image, ax=axes[3])
 
-    axes[4].axhline(0, color="0.55", lw=0.8)
+    axes[5].axhline(0, color="0.55", lw=0.8)
     for name, color, label in (
         ("evidence_support", "#2166ac", "Evidence support"),
         ("history_support", "#b2182b", "History support"),
         ("route_interaction", "#762a83", "E×history interaction"),
-    ):
-        axes[4].plot(x, record[name], color=color, label=label)
-    axes[4].set(title="Symmetric factorial deletion effects", ylabel="Δ log p")
-    axes[4].legend(frameon=False, ncols=3)
-
-    for name, color, label in (
-        ("evidence_route_contraction", "#2166ac", "Evidence routes"),
-        ("history_route_contraction", "#762a83", "History routes"),
+        ("evidence_bypass", "#ef8a62", "Evidence bypass"),
+        ("symmetric_route_capture", "#1b7837", "Symmetric capture"),
     ):
         axes[5].plot(x, record[name], color=color, label=label)
-    axes[5].axhline(0, color="0.55", lw=0.8)
-    axes[5].set(title="Fixed-window route contraction", ylabel="Contraction")
-    axes[5].legend(frameon=False, ncols=2)
+    conservation = np.asarray(layers["register_conservation_error"])
+    edge_error = np.asarray(layers["register_attention_edge_error"])
+    axes[5].set(
+        title=(
+            "Causal branch controls "
+            f"(max register/edge errors {np.abs(conservation).max():.2e}/"
+            f"{np.abs(edge_error).max():.2e})"
+        ),
+        ylabel="Δ log p",
+    )
+    axes[5].legend(frameon=False, ncols=3)
 
     stride = max(1, int(np.ceil(len(token_text) / 24)))
     ticks = np.arange(0, len(token_text), stride)
-    axes[-1].set_xticks(
+    axes[5].set_xticks(
         ticks,
         [token_text[index].replace("\n", "\\n") for index in ticks],
         rotation=60,
         ha="right",
         fontsize=7,
     )
-    axes[-1].set_xlabel("Response token")
+    axes[5].set_xlabel("Response token")
     figure.savefig(output, dpi=180)
     plt.close(figure)

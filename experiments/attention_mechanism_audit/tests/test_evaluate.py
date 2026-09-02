@@ -13,52 +13,78 @@ from experiments.attention_mechanism_audit import evaluate
 
 
 def _artifact(tokens: int = 2) -> dict:
-    layers, heads, roles = 3, 2, 4
-    attention = torch.ones(layers, tokens, heads, roles)
-    edge = attention.clone()
-    write = attention.clone()
-    entropy = torch.full((layers, tokens, heads, roles), 0.25)
-    top1 = torch.full((layers, tokens, heads, roles), 0.75)
-    coherence = torch.full((layers, tokens, roles), 0.5)
+    layers, heads, roles, registers, stages = 3, 2, 4, 2, 4
     token_ids = torch.arange(tokens + 3)
     full = torch.arange(tokens, dtype=torch.float32) - 1
+    register_norm = torch.ones(layers, tokens, registers, stages)
+    register_norm[..., 0, :] *= torch.tensor([1.0, 2.0, 3.0, 4.0])
+    register_norm[..., 1, :] *= torch.tensor([2.0, 4.0, 6.0, 8.0])
+    gram = torch.zeros(layers, tokens, registers, layers)
+    for register, diagonal in enumerate(([1.0, 4.0, 9.0], [16.0, 25.0, 36.0])):
+        gram[:, :, register] = torch.diag(torch.tensor(diagonal))[:, None]
     trace = {
-        "attention_role_mass": attention,
-        "edge_role_mass": edge,
-        "head_role_write_norm": write,
-        "role_head_coherence": coherence,
-        "route_source_index": torch.full(
-            (layers, tokens, heads, 2, 1), -1, dtype=torch.int32
+        "register_route_source_index": torch.zeros(
+            layers, tokens, registers, 1, dtype=torch.int32
         ),
-        "route_source_magnitude": torch.zeros(layers, tokens, heads, 2, 1),
-        "route_source_remainder": torch.zeros(layers, tokens, heads, 2),
-        "route_source_cover_size": torch.zeros(
-            layers, tokens, heads, 2, dtype=torch.int16
+        "register_route_head_index": torch.zeros(
+            layers, tokens, registers, 1, dtype=torch.int16
         ),
-        "pathway_effect_norm": torch.ones(layers, tokens, 3, 5),
-        "pathway_mlp_projection": torch.tensor([0.1, 0.2, 0.3])
-        .expand(layers, tokens, 3)
+        "register_route_magnitude": torch.full(
+            (layers, tokens, registers, 1), float(heads * roles)
+        ),
+        "register_route_contribution": torch.ones(layers, tokens, registers, 1),
+        "register_route_root_contribution": torch.ones(layers, tokens, registers, 1),
+        "register_route_carrier_contribution": torch.zeros(
+            layers, tokens, registers, 1
+        ),
+        "register_route_gate_contribution": torch.zeros(layers, tokens, registers, 1),
+        "register_route_remainder_magnitude": torch.zeros(layers, tokens, registers),
+        "register_route_remainder_contribution": torch.zeros(layers, tokens, registers),
+        "register_route_remainder_root_contribution": torch.zeros(
+            layers, tokens, registers
+        ),
+        "register_route_remainder_carrier_contribution": torch.zeros(
+            layers, tokens, registers
+        ),
+        "register_route_remainder_gate_contribution": torch.zeros(
+            layers, tokens, registers
+        ),
+        "register_route_cover_size": torch.ones(
+            layers, tokens, registers, dtype=torch.int32
+        ),
+        "register_role_mass": torch.ones(layers, tokens, heads, registers, roles),
+        "register_role_contribution": torch.full(
+            (layers, tokens, heads, registers, roles), 1.0 / (heads * roles)
+        ),
+        "register_role_root_contribution": torch.full(
+            (layers, tokens, heads, registers, roles), 1.0 / (heads * roles)
+        ),
+        "register_role_carrier_contribution": torch.zeros(
+            layers, tokens, heads, registers, roles
+        ),
+        "register_role_gate_contribution": torch.zeros(
+            layers, tokens, heads, registers, roles
+        ),
+        "register_role_effective_routes": torch.full(
+            (layers, tokens, registers, roles), 2.0
+        ),
+        "register_norm": register_norm,
+        "register_mlp_alignment": torch.tensor([0.25, -0.5])
+        .expand(layers, tokens, registers)
         .clone(),
-        "pathway_pre_output_gain": torch.full((layers, tokens, 3), 1.25),
-        "pathway_pre_output_cosine": torch.full((layers, tokens, 3), 0.8),
-        "pathway_residual_error": torch.zeros(layers, tokens, 4),
-        "pathway_valid": torch.ones(layers, tokens, 3, dtype=torch.bool),
-        "pathway_cosine_valid": torch.ones(layers, tokens, 3, dtype=torch.bool),
+        "register_conservation_error": torch.full((layers, tokens, registers), 0.01),
+        "register_attention_edge_error": torch.full((layers, tokens, registers), 0.02),
+        "register_step_gram": gram,
+        "interaction_norm": torch.full((layers, tokens, stages), 0.5),
+        "final_register_norm": torch.tensor([5.0, 7.0])
+        .expand(1, tokens, registers)
+        .clone(),
     }
-    trace["route_source_index"][..., 0, 0] = 0
-    trace["route_source_magnitude"][..., 0, 0] = 1
-    trace["route_source_cover_size"][..., 0] = 1
     for family in ("attention", "edge"):
-        trace[f"{family}_role_source_entropy"] = entropy.clone()
-        trace[f"{family}_role_top1"] = top1.clone()
-        trace[f"{family}_role_anchor_index"] = torch.zeros(
-            layers, tokens, heads, roles, dtype=torch.int32
-        )
-        trace[f"{family}_role_effective_rank"] = torch.full(
-            (layers, tokens, roles), 1.5
-        )
-        trace[f"{family}_role_effective_routes"] = torch.full(
-            (layers, tokens, roles), 2.0
+        trace[f"prompt_{family}_effective_sources"] = torch.full((layers, tokens), 3.0)
+        trace[f"prompt_{family}_effective_rank"] = torch.full((layers, tokens), 2.0)
+        trace[f"prompt_{family}_anchor_index"] = torch.zeros(
+            layers, tokens, heads, dtype=torch.int32
         )
     return {
         "token_ids": token_ids,
@@ -78,67 +104,75 @@ def _artifact(tokens: int = 2) -> dict:
     }
 
 
-def test_rich_audit_preserves_head_routes_pathways_and_factorial_equations():
+def test_rich_audit_preserves_registers_routes_and_causal_equations():
     artifact = _artifact(3)
-    artifact["trace"]["edge_role_mass"][:, :, 0] = torch.tensor([4.0, 2.0, 1.0, 1.0])
-    artifact["trace"]["edge_role_mass"][:, :, 1] = torch.tensor([4.0, 2.0, 1.0, 1.0])
     layers = evaluate.layer_audit_metrics(artifact)
     audit = evaluate.token_audit_metrics(artifact)
 
-    np.testing.assert_allclose(layers["edge_evidence_mass_share"], 0.5)
-    np.testing.assert_allclose(layers["edge_predictor_self_mass_share"], 0.125)
-    np.testing.assert_allclose(layers["edge_evidence_effective_routes"], 2.0)
-    np.testing.assert_allclose(layers["edge_evidence_effective_rank"], 1.5)
-    np.testing.assert_allclose(layers["edge_evidence_head_entropy"], 0.25)
-    np.testing.assert_allclose(layers["edge_evidence_head_top1"], 0.75)
-    np.testing.assert_allclose(layers["evidence_within_head_cancellation"], 0.75)
-    np.testing.assert_allclose(layers["pathway_evidence_mlp_projection"], 0.1)
-    # full/noE/noR/noER offsets are 0/1/2/4: E=1.5, R=2.5, I=-1.
-    np.testing.assert_allclose(audit["causal_evidence_support"], 1.5)
-    np.testing.assert_allclose(audit["causal_history_support"], 2.5)
+    np.testing.assert_allclose(layers["prompt_edge_effective_sources"], 3.0)
+    np.testing.assert_allclose(layers["prompt_edge_effective_rank"], 2.0)
+    np.testing.assert_allclose(layers["register_evidence_adoption_attention_norm"], 2)
+    np.testing.assert_allclose(layers["register_autonomous_history_mlp_norm"], 6)
+    # full/noE/noR/noER offsets are 0/1/2/4.
+    np.testing.assert_allclose(audit["causal_evidence_support"], 1.0)
+    np.testing.assert_allclose(audit["causal_history_support"], 2.0)
     np.testing.assert_allclose(audit["causal_interaction"], -1.0)
-    np.testing.assert_allclose(audit["direct_evidence_support_with_history"], 1.0)
-    np.testing.assert_allclose(audit["history_support_under_direct_evidence_cut"], 3.0)
-    np.testing.assert_allclose(audit["unsupported_history_takeover_raw"], 2.0)
-    np.testing.assert_allclose(audit["edge_evidence_head_cover_size_mean"], 1)
-    np.testing.assert_allclose(audit["edge_evidence_anchor_persistence_mean"][1:], 1)
-    assert "attention_response_history_mass_share_layer_shift" in audit
-    assert "edge_evidence_route_contraction" in audit
-    assert "head_coherence_evidence_layer_shift" in audit
-    assert "head_coherence_predictor_self_mean" not in audit
-    assert audit["edge_evidence_route_contraction__valid"].dtype == np.bool_
-    assert len(audit) < 105
+    np.testing.assert_allclose(audit["raw_evidence_bypass"], -1.0)
+    np.testing.assert_allclose(audit["raw_history_after_cut"], 3.0)
+    np.testing.assert_allclose(audit["raw_old_symmetric"], 1.0)
+    np.testing.assert_allclose(audit["raw_takeover"], 2.0)
+    np.testing.assert_allclose(audit["register_evidence_adoption_terminal_norm"], 5)
+    np.testing.assert_allclose(
+        audit["register_autonomous_history_step_principal_energy"], 36
+    )
+    np.testing.assert_allclose(
+        audit["register_evidence_adoption_evidence_mass_mean"], 2
+    )
+    np.testing.assert_allclose(
+        audit["register_evidence_adoption_conservation_error_max"], 0.01
+    )
+    np.testing.assert_allclose(audit["interaction_mlp_norm_mean"], 0.5)
+    assert "prompt_edge_log_volume_layer_shift" in audit
+    assert not any("pathway_" in name for name in audit)
+    assert not any("route_contraction" in name for name in audit)
+    assert len(audit) <= 150
     assert not any(name.endswith(("_early", "_late")) for name in audit)
 
 
-def test_per_head_route_summaries_are_weighted_by_role_mass():
+def test_head_resolved_register_contributions_are_only_summed_at_token_audit():
     artifact = _artifact()
     trace = artifact["trace"]
-    trace["edge_role_mass"][:, :, 0, 0] = 9
-    trace["edge_role_mass"][:, :, 1, 0] = 1
-    trace["edge_role_source_entropy"][:, :, 0, 0] = 0.1
-    trace["edge_role_source_entropy"][:, :, 1, 0] = 0.9
+    trace["register_role_contribution"][:, :, 0, 0, 0] = 1.0
+    trace["register_role_contribution"][:, :, 1, 0, 0] = -0.25
+    trace["register_role_root_contribution"][:, :, 0, 0, 0] = 1.0
+    trace["register_role_root_contribution"][:, :, 1, 0, 0] = -0.25
 
     layers = evaluate.layer_audit_metrics(artifact)
 
-    np.testing.assert_allclose(layers["edge_evidence_head_entropy"], 0.18)
-    np.testing.assert_allclose(layers["edge_evidence_head_entropy_spread"], 0.24)
+    np.testing.assert_allclose(
+        layers["register_evidence_adoption_evidence_contribution"], 0.75
+    )
 
 
-def test_pathway_ratios_ignore_layers_without_a_defined_contrast():
+def test_register_principal_energy_uses_the_full_cross_layer_gram():
     artifact = _artifact()
-    artifact["trace"]["pathway_mlp_projection"][:, :, 0] = torch.tensor(
-        [10.0, 2.0, 4.0]
+    matrix = torch.tensor([[2.0, 1.0, 0.0], [1.0, 2.0, 0.0], [0.0, 0.0, 0.5]])
+    artifact["trace"]["register_step_gram"][:, :, 0] = matrix[:, None]
+    artifact["trace"]["register_mlp_alignment"][:, :, 0] = torch.tensor(
+        [-1.0, 0.0, 1.0]
     )[:, None]
-    artifact["trace"]["pathway_valid"][:, :, 0] = torch.tensor([False, True, True])[
-        :, None
-    ]
 
     audit = evaluate.token_audit_metrics(artifact)
 
-    np.testing.assert_allclose(audit["pathway_evidence_mlp_projection_mean"], 3)
-    np.testing.assert_allclose(audit["pathway_evidence_mlp_projection_layer_shift"], 0)
-    np.testing.assert_allclose(audit["pathway_evidence_valid_mean"], 2 / 3)
+    np.testing.assert_allclose(
+        audit["register_evidence_adoption_step_principal_energy"], 3
+    )
+    np.testing.assert_allclose(
+        audit["register_evidence_adoption_mlp_alignment_mean"], 0
+    )
+    np.testing.assert_allclose(
+        audit["register_evidence_adoption_mlp_alignment_layer_shift"], 2
+    )
 
 
 def test_auc_direction_is_never_flipped_after_reading_labels():
@@ -187,16 +221,16 @@ def test_history_audits_exclude_the_pre_history_prefix():
         "token_index": np.arange(4),
         "response_length": np.repeat(20, 4),
         "detection_valid": np.asarray([False, False, True, True]),
-        "unsupported_history_takeover_raw": np.asarray([0.0, 100.0, 0.0, 2.0]),
+        "raw_takeover": np.asarray([0.0, 100.0, 0.0, 2.0]),
     }
     report = evaluate.group_difference_audit(
         arrays,
-        ("unsupported_history_takeover_raw",),
+        ("raw_takeover",),
         position_bin=16,
         bootstrap=0,
         seed=1,
     )
-    result = report["metrics"]["unsupported_history_takeover_raw"]
+    result = report["metrics"]["raw_takeover"]
 
     assert result["token_scope"] == "strict_history_eligible"
     assert result["hallucinated_mean"] == 2.0
@@ -295,6 +329,10 @@ def test_pool_score_freeze_then_labels_is_the_only_evaluation_order(
                     name: np.asarray([0.9, 1.0], dtype=np.float32)
                     for name in evaluate.SCORE_ORDER
                 },
+                **{
+                    f"{name}__valid": np.ones(2, dtype=bool)
+                    for name in evaluate.SCORE_ORDER
+                },
                 "detection_valid": np.ones(2, dtype=bool),
             },
             "test_sample": {
@@ -302,9 +340,13 @@ def test_pool_score_freeze_then_labels_is_the_only_evaluation_order(
                     name: np.asarray([0.0, 0.1], dtype=np.float32)
                     for name in evaluate.SCORE_ORDER
                 },
+                **{
+                    f"{name}__valid": np.ones(2, dtype=bool)
+                    for name in evaluate.SCORE_ORDER
+                },
                 "detection_valid": np.ones(2, dtype=bool),
             },
-        }, {"crossfit_complete": True, "seed": seed}
+        }, {"crossfit": "not_applicable", "seed": seed}
 
     monkeypatch.setattr(evaluate, "score_records", score_records)
     monkeypatch.setattr(evaluate, "_load_artifact", lambda *_args: _artifact())
@@ -370,7 +412,9 @@ def test_pool_score_freeze_then_labels_is_the_only_evaluation_order(
     assert report["primary_score"] == evaluate.SCORE_ORDER[0]
     assert report["control_scores"] == list(evaluate.SCORE_ORDER[1:])
     assert report["detection_estimand"] == "token_micro"
-    assert "strict_history_eligible" in report["detection_token_scope"]
+    assert (
+        report["detection_token_scope"] == "intersection_of_fixed_score_validity_masks"
+    )
     assert report["detection_bootstrap_unit"] == "source_id_cluster"
     assert report["evaluated_tokens"] == 4
     assert report["evaluated_positives"] == 2
@@ -382,6 +426,8 @@ def test_pool_score_freeze_then_labels_is_the_only_evaluation_order(
     with np.load(frozen) as arrays:
         assert "label" not in arrays
         assert arrays["detection_valid"].all()
+        for name in evaluate.SCORE_ORDER:
+            assert arrays[f"{name}__valid"].all()
     assert (
         report["frozen_scores_sha256"]
         == hashlib.sha256(frozen.read_bytes()).hexdigest()
@@ -574,6 +620,12 @@ def test_sample_plot_consumes_only_the_new_compact_trace(tmp_path, monkeypatch):
     assert "source_flow" not in seen["record"]
     assert "route_interaction" in seen["record"]
     assert "history_support" in seen["record"]
-    assert seen["layers"]["edge_evidence_head_entropy"].shape == (3, 2, 2)
-    assert "edge_predictor_self_mass_share" in seen["layers"]
+    assert seen["record"]["evidence_bypass"].shape == (2,)
+    assert seen["layers"]["register_evidence_adoption_attention_norm"].shape == (
+        3,
+        2,
+    )
+    assert seen["layers"]["register_conservation_error"].shape == (3, 2, 2)
+    assert "prompt_edge_log_volume" in seen["layers"]
+    assert not any(name.startswith("pathway_") for name in seen["layers"])
     assert "label" not in seen["record"]

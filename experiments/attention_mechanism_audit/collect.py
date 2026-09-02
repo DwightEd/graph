@@ -20,9 +20,9 @@ from research_dataset import open_research_dataset
 
 from .capture import (
     BRANCH_NAMES,
-    PATHWAY_CONTRAST_NAMES,
+    REGISTER_NAMES,
+    REGISTER_STAGE_NAMES,
     ROLE_NAMES,
-    ROUTE_ROLE_NAMES,
     FunctionalTraceReplay,
 )
 from .data import (
@@ -33,8 +33,8 @@ from .data import (
 )
 
 SCHEMA = "ragtruth-mechanism-state"
-VERSION = 7
-STATE_DIRECTORY = "evidence_adoption_state"
+VERSION = 8
+STATE_DIRECTORY = "dual_register_state"
 _MODEL_SUFFIXES = {
     ".bin",
     ".json",
@@ -104,9 +104,9 @@ def _capture_spec(top_k: int, route_cover_mass: float) -> dict[str, Any]:
 
     return {
         "branches": list(BRANCH_NAMES),
-        "pathway_contrasts": list(PATHWAY_CONTRAST_NAMES),
+        "registers": list(REGISTER_NAMES),
+        "register_stages": list(REGISTER_STAGE_NAMES),
         "source_roles": list(ROLE_NAMES),
-        "route_roles": list(ROUTE_ROLE_NAMES),
         "route_cover_mass": float(route_cover_mass),
         "top_k": int(top_k),
     }
@@ -253,8 +253,8 @@ def capture_split(
     device: str = "cuda:0",
     dtype: torch.dtype = torch.bfloat16,
     limit: int | None = None,
-    predictor_chunk: int = 128,
-    top_k: int = 8,
+    predictor_chunk: int = 64,
+    top_k: int = 32,
     logit_chunk: int = 64,
     route_cover_mass: float = 0.8,
 ) -> dict[str, Any]:

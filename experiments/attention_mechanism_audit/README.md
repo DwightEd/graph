@@ -1,166 +1,171 @@
-# Evidence-Adoption Incidence Graph
+# Dual-register attention mechanism audit
 
-This experiment asks one narrow question: when a response token becomes
-unsupported, how much do its direct evidence-token attention-value writes
-matter, and how much support remains from strict history after those writes are
-cut at response predictor queries?
+This experiment tests a narrow mechanism question: when a generated token is
+unsupported, does the model carry a persistent state descended from direct
+evidence, or a persistent state supplied by response history after direct
+evidence attention writes are removed?
 
-The earlier prompt-carrier-collapse score is not the formal method. Its QA
-result was useful, but Summary and Data2txt showed why an all-prompt
-concentration statistic is not a task-general detector: looking at a source is
-not the same as using it, and correct tokens can legitimately retrieve a very
-small source span.
+It is a frozen-model, teacher-forced audit. It does not claim to reconstruct
+complete causal flow, recover full token ancestry, or identify parametric
+knowledge.
 
-## Incidence graph
+## Alignment and replay branches
 
-For target response token `t`, the causal predictor is
-`q_t = response_start - 1 + t`. At layer `l`, query head `h`, and source token
-`s`, the graph records the dynamic source-head incidence magnitude
+Let `P = response_start`. Target response token `t` is scored from its causal
+predictor
 
-    e[l,h,t,s] = A[l,h,q_t,s] ||W_O[l,h] V[l,g(h),s]||_2
+    q_t = P - 1 + t
 
-`g(h)` is the GQA query-to-KV mapping. The graph keeps source, layer, head, and
-target identity. Sources are partitioned into direct evidence, other prompt,
-strict response history, and predictor self.
+The same sample is replayed in four aligned branches:
 
-```mermaid
-flowchart TD
-    S["source token state"] --> H["head incidence: A · V"]
-    H --> W["matching head block of W_O"]
-    W --> R["real residual merge"]
-    R --> M["token-local MLP"]
-    M --> X["next-layer token state"]
-```
+| Symbol | Stored name | Attention writes removed at response predictor queries |
+|---|---|---|
+| `F` | `full` | none |
+| `noE` | `no_evidence` | direct-evidence sources |
+| `noH` | `no_history` | strict response-history sources |
+| `noEH` | `no_evidence_history` | both |
 
-This scalar measures incidence magnitude, not whether a source supports or
-opposes the chosen token. Direction and cancellation are retained separately:
-the model sums `A V` inside each head and source role, applies that head's
-matching `W_O` block, and merges the resulting vectors in the shared residual
-stream. Heads are never averaged to construct the graph. The MLP is a local
-transition after the real merge, not a fabricated source-to-token edge.
+Predictor self is never included in strict history. A deletion is applied at
+each aligned response predictor query, so its state and KV consequences pass
+through later layers. The intervention is deliberately narrower than “remove
+all evidence”: other prompt tokens, predictor residual state, MLP computation,
+and evidence already propagated into other states remain available.
 
-For compact storage, each `(layer, target, head)` computes separate evidence
-and strict-history covers. Each is the smallest source set carrying 80% of that
-role's incidence magnitude. The artifact stores the required cover size, the
-leading sources that fit the compact slot budget, and all remaining mass.
-Other prompt and predictor self remain in dense role summaries but do not
-receive sparse covers. Those summaries preserve mass, entropy, top source,
-route rank, and joint effective routes without pretending omitted sources are
-zero.
+## Two finite-difference registers
 
-The serialized `RouteGraph` is a layer-local head-source incidence graph, not
-a complete cross-layer ancestry graph. It does not connect equal-numbered heads
-between layers and cannot by itself decide whether a response-history source is
-evidence-grounded. The MLP and four-branch pathway traces are separate
-finite-difference audits, not invented ancestry edges.
+For every captured hidden-state quantity, the audit forms
 
-## Primary endpoint
+    P_reg = F - noE       evidence-adoption register
+    R_reg = noE - noEH   autonomous-history register
 
-The same frozen model runs four aligned branches:
+`P_reg` is separate from `P = response_start` in the predictor equation. The
+register names describe the branch contrasts, not an assertion that every bit
+of their state has uniquely known ancestry.
 
-| Branch | Removed at response predictor queries |
-|---|---|
-| `full` | nothing |
-| `no_evidence` | direct-evidence attention writes |
-| `no_history` | strict response-history attention writes |
-| `no_evidence_history` | both sets of writes |
+Each decoder layer is captured at four stages with the exact residual identity
 
-The deletion is applied at every aligned response predictor query during
-replay, so its consequences continue through later layers and response KV
-states. Predictor self remains present in every branch. With target-token log
-probabilities from those branches, the fixed raw endpoint is
+    output = input + attention_write + mlp_write
 
-    unsupported_history_takeover
-      = (no_evidence - no_evidence_history) - (full - no_evidence)
+The identity is differenced branchwise for both registers. The artifact stores
+the four stage norms, the `attention_write + mlp_write` step, MLP alignment,
+the evidence/history interaction norm, and closure error. This keeps MLP
+amplification, cancellation, or rotation explicit instead of folding it into
+an attention-only story.
 
-The first difference measures how much strict history can still support the
-target after direct evidence-token attention-value writes are cut at response
-predictor queries. The second measures the contribution of those direct writes
-in the full computation. This cut does not remove all evidence: other prompt,
-predictor residual/self, MLP, and evidence already propagated into prompt or
-response states remain. A high raw value therefore indicates relative history
-takeover under this specified intervention. It is computed by real model
-intervention; no graph encoder or hand-weighted feature sum defines the
-endpoint.
+For each target and register, the step vectors across layers define a Gram
+matrix. One label-free graph candidate is
 
-The reported primary score with the same name is not this raw log-probability
-difference. For each source-disjoint fold, fit sources regress the raw endpoint
-on relative response position, squared position, and separate prompt,
-evidence, and response lengths. Different calibration sources define its
-empirical CDF. Held-out tokens receive the resulting out-of-fold percentile.
-Confidence (`-full_logprob`) remains a separate control; neither confidence nor
-target margin enters the nuisance regression. The raw endpoint is reported
-separately as a post-hoc audit.
+    provenance_takeover
+      = log((lambda_max(Gram(R_reg)) + eps)
+            / (lambda_max(Gram(P_reg)) + eps))
 
-Every nuisance fit must have at least six rows and full rank for the six fixed
-columns. A run that cannot satisfy that contract reports the mechanism scores
-as unavailable instead of silently using an underdetermined pseudoinverse.
-Route-contraction controls use only tokens with a real prior route for
-comparison; a held-out token without such a baseline receives the fixed neutral
-percentile `0.5` and never enters fitting or calibration.
+This raw quotient compares the dominant cross-layer step energy; its leading
+eigenvalue reflects both step magnitude and cross-layer alignment. It is kept
+as a candidate control, not promoted over an already validated raw causal
+baseline and not presented as proof of ancestry. History-dependent scores are
+invalid for the first two response targets, where strict history is not
+available separately from predictor self.
 
-The first two response targets have no strict-history source distinct from
-predictor self. They are marked `detection_valid=False` and excluded from
-detector fitting, calibration, and evaluation. Reports therefore show both
-total `tokens` and the smaller `evaluated_tokens`.
+## Signed residual-message routes
 
-## What the graph explains
+The capture also exposes how each register's attention write is assembled.
+For each `(layer, target, register)`, branch-difference head-source messages use
+the actual post-intervention attention coefficients and values, the GQA
+query-to-KV mapping, and the matching query-head block of `W_O`. Thus the
+stored magnitude is `||delta(A V W_O)||`, not `A ||V W_O||` and not bare
+attention.
 
-The graph tests why the endpoint is high without replacing it:
+Every signed edge contribution is decomposed before compression into three
+terms:
 
-- per-head evidence and history incidence magnitude, role write norms, and
-  cross-head cancellation at the real residual merge;
-- role-specific adaptive-cover size, source anchors, joint effective routes,
-  and cross-head route rank near hallucination onset;
-- effective route-support contraction and total route-mass contraction as two
-  separate audits, never a weighted mixture;
-- the full 2x2 evidence/history/interaction contrasts in attention output, MLP
-  output, and residual state;
-- whether the MLP amplifies, cancels, or rotates evidence-conditioned state.
+- `root`: the write removed by the intervention itself (direct evidence for
+  the evidence-adoption register; strict history for autonomous history);
+- `carrier`: content already changed in a non-root source state,
+  `mean(A) * delta(V)`, including evidence propagated into response history;
+- `gate`: changed routing through Q/K and softmax competition,
+  `delta(A) * mean(V)`.
 
-Route contraction is an onset-local control, not a universal claim that an
-entire hallucinated span must stay on a few prompt tokens. Likewise, an MLP
-projection can show adoption or cancellation of an intervention difference;
-it cannot by itself identify parametric knowledge.
+For non-root edges, the midpoint identity
+`delta(A V) = mean(A) delta(V) + delta(A) mean(V)` is exact. It is a symmetric
+algebraic decomposition, not a unique causal attribution: `gate` combines Q,
+K, and softmax-competition changes. Root, carrier, and gate contributions
+reconstruct the complete signed attention-register write.
 
-The historical "attention bias" hypothesis would require controlled pairs
-with matched prompts and an independently known model prior, ideally including
-a counterfactual fact. RAGTruth provides evidence-supported versus unsupported
-response labels, so this experiment can test evidence bypass and history
-takeover, but not pure parametric bias.
+Edges are ranked globally over `(head, source)` by the absolute value of their
+signed projection onto the complete register attention write. The adaptive
+cover, capped by `top_k`, retains for every explicit edge:
 
-## Files and outputs
+- source token and query head;
+- nonnegative `delta(A V W_O)` magnitude;
+- signed residual-message contribution; and
+- one of four disjoint source roles: direct evidence, other prompt, strict
+  response history, or predictor self.
 
-- `capture.py`: dynamic incidences, four causal branches, and pathway traces.
-- `collect.py`: dataset traversal, boundary checks, serialization, and resume.
-- `graph.py`: adaptive covers and the incidence graph.
-- `detect.py`: the primary endpoint and prespecified controls, with labels
-  sealed.
-- `evaluate.py`: label-opened metrics, source-cluster confidence intervals, and
-  post-hoc mechanism audits.
-- `run.py`: the single foreground command.
+Dense role totals are computed before compression. The artifact stores the
+omitted sum of per-edge norms and the omitted signed contribution as tails;
+the former is not the norm of the omitted net vector. Because tails have no
+resolved source/head endpoints, the graph leaves them as row statistics. It
+never invents sparse ancestry edges or connects equal-numbered heads across
+layers. Explicit routes terminate at their corresponding `attention_write`
+stage node; response/predictor sources link to captured `input_state` nodes,
+while earlier prompt sources remain explicit external token endpoints.
 
-Schema 7 requires a fresh capture; older route-collapse artifacts are not
-reused. Run all tasks in the foreground:
+The AVWO construction itself belongs to the established norm-based lineage
+from Kobayashi et al. through ALTI and IFR. The experiment's novelty boundary
+is the branch-defined evidence-descended versus autonomous-history comparison
+and the explicit attention/MLP finite-difference registers, not AVWO tracing.
+
+The older full-prompt collapse statistic remains only as a historical QA
+audit. Its QA behavior did not generalize across Summary and Data2txt, so it is
+not the present method or a task-general detector.
+
+## Raw controls and evaluation boundary
+
+All scores are fixed raw equations over target-token log probabilities:
+
+| Name | Equation | Role |
+|---|---|---|
+| `evidence_bypass` | `noE - F` | locked primary raw baseline |
+| `symmetric_route_capture` | `noE - noH` | control |
+| `unsupported_history_takeover` | `2 * noE - F - noEH` | control |
+| `provenance_takeover` | cross-layer Gram log spectral quotient above | graph candidate |
+| `confidence` | `-F` | control |
+
+There is no nuisance fit, cross-fitting, ECDF calibration, percentile mapping,
+or label-dependent direction flip. All scores use the intersection of their
+fixed validity masks for the printed comparison; every score-specific mask is
+also saved. Labels remain sealed through capture, graph
+construction, and score construction. They are opened only for final,
+task-specific evaluation and named post-hoc audits. QA, Summary, and Data2txt
+are reported separately using token-micro AUROC, sklearn average precision
+(`AP`), and source-cluster bootstrap intervals.
+
+## Files and running
+
+- `capture.py` replays the four branches and captures register states, Gram
+  matrices, and signed routes.
+- `collect.py` traverses data, verifies alignment, serializes captures, and
+  resumes completed samples without labels.
+- `graph.py` exposes the sparse dual-register route view and unresolved tails.
+- `detect.py` computes the fixed raw candidate and controls.
+- `evaluate.py` opens labels for final metrics and post-hoc audits.
+- `run.py` is the foreground CLI.
+
+Schema 8 must be recaptured into
+`outputs/<observer-model>/dual_register_state/{train,test}/`. Older capture
+directories are preserved as historical artifacts and are not adapted or
+deleted. New reports are written under
+`outputs/<observer-model>/dual_register_v8/{qa,summary,data2txt}/`, so the
+earlier task reports are not overwritten.
+
+Run the complete audit once in the foreground:
 
     bash experiments/attention_mechanism_audit/run_all.sh
 
-The shell file contains only:
+The script contains the single entry
+`python -m experiments.attention_mechanism_audit.run all`, which captures the
+physical train/test shards and evaluates QA, Summary, and Data2txt separately.
 
-    python -m experiments.attention_mechanism_audit.run all
-
-Outputs are written under
-`experiments/attention_mechanism_audit/outputs/<observer-model>/`. Capture
-artifacts live in `evidence_adoption_state/train/` and
-`evidence_adoption_state/test/`, while
-`qa/`, `summary/`, and `data2txt/` each receive their own `report.json`,
-`token_scores.npz`, and population figures.
-
-Detection reports use token-micro AUROC and sklearn average precision (`AP`),
-with source-cluster bootstrap intervals. They separately report total and
-evaluated samples, sources, and tokens, plus the comparable coverage of each
-route control.
-
-Run the focused test suite with:
+Run focused tests with:
 
     python -m pytest -q experiments/attention_mechanism_audit/tests

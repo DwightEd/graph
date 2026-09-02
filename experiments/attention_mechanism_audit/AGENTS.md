@@ -1,124 +1,126 @@
 # Attention mechanism audit rules
 
 Read and follow `../grounded_route/iclr/ENGINEERING_RULES.md` before changing
-this directory. The rules below are mandatory for this experiment.
+this directory. The rules below define the current experiment.
 
-## Formal method
+## Method
 
-- Maintain one implementation: the **Evidence-Adoption Incidence Graph**. Do
-  not add `v2`, `new`, fallback detectors, feature registries, a second graph
-  encoder, or another meaning for the primary score.
-- A target response token `t` is evaluated at its causal predictor
-  `q_t = response_start - 1 + t`. Preserve source token, target token, layer,
-  and query-head identity until the model's real `W_O` merge.
-- The source-head incidence ledger is the dynamic magnitude
+- Maintain one implementation of the **dual-register attention mechanism
+  audit**. Do not restore the retired incidence-graph framing or make
+  `unsupported_history_takeover` the fixed primary detector.
+- Let `P = response_start`. Response target `t` is evaluated at its causal
+  predictor `q_t = P - 1 + t`. Preserve target, source, layer, and query-head
+  identity throughout capture. Predictor self is distinct from strict response
+  history.
+- Replay exactly four aligned branches: `F` (`full`), `noE` (`no_evidence`),
+  `noH` (`no_history`), and `noEH` (`no_evidence_history`). At response
+  predictor queries, `noE` deletes direct-evidence attention writes, `noH`
+  deletes strict-history attention writes, and `noEH` deletes both. The
+  deletions propagate through later layers and response KV states; they do not
+  erase evidence already present elsewhere in the computation.
+- Form two branch finite-difference registers for every aligned hidden-state
+  quantity:
 
-      e[l,h,t,s] = A[l,h,q_t,s] ||W_O[l,h] V[l,g(h),s]||_2
+      evidence-adoption register:  P_reg = F - noE
+      autonomous-history register: R_reg = noE - noEH
 
-  with the matching layer/head output block and explicit GQA mapping. Do not
-  replace this with attention alone, checkpoint geometry, or a head average.
-  This unsigned scalar locates message-path incidence but does not establish
-  support or opposition. Preserve direction and cancellation in exact role net
-  writes: sum `A V` within each head, project through its matching `W_O` block,
-  then merge heads by their real vector sum in the shared residual stream.
-- Partition sources into exactly four disjoint roles: direct evidence, other
-  prompt, strict response history, and predictor self. Predictor self is never
-  silently included in strict history.
-- Compute separate head-resolved adaptive covers for evidence and strict
-  response history. Each cover is the smallest sources carrying at least `0.8`
-  of that `(layer, target, head, role)` incidence magnitude. Store the required
-  cover size, as many leading source indices and magnitudes as the compact slot
-  limit permits, and all remaining mass. Other prompt and predictor self remain
-  in the dense role statistics but do not receive sparse covers. Unstored mass
-  is not zero.
-- Route contraction is an onset-local explanatory control. Preserve effective
-  head-source support contraction and total route-mass contraction as separate
-  audits; do not add or multiply them. Measure cover size, anchors, and route
-  rank without averaging heads first. Do not claim that every hallucinated span
-  must remain globally locked to a small prompt set.
-- A contraction value is defined only when a current route and a prior route
-  are comparable. Exclude undefined rows from fitting and calibration, assign
-  the fixed neutral percentile `0.5` when a common evaluation pool requires a
-  score, and report comparable token/source counts.
+  The symbols `P_reg` and `R_reg` are register names; `P = response_start` in
+  the predictor equation above.
+- At every decoder layer, capture the exact residual identity
 
-## Causal endpoint and pathway audit
+      output = input + attention_write + mlp_write
 
-- Keep exactly four model branches: `full`, `no_evidence`, `no_history`, and
-  `no_evidence_history`. Evidence and strict-history writes are deleted at the
-  aligned response predictor queries throughout replay, so their effects
-  propagate through later layers and response KV states. Predictor self is
-  fixed in all branches.
-- The fixed raw endpoint is
+  and apply the same finite differences to all four terms. Store register
+  norms, the attention-plus-MLP step, MLP alignment, interaction norms, and the
+  numerical closure error. Do not hide the MLP inside an attention route.
+- For each response token and register, construct the cross-layer Gram matrix
+  of the finite-difference steps. The label-free candidate
+  `provenance_takeover` is the raw log spectral quotient of the leading Gram
+  eigenvalues for `R_reg` over `P_reg`. It mixes step energy and cross-layer
+  alignment and remains a graph candidate, not the primary baseline or a
+  complete ancestry reconstruction.
 
-      unsupported_history_takeover
-        = (no_evidence - no_evidence_history) - (full - no_evidence)
+## Residual-message routes
 
-  where each term is the target-token log probability. High values mean that
-  strict history remains supportive after direct evidence-token attention-value
-  writes are cut at response predictor queries, while those direct writes
-  contribute little in the full computation. This cut does not erase evidence:
-  other prompt, predictor residual/self, MLP, and evidence already propagated
-  into prompt or response states remain. This is a real frozen-model
-  intervention endpoint, not an attention rollout or a learned feature sum.
-  Report the raw quantity as a mechanism audit; do not confuse it with the
-  final detector scale.
-- The primary detector named `unsupported_history_takeover` is the out-of-fold
-  percentile of that raw endpoint after source-disjoint nuisance regression.
-  Fit only relative position, squared relative position, and separate
-  prompt/evidence/response lengths on fit sources; use distinct calibration
-  sources for the empirical CDF and evaluate on held-out sources. Do not put
-  confidence or target margin in this regression. Keep confidence as an
-  independent control.
-- Only response indices `t >= 2` have strict history separate from predictor
-  self. Mark earlier tokens `detection_valid=False`, exclude them from fitting,
-  calibration, and detection metrics, and report `evaluated_tokens` explicitly.
-- At every layer and response predictor, retain the 2x2 factorial effects of
-  evidence, history, and their interaction for attention output, MLP output,
-  and residual state. For any aligned quantity `x`, use
+- Compute branch-difference attention routes with the actual post-intervention
+  attention coefficients, values, GQA mapping, and matching query-head block
+  of `W_O`. Do not replace them with attention weights, head averages, or
+  checkpoint-only geometry.
+- Globally rank head-source edges within each `(layer, target, register)` by
+  absolute signed contribution to the complete register attention write. Keep
+  the adaptive cover subject to `top_k`; every saved edge retains its source,
+  head, nonnegative `delta(A V W_O)` magnitude, and signed contribution.
+- Decompose signed branch-difference contributions into intervention `root`,
+  non-root `carrier = mean(A) delta(V)`, and non-root
+  `gate = delta(A) mean(V)`. Their explicit edges and unresolved tails must
+  reconstruct the complete signed contribution. This midpoint split is an
+  exact algebraic identity but not a unique causal decomposition; `gate`
+  includes Q, K, and softmax-competition changes.
+- Partition sources into exactly four disjoint roles: `evidence`,
+  `other_prompt`, `response_history`, and `predictor_self`. Preserve dense
+  head/register/role totals.
+- Preserve the omitted sum of per-edge norms and the omitted signed
+  contribution as row tails. The magnitude tail is not the norm of the omitted
+  net vector. A tail has no known source or head endpoint and must never be
+  expanded into invented edges. Connect explicit routes to their aligned
+  attention-stage nodes, but keep the sparse view distinct from a complete
+  cross-layer ancestry graph.
+- Keep the established full-prompt collapse measurements only as a historical
+  QA audit. They are not the current detector and must not be generalized from
+  the earlier QA result to Summary or Data2txt.
 
-      evidence    = 0.5 * ((x_full - x_noE) + (x_noH - x_noEH))
-      history     = 0.5 * ((x_full - x_noH) + (x_noE - x_noEH))
-      interaction = x_full - x_noE - x_noH + x_noEH
+## Scores, labels, and claims
 
-  These are finite differences under the named deletions, not an additive
-  decomposition of all information in the hidden state.
-- Treat the serialized `RouteGraph` as layer-local head-source incidence, not
-  cross-layer ancestry. Never connect equal-numbered heads across layers or use
-  the graph alone to decide whether a history source is evidence-grounded.
-  MLP and branch pathway quantities remain separate finite-difference audits.
-- MLP diagnostics test whether an evidence/history branch difference is
-  amplified, cancelled, or rotated between attention output and layer output.
-  Never call an MLP norm or the `no_evidence_history` margin parametric
-  knowledge.
-- A pure parametric-attention bias claim requires controlled prior pairs with
-  matched context and known model priors or counterfactual facts. RAGTruth alone
-  identifies evidence bypass/history takeover, not pure parametric bias.
+- Keep the following fixed raw log-probability controls:
 
-## Data, evaluation, and files
+      evidence_bypass              = noE - F
+      symmetric_route_capture      = noE - noH
+      unsupported_history_takeover = 2 * noE - F - noEH
+      confidence                   = -F
 
-- Keep labels sealed through collection, graph construction, score
-  construction, nuisance fitting, and calibration. Open them only for final
-  AUROC/AP, source-cluster bootstrap intervals, and named post-hoc audits.
-- Require every nuisance fit to have enough rows and full column rank. Report
-  sklearn average precision as `AP`, not `AUPRC`, and report the samples and
-  sources that actually enter detection.
-- Compare observer, dtype, capture spec, and source identities before pooling
-  shards. Journal full token/evidence-mask digests and reject changed or
-  size-corrupted artifacts before resume or label reconnection.
-- Pool physical train/test cache directories within each task, then split by
-  `source_id`. Report QA, Summary, and Data2txt separately. Control prompt,
-  evidence, response length, and response position explicitly.
-- `capture.py` owns frozen-model incidences, the four interventions, and
-  attention/MLP/residual pathway traces. `collect.py` only traverses samples,
-  checks identity/alignment at the input boundary, serializes the current
-  schema, and resumes completed samples. `graph.py` constructs the incidence
-  graph. `detect.py` implements the one primary endpoint and controls.
-  `evaluate.py` opens labels and produces reports; its `audit` section is
-  post-hoc explanation, not another detector.
-- A changed capture schema requires fresh recapture; never silently adapt an
-  earlier prompt-carrier artifact. Keep one output tree and one foreground
-  entry, `python -m experiments.attention_mechanism_audit.run all`.
-- Test predictor/target alignment, role partitioning, per-head incidence and
-  real `W_O` merge, 0.8 cover plus remainder, the four branch equations,
-  attention/MLP/residual factorial effects, source-disjoint evaluation, and
-  label sealing. Synthetic correctness does not establish empirical value.
+  `unsupported_history_takeover` is a control, not the primary method.
+  Keep `evidence_bypass` as the locked primary raw baseline; a new graph
+  statistic remains a candidate until independent full-data evaluation.
+- Do not fit nuisance regressions, cross-fit a detector, calibrate an empirical
+  CDF, percentile-transform scores, or flip directions after reading labels.
+  Raw equations and their validity masks are frozen before evaluation.
+- Strict autonomous history is unavailable for the first two response targets.
+  Mark history-dependent scores invalid there and report the tokens and sources
+  that actually enter evaluation.
+- Keep hallucination labels sealed during capture, graph construction, and
+  score construction. Freeze every score-specific validity mask and use their
+  intersection for the printed comparison. Open labels only in final task-specific evaluation and
+  explicitly named post-hoc audits. Report QA, Summary, and Data2txt separately
+  with token-micro AUROC, sklearn average precision (`AP`), and source-cluster
+  bootstrap intervals.
+- AVWO magnitude tracing is prior art in the line from Kobayashi et al. through
+  ALTI and IFR. Limit any novelty claim to the branch-defined distinction
+  between evidence-descended and autonomous-history state, plus explicit MLP
+  finite-difference registers.
+- Do not claim complete causal flow, full token ancestry, or identification of
+  parametric knowledge. The four replay branches identify effects only under
+  their named attention-write deletions.
+
+## Files and execution
+
+- `capture.py` owns the frozen-model replay, exact layer traces, Gram state, and
+  signed residual-message routes. `collect.py` owns traversal, alignment,
+  serialization, and resume. `graph.py` exposes the sparse dual-register view.
+  `detect.py` computes only fixed raw scores. `evaluate.py` is the label-opening
+  boundary.
+- Schema 8 requires a fresh capture under `dual_register_state/train/` and
+  `dual_register_state/test/`. Do not adapt old artifacts in place and do not
+  delete them; historical output directories remain preserved. Write v8 task
+  reports under `dual_register_v8/{qa,summary,data2txt}/` instead of replacing
+  earlier reports.
+- Use the single foreground entry:
+
+      bash experiments/attention_mechanism_audit/run_all.sh
+
+  It runs `python -m experiments.attention_mechanism_audit.run all` once and
+  evaluates the three tasks separately. Do not launch hidden or per-task
+  background jobs.
+- Test predictor alignment, branch removals, role partitioning, layer closure,
+  register Gram construction, global sparse selection and exact tails, raw
+  score equations, validity masks, and label sealing. Synthetic correctness is
+  not empirical validation.

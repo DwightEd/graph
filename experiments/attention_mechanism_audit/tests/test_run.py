@@ -34,8 +34,8 @@ def test_all_command_evaluates_each_task_from_the_same_saved_mechanism_states(
     tmp_path, monkeypatch
 ):
     shared = [
-        (tmp_path / "evidence_adoption_state/train", tmp_path / "cache/train"),
-        (tmp_path / "evidence_adoption_state/test", tmp_path / "cache/test"),
+        (tmp_path / "dual_register_state/train", tmp_path / "cache/train"),
+        (tmp_path / "dual_register_state/test", tmp_path / "cache/test"),
     ]
     captures = []
     evaluations = []
@@ -73,7 +73,7 @@ def test_all_command_evaluates_each_task_from_the_same_saved_mechanism_states(
     assert [call[1] for call in evaluations] == list(run.TASK_TYPES)
     assert all(call[0] is shared for call in evaluations)
     assert [call[2] for call in evaluations] == [
-        tmp_path / "results" / task.casefold() / "report.json"
+        tmp_path / "results" / run.REPORT_DIRECTORY / task.casefold() / "report.json"
         for task in run.TASK_TYPES
     ]
 
@@ -83,9 +83,9 @@ def test_plot_sample_searches_the_same_saved_inputs():
         [
             "plot-sample",
             "--input",
-            "evidence_adoption_state/train",
+            "dual_register_state/train",
             "--input",
-            "evidence_adoption_state/test",
+            "dual_register_state/test",
             "--sample-id",
             "11907",
             "--output",
@@ -95,8 +95,8 @@ def test_plot_sample_searches_the_same_saved_inputs():
 
     assert args.sample_id == "11907"
     assert args.input == [
-        Path("evidence_adoption_state/train"),
-        Path("evidence_adoption_state/test"),
+        Path("dual_register_state/train"),
+        Path("dual_register_state/test"),
     ]
     assert args.output == Path("sample.png")
 
@@ -113,6 +113,13 @@ def test_report_prints_without_bootstrap_intervals(capsys):
         "hallucinated_minus_correct": 0.1,
         "ci95": [None, None],
     }
+    audit_names = (
+        "causal_evidence_support",
+        "raw_takeover",
+        "prompt_edge_log_volume_mean",
+        "register_evidence_adoption_step_principal_energy",
+        "register_autonomous_history_terminal_norm",
+    )
     run._print_report(
         {
             "samples": 1,
@@ -129,17 +136,7 @@ def test_report_prints_without_bootstrap_intervals(capsys):
             "primary_score": run.SCORE_ORDER[0],
             "detection": {name: metric for name in run.SCORE_ORDER},
             "group_difference_audit": {
-                "metrics": {
-                    name: audit_metric
-                    for name in (
-                        "causal_evidence_support",
-                        "unsupported_history_takeover_raw",
-                        "edge_evidence_route_contraction",
-                        "edge_evidence_head_top1_mean",
-                        "pathway_evidence_mlp_projection_mean",
-                        "pathway_evidence_valid_mean",
-                    )
-                }
+                "metrics": {name: audit_metric for name in audit_names}
             },
         },
     )
@@ -147,15 +144,12 @@ def test_report_prints_without_bootstrap_intervals(capsys):
     assert "PARTIAL-SUMMARY" in output
     assert "tokens=2 positives=1 evaluated_samples=1 evaluated_sources=1" in output
     assert "evaluated_tokens=1 evaluated_positives=1" in output
-    assert "PRIMARY   unsupported_history_takeover" in output
-    assert "control   evidence_bypass" in output
-    assert "control   evidence_route_contraction" in output
-    assert "control   history_route_contraction" in output
+    assert "PRIMARY   evidence_bypass" in output
+    assert "control   provenance_takeover" in output
+    assert "control   symmetric_route_capture" in output
+    assert "control   unsupported_history_takeover" in output
     assert "control   confidence" in output
     assert "component" not in output
-    assert output.count("CI=n/a") == 16
-    assert "causal_evidence_support" in output
-    assert "unsupported_history_takeover_raw" in output
-    assert "edge_evidence_head_top1_mean" in output
-    assert "pathway_evidence_mlp_projection_mean" in output
-    assert "pathway_evidence_valid_mean" in output
+    assert output.count("CI=n/a") == 2 * len(run.SCORE_ORDER) + len(audit_names)
+    for name in audit_names:
+        assert name in output
