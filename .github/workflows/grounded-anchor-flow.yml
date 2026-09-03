@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Materialize method implementation
+      - name: Materialize cache-compatible method implementation
         shell: bash
         run: |
           python .bootstrap/apply_grounded_anchor_flow.py
