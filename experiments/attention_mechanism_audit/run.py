@@ -59,7 +59,7 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--output", type=Path, default=OUTPUT)
     command.add_argument("--device", default="cuda:0")
     command.add_argument("--dtype", choices=("bfloat16", "float16"), default="bfloat16")
-    command.add_argument("--predictor-batch", type=int, default=8)
+    command.add_argument("--predictor-batch", type=int, default=1)
     command.add_argument("--edge-cover", type=float, default=0.95)
     command.add_argument("--edge-budget", type=int, default=64)
     command.add_argument("--limit", type=int)
