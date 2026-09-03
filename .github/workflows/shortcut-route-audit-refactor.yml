@@ -21,13 +21,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Apply refactor (attempt 3)
+      - name: Apply refactor (attempt 4)
         shell: bash
         run: |
           python .bootstrap/fix_shortcut_refactor_patch.py
           python .bootstrap/apply_shortcut_route_refactor.py
+          python .bootstrap/fix_shortcut_report_boundary.py
           rm -f .bootstrap/fix_shortcut_refactor_patch.py
           rm -f .bootstrap/apply_shortcut_route_refactor.py
+          rm -f .bootstrap/fix_shortcut_report_boundary.py
           rmdir .bootstrap 2>/dev/null || true
           python -m compileall -q experiments/attention_mechanism_audit
           bash -n experiments/attention_mechanism_audit/run_all.sh
