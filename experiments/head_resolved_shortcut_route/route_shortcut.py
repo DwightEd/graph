@@ -236,7 +236,10 @@ def measure_layer_routes(
     if ((carrier < 0) | (carrier >= len(CARRIER_NAMES))).any():
         raise ValueError("carrier contains an unknown physical source role")
 
-    device = attention.device
+    # Captured event tensors live on CPU so a full sample does not compete with
+    # the observer weights for GPU memory.  One layer is restored to the native
+    # weight device here and released again after it has been summarized.
+    device = output_weight.device
     dtype = torch.float32
     query = query_position.to(device=device, dtype=torch.long)
     source = source_position.to(device=device, dtype=torch.long)
@@ -255,10 +258,9 @@ def measure_layer_routes(
     adjoint = suffix_adjoint.to(device=device, dtype=dtype)
     head_adjoint = torch.einsum("ed,hdk->ehk", adjoint, weight)
 
-    observed_attention = attention.to(dtype=dtype) * causal[:, None]
-    root_phi = observed_attention[..., None] * torch.einsum(
-        "ehd,hsrd->ehsr", head_adjoint, head_values
-    )
+    observed_attention = attention.to(device=device, dtype=dtype) * causal[:, None]
+    root_phi = torch.einsum("ehd,hsrd->ehsr", head_adjoint, head_values)
+    root_phi.mul_(observed_attention[..., None])
 
     # ||W_O^h v|| is evaluated through its exact Gram form to avoid creating
     # an [event, head, source, hidden] tensor.
@@ -287,34 +289,87 @@ def measure_layer_routes(
 def moments_from_layers(layers: Sequence[LayerRoutes]) -> RouteMoments:
     """Accumulate dense edge atoms without losing endpoint-level signs."""
 
-    phi, carrier, causal = stack_route_layers(layers)
-    events, layer_count, heads, _, roots = phi.shape
-    physical = phi[..., :NUMERIC].sum(dim=-1)
-    physical_signed = torch.stack(
-        (physical.clamp_min(0), (-physical).clamp_min(0)), dim=-1
-    )
-    root_signed = torch.stack((phi.clamp_min(0), (-phi).clamp_min(0)), dim=-1)
-    shape = (events, layer_count, heads, len(CARRIER_NAMES), 2)
+    validate_route_layers(layers, require_complete=True)
+    return concatenate_route_moments([moments_from_layer(route) for route in layers])
+
+
+def moments_from_layer(
+    route: LayerRoutes,
+    *,
+    event_chunk_size: int = 16,
+) -> RouteMoments:
+    """Reduce one dense layer in bounded event chunks.
+
+    Source signs are still resolved atom by atom before any reduction.  The
+    event chunk only bounds workspace because different prediction events do
+    not interact in any registered moment.
+    """
+
+    if event_chunk_size <= 0:
+        raise ValueError("event_chunk_size must be positive")
+    phi = route.root_phi
+    events, heads, _, roots = phi.shape
+    if roots != len(ROOT_NAMES):
+        raise ValueError("route roots do not match the registered ledger")
+    shape = (events, 1, heads, len(CARRIER_NAMES), 2)
     physical_mass = torch.zeros(shape, dtype=phi.dtype, device=phi.device)
     root_mass = torch.zeros(*shape[:-1], roots, 2, dtype=phi.dtype, device=phi.device)
     physical_xlogx = torch.zeros_like(physical_mass)
     eligible_count = torch.zeros(shape[:-1], dtype=torch.int64, device=phi.device)
 
-    for role in range(len(CARRIER_NAMES)):
-        role_mask = causal & (carrier == role)[None]
-        physical_role = physical_signed * role_mask[:, None, None, :, None]
-        root_role = root_signed * role_mask[:, None, None, :, None, None]
-        physical_mass[..., role, :] = physical_role.sum(dim=3)
-        root_mass[..., role, :, :] = root_role.sum(dim=3)
-        physical_xlogx[..., role, :] = xlogx(physical_role).sum(dim=3)
-        count = role_mask.sum(dim=1)
-        eligible_count[..., role] = count[:, None, None]
+    for start in range(0, events, event_chunk_size):
+        stop = min(start + event_chunk_size, events)
+        chunk = phi[start:stop]
+        physical = chunk[..., :NUMERIC].sum(dim=-1)
+        physical_positive = physical.clamp_min(0)
+        physical_negative = (-physical).clamp_min(0)
+        root_positive = chunk.clamp_min(0)
+        root_negative = (-chunk).clamp_min(0)
+        causal = route.causal[start:stop]
+        for role in range(len(CARRIER_NAMES)):
+            role_mask = causal & (route.carrier == role)[None]
+            physical_mask = role_mask[:, None]
+            root_mask = physical_mask[..., None]
+            physical_mass[start:stop, 0, :, role, SUPPORT] = (
+                physical_positive * physical_mask
+            ).sum(dim=2)
+            physical_mass[start:stop, 0, :, role, VETO] = (
+                physical_negative * physical_mask
+            ).sum(dim=2)
+            root_mass[start:stop, 0, :, role, :, SUPPORT] = (
+                root_positive * root_mask
+            ).sum(dim=2)
+            root_mass[start:stop, 0, :, role, :, VETO] = (
+                root_negative * root_mask
+            ).sum(dim=2)
+            physical_xlogx[start:stop, 0, :, role, SUPPORT] = xlogx(
+                physical_positive * physical_mask
+            ).sum(dim=2)
+            physical_xlogx[start:stop, 0, :, role, VETO] = xlogx(
+                physical_negative * physical_mask
+            ).sum(dim=2)
+            eligible_count[start:stop, 0, :, role] = role_mask.sum(dim=1)[:, None]
 
     return RouteMoments(
         physical_mass=physical_mass,
         root_mass=root_mass,
         physical_xlogx=physical_xlogx,
         eligible_source_count=eligible_count,
+    )
+
+
+def concatenate_route_moments(parts: Sequence[RouteMoments]) -> RouteMoments:
+    """Join independently reduced layers without recreating dense edges."""
+
+    if not parts:
+        raise ValueError("at least one route-moment layer is required")
+    return RouteMoments(
+        physical_mass=torch.cat([part.physical_mass for part in parts], dim=1),
+        root_mass=torch.cat([part.root_mass for part in parts], dim=1),
+        physical_xlogx=torch.cat([part.physical_xlogx for part in parts], dim=1),
+        eligible_source_count=torch.cat(
+            [part.eligible_source_count for part in parts], dim=1
+        ),
     )
 
 
@@ -736,12 +791,12 @@ def sparsify_routes(
         raise ValueError("top_k must be nonnegative")
     if not 0 < cover_mass <= 1:
         raise ValueError("cover_mass must be in (0, 1]")
-    phi, carriers, causal = stack_route_layers(layers)
-    norms = torch.stack([route.physical_message_norm for route in layers], dim=1)
-    attention = torch.stack([route.attention for route in layers], dim=1)
-    energy = torch.stack([route.value_energy for route in layers], dim=1)
-    events, layer_count, heads, _, _ = phi.shape
-    device, dtype = phi.device, phi.dtype
+    validate_route_layers(layers, require_complete=False)
+    reference = layers[0]
+    carriers, causal = reference.carrier, reference.causal
+    events, heads, _ = reference.attention.shape
+    layer_count = len(layers)
+    device, dtype = reference.root_phi.device, reference.root_phi.dtype
     source = layers[0].source_position
 
     row_event: list[int] = []
@@ -789,7 +844,8 @@ def sparsify_routes(
                 row_event.append(event)
                 row_layer.append(layers[layer].layer)
                 row_head.append(head)
-                magnitude = norms[event, layer, head, source_sorted]
+                route = layers[layer]
+                magnitude = route.physical_message_norm[event, head, source_sorted]
                 magnitude_order = torch.argsort(magnitude, descending=True, stable=True)
                 ranked_source = source_sorted[magnitude_order]
                 ranked_magnitude = magnitude[magnitude_order]
@@ -809,23 +865,25 @@ def sparsify_routes(
 
                 selected_source.append(source[keep])
                 selected_carrier.append(carriers[keep])
-                selected_attention.append(attention[event, layer, head, keep])
-                selected_energy.append(energy[event, layer, head, keep])
-                selected_norm.append(norms[event, layer, head, keep])
-                selected_phi.append(phi[event, layer, head, keep])
+                selected_attention.append(route.attention[event, head, keep])
+                selected_energy.append(route.value_energy[event, head, keep])
+                selected_norm.append(route.physical_message_norm[event, head, keep])
+                selected_phi.append(route.root_phi[event, head, keep])
                 row_ptr.append(row_ptr[-1] + len(keep))
 
                 for role in range(len(CARRIER_NAMES)):
                     tail = omitted & (carriers == role)
                     tail_count[row, role] = tail.sum()
-                    tail_attention[row, role] = attention[
-                        event, layer, head, tail
+                    tail_attention[row, role] = route.attention[event, head, tail].sum()
+                    tail_energy[row, role] = route.value_energy[event, head, tail].sum()
+                    tail_norm[row, role] = route.physical_message_norm[
+                        event, head, tail
                     ].sum()
-                    tail_energy[row, role] = energy[event, layer, head, tail].sum()
-                    tail_norm[row, role] = norms[event, layer, head, tail].sum()
                     if tail.any():
-                        tail_norm_max[row, role] = norms[event, layer, head, tail].max()
-                    root_tail = phi[event, layer, head, tail]
+                        tail_norm_max[row, role] = route.physical_message_norm[
+                            event, head, tail
+                        ].max()
+                    root_tail = route.root_phi[event, head, tail]
                     tail_root_positive[row, role] = root_tail.clamp_min(0).sum(dim=0)
                     tail_root_negative[row, role] = (-root_tail).clamp_min(0).sum(dim=0)
                     physical_tail = root_tail[:, :NUMERIC].sum(dim=-1)
@@ -871,15 +929,93 @@ def sparsify_routes(
     )
 
 
+def concatenate_sparse_routes(parts: Sequence[SparseRoutes]) -> SparseRoutes:
+    """Join per-layer sparse tables in canonical event/layer/head row order."""
+
+    if not parts:
+        raise ValueError("at least one sparse route part is required")
+    row_event = torch.cat([part.row_event for part in parts])
+    row_layer = torch.cat([part.row_layer for part in parts])
+    row_head = torch.cat([part.row_head for part in parts])
+    counts = torch.cat([part.row_ptr.diff() for part in parts])
+    layer_count = int(row_layer.max().item()) + 1
+    head_count = int(row_head.max().item()) + 1
+    flat_row = (
+        row_event.long() * layer_count + row_layer.long()
+    ) * head_count + row_head.long()
+    row_order = torch.argsort(flat_row, stable=True)
+    row_rank = torch.empty_like(row_order)
+    row_rank[row_order] = torch.arange(len(row_order), device=row_order.device)
+    edge_row = torch.repeat_interleave(
+        torch.arange(len(counts), device=counts.device), counts.long()
+    )
+    edge_order = torch.argsort(row_rank[edge_row], stable=True)
+    ordered_counts = counts[row_order]
+    row_ptr = torch.cat(
+        (
+            torch.zeros(1, dtype=torch.int64, device=counts.device),
+            ordered_counts.long().cumsum(dim=0),
+        )
+    )
+
+    def join_edges(name: str) -> Tensor:
+        return torch.cat([getattr(part, name) for part in parts])[edge_order]
+
+    def join_rows(name: str) -> Tensor:
+        return torch.cat([getattr(part, name) for part in parts])[row_order]
+
+    return SparseRoutes(
+        row_event=row_event[row_order],
+        row_layer=row_layer[row_order],
+        row_head=row_head[row_order],
+        row_ptr=row_ptr,
+        source_position=join_edges("source_position"),
+        carrier=join_edges("carrier"),
+        attention=join_edges("attention"),
+        value_energy=join_edges("value_energy"),
+        physical_message_norm=join_edges("physical_message_norm"),
+        root_phi=join_edges("root_phi"),
+        tail_count=join_rows("tail_count"),
+        tail_attention_sum=join_rows("tail_attention_sum"),
+        tail_value_energy_sum=join_rows("tail_value_energy_sum"),
+        tail_message_norm_sum=join_rows("tail_message_norm_sum"),
+        tail_message_norm_max=join_rows("tail_message_norm_max"),
+        tail_root_positive=join_rows("tail_root_positive"),
+        tail_root_negative=join_rows("tail_root_negative"),
+        tail_physical_positive=join_rows("tail_physical_positive"),
+        tail_physical_negative=join_rows("tail_physical_negative"),
+        tail_physical_pos_xlogx=join_rows("tail_physical_pos_xlogx"),
+        tail_physical_neg_xlogx=join_rows("tail_physical_neg_xlogx"),
+    )
+
+
 def stack_route_layers(
     layers: Sequence[LayerRoutes],
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Stack aligned layer routes as ``[event, layer, head, source, root]``."""
 
+    validate_route_layers(layers, require_complete=True)
+    reference = layers[0]
+    return (
+        torch.stack([route.root_phi for route in layers], dim=1),
+        reference.carrier,
+        reference.causal,
+    )
+
+
+def validate_route_layers(
+    layers: Sequence[LayerRoutes], *, require_complete: bool
+) -> None:
+    """Validate a dense layer sequence without stacking its edge tensors."""
+
     if not layers:
         raise ValueError("at least one layer of routes is required")
-    if tuple(route.layer for route in layers) != tuple(range(len(layers))):
+    if require_complete and tuple(route.layer for route in layers) != tuple(
+        range(len(layers))
+    ):
         raise ValueError("route layers must be complete and ordered from zero")
+    if len({route.layer for route in layers}) != len(layers):
+        raise ValueError("route layer coordinates must be unique")
     reference = layers[0]
     for route in layers[1:]:
         if (
@@ -893,11 +1029,6 @@ def stack_route_layers(
             raise ValueError(
                 "route layers must have aligned events, heads, and sources"
             )
-    return (
-        torch.stack([route.root_phi for route in layers], dim=1),
-        reference.carrier,
-        reference.causal,
-    )
 
 
 def divide_or_nan(numerator: Tensor, denominator: Tensor, defined: Tensor) -> Tensor:

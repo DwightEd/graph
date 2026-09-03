@@ -29,6 +29,8 @@ from .route_shortcut import (
 from .route_suffix import ObservedSuffix, symmetric_swiglu_root_write
 
 CLOSURE_RELATIVE_LIMIT = 1e-3
+_ROOT_TOKEN_BLOCK_SIZE = 128
+_ROOT_INTERMEDIATE_BLOCK_SIZE = 1024
 
 
 def endpoint_boundary_error(boundary_error: list[Tensor], query: Tensor) -> Tensor:
@@ -53,7 +55,13 @@ def endpoint_boundary_error(boundary_error: list[Tensor], query: Tensor) -> Tens
 class NativeRouteObserver:
     """Capture observed E/Q/R/N operators from one frozen Llama forward."""
 
-    def __init__(self, model: Any) -> None:
+    def __init__(
+        self,
+        model: Any,
+        *,
+        root_token_block_size: int = _ROOT_TOKEN_BLOCK_SIZE,
+        root_intermediate_block_size: int = _ROOT_INTERMEDIATE_BLOCK_SIZE,
+    ) -> None:
         self.model = model.eval()
         self.model.requires_grad_(False)
         if hasattr(self.model, "set_attn_implementation"):
@@ -75,6 +83,19 @@ class NativeRouteObserver:
             raise ValueError("query heads must be divisible by KV heads")
         if str(getattr(config, "hidden_act", "silu")) != "silu":
             raise ValueError("the symmetric observed MLP operator requires SiLU")
+        if (
+            isinstance(root_token_block_size, bool)
+            or not isinstance(root_token_block_size, int)
+            or root_token_block_size <= 0
+            or isinstance(root_intermediate_block_size, bool)
+            or not isinstance(root_intermediate_block_size, int)
+            or root_intermediate_block_size <= 0
+        ):
+            raise ValueError("root block sizes must be positive integers")
+        # These blocks partition only the auxiliary FP32 root ledger.  They do
+        # not split or approximate the native full-sequence model forward.
+        self._root_token_block_size = root_token_block_size
+        self._root_intermediate_block_size = root_intermediate_block_size
         self._validate_bias_free()
 
     @classmethod
@@ -84,6 +105,8 @@ class NativeRouteObserver:
         *,
         device: str = "cuda:0",
         dtype: torch.dtype = torch.bfloat16,
+        root_token_block_size: int = _ROOT_TOKEN_BLOCK_SIZE,
+        root_intermediate_block_size: int = _ROOT_INTERMEDIATE_BLOCK_SIZE,
     ) -> NativeRouteObserver:
         """Load a local frozen causal LM with native eager attention."""
 
@@ -95,7 +118,11 @@ class NativeRouteObserver:
             torch_dtype=dtype,
             attn_implementation="eager",
         ).to(device)
-        return cls(model)
+        return cls(
+            model,
+            root_token_block_size=root_token_block_size,
+            root_intermediate_block_size=root_intermediate_block_size,
+        )
 
     @property
     def device(self) -> torch.device:
@@ -147,7 +174,7 @@ class NativeRouteObserver:
         mlp_multiplier: list[Tensor] = []
         native_gate: list[Tensor] = []
         native_up: list[Tensor] = []
-        self_value_numeric_write: list[Tensor] = []
+        self_value_numeric_input: list[Tensor] = []
         post_attention_numeric_write: list[Tensor] = []
         layer_numeric_write: list[Tensor] = []
         final_rms_numeric_write: Tensor | None = None
@@ -197,7 +224,7 @@ class NativeRouteObserver:
             current[prompt & ~evidence, QUESTION] = embedded[prompt & ~evidence]
             current[~prompt, RESPONSE] = embedded[~prompt]
             roots = current
-            initial_roots = current.clone()
+            initial_roots = current.index_select(0, query).detach().cpu()
 
         def layer_input_hook(index: int):
             def hook(_module: Any, args: tuple[Tensor, ...]) -> None:
@@ -287,7 +314,6 @@ class NativeRouteObserver:
                     source_count, self.kv_heads, self.head_dim
                 )
                 values, value_delta = close_numeric(raw_values, native_values)
-                root_values.append(values)
 
                 repeats = self.heads // self.kv_heads
                 head_to_kv = torch.arange(self.heads, device=self.device) // repeats
@@ -311,21 +337,51 @@ class NativeRouteObserver:
                     query[None],
                     query[None],
                 ].T
-                output_blocks = (
-                    layer.self_attn.o_proj.weight.detach()
-                    .float()
-                    .reshape(self.hidden, self.heads, self.head_dim)
-                    .permute(1, 0, 2)
-                )
-                self_value_numeric_write.append(
-                    torch.einsum(
-                        "ehk,hdk->ehd",
-                        self_attention[..., None] * event_value_delta,
-                        output_blocks,
-                    )
-                )
+                weighted_value_delta = self_attention[..., None] * event_value_delta
+                root_values.append(values.detach().cpu())
+                self_value_numeric_input.append(weighted_value_delta.detach().cpu())
                 post_attention_numeric_write.append(
-                    post_attention_delta.index_select(0, query)
+                    post_attention_delta.index_select(0, query).detach().cpu()
+                )
+                event_attention.append(
+                    weights.index_select(1, query).permute(1, 0, 2).detach().cpu()
+                )
+                attention_multiplier.append(
+                    attention_scale.index_select(0, query).detach().cpu()
+                )
+
+                # Only the post-attention root state enters the MLP.  Release
+                # full-sequence attention scratch before allocating its FP32
+                # SwiGLU ledger; completed records are already on CPU.
+                roots = post_attention_roots
+                for values_list in (
+                    layer_input,
+                    attention_norm,
+                    value_output,
+                    attention_write,
+                    attention_weight,
+                ):
+                    values_list[index] = None
+                del (
+                    captured,
+                    native_input,
+                    native_attention_norm,
+                    native_value,
+                    native_attention_write,
+                    weights,
+                    attention_scale,
+                    normalized_roots,
+                    raw_values,
+                    native_values,
+                    values,
+                    value_delta,
+                    values_by_head,
+                    context,
+                    rooted_attention_write,
+                    post_attention_delta,
+                    event_value_delta,
+                    self_attention,
+                    weighted_value_delta,
                 )
 
                 mlp_scale = rms_multiplier(
@@ -340,6 +396,8 @@ class NativeRouteObserver:
                     layer.mlp.gate_proj.weight.detach(),
                     layer.mlp.up_proj.weight.detach(),
                     layer.mlp.down_proj.weight.detach(),
+                    token_block_size=self._root_token_block_size,
+                    intermediate_block_size=self._root_intermediate_block_size,
                 )
                 closure_delta(rooted_mlp_write.sum(dim=1), native_mlp_write)
                 native_output = output[0] if isinstance(output, tuple) else output
@@ -347,20 +405,14 @@ class NativeRouteObserver:
                     post_attention_roots + rooted_mlp_write,
                     native_output[0].detach(),
                 )
-                layer_numeric_write.append(output_delta.index_select(0, query))
-
-                event_attention.append(weights.index_select(1, query).permute(1, 0, 2))
-                attention_multiplier.append(attention_scale.index_select(0, query))
-                mlp_multiplier.append(mlp_scale.index_select(0, query))
-                native_gate.append(gate.index_select(0, query))
-                native_up.append(up.index_select(0, query))
+                layer_numeric_write.append(
+                    output_delta.index_select(0, query).detach().cpu()
+                )
+                mlp_multiplier.append(mlp_scale.index_select(0, query).detach().cpu())
+                native_gate.append(gate.index_select(0, query).detach().cpu())
+                native_up.append(up.index_select(0, query).detach().cpu())
 
                 for values_list in (
-                    layer_input,
-                    attention_norm,
-                    value_output,
-                    attention_write,
-                    attention_weight,
                     mlp_input,
                     mlp_norm,
                     gate_value,
@@ -380,12 +432,15 @@ class NativeRouteObserver:
                 raise RuntimeError("root ledger was not initialized")
             native_input = args[0][0].detach()
             closure_delta(roots.sum(dim=1), native_input)
-            final_multiplier = rms_multiplier(self.model.model.norm, native_input)
-            normalized_roots = roots * final_multiplier.unsqueeze(1)
-            terminal_roots, final_delta = close_numeric(
+            multiplier = rms_multiplier(self.model.model.norm, native_input)
+            normalized_roots = roots * multiplier.unsqueeze(1)
+            closed_roots, final_delta = close_numeric(
                 normalized_roots, output[0].detach()
             )
-            final_rms_numeric_write = final_delta.index_select(0, query)
+            terminal_roots = closed_roots.index_select(0, query).detach().cpu()
+            final_multiplier = multiplier.index_select(0, query).detach().cpu()
+            final_rms_numeric_write = final_delta.index_select(0, query).detach().cpu()
+            roots = None
 
         try:
             handles.append(
@@ -440,34 +495,51 @@ class NativeRouteObserver:
             raise RuntimeError("native forward did not complete the root ledger")
         if not (
             len(root_values)
-            == len(self_value_numeric_write)
+            == len(self_value_numeric_input)
             == len(post_attention_numeric_write)
             == len(layer_numeric_write)
             == len(self.layers)
         ):
             raise RuntimeError("native forward did not visit every decoder layer")
 
-        event_logits = output.logits[0].float()
-        target = events.target_token_id.to(self.device)
-        target_logits = event_logits.gather(1, target[:, None]).squeeze(1)
-        competitor_logits = event_logits.clone()
-        competitor_logits.scatter_(1, target[:, None], -torch.inf)
-        competitor = competitor_logits.argmax(dim=1)
-        competitor_value = event_logits.gather(1, competitor[:, None]).squeeze(1)
-        native_margin = target_logits - competitor_value
-        target_logprob = target_logits - event_logits.logsumexp(dim=1)
+        with torch.inference_mode():
+            event_logits = output.logits[0].float()
+            del output
+            target = events.target_token_id
+            target_logits = event_logits.gather(1, target[:, None]).squeeze(1)
+            log_normalizer = event_logits.logsumexp(dim=1)
+            target_logprob = target_logits - log_normalizer
+            event_logits.scatter_(1, target[:, None], -torch.inf)
+            competitor = event_logits.argmax(dim=1)
+            competitor_value = event_logits.gather(1, competitor[:, None]).squeeze(1)
+            native_margin = target_logits - competitor_value
 
-        readout = self.model.lm_head.weight.detach().float()
-        direction = readout.index_select(0, target) - readout.index_select(
-            0, competitor
-        )
-        terminal_event_roots = terminal_roots.index_select(0, query)
-        terminal_root_margin = torch.einsum(
-            "erd,ed->er", terminal_event_roots, direction
-        )
-        terminal_error = (terminal_root_margin.sum(dim=1) - native_margin).abs()
+            readout = self.model.lm_head.weight.detach()
+            direction = readout.index_select(0, target).float()
+            direction -= readout.index_select(0, competitor).float()
+            terminal_event_roots = terminal_roots.to(self.device)
+            terminal_root_margin = torch.einsum(
+                "erd,ed->er", terminal_event_roots, direction
+            )
+            terminal_error = (terminal_root_margin.sum(dim=1) - native_margin).abs()
 
-        event_error = endpoint_boundary_error(boundary_error, query)
+        competitor_token_id = competitor.detach().cpu()
+        target_logprob = target_logprob.detach().cpu()
+        direction = direction.detach().cpu()
+        event_error = endpoint_boundary_error(boundary_error, query).detach().cpu()
+        native_margin = native_margin.detach().cpu()
+        terminal_root_margin = terminal_root_margin.detach().cpu()
+        terminal_error = terminal_error.detach().cpu()
+        del (
+            event_logits,
+            target,
+            target_logits,
+            log_normalizer,
+            competitor,
+            competitor_value,
+            readout,
+            terminal_event_roots,
+        )
         margin_scale = native_margin.abs().clamp_min(1.0)
         native_dtype = self.model.get_input_embeddings().weight.dtype
         closure_limit = max(
@@ -478,7 +550,7 @@ class NativeRouteObserver:
         operator_valid &= terminal_error <= closure_limit * margin_scale
 
         suffix = ObservedSuffix(
-            query_position=events.query_position,
+            query_position=cpu_events.query_position,
             attention=tuple(event_attention),
             attention_rms_multiplier=tuple(attention_multiplier),
             mlp_rms_multiplier=tuple(mlp_multiplier),
@@ -497,23 +569,21 @@ class NativeRouteObserver:
             down_weight=tuple(
                 layer.mlp.down_proj.weight.detach() for layer in self.layers
             ),
-            final_rms_multiplier=final_multiplier.index_select(0, query),
+            final_rms_multiplier=final_multiplier,
             readout_direction=direction,
         )
         return CapturedRouteOperators(
             response_start=int(response_start),
-            events=events,
+            events=cpu_events,
             source_token_id=source_ids,
-            competitor_token_id=competitor.detach(),
-            target_logprob=target_logprob.detach(),
-            source_position=torch.arange(
-                source_count, dtype=torch.long, device=self.device
-            ),
-            evidence_mask=source_evidence.to(self.device),
+            competitor_token_id=competitor_token_id,
+            target_logprob=target_logprob,
+            source_position=torch.arange(source_count, dtype=torch.long),
+            evidence_mask=source_evidence,
             root_values=tuple(root_values),
-            input_roots=initial_roots.index_select(0, query),
+            input_roots=initial_roots,
             suffix=suffix,
-            self_value_numeric_write=torch.stack(self_value_numeric_write, dim=1),
+            self_value_numeric_input=torch.stack(self_value_numeric_input, dim=1),
             post_attention_numeric_write=torch.stack(
                 post_attention_numeric_write, dim=1
             ),

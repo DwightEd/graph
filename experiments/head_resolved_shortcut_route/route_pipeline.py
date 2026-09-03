@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 import torch
 from torch import Tensor
@@ -11,10 +11,14 @@ from torch import Tensor
 from .route_artifact import RouteArtifact, RouteReadout
 from .route_shortcut import (
     NUMERIC,
-    LayerRoutes,
     PredictionEvents,
+    RouteMoments,
+    SparseRoutes,
+    concatenate_route_moments,
+    concatenate_sparse_routes,
     measure_layer_routes,
-    route_axes,
+    moments_from_layer,
+    reduce_route_moments,
     route_axes_from_sparse,
     sparsify_routes,
     token_carriers,
@@ -43,7 +47,7 @@ class CapturedRouteOperators:
     root_values: Sequence[Tensor]  # layer: [source, root, kv_head, head_dim]
     input_roots: Tensor  # [event, root, hidden] at predictor q
     suffix: ObservedSuffix
-    self_value_numeric_write: Tensor  # [event, layer, head, hidden]
+    self_value_numeric_input: Tensor  # [event, layer, head, head_dim], before W_O
     post_attention_numeric_write: Tensor  # [event, layer, hidden]
     layer_numeric_write: Tensor  # [event, layer, hidden], decoder-layer output
     final_rms_numeric_write: Tensor  # [event, hidden], normalized output
@@ -51,6 +55,17 @@ class CapturedRouteOperators:
     native_margin: Tensor  # [event]
     operator_error: Tensor  # [event], outward absolute bound
     operator_valid: Tensor  # [event]
+
+
+def record_to_cpu(value: RouteMoments | SparseRoutes) -> RouteMoments | SparseRoutes:
+    """Move one reduced dataclass off the accelerator without changing values."""
+
+    return type(value)(
+        **{
+            field.name: getattr(value, field.name).detach().cpu()
+            for field in fields(value)
+        }
+    )
 
 
 def build_route_artifact(
@@ -68,14 +83,15 @@ def build_route_artifact(
     layer_count = len(captured.suffix.attention)
     hidden = captured.suffix.readout_direction.shape[1]
     heads = captured.suffix.attention[0].shape[1]
-    if captured.self_value_numeric_write.shape != (
+    head_dim = captured.suffix.output_weight[0].shape[1] // heads
+    if captured.self_value_numeric_input.shape != (
         events,
         layer_count,
         heads,
-        hidden,
+        head_dim,
     ):
         raise ValueError(
-            "self_value_numeric_write must be [event, layer, head, hidden]"
+            "self_value_numeric_input must be [event, layer, head, head_dim]"
         )
     if captured.post_attention_numeric_write.shape != (events, layer_count, hidden):
         raise ValueError("post_attention_numeric_write must be [event, layer, hidden]")
@@ -92,7 +108,13 @@ def build_route_artifact(
         captured.response_start,
         captured.evidence_mask,
     )
-    layers: list[LayerRoutes] = []
+    moment_layers: list[RouteMoments] = []
+    sparse_layers: list[SparseRoutes] = []
+    route_root_sum = torch.zeros(events, 4, dtype=torch.float32)
+    route_numeric_variation = torch.zeros(events, dtype=torch.float32)
+    self_value_numeric_phi = torch.empty(
+        events, layer_count, heads, dtype=torch.float32
+    )
     for layer, (attention, root_values, output_weight, adjoint) in enumerate(
         zip(
             captured.suffix.attention,
@@ -102,35 +124,60 @@ def build_route_artifact(
             strict=True,
         )
     ):
-        layers.append(
-            measure_layer_routes(
-                layer=layer,
-                attention=attention,
-                root_values=root_values,
-                output_weight=output_weight,
-                suffix_adjoint=adjoint,
-                query_position=captured.events.query_position,
-                source_position=captured.source_position,
-                carrier=carrier,
-            )
+        device = output_weight.device
+        weight = output_weight.detach().to(device=device, dtype=torch.float32)
+        blocks = weight.reshape(hidden, heads, head_dim).permute(1, 0, 2)
+        device_adjoint = adjoint.to(device=device, dtype=torch.float32)
+        head_adjoint = torch.einsum("ed,hdk->ehk", device_adjoint, blocks)
+        numeric_input = captured.self_value_numeric_input[:, layer].to(
+            device=device, dtype=torch.float32
         )
+        self_value_numeric_phi[:, layer] = (
+            (numeric_input * head_adjoint).sum(dim=-1).cpu()
+        )
+        del blocks, device_adjoint, head_adjoint, numeric_input, weight
+
+        route = measure_layer_routes(
+            layer=layer,
+            attention=attention,
+            root_values=root_values,
+            output_weight=output_weight,
+            suffix_adjoint=adjoint,
+            query_position=captured.events.query_position,
+            source_position=captured.source_position,
+            carrier=carrier,
+        )
+        route_root_sum += route.root_phi.sum(dim=(1, 2)).cpu()
+        route_numeric_variation += (
+            route.root_phi[..., NUMERIC].abs().sum(dim=(1, 2)).cpu()
+        )
+        moment_layers.append(record_to_cpu(moments_from_layer(route)))
+        sparse_layers.append(
+            record_to_cpu(sparsify_routes([route], top_k=top_k, cover_mass=cover_mass))
+        )
+        del route
 
     injection = injection_contribution(captured.input_roots, suffix.input)
     initial_numeric_phi = injection[:, NUMERIC].clone()
-    self_value_numeric_phi = torch.einsum(
-        "elhd,eld->elh",
-        captured.self_value_numeric_write.float(),
-        torch.stack(suffix.attention_write, dim=1),
+    post_attention_numeric_phi = torch.stack(
+        [
+            (
+                captured.post_attention_numeric_write[:, layer].float()
+                * suffix.attention_write[layer].float()
+            ).sum(dim=1)
+            for layer in range(layer_count)
+        ],
+        dim=1,
     )
-    post_attention_numeric_phi = torch.einsum(
-        "eld,eld->el",
-        captured.post_attention_numeric_write.float(),
-        torch.stack(suffix.attention_write, dim=1),
-    )
-    layer_numeric_phi = torch.einsum(
-        "eld,eld->el",
-        captured.layer_numeric_write.float(),
-        torch.stack(suffix.layer_output, dim=1),
+    layer_numeric_phi = torch.stack(
+        [
+            (
+                captured.layer_numeric_write[:, layer].float()
+                * suffix.layer_output[layer].float()
+            ).sum(dim=1)
+            for layer in range(layer_count)
+        ],
+        dim=1,
     )
     final_numeric_phi = torch.einsum(
         "ed,ed->e",
@@ -147,18 +194,12 @@ def build_route_artifact(
         dim=1,
     )
     injection[:, NUMERIC] += local_numeric_phi.sum(dim=1)
-    route_numeric_variation = torch.stack(
-        [route.root_phi[..., NUMERIC].abs().sum(dim=(1, 2)) for route in layers],
-        dim=1,
-    ).sum(dim=1)
     numeric_total_variation = (
         initial_numeric_phi.abs()
         + local_numeric_phi.abs().sum(dim=1)
         + route_numeric_variation
     )
-    arrived = injection + torch.stack(
-        [route.root_phi.sum(dim=(1, 2)) for route in layers], dim=1
-    ).sum(dim=1)
+    arrived = injection + route_root_sum
     terminal = captured.terminal_root_margin.float()
     root_error = terminal - arrived
     root_scale = terminal.abs() + arrived.abs()
@@ -175,14 +216,15 @@ def build_route_artifact(
     )
     event_valid = captured.operator_valid.bool() & closure_valid
     outward_error = captured.operator_error.float() + root_error.abs().sum(dim=1)
-    dense_axes = route_axes(
-        layers,
+    moments = concatenate_route_moments(moment_layers)
+    dense_axes = reduce_route_moments(
+        moments,
         injection,
         event_valid=event_valid,
         resolution=outward_error,
         numeric_total_variation=numeric_total_variation,
     )
-    sparse = sparsify_routes(layers, top_k=top_k, cover_mass=cover_mass)
+    sparse = concatenate_sparse_routes(sparse_layers)
     axes = route_axes_from_sparse(
         sparse,
         injection,

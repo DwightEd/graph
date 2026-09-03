@@ -387,34 +387,40 @@ def capture_split(
                 int(attention.response_idx),
                 evidence_mask,
             )
-            artifact = build_route_artifact(
-                captured,
-                top_k=top_k,
-                cover_mass=cover_mass,
-            )
+            try:
+                artifact = build_route_artifact(
+                    captured,
+                    top_k=top_k,
+                    cover_mass=cover_mass,
+                )
+            finally:
+                del captured
         finally:
             sample.release_attention()
 
-        artifact_path = samples / _artifact_name(key)
-        _atomic_save_artifact(artifact_path, artifact)
-        row = {
-            "sample_id": key,
-            "source_id": source_id,
-            "task_type": task_type,
-            "generator_model": generator_model,
-            "path": artifact_path.name,
-            "bytes": artifact_path.stat().st_size,
-            "sha256": _sha256(artifact_path),
-            "events": len(artifact.events.query_position),
-            "response_start": int(artifact.response_start),
-        }
-        rows.append(row)
-        rows.sort(key=lambda current: dataset_order[str(current["sample_id"])])
         try:
-            _atomic_write_index(index_path, rows)
-        except BaseException:
-            rows.remove(row)
-            raise
+            artifact_path = samples / _artifact_name(key)
+            _atomic_save_artifact(artifact_path, artifact)
+            row = {
+                "sample_id": key,
+                "source_id": source_id,
+                "task_type": task_type,
+                "generator_model": generator_model,
+                "path": artifact_path.name,
+                "bytes": artifact_path.stat().st_size,
+                "sha256": _sha256(artifact_path),
+                "events": len(artifact.events.query_position),
+                "response_start": int(artifact.response_start),
+            }
+            rows.append(row)
+            rows.sort(key=lambda current: dataset_order[str(current["sample_id"])])
+            try:
+                _atomic_write_index(index_path, rows)
+            except BaseException:
+                rows.remove(row)
+                raise
+        finally:
+            del artifact
 
     indexed_ids = [str(row["sample_id"]) for row in rows]
     if limit is None and indexed_ids != dataset_ids:

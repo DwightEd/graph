@@ -89,6 +89,12 @@ changing this directory.  The rules below define the current audit.
 - `route_capture.py` owns the native one-pass hook capture.  The older
   four-branch audit remains isolated in the sibling
   `../attention_mechanism_audit/` package and must not be imported here.
+- Completed capture tensors must live on CPU; model weights may remain frozen
+  device references.  Restore at most one layer of dense route state to the
+  accelerator, reduce and sparsify it, then release it before the next layer.
+- Auxiliary root algebra may use tested token/intermediate partitions of the
+  exact FP32 formulas.  Such partitions are not native KV-cache chunking and
+  must not become a public chunk option or change experiment identity.
 - `route_suffix.py` owns the same-position observed suffix adjoint.
 - `route_shortcut.py` owns true-message atoms, the three axes, and sparse tails.
 - `route_pipeline.py` assembles captured operators into one artifact.

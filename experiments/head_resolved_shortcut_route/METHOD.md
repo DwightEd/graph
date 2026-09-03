@@ -189,6 +189,14 @@ F^r
 \sum_r F^r=F^{native}.
 \]
 
+这个等式指同一实数算术下 `a=\sum_r a_r`、`b=\sum_r b_r` 时的代数恒等式。
+实际实现使用由 `--dtype` 指定的原生前向（默认 BF16）捕获 `a,b`，root 投影与
+读出使用 FP32；两条数值路径之间的 kernel 舍入差异在算子边界先记录，再进入
+`N` 闭合，超过预注册容差时 validity 失败。辅助 root 算子可以沿 token 和
+intermediate 坐标分块求同一组和；这只改变 FP32 reduction order，不删除
+token/root/head，也不分块或替代原生 full-sequence 前向。分块式与密集式必须
+在声明的闭合容差内一致。
+
 这只是固定原生 gate 后的精确加性记账；删除某个 root 会改变 RMS、Q/K、softmax 和 SwiGLU gate，因此它不是 counterfactual causal effect。每层最后用原生 layer output 对 `N` 做一次数值闭合，并保存闭合误差。闭合误差超过预先固定容差时，该行无效，不能把错误吸收到 `N` 后继续打分。
 
 ## 6. Root × carrier cells

@@ -34,7 +34,9 @@ from experiments.head_resolved_shortcut_route.route_shortcut import (
     SUPPORT,
     VETO,
     LayerRoutes,
+    concatenate_sparse_routes,
     measure_layer_routes,
+    moments_from_layers,
     moments_from_sparse,
     prediction_events,
     route_axes,
@@ -46,6 +48,8 @@ from experiments.head_resolved_shortcut_route.route_suffix import (
     ObservedSuffix,
     injection_contribution,
     reverse_observed_suffix,
+    symmetric_swiglu_adjoint,
+    symmetric_swiglu_root_write,
 )
 
 
@@ -185,6 +189,46 @@ def test_true_avwo_edges_use_native_gqa_and_strict_first_arrival():
     torch.testing.assert_close(actual.attention, expected_attention)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is unavailable")
+def test_layer_route_stream_restores_cpu_capture_to_weight_device():
+    generator = torch.Generator().manual_seed(18)
+    attention = torch.rand(2, 4, 4, generator=generator)
+    root_values = torch.randn(4, 4, 2, 2, generator=generator)
+    output_weight = torch.randn(6, 8, generator=generator)
+    suffix_adjoint = torch.randn(2, 6, generator=generator)
+    query = torch.tensor([2, 3])
+    source = torch.arange(4)
+    carrier = token_carriers(
+        source,
+        response_start=2,
+        evidence_mask=torch.tensor([True, False, False, False]),
+    )
+    arguments = {
+        "layer": 0,
+        "attention": attention,
+        "root_values": root_values,
+        "suffix_adjoint": suffix_adjoint,
+        "query_position": query,
+        "source_position": source,
+        "carrier": carrier,
+    }
+
+    expected = measure_layer_routes(output_weight=output_weight, **arguments)
+    actual = measure_layer_routes(
+        output_weight=output_weight.to("cuda"),
+        **arguments,
+    )
+
+    for field in fields(expected):
+        expected_value = getattr(expected, field.name)
+        actual_value = getattr(actual, field.name)
+        if isinstance(expected_value, torch.Tensor):
+            assert actual_value.device.type == "cuda"
+            torch.testing.assert_close(actual_value.cpu(), expected_value)
+        else:
+            assert actual_value == expected_value
+
+
 def test_suffix_adjoint_keeps_predictor_self_mlp_and_residual_paths():
     generator = torch.Generator().manual_seed(23)
     events, layers, hidden, heads, kv_heads = 2, 2, 4, 4, 2
@@ -290,6 +334,96 @@ def test_suffix_adjoint_keeps_predictor_self_mlp_and_residual_paths():
     )
 
 
+def test_blocked_swiglu_root_write_matches_dense_formula_without_mutation():
+    generator = torch.Generator().manual_seed(2301)
+    tokens, roots, hidden, intermediate = 7, 4, 5, 11
+    normalized = torch.randn(tokens, roots, hidden, generator=generator)
+    gate_weight = torch.randn(intermediate, hidden, generator=generator)
+    up_weight = torch.randn(intermediate, hidden, generator=generator)
+    down_weight = torch.randn(hidden, intermediate, generator=generator)
+    native_gate = torch.randn(tokens, intermediate, generator=generator)
+    native_up = torch.randn(tokens, intermediate, generator=generator)
+    inputs = (
+        normalized,
+        native_gate,
+        native_up,
+        gate_weight,
+        up_weight,
+        down_weight,
+    )
+    saved = tuple(value.clone() for value in inputs)
+    gate_roots = normalized @ gate_weight.T
+    up_roots = normalized @ up_weight.T
+    dense = (
+        0.5
+        * torch.sigmoid(native_gate).unsqueeze(1)
+        * (gate_roots * native_up.unsqueeze(1) + native_gate.unsqueeze(1) * up_roots)
+    ) @ down_weight.T
+
+    blocked = symmetric_swiglu_root_write(
+        *inputs,
+        token_block_size=3,
+        intermediate_block_size=4,
+    )
+
+    assert blocked.shape == (tokens, roots, hidden)
+    assert blocked.dtype == torch.float32
+    torch.testing.assert_close(blocked, dense, rtol=1e-5, atol=1e-6)
+    for current, original in zip(inputs, saved, strict=True):
+        assert torch.equal(current, original)
+
+
+def test_blocked_swiglu_forward_is_transpose_of_observed_adjoint():
+    generator = torch.Generator().manual_seed(2302)
+    tokens, roots, hidden, intermediate = 5, 4, 6, 13
+    input_roots = torch.randn(
+        tokens, roots, hidden, generator=generator, requires_grad=True
+    )
+    multiplier = torch.rand(tokens, hidden, generator=generator) + 0.5
+    gate_weight = torch.randn(intermediate, hidden, generator=generator)
+    up_weight = torch.randn(intermediate, hidden, generator=generator)
+    down_weight = torch.randn(hidden, intermediate, generator=generator)
+    complete = input_roots.detach().sum(dim=1) * multiplier
+    native_gate = F.linear(complete, gate_weight).detach()
+    native_up = F.linear(complete, up_weight).detach()
+    downstream = torch.randn(tokens, hidden, generator=generator)
+    normalized_roots = input_roots * multiplier[:, None]
+    root_write = symmetric_swiglu_root_write(
+        normalized_roots,
+        native_gate,
+        native_up,
+        gate_weight,
+        up_weight,
+        down_weight,
+        token_block_size=2,
+        intermediate_block_size=5,
+    )
+    score = ((input_roots + root_write) * downstream[:, None]).sum()
+    (actual_gradient,) = torch.autograd.grad(score, input_roots)
+    expected = symmetric_swiglu_adjoint(
+        downstream,
+        multiplier,
+        native_gate,
+        native_up,
+        gate_weight,
+        up_weight,
+        down_weight,
+        token_block_size=2,
+        intermediate_block_size=5,
+    )
+
+    torch.testing.assert_close(
+        actual_gradient,
+        expected[:, None].expand_as(actual_gradient),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+    native_write = F.linear(F.silu(native_gate) * native_up, down_weight)
+    torch.testing.assert_close(
+        root_write.sum(dim=1), native_write, rtol=3e-5, atol=5e-6
+    )
+
+
 def test_route_pipeline_closes_injection_and_strict_arrival_to_terminal_roots():
     query = torch.tensor([1])
     events = prediction_events(torch.tensor([7, 8, 9]), response_start=2)
@@ -361,7 +495,7 @@ def test_route_pipeline_closes_injection_and_strict_arrival_to_terminal_roots():
         root_values=root_values,
         input_roots=input_roots,
         suffix=suffix,
-        self_value_numeric_write=torch.zeros(1, 1, 1, 1),
+        self_value_numeric_input=torch.zeros(1, 1, 1, 1),
         post_attention_numeric_write=torch.zeros(1, 1, 1),
         layer_numeric_write=torch.zeros(1, 1, 1),
         final_rms_numeric_write=torch.zeros(1, 1),
@@ -430,7 +564,7 @@ def test_route_pipeline_closes_injection_and_strict_arrival_to_terminal_roots():
     )
     assert dropped_local.readout.operator_valid.tolist() == [False]
     for field, invalid in (
-        ("self_value_numeric_write", torch.zeros(1, 2, 1, 1)),
+        ("self_value_numeric_input", torch.zeros(1, 2, 1, 1)),
         ("post_attention_numeric_write", torch.zeros(1, 1, 2)),
         ("layer_numeric_write", torch.zeros(1, 1, 2)),
         ("final_rms_numeric_write", torch.zeros(2, 1)),
@@ -450,7 +584,7 @@ def test_self_value_numeric_variation_does_not_cancel_across_heads():
         native_gate=zeros,
         native_up=zeros,
         value_weight=[torch.zeros(1, 1)],
-        output_weight=[torch.zeros(1, 2)],
+        output_weight=[torch.ones(1, 2)],
         gate_weight=zeros,
         up_weight=zeros,
         down_weight=zeros,
@@ -469,7 +603,7 @@ def test_self_value_numeric_variation_does_not_cancel_across_heads():
         root_values=[torch.zeros(2, 4, 1, 1)],
         input_roots=torch.zeros(1, 4, 1),
         suffix=suffix,
-        self_value_numeric_write=self_value_write,
+        self_value_numeric_input=self_value_write,
         post_attention_numeric_write=torch.zeros(1, 1, 1),
         layer_numeric_write=torch.zeros(1, 1, 1),
         final_rms_numeric_write=torch.zeros(1, 1),
@@ -510,7 +644,11 @@ def test_native_observer_closes_local_numeric_writes_in_one_forward(
         max_position_embeddings=32,
     )
     model = transformers.LlamaForCausalLM(config).to(dtype).eval()
-    observer = NativeRouteObserver(model)
+    observer = NativeRouteObserver(
+        model,
+        root_token_block_size=2,
+        root_intermediate_block_size=3,
+    )
     forward_calls: list[int] = []
     native_values: list[torch.Tensor] = []
     handles = [
@@ -546,7 +684,7 @@ def test_native_observer_closes_local_numeric_writes_in_one_forward(
     assert hooks_after == hooks_before
     assert captured.events.query_position.tolist() == [2, 3, 4, 5]
     assert captured.events.prediction_position.tolist() == [3, 4, 5, 6]
-    assert captured.self_value_numeric_write.shape == (4, 2, 4, 16)
+    assert captured.self_value_numeric_input.shape == (4, 2, 4, 4)
     assert captured.post_attention_numeric_write.shape == (4, 2, 16)
     assert captured.layer_numeric_write.shape == (4, 2, 16)
     assert captured.final_rms_numeric_write.shape == (4, 16)
@@ -697,7 +835,7 @@ def test_current_target_embedding_cannot_change_its_predictor_trace():
         ):
             torch.testing.assert_close(left[event], right[event], rtol=0, atol=0)
     for field in (
-        "self_value_numeric_write",
+        "self_value_numeric_input",
         "post_attention_numeric_write",
         "layer_numeric_write",
         "final_rms_numeric_write",
@@ -1169,6 +1307,104 @@ def test_sparse_selection_uses_message_norm_and_tail_closes_by_carrier_and_root(
             + sparse.tail_message_norm_sum[head].sum(),
             norm[0, head].sum(),
         )
+
+
+def test_layerwise_sparse_stream_has_the_same_canonical_table_as_dense_call():
+    generator = torch.Generator().manual_seed(2303)
+    source = torch.arange(5)
+    query = torch.tensor([3, 5])
+    carrier = torch.tensor(
+        [
+            EVIDENCE_PROMPT,
+            OTHER_PROMPT,
+            OTHER_PROMPT,
+            RESPONSE_HISTORY,
+            RESPONSE_HISTORY,
+        ]
+    )
+    layers = []
+    for layer in range(3):
+        phi = torch.randn(2, 2, 5, 4, generator=generator)
+        message_norm = torch.rand(2, 2, 5, generator=generator)
+        layers.append(
+            layer_routes(
+                phi,
+                layer=layer,
+                query_position=query,
+                source_position=source,
+                carrier=carrier,
+                message_norm=message_norm,
+            )
+        )
+
+    direct = sparsify_routes(layers, top_k=2, cover_mass=0.8)
+    streamed = concatenate_sparse_routes(
+        [sparsify_routes([route], top_k=2, cover_mass=0.8) for route in layers]
+    )
+
+    for field in fields(direct):
+        torch.testing.assert_close(
+            getattr(streamed, field.name), getattr(direct, field.name)
+        )
+
+
+def test_layerwise_moment_stream_matches_dense_signed_formula():
+    generator = torch.Generator().manual_seed(2304)
+    events, layer_count, heads, sources, roots = 19, 3, 2, 7, 4
+    source = torch.arange(sources)
+    query = torch.arange(events).remainder(sources - 1) + 1
+    carrier = torch.tensor(
+        [
+            EVIDENCE_PROMPT,
+            OTHER_PROMPT,
+            OTHER_PROMPT,
+            RESPONSE_HISTORY,
+            RESPONSE_HISTORY,
+            RESPONSE_HISTORY,
+            RESPONSE_HISTORY,
+        ]
+    )
+    layers = [
+        layer_routes(
+            torch.randn(events, heads, sources, roots, generator=generator),
+            layer=layer,
+            query_position=query,
+            source_position=source,
+            carrier=carrier,
+        )
+        for layer in range(layer_count)
+    ]
+
+    actual = moments_from_layers(layers)
+    phi = torch.stack([route.root_phi for route in layers], dim=1)
+    causal = source[None] < query[:, None]
+    physical = phi[..., :NUMERIC].sum(dim=-1)
+    expected_physical = torch.zeros_like(actual.physical_mass)
+    expected_root = torch.zeros_like(actual.root_mass)
+    expected_xlogx = torch.zeros_like(actual.physical_xlogx)
+    expected_count = torch.zeros_like(actual.eligible_source_count)
+    for role in range(3):
+        role_mask = causal & (carrier == role)[None]
+        physical_mask = role_mask[:, None, None, :, None]
+        root_mask = role_mask[:, None, None, :, None, None]
+        physical_signed = torch.stack(
+            (physical.clamp_min(0), (-physical).clamp_min(0)), dim=-1
+        )
+        root_signed = torch.stack((phi.clamp_min(0), (-phi).clamp_min(0)), dim=-1)
+        role_physical = physical_signed * physical_mask
+        expected_physical[..., role, :] = role_physical.sum(dim=3)
+        expected_root[..., role, :, :] = (root_signed * root_mask).sum(dim=3)
+        expected_xlogx[..., role, :] = torch.where(
+            role_physical > 0,
+            role_physical * role_physical.clamp_min(torch.finfo(phi.dtype).tiny).log(),
+            0,
+        ).sum(dim=3)
+        expected_count[..., role] = role_mask.sum(dim=1)[:, None, None]
+
+    torch.testing.assert_close(actual.physical_mass, expected_physical)
+    torch.testing.assert_close(actual.root_mass, expected_root)
+    torch.testing.assert_close(actual.physical_xlogx, expected_xlogx)
+    torch.testing.assert_close(actual.eligible_source_count, expected_count)
 
 
 def test_sparse_prefix_reaches_capacity_cover_without_saving_zero_edges():

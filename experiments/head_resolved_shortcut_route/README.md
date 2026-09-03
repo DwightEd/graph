@@ -151,10 +151,12 @@ to a detector.
 
 - `route_shortcut.py`: physical AVWO atoms, D/G/B projections, one shared
   dense-or-sparse three-axis reducer, and deterministic sparse tails.
-- `route_capture.py`: single-batch, one-pass native Llama operator capture.
+- `route_capture.py`: single-batch, one-pass native Llama operator capture with
+  completed per-layer records offloaded to CPU.
 - `route_suffix.py`: reverse observed-gate recurrence through final RMSNorm,
-  symmetric SwiGLU, predictor self-attention, and residual paths.
-- `route_pipeline.py`: operator-to-artifact assembly and root/native closure.
+  memory-bounded symmetric SwiGLU, predictor self-attention, and residual paths.
+- `route_pipeline.py`: layer-streamed operator-to-artifact assembly and
+  root/native closure.
 - `route_artifact.py`: fixed, numeric-only NPZ schema plus causal-alignment and
   schema validation.
 - `collect.py`: label-free dataset traversal, atomic artifact journal, and
@@ -165,6 +167,22 @@ to a detector.
 - `tests/test_route_shortcut.py`: independent GQA/AVWO oracle, suffix autograd
   oracle, q-to-q+1, root/carrier counterexamples, exact-tail checks, label
   isolation, and serialization round-trip.
+
+## Memory-bounded exact execution
+
+The auxiliary root ledger is evaluated without retaining a second dense model
+trace on the GPU. Completed per-layer captures are moved to CPU, the self-value
+numeric remainder is stored before `W_O` as `[event, head, head_dim]`, suffix
+adjoints are offloaded as soon as each layer is reversed, and route moments and
+sparse tails are reduced one layer at a time. The observed-gate SwiGLU root
+operator is partitioned over token and intermediate coordinates, so it never
+materializes the full `[token, root, intermediate]` gate and up tensors.
+
+These are exact execution partitions of the same registered formulas: no head,
+layer, source, or root is dropped or averaged, and no native gate is recomputed.
+Only ordinary FP32 evaluation or reduction roundoff can differ, which is
+covered by the existing closure tolerance and dense-versus-streamed regression
+tests.
 
 Run collection plus the three separate task evaluations with:
 
@@ -183,7 +201,10 @@ report. Run the regression suite with:
 python -m pytest -q experiments/head_resolved_shortcut_route/tests
 ```
 
-The native hook already produces BF16-closed `CapturedRouteOperators` from one
-full-sequence model pass. Root-preserving KV-cache chunking has not yet been
-implemented, so long inputs may exceed the observer's memory budget; this v1
-entry does not expose a fake chunk option.
+The native hook still performs one unchunked eager-attention model pass, whose
+attention workspace is quadratic in sequence length. Root-preserving KV-cache
+chunking has not been implemented, so sufficiently long inputs can still exceed
+the native model's memory budget; this v1 entry does not expose a fake chunk
+option. `--limit` changes the number of samples, not the peak memory of one
+sample, and `top_k` only controls persistence after that layer's full route has
+been measured.
