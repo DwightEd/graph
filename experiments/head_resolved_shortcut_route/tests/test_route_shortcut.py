@@ -17,6 +17,8 @@ from experiments.head_resolved_shortcut_route.route_artifact import (
 )
 from experiments.head_resolved_shortcut_route.route_capture import (
     NativeRouteObserver,
+    _logits_keep_arguments,
+    _select_event_logits,
     endpoint_boundary_error,
 )
 from experiments.head_resolved_shortcut_route.route_pipeline import (
@@ -125,6 +127,37 @@ def test_operator_boundary_validity_is_endpoint_local_not_prefix_global():
     error = endpoint_boundary_error(boundary_error, torch.tensor([1, 2]))
 
     torch.testing.assert_close(error, torch.tensor([0.04, 0.03]))
+
+
+def test_logits_keep_arguments_support_transformers_api_generations():
+    class CurrentModel:
+        def forward(self, *, logits_to_keep=0, **_kwargs):
+            return logits_to_keep
+
+    class EarlierModel:
+        def forward(self, *, num_logits_to_keep=0, **_kwargs):
+            return num_logits_to_keep
+
+    class LegacyModel:
+        def forward(self, **_kwargs):
+            return None
+
+    assert _logits_keep_arguments(CurrentModel(), 296) == {"logits_to_keep": 296}
+    assert _logits_keep_arguments(EarlierModel(), 296) == {"num_logits_to_keep": 296}
+    assert _logits_keep_arguments(LegacyModel(), 296) == {}
+
+
+def test_event_logits_accept_compact_rows_or_select_full_query_rows():
+    full = torch.arange(5 * 7, dtype=torch.float32).reshape(5, 7)
+    query = torch.tensor([2, 3, 4])
+    compact = full.index_select(0, query)
+
+    assert _select_event_logits(compact, query, source_count=5) is compact
+    torch.testing.assert_close(
+        _select_event_logits(full, query, source_count=5), compact
+    )
+    with pytest.raises(RuntimeError, match="actual=4, events=3, sources=5"):
+        _select_event_logits(full[:4], query, source_count=5)
 
 
 def test_true_avwo_edges_use_native_gqa_and_strict_first_arrival():
@@ -768,6 +801,59 @@ def test_native_observer_closes_local_numeric_writes_in_one_forward(
     ).any(dim=1)
     assert violated.any()
     assert (~wrong_projection.readout.operator_valid[violated]).all()
+
+
+def test_native_observer_selects_queries_when_model_returns_full_logits(monkeypatch):
+    transformers = pytest.importorskip("transformers")
+    torch.manual_seed(11)
+    config = transformers.LlamaConfig(
+        vocab_size=41,
+        hidden_size=16,
+        intermediate_size=32,
+        num_hidden_layers=1,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        max_position_embeddings=32,
+    )
+    model = transformers.LlamaForCausalLM(config).eval()
+    arguments = {
+        "token_ids": [1, 2, 3, 4, 5, 6, 7],
+        "response_start": 4,
+        "evidence_mask": [True, False, False, False],
+    }
+    expected = NativeRouteObserver(
+        model,
+        root_token_block_size=2,
+        root_intermediate_block_size=3,
+    ).capture(**arguments)
+    native_forward = model.forward
+    returned_rows: list[int] = []
+
+    def full_logits_forward(*args, **kwargs):
+        kwargs.pop("logits_to_keep", None)
+        kwargs.pop("num_logits_to_keep", None)
+        result = native_forward(*args, **kwargs)
+        returned_rows.append(result.logits.shape[1])
+        return result
+
+    monkeypatch.setattr(model, "forward", full_logits_forward)
+    actual = NativeRouteObserver(
+        model,
+        root_token_block_size=2,
+        root_intermediate_block_size=3,
+    ).capture(**arguments)
+
+    assert returned_rows == [len(arguments["token_ids"]) - 1]
+    assert actual.events.query_position.tolist() == [3, 4, 5]
+    assert actual.events.prediction_position.tolist() == [4, 5, 6]
+    assert actual.events.target_token_id.tolist() == [5, 6, 7]
+    assert torch.equal(actual.competitor_token_id, expected.competitor_token_id)
+    assert torch.equal(actual.operator_valid, expected.operator_valid)
+    torch.testing.assert_close(actual.target_logprob, expected.target_logprob)
+    torch.testing.assert_close(actual.native_margin, expected.native_margin)
+    torch.testing.assert_close(
+        actual.terminal_root_margin, expected.terminal_root_margin
+    )
 
 
 def test_current_target_embedding_cannot_change_its_predictor_trace():

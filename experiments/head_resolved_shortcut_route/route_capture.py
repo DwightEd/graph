@@ -10,6 +10,7 @@ to the frozen observer.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from inspect import signature
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,38 @@ from .route_suffix import ObservedSuffix, symmetric_swiglu_root_write
 CLOSURE_RELATIVE_LIMIT = 1e-3
 _ROOT_TOKEN_BLOCK_SIZE = 128
 _ROOT_INTERMEDIATE_BLOCK_SIZE = 1024
+
+
+def _logits_keep_arguments(model: Any, event_count: int) -> dict[str, int]:
+    """Request only the trailing predictor logits across Transformers APIs."""
+
+    try:
+        parameters = signature(model.forward).parameters
+    except (TypeError, ValueError):
+        return {}
+    if "logits_to_keep" in parameters:
+        return {"logits_to_keep": event_count}
+    if "num_logits_to_keep" in parameters:
+        return {"num_logits_to_keep": event_count}
+    return {}
+
+
+def _select_event_logits(logits: Tensor, query: Tensor, source_count: int) -> Tensor:
+    """Normalize compact or full-sequence model logits to predictor events."""
+
+    if logits.ndim != 2 or query.ndim != 1:
+        raise RuntimeError(
+            "model logits and predictor queries must be rank two and one"
+        )
+    event_count = len(query)
+    if logits.shape[0] == event_count:
+        return logits
+    if logits.shape[0] == source_count:
+        return logits.index_select(0, query.to(device=logits.device, dtype=torch.long))
+    raise RuntimeError(
+        "model returned an unsupported logits row count: "
+        f"actual={logits.shape[0]}, events={event_count}, sources={source_count}"
+    )
 
 
 def endpoint_boundary_error(boundary_error: list[Tensor], query: Tensor) -> Tensor:
@@ -480,7 +513,7 @@ class NativeRouteObserver:
                     output_attentions=True,
                     output_hidden_states=False,
                     return_dict=True,
-                    logits_to_keep=query,
+                    **_logits_keep_arguments(self.model, len(query)),
                 )
         finally:
             for handle in handles:
@@ -503,7 +536,9 @@ class NativeRouteObserver:
             raise RuntimeError("native forward did not visit every decoder layer")
 
         with torch.inference_mode():
-            event_logits = output.logits[0].float()
+            event_logits = _select_event_logits(
+                output.logits[0], query, source_count
+            ).float()
             del output
             target = events.target_token_id
             target_logits = event_logits.gather(1, target[:, None]).squeeze(1)
