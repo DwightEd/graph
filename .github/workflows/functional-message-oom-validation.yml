@@ -27,3 +27,4 @@ jobs:
           bash -n experiments/attention_mechanism_audit/run_all.sh
           bash -n experiments/grounded_anchor_flow/run_all.sh
           pytest -q experiments/attention_mechanism_audit/tests experiments/grounded_anchor_flow/tests
+          echo "chunked prefix and predictor microbatch validated"
