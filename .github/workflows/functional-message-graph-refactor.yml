@@ -26,6 +26,21 @@ jobs:
           base64 -d .bootstrap/functional_message_graph.tar.gz.b64 > /tmp/functional_message_graph.tar.gz
           rm -rf experiments/attention_mechanism_audit
           tar -xzf /tmp/functional_message_graph.tar.gz
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("experiments/attention_mechanism_audit/capture.py")
+          text = path.read_text(encoding="utf-8")
+          old = "    return tuple(layers)\n\n\nclass FunctionalMessageReplay:"
+          new = (
+              "    from transformers.cache_utils import DynamicCache\n\n"
+              "    return DynamicCache.from_legacy_cache(tuple(layers))\n\n\n"
+              "class FunctionalMessageReplay:"
+          )
+          if text.count(old) != 1:
+              raise RuntimeError("expected one legacy cache return")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
           rm -rf .bootstrap
           rm -f .github/workflows/functional-message-graph-refactor.yml
           python -m compileall -q experiments/attention_mechanism_audit
