@@ -39,6 +39,8 @@ jobs:
           python -m pip install transformers numpy scikit-learn pytest
       - name: Test exact messages and global flow
         shell: bash
+        env:
+          PYTHONPATH: .
         run: |
           pytest -q \
             experiments/attention_mechanism_audit/tests \
