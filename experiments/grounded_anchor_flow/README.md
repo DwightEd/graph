@@ -4,22 +4,28 @@ This experiment tests one mechanism instead of adding another stack of scalar
 attention features:
 
 > A correct continuation may pass through influential response anchors, but
-> those anchors remain reachable from the prompt/evidence.  A hallucinated
+> those anchors remain reachable from the prompt/evidence. A hallucinated
 > continuation may instead be carried by a response-seeded anchor backbone that
 > still has high downstream influence after prompt-seeded paths weaken.
 
 The method combines two useful ideas without copying their attention-only
-implementations.  The preplan-and-anchor work motivates separating long-range
-incoming gathering from later downstream influence.  FlowTracer motivates
+implementations. The preplan-and-anchor work motivates separating long-range
+incoming gathering from later downstream influence. FlowTracer motivates
 conditioning a causal DAG on reaching the current target and measuring the
-transit nodes on all target-reaching paths.  Here both operations are performed
+transit nodes on all target-reaching paths. Here both operations are performed
 on the frozen model's real functional messages rather than on head-averaged raw
 attention.
 
+The resulting DAG is a **generation-dependency graph**: an edge says that a
+source token's native `AVWO` message functionally supported a later token's
+prediction. A multi-hop path therefore links successive generation decisions;
+it is not claimed to be a chain-rule decomposition of the Transformer's hidden
+state across layers.
+
 ## 1. Exact generation edges
 
-For response token `y_t`, the causal predictor is `q_t = P - 1 + t`.  At layer
-`l`, query head `h`, and source `s <= q_t`, the observer already records
+For response token `y_t`, the causal predictor is `q_t = P - 1 + t`. At layer
+`l`, query head `h`, and source `s <= q_t`, the observer records
 
 \[
 m_{t,l,h,s}
@@ -47,7 +53,7 @@ C^+_{s,t}=\sum_{l,h}[\phi_{t,l,h,s}]_+.
 \]
 
 The same all-source table stores veto, raw attention, and exact residual-message
-norm.  Thus the identical graph algorithm can be run on:
+norm. Thus the identical graph operator can be run on:
 
 1. positive functional `AVWO` support — the method;
 2. raw attention — information-selection control;
@@ -61,27 +67,27 @@ Each response target column is normalized:
 W_{s,t}=\frac{C^+_{s,t}}{\sum_{u<t}C^+_{u,t}}.
 \]
 
-Let `B` be the response-to-response block of `W`.  It is strictly upper
+Let `B` be the response-to-response block of `W`. It is strictly upper
 triangular, so every response path is summed exactly by
 
 \[
 H=(I-B)^{-1}=I+B+B^2+\cdots.
 \]
 
-`H[i,t]` is the total product weight of all response paths from response token
-`i` to target `t`.  Prompt-to-target paths are the direct prompt block followed
-by `H`; no full token-by-token matrix inverse is constructed.
+`H[i,t]` is the total product weight of all response-dependency paths from
+response token `i` to target `t`. Prompt-to-target paths are the direct prompt
+block followed by `H`; no full token-by-token matrix inverse is constructed.
 
 For targets that have prior response tokens, a fixed source prior assigns half
 of its mass uniformly to the prompt and half uniformly to prior response
-positions.  Conditioning that prior on reaching the target gives the
-`response_seeded_path_share`.  This is a global path quantity; the ordinary
+positions. Conditioning that prior on reaching the target gives the
+`response_seeded_path_share`. This is a global path quantity; the ordinary
 one-step `direct_response_share` is reported separately.
 
 ## 3. Anchor mediation
 
-For source group `g`, response transit token `v`, and target `t`, all paths that
-pass through `v` factorize as
+For source group `g`, response transit token `v`, and target `t`, all weighted
+generation-dependency paths that pass through `v` factorize as
 
 \[
 O_g(v\mid t)
@@ -89,8 +95,8 @@ O_g(v\mid t)
 H_g(v)H(v,t).
 \]
 
-A prior response token can also be sampled as a zero-hop starting point.  That
-start contribution is subtracted before anchor mediation is measured.  The
+A prior response token can also be sampled as a zero-hop starting point. That
+start contribution is subtracted before anchor mediation is measured. The
 remaining occupancy therefore represents genuine transit through `v`, not the
 trivial fact that `v` is itself a response token.
 
@@ -105,11 +111,13 @@ The single primary score is
 }
 \]
 
-and is stored as `functional_response_seeded_anchor_flow`.  A high value means
+and is stored as `functional_response_seeded_anchor_flow`. A high value means
 that the response anchors mediating the current target are reached mainly from
-prior response seeds rather than prompt seeds.  It is a candidate
+prior response seeds rather than prompt seeds. It is a candidate
 self-confirming-flow signal, not a claim of semantic falsity or causal
-necessity.
+necessity. Direct one-step response dependence remains a separate control; the
+primary deliberately requires a genuine intermediate response anchor and may
+therefore become defined only after enough response history exists.
 
 The full functional artifact additionally retains:
 
@@ -121,7 +129,8 @@ The full functional artifact additionally retains:
 - `dominant_anchor` and `anchor_concentration` for visualization.
 
 `gather_distance` and `future_anchor_influence` test the gather–anchor rhythm.
-They are not multiplied into the detector.
+They are not multiplied into the detector and are not presented as evidence
+that the model explicitly enumerates candidate plans.
 
 ## 4. Evaluation contract
 
@@ -140,7 +149,7 @@ The primary functional RSAF is compared on the same valid tokens against:
 A label-free response-position adjustment is reported because ordinary
 autoregressive generation naturally becomes more response-dependent over time.
 
-The current experiment is an observed functional-flow audit.  A later
+The current experiment is an observed functional-flow audit. A later
 confirmatory phase must remove or keep the selected anchor backbone in a real
 model re-forward, with downstream gates recomputed, before claiming causal
 necessity or sufficiency.
@@ -157,7 +166,7 @@ tests/       path, relay, anchor, control, and evaluation invariants
 ```
 
 The exact functional graph remains in the sibling
-`attention_mechanism_audit` package.  This package adds only the global graph
+`attention_mechanism_audit` package. This package adds only the global graph
 operator and its evaluation; it does not introduce a learned GNN, autoencoder,
 or feature combiner.
 
