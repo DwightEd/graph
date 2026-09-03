@@ -26,18 +26,22 @@ def _legacy_cache(cache: Any) -> tuple[tuple[torch.Tensor, torch.Tensor], ...]:
 def _batched_prefix(
     cache: tuple[tuple[torch.Tensor, torch.Tensor], ...], predictors: torch.Tensor
 ) -> tuple[tuple[torch.Tensor, torch.Tensor], ...]:
-    """Pad several exact prefixes so their next-token predictors run independently."""
+    """Build independent exact prefixes for one predictor microbatch."""
 
     batch = len(predictors)
     past = int(predictors.max().item())
-    valid = torch.arange(past, device=predictors.device)[None] < predictors[:, None]
-    layers = []
-    for key, value in cache:
-        key = key[:, :, :past].expand(batch, -1, -1, -1).clone()
-        value = value[:, :, :past].expand(batch, -1, -1, -1).clone()
-        key.masked_fill_(~valid[:, None, :, None], 0)
-        value.masked_fill_(~valid[:, None, :, None], 0)
-        layers.append((key, value))
+    if batch == 1:
+        layers = [(key[:, :, :past], value[:, :, :past]) for key, value in cache]
+    else:
+        valid = torch.arange(past, device=predictors.device)[None] < predictors[:, None]
+        layers = []
+        for key, value in cache:
+            key = key[:, :, :past].expand(batch, -1, -1, -1).clone()
+            value = value[:, :, :past].expand(batch, -1, -1, -1).clone()
+            key.masked_fill_(~valid[:, None, :, None], 0)
+            value.masked_fill_(~valid[:, None, :, None], 0)
+            layers.append((key, value))
+
     from transformers.cache_utils import DynamicCache
 
     if hasattr(DynamicCache, "from_legacy_cache"):
@@ -50,8 +54,9 @@ class FunctionalMessageReplay:
 
     Every batch element is an independent one-token decoding problem with its
     own frozen prefix. Summing the batch log probabilities therefore yields one
-    uncontaminated gradient per target token, while avoiding one model call per
-    response token.
+    uncontaminated gradient per target token. The default microbatch is one
+    because an 8B model plus eight replicated long KV prefixes exceeds a 24 GB
+    device even though the underlying attribution is token-local.
     """
 
     def __init__(self, model: Any) -> None:
@@ -99,7 +104,7 @@ class FunctionalMessageReplay:
         response_start: int,
         evidence_mask: Sequence[bool] | torch.Tensor,
         *,
-        predictor_batch: int = 8,
+        predictor_batch: int = 1,
         edge_cover: float = 0.95,
         edge_budget: int = 64,
     ) -> dict[str, Any]:
@@ -151,7 +156,7 @@ class FunctionalMessageReplay:
             )
 
         try:
-            with torch.no_grad():
+            with torch.inference_mode():
                 full = self.model.model(
                     input_ids=ids[:-1][None],
                     use_cache=True,
@@ -160,6 +165,9 @@ class FunctionalMessageReplay:
                 )
             prefix_cache = _legacy_cache(full.past_key_values)
             value_bank = tuple(value[0].detach() for value in current_value)
+            current_value[:] = [None] * len(self.layers)
+            current_context[:] = [None] * len(self.layers)
+            current_mlp[:] = [None] * len(self.layers)
             del full
 
             for start in range(0, response, predictor_batch):
@@ -172,9 +180,6 @@ class FunctionalMessageReplay:
                 attention_mask = positions[None] < predictors[:, None]
                 attention_mask[:, -1] = True
 
-                current_value[:] = [None] * len(self.layers)
-                current_context[:] = [None] * len(self.layers)
-                current_mlp[:] = [None] * len(self.layers)
                 embedding = self.model.model.embed_tokens(ids[predictors][:, None]).detach()
                 embedding.requires_grad_(True)
                 output = self.model.model(
@@ -226,7 +231,13 @@ class FunctionalMessageReplay:
                             mlp_gradient=mlp_gradient[layer][row, 0],
                         )
                     builder.add_target_score(target, logprob[row], margin[row])
+
+                current_value[:] = [None] * len(self.layers)
+                current_context[:] = [None] * len(self.layers)
+                current_mlp[:] = [None] * len(self.layers)
                 del output, gradients, captured, embedding, past
+                del logits, selected, logprob, masked, margin
+                del context_gradient, mlp_gradient, attention_mask, positions, target_ids
         finally:
             for handle in handles:
                 handle.remove()
