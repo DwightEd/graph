@@ -1,0 +1,48 @@
+name: validate-paired-shortcut-endpoint-control
+
+on:
+  push:
+    branches:
+      - agent/paired-shortcut-endpoint-control
+    paths:
+      - ".github/workflows/paired-shortcut-endpoint-control.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/paired-shortcut-endpoint-control
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Apply paired endpoint-control implementation
+        shell: bash
+        run: |
+          python .bootstrap/apply_paired_shortcut_endpoint_control.py
+          rm -f .bootstrap/apply_paired_shortcut_endpoint_control.py
+          rmdir .bootstrap 2>/dev/null || true
+          python -m compileall -q experiments/attention_mechanism_audit
+          bash -n experiments/attention_mechanism_audit/run_all.sh
+      - name: Install test dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install transformers numpy scipy scikit-learn matplotlib networkx tqdm pytest
+      - name: Run mechanism-audit tests
+        shell: bash
+        run: |
+          pytest -q experiments/attention_mechanism_audit/tests
+      - name: Commit tested paired endpoint control
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add paired shortcut endpoint control"
+          git push origin HEAD:agent/paired-shortcut-endpoint-control
