@@ -56,6 +56,7 @@ def test_observed_response_endpoint_completes_route_better_than_rewire():
     assert geometry["route_gram"].shape == (1, len(SHORTCUT_VECTOR_NAMES), 7)
     assert geometry["head_gram"].shape == (1, 1, 7, 7)
     assert geometry["rewire_valid"].item()
+    assert geometry["relay_closure_error"].max() < 1e-6
     torch.testing.assert_close(
         geometry["route_gram"], geometry["route_gram"].transpose(-1, -2)
     )

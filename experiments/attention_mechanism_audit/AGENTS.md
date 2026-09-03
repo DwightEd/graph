@@ -66,7 +66,8 @@ this directory. The rules below define the current experiment.
   expanded into invented edges. Connect explicit routes to their aligned
   attention-stage nodes, but keep the sparse view distinct from a complete
   cross-layer ancestry graph.
-- Capture, for every `(layer,target)`, the residual-space Gram of the full
+- Capture, for every `(layer,target)`, and fail if the exact midpoint relay
+  decomposition does not close. Store the residual-space Gram of the full
   strict-history write, direct-evidence write, evidence-conditioned history
   carrier and gate writes, autonomous-history write, and an adjacent-endpoint
   rewiring control. Preserve the matching per-head Gram. These are the raw

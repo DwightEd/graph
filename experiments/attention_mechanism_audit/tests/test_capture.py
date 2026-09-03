@@ -269,6 +269,8 @@ def test_capture_uses_one_four_branch_pass_and_saves_aligned_state():
     assert trace["shortcut_route_gram"].shape == (2, 4, 7, 7)
     assert trace["shortcut_head_gram"].shape == (2, 4, 4, 7, 7)
     assert trace["shortcut_rewire_valid"].shape == (2, 4)
+    assert trace["shortcut_relay_closure_error"].shape == (2, 4)
+    assert trace["shortcut_relay_closure_error"].max() < 1e-4
     assert torch.allclose(
         trace["shortcut_route_gram"],
         trace["shortcut_route_gram"].transpose(-1, -2),

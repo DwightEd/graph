@@ -161,7 +161,21 @@ def capture_shortcut_geometry(
     mean_value = 0.5 * (v_full + v_no_evidence)
     evidence_carrier = context(mean_attention, delta_value, history)
     evidence_gate = context(delta_attention, mean_value, history)
-    autonomous_history = context(a_no_evidence, v_no_evidence, history) - context(
+    no_evidence_history = context(a_no_evidence, v_no_evidence, history)
+    evidence_conditioned_history = full_history - no_evidence_history
+    relay_reconstruction = evidence_carrier + evidence_gate
+    relay_closure_error = (
+        evidence_conditioned_history - relay_reconstruction
+    ).flatten(1).norm(dim=-1)
+    relay_scale = torch.maximum(
+        evidence_conditioned_history.flatten(1).norm(dim=-1),
+        relay_reconstruction.flatten(1).norm(dim=-1),
+    )
+    if not torch.all(
+        relay_closure_error <= 5e-5 + 5e-5 * relay_scale
+    ):
+        raise ValueError("evidence relay midpoint decomposition does not close")
+    autonomous_history = no_evidence_history - context(
         a_no_both, v_no_both, history
     )
 
@@ -216,6 +230,7 @@ def capture_shortcut_geometry(
         "route_gram": route_gram,
         "head_gram": head_gram,
         "rewire_valid": rewire_valid,
+        "relay_closure_error": relay_closure_error,
     }
 
 

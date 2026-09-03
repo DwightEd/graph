@@ -91,6 +91,7 @@ def _artifact(tokens: int = 2) -> dict:
             layers, tokens, heads, 7, 7
         ).clone(),
         "shortcut_rewire_valid": torch.ones(layers, tokens, dtype=torch.bool),
+        "shortcut_relay_closure_error": torch.zeros(layers, tokens),
     }
     for family in ("attention", "edge"):
         trace[f"prompt_{family}_effective_sources"] = torch.full((layers, tokens), 3.0)

@@ -120,8 +120,10 @@ e_{\mathrm{gate},q}^l = W_O^l\operatorname{concat}_a
 \]
 
 The direct evidence write and the exact history-root write for `noE - noEH`
-complete the observed vector set. Capture stores their aggregate and per-head
-Gram matrices. It also swaps adjacent response value endpoints before the two
+complete the observed vector set. Capture verifies the midpoint identity for
+every layer and prediction event, then stores its closure error together with
+the aggregate and per-head Gram matrices. It also swaps adjacent response value
+endpoints before the two
 relay calculations. This control keeps the coefficient and value multisets but
 breaks the observed endpoint pairing with at most one-token displacement inside
 each pair.

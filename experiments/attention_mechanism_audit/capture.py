@@ -294,6 +294,9 @@ class FunctionalTraceReplay:
             "shortcut_rewire_valid": torch.zeros(
                 layers, response_tokens, dtype=torch.bool
             ),
+            "shortcut_relay_closure_error": torch.zeros(
+                layers, response_tokens, dtype=torch.float32
+            ),
         }
         for family in ("attention", "edge"):
             trace[f"prompt_{family}_effective_sources"] = torch.zeros(
