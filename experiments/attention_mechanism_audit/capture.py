@@ -53,10 +53,9 @@ class FunctionalMessageReplay:
     """Build a graph whose attention edges are exact ``A·V·W_O`` messages.
 
     Every batch element is an independent one-token decoding problem with its
-    own frozen prefix. Summing the batch log probabilities therefore yields one
-    uncontaminated gradient per target token. The default microbatch is one
-    because an 8B model plus eight replicated long KV prefixes exceeds a 24 GB
-    device even though the underlying attribution is token-local.
+    own frozen prefix. The prefix cache is built in causal chunks, and target
+    replay defaults to one predictor at a time. Both changes reduce memory
+    without truncating context, dropping edges, or changing the attribution.
     """
 
     def __init__(self, model: Any) -> None:
@@ -105,6 +104,7 @@ class FunctionalMessageReplay:
         evidence_mask: Sequence[bool] | torch.Tensor,
         *,
         predictor_batch: int = 1,
+        prefix_chunk: int = 128,
         edge_cover: float = 0.95,
         edge_budget: int = 64,
     ) -> dict[str, Any]:
@@ -124,6 +124,7 @@ class FunctionalMessageReplay:
         current_value: list[torch.Tensor | None] = [None] * len(self.layers)
         current_context: list[torch.Tensor | None] = [None] * len(self.layers)
         current_mlp: list[torch.Tensor | None] = [None] * len(self.layers)
+        record_backward = False
         handles = []
 
         def value_hook(index: int):
@@ -136,13 +137,15 @@ class FunctionalMessageReplay:
 
         def context_hook(index: int):
             def hook(_module: Any, args: tuple[torch.Tensor, ...]) -> None:
-                current_context[index] = args[0]
+                if record_backward:
+                    current_context[index] = args[0]
 
             return hook
 
         def mlp_hook(index: int):
             def hook(_module: Any, _args: Any, output: torch.Tensor) -> None:
-                current_mlp[index] = output
+                if record_backward:
+                    current_mlp[index] = output
 
             return hook
 
@@ -156,19 +159,28 @@ class FunctionalMessageReplay:
             )
 
         try:
+            value_parts: list[list[torch.Tensor]] = [[] for _ in self.layers]
+            past = None
             with torch.no_grad():
-                full = self.model.model(
-                    input_ids=ids[:-1][None],
-                    use_cache=True,
-                    output_attentions=False,
-                    return_dict=True,
-                )
-            prefix_cache = _legacy_cache(full.past_key_values)
-            value_bank = tuple(value[0].detach() for value in current_value)
-            current_value[:] = [None] * len(self.layers)
-            current_context[:] = [None] * len(self.layers)
-            current_mlp[:] = [None] * len(self.layers)
-            del full
+                for start in range(0, len(ids) - 1, prefix_chunk):
+                    stop = min(start + prefix_chunk, len(ids) - 1)
+                    prefix = self.model.model(
+                        input_ids=ids[start:stop][None],
+                        past_key_values=past,
+                        use_cache=True,
+                        output_attentions=False,
+                        return_dict=True,
+                    )
+                    past = prefix.past_key_values
+                    for layer, value in enumerate(current_value):
+                        value_parts[layer].append(value[0].detach())
+                    current_value[:] = [None] * len(self.layers)
+                    del prefix
+
+            prefix_cache = _legacy_cache(past)
+            value_bank = tuple(torch.cat(parts, dim=0) for parts in value_parts)
+            del past, value_parts
+            record_backward = True
 
             for start in range(0, response, predictor_batch):
                 stop = min(start + predictor_batch, response)
