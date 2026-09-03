@@ -1,1 +1,1 @@
-python -m experiments.grounded_anchor_flow.run "$@"
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python -m experiments.grounded_anchor_flow.run "$@"
