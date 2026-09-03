@@ -1,0 +1,36 @@
+name: validate-grounded-anchor-flow
+
+on:
+  push:
+    branches:
+      - agent/grounded-anchor-flow
+    paths:
+      - ".github/workflows/grounded-anchor-flow-validation.yml"
+      - "experiments/grounded_anchor_flow/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/grounded-anchor-flow
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install transformers numpy scipy scikit-learn pytest
+      - name: Validate implementation
+        shell: bash
+        run: |
+          python -m compileall -q experiments/grounded_anchor_flow
+          bash -n experiments/grounded_anchor_flow/run_all.sh
+          pytest -q experiments/grounded_anchor_flow/tests
+          pytest -q experiments/head_resolved_shortcut_route/tests/test_route_shortcut.py
