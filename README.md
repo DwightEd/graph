@@ -24,6 +24,7 @@ research_dataset.py                     unified data interface
 experiments/directed_route_hypergraph/  current ordered-layout experiment
 experiments/grounded_route/             typed token-graph baseline and evaluator
 experiments/information_flow/           deterministic attention-transport control
+experiments/head_resolved_shortcut_route/ independent AVWO association audit
 experiments/dbgnn_reference/            DBGNN / GCN reference
 experiments/holoroute/                   historical baselines and failed P-Cut record
 docs/RESEARCH_STATUS.md                 current claims, gates and next experiment
@@ -54,6 +55,15 @@ bash experiments/grounded_route/run_qa.sh
 bash experiments/grounded_route/evaluation/run_controls_qa.sh
 bash experiments/information_flow/run_qa.sh
 ```
+
+独立的逐头真实 AVWO shortcut-route 关联审计运行：
+
+```bash
+bash experiments/head_resolved_shortcut_route/run_all.sh
+```
+
+该入口采集全部 train/test shard，并分别评价 QA、Summary 和 Data2txt；它不替代
+当前无监督图检测主线，也不把关联结果声明为完整因果机制验证。
 
 ## 测试
 
