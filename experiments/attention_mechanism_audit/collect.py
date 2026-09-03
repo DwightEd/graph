@@ -30,6 +30,7 @@ def capture_split(
     device: str = "cuda:0",
     dtype: torch.dtype = torch.bfloat16,
     predictor_batch: int = 1,
+    prefix_chunk: int = 128,
     edge_cover: float = 0.95,
     edge_budget: int = 64,
     limit: int | None = None,
@@ -108,6 +109,7 @@ def capture_split(
             int(attention.response_idx),
             mask,
             predictor_batch=predictor_batch,
+            prefix_chunk=prefix_chunk,
             edge_cover=edge_cover,
             edge_budget=edge_budget,
         )
@@ -118,6 +120,7 @@ def capture_split(
             task_type=current_task,
             generator_model=sample.generator_model,
             predictor_batch=int(predictor_batch),
+            prefix_chunk=int(prefix_chunk),
             edge_cover=float(edge_cover),
             edge_budget=int(edge_budget),
             labels_used=False,
@@ -144,6 +147,7 @@ def capture_split(
     manifest = {
         **identity,
         "predictor_batch": int(predictor_batch),
+        "prefix_chunk": int(prefix_chunk),
         "samples": len(rows),
         "complete": complete,
         "labels_used": False,
