@@ -1,0 +1,27 @@
+name: validate-functional-message-graph-integration
+
+on:
+  push:
+    branches:
+      - agent/functional-message-graph-ci
+    paths:
+      - ".github/workflows/functional-message-graph-integration.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/functional-message-graph-ci
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install "transformers<5" numpy pytest
+      - run: |
+          python -m compileall -q experiments/attention_mechanism_audit
+          bash -n experiments/attention_mechanism_audit/run_all.sh
+          PYTHONPATH=. pytest -q experiments/attention_mechanism_audit/tests
