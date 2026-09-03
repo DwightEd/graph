@@ -35,6 +35,7 @@ def build(args: argparse.Namespace) -> None:
         device=args.device,
         dtype={"bfloat16": torch.bfloat16, "float16": torch.float16}[args.dtype],
         predictor_batch=args.predictor_batch,
+        prefix_chunk=args.prefix_chunk,
         edge_cover=args.edge_cover,
         edge_budget=args.edge_budget,
         limit=args.limit,
@@ -60,6 +61,7 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--device", default="cuda:0")
     command.add_argument("--dtype", choices=("bfloat16", "float16"), default="bfloat16")
     command.add_argument("--predictor-batch", type=int, default=1)
+    command.add_argument("--prefix-chunk", type=int, default=128)
     command.add_argument("--edge-cover", type=float, default=0.95)
     command.add_argument("--edge-budget", type=int, default=64)
     command.add_argument("--limit", type=int)
