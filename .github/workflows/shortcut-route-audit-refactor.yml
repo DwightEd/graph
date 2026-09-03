@@ -21,15 +21,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Apply refactor (attempt 4)
+      - name: Add exact relay closure audit
         shell: bash
         run: |
-          python .bootstrap/fix_shortcut_refactor_patch.py
-          python .bootstrap/apply_shortcut_route_refactor.py
-          python .bootstrap/fix_shortcut_report_boundary.py
-          rm -f .bootstrap/fix_shortcut_refactor_patch.py
-          rm -f .bootstrap/apply_shortcut_route_refactor.py
-          rm -f .bootstrap/fix_shortcut_report_boundary.py
+          python .bootstrap/add_shortcut_relay_closure.py
+          rm -f .bootstrap/add_shortcut_relay_closure.py
           rmdir .bootstrap 2>/dev/null || true
           python -m compileall -q experiments/attention_mechanism_audit
           bash -n experiments/attention_mechanism_audit/run_all.sh
@@ -42,11 +38,11 @@ jobs:
       - name: Run mechanism-audit tests
         shell: bash
         run: pytest -q experiments/attention_mechanism_audit/tests
-      - name: Commit tested refactor
+      - name: Commit tested closure audit
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Audit response shortcut routes through evidence relays"
+          git commit -m "Enforce exact evidence-relay closure"
           git push origin HEAD:agent/continue-source-origin-flow
