@@ -55,7 +55,7 @@ SHORTCUT_SCORE_DEFINITIONS = {
         "history-write direction"
     ),
     "shortcut_route_candidate_mean": (
-        "observed route incompleteness times positive autonomous residual alignment"
+        "observed route incompleteness times positive signed autonomous support"
     ),
     "shortcut_route_rewired_control_mean": (
         "the same candidate after adjacent response-endpoint rewiring"
