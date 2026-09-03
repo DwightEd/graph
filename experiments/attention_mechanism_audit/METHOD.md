@@ -129,10 +129,20 @@ breaks the observed endpoint pairing with at most one-token displacement inside
 each pair.
 
 Let `S=[direct evidence, carrier, gate]`. Route completion is the fraction of
-the full-history energy projected onto `span(S)`. The shortcut candidate is the
-unexplained energy fraction multiplied by the positive cosine between the
-residualized full-history and autonomous-history writes. These directions are
-frozen before labels are opened. They remain mechanism-audit candidates; the
-locked primary detector is unchanged until full QA, Summary, and Data2txt
-evaluation supports replacement.
+the full-history energy projected onto `span(S)`. Since
+`full_history = evidence_relay + autonomous_history`, residualizing the first
+and third terms against the relay would make their residuals identical and the
+cosine trivially one. The audit therefore uses the non-degenerate signed
+support
+
+\[
+c_{auto}=\frac{\langle h_{full},h_{auto}\rangle}
+{\lVert h_{full}\rVert^2},
+\]
+
+and verifies that the corresponding relay support sums with it to one. The
+shortcut candidate is route incompleteness times `max(c_auto, 0)`. These
+directions are frozen before labels are opened. They remain mechanism-audit
+candidates; the locked primary detector is unchanged until full QA, Summary,
+and Data2txt evaluation supports replacement.
 

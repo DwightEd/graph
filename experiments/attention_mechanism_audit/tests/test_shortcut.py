@@ -72,7 +72,7 @@ def test_observed_response_endpoint_completes_route_better_than_rewire():
     assert metrics["shortcut_endpoint_rewire_gap"][0, 0] < -0.5
 
 
-def test_shortcut_candidate_is_residual_history_aligned_with_autonomy():
+def test_shortcut_candidate_uses_non_degenerate_autonomous_support():
     layers, tokens, vectors, hidden = 3, 4, 7, 3
     state = torch.zeros(layers, tokens, vectors, hidden)
     state[..., 0, 0] = 1.0  # full history
@@ -93,7 +93,13 @@ def test_shortcut_candidate_is_residual_history_aligned_with_autonomy():
 
     np.testing.assert_allclose(layer["shortcut_route_completion"], 0.0, atol=1e-6)
     np.testing.assert_allclose(
-        layer["shortcut_autonomous_residual_alignment"], 1.0, atol=1e-6
+        layer["shortcut_autonomous_support"], 1.0, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        layer["shortcut_evidence_relay_support"], 0.0, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        layer["shortcut_additive_support_error"], 0.0, atol=1e-6
     )
     np.testing.assert_allclose(layer["shortcut_route_candidate"], 1.0, atol=1e-6)
     np.testing.assert_allclose(
@@ -101,3 +107,28 @@ def test_shortcut_candidate_is_residual_history_aligned_with_autonomy():
     )
     np.testing.assert_allclose(token["shortcut_route_candidate_mean"], 1.0)
     assert token["shortcut_route_candidate_mean__valid"].all()
+
+def test_autonomous_support_is_not_the_old_tautological_residual_cosine():
+    layers, tokens, vectors, hidden = 1, 2, 7, 2
+    state = torch.zeros(layers, tokens, vectors, hidden)
+    state[..., 0, 0] = 1.0  # full history
+    state[..., 2, 0] = 0.8  # evidence-conditioned carrier supports most of it
+    state[..., 4, 0] = 0.2  # autonomous history supports the remainder
+    gram = torch.einsum("ltkd,ltmd->ltkm", state, state)
+    metrics = shortcut_layer_metrics(
+        {
+            "shortcut_route_gram": gram,
+            "shortcut_rewire_valid": torch.ones(layers, tokens, dtype=torch.bool),
+        }
+    )
+
+    np.testing.assert_allclose(
+        metrics["shortcut_evidence_relay_support"], 0.8, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        metrics["shortcut_autonomous_support"], 0.2, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        metrics["shortcut_additive_support_error"], 0.0, atol=1e-6
+    )
+

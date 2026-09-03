@@ -36,7 +36,7 @@ _EPS = 1e-12
 SHORTCUT_SCORE_NAMES = (
     "shortcut_route_incompleteness_mean",
     "shortcut_endpoint_rewire_gap_mean",
-    "shortcut_autonomous_residual_alignment_mean",
+    "shortcut_autonomous_support_mean",
     "shortcut_route_candidate_mean",
     "shortcut_route_rewired_control_mean",
 )
@@ -50,9 +50,9 @@ SHORTCUT_SCORE_DEFINITIONS = {
         "route completion after adjacent response-endpoint rewiring minus route "
         "completion with the observed endpoints"
     ),
-    "shortcut_autonomous_residual_alignment_mean": (
-        "alignment of full-history and autonomous-history writes after removing "
-        "their shared evidence-support subspace"
+    "shortcut_autonomous_support_mean": (
+        "signed contribution of the no-evidence history write to the full "
+        "history-write direction"
     ),
     "shortcut_route_candidate_mean": (
         "observed route incompleteness times positive autonomous residual alignment"
@@ -260,31 +260,23 @@ def _projection_fraction(
     return fraction, valid
 
 
-def _residual_cosine(
-    gram: np.ndarray,
-    left: int,
-    right: int,
-    support: Sequence[int],
+def _signed_support(
+    gram: np.ndarray, source: Sequence[int]
 ) -> tuple[np.ndarray, np.ndarray]:
-    inverse = _support_inverse(gram, support)
-    left_support = np.take(gram[..., left, :], support, axis=-1)
-    right_support = np.take(gram[..., right, :], support, axis=-1)
-    left_energy = gram[..., left, left] - np.einsum(
-        "...i,...ij,...j->...", left_support, inverse, left_support
-    )
-    right_energy = gram[..., right, right] - np.einsum(
-        "...i,...ij,...j->...", right_support, inverse, right_support
-    )
-    cross = gram[..., left, right] - np.einsum(
-        "...i,...ij,...j->...", left_support, inverse, right_support
-    )
-    left_energy = np.maximum(left_energy, 0.0)
-    right_energy = np.maximum(right_energy, 0.0)
-    denominator = np.sqrt(left_energy * right_energy)
-    valid = denominator > _EPS
-    cosine = np.zeros_like(denominator)
-    cosine[valid] = np.clip(cross[valid] / denominator[valid], -1.0, 1.0)
-    return cosine, valid
+    """Project additive source writes onto the full-history direction.
+
+    For an exact decomposition ``h = r + a``, the returned signed supports
+    ``<h,r>/||h||²`` and ``<h,a>/||h||²`` sum to one.  Unlike residualizing
+    both ``h`` and ``a`` against ``r``, this quantity is not an algebraic
+    identity equal to one; it retains reinforcement and cancellation.
+    """
+
+    energy = np.maximum(gram[..., FULL_HISTORY_WRITE, FULL_HISTORY_WRITE], 0.0)
+    cross = np.take(gram[..., FULL_HISTORY_WRITE, :], source, axis=-1).sum(-1)
+    valid = energy > _EPS
+    support = np.zeros_like(energy)
+    support[valid] = cross[valid] / energy[valid]
+    return support, valid
 
 
 def _combined_norm(gram: np.ndarray, indices: Sequence[int]) -> np.ndarray:
@@ -326,25 +318,21 @@ def shortcut_layer_metrics(trace: Mapping[str, Any]) -> dict[str, np.ndarray]:
     rewired_completion, _ = _projection_fraction(
         gram, FULL_HISTORY_WRITE, rewired_support
     )
-    autonomous_alignment, autonomous_valid = _residual_cosine(
-        gram,
-        FULL_HISTORY_WRITE,
-        AUTONOMOUS_HISTORY_WRITE,
-        evidence_support,
+    evidence_relay_support, support_valid = _signed_support(
+        gram, (EVIDENCE_RELAY_CARRIER, EVIDENCE_RELAY_GATE)
     )
-    rewired_alignment, rewired_autonomous_valid = _residual_cosine(
-        gram,
-        FULL_HISTORY_WRITE,
-        AUTONOMOUS_HISTORY_WRITE,
-        rewired_support,
+    autonomous_support, autonomous_valid = _signed_support(
+        gram, (AUTONOMOUS_HISTORY_WRITE,)
+    )
+    additive_support_error = np.abs(
+        evidence_relay_support + autonomous_support - 1.0
     )
 
     route_incompleteness = 1.0 - route_completion
-    relay_incompleteness = 1.0 - relay_completion
     endpoint_rewire_gap = rewired_completion - route_completion
-    shortcut_candidate = route_incompleteness * np.maximum(autonomous_alignment, 0.0)
+    shortcut_candidate = route_incompleteness * np.maximum(autonomous_support, 0.0)
     rewired_candidate = (1.0 - rewired_completion) * np.maximum(
-        rewired_alignment, 0.0
+        autonomous_support, 0.0
     )
     valid_rewire = history_valid & rewire_valid
 
@@ -366,7 +354,9 @@ def shortcut_layer_metrics(trace: Mapping[str, Any]) -> dict[str, np.ndarray]:
         "shortcut_route_incompleteness": route_incompleteness,
         "shortcut_rewired_route_completion": rewired_completion,
         "shortcut_endpoint_rewire_gap": endpoint_rewire_gap,
-        "shortcut_autonomous_residual_alignment": autonomous_alignment,
+        "shortcut_evidence_relay_support": evidence_relay_support,
+        "shortcut_autonomous_support": autonomous_support,
+        "shortcut_additive_support_error": additive_support_error,
         "shortcut_route_candidate": shortcut_candidate,
         "shortcut_route_rewired_control": rewired_candidate,
     }
@@ -380,11 +370,11 @@ def shortcut_layer_metrics(trace: Mapping[str, Any]) -> dict[str, np.ndarray]:
         "shortcut_route_incompleteness": history_valid,
         "shortcut_rewired_route_completion": valid_rewire,
         "shortcut_endpoint_rewire_gap": valid_rewire,
-        "shortcut_autonomous_residual_alignment": history_valid & autonomous_valid,
+        "shortcut_evidence_relay_support": history_valid & support_valid,
+        "shortcut_autonomous_support": history_valid & autonomous_valid,
+        "shortcut_additive_support_error": history_valid & support_valid & autonomous_valid,
         "shortcut_route_candidate": history_valid & autonomous_valid,
-        "shortcut_route_rewired_control": (
-            valid_rewire & rewired_autonomous_valid
-        ),
+        "shortcut_route_rewired_control": valid_rewire & autonomous_valid,
     }
     return {
         **{name: np.asarray(value, dtype=np.float32) for name, value in values.items()},

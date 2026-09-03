@@ -61,7 +61,7 @@ ONSET_AUDITS = {
     "shortcut_route_completion_mean",
     "shortcut_route_incompleteness_mean",
     "shortcut_endpoint_rewire_gap_mean",
-    "shortcut_autonomous_residual_alignment_mean",
+    "shortcut_autonomous_support_mean",
     "shortcut_route_candidate_mean",
 }
 _EPS = 1e-12

@@ -46,7 +46,9 @@ PRINTED_AUDIT_ORDER = (
     "shortcut_route_incompleteness_mean",
     "shortcut_rewired_route_completion_mean",
     "shortcut_endpoint_rewire_gap_mean",
-    "shortcut_autonomous_residual_alignment_mean",
+    "shortcut_evidence_relay_support_mean",
+    "shortcut_autonomous_support_mean",
+    "shortcut_additive_support_error_mean",
     "shortcut_route_candidate_mean",
     "shortcut_route_rewired_control_mean",
 )
@@ -63,7 +65,7 @@ DEFAULT_SOURCE_INFO = Path(
     "/share/home/tm902089733300000/a903202310/lys/data/"
     "RAGTruth/dataset/source_info.jsonl"
 )
-REPORT_DIRECTORY = "shortcut_route_v9"
+REPORT_DIRECTORY = "shortcut_route_v10"
 
 
 def _print_report(report: dict) -> None:

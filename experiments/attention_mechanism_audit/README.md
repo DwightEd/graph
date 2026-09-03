@@ -138,8 +138,10 @@ adjacent-endpoint rewired relay and gate controls
 
 The observed route is complete when the full history write lies in the span of
 direct evidence and evidence-conditioned relay/gate writes. The shortcut
-candidate is the remaining history component when it is aligned with the
-autonomous-history write. The adjacent swap preserves target rows, heads,
+candidate multiplies unexplained history energy by the positive signed
+contribution of the no-evidence history write to the full-history direction.
+This avoids the degenerate operation of residualizing two vectors whose
+residuals are algebraically identical. The adjacent swap preserves target rows, heads,
 coefficient values, and the response-value multiset while breaking the exact
 carrier endpoint. All scalar measurements are post-capture views of the saved
 Gram; they do not replace the raw geometry.
@@ -176,11 +178,11 @@ are reported separately using token-micro AUROC, sklearn average precision
 - `evaluate.py` opens labels for final metrics and post-hoc audits.
 - `run.py` is the foreground CLI.
 
-Schema 9 must be recaptured into
-`outputs/<observer-model>/shortcut_route_state/{train,test}/`. Older capture
+Schema 10 must be recaptured into
+`outputs/<observer-model>/shortcut_route_state_v10/{train,test}/`. Older capture
 directories are preserved as historical artifacts and are not adapted or
 deleted. New reports are written under
-`outputs/<observer-model>/shortcut_route_v9/{qa,summary,data2txt}/`, so the
+`outputs/<observer-model>/shortcut_route_v10/{qa,summary,data2txt}/`, so the
 earlier task reports are not overwritten.
 
 Run the complete audit once in the foreground:

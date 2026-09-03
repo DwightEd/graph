@@ -33,8 +33,8 @@ from .data import (
 )
 
 SCHEMA = "ragtruth-mechanism-state"
-VERSION = 9
-STATE_DIRECTORY = "shortcut_route_state"
+VERSION = 10
+STATE_DIRECTORY = "shortcut_route_state_v10"
 _MODEL_SUFFIXES = {
     ".bin",
     ".json",

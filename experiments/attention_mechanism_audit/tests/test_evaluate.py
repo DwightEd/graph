@@ -148,9 +148,11 @@ def test_rich_audit_preserves_registers_routes_and_causal_equations():
     assert "prompt_edge_log_volume_layer_shift" in audit
     np.testing.assert_allclose(audit["shortcut_relay_completion_mean"], 1.0)
     np.testing.assert_allclose(audit["shortcut_route_incompleteness_mean"], 0.0)
-    # This fixture's history is completely explained by the relay span, so
-    # no residual exists on which an autonomous alignment could be defined.
-    assert not audit["shortcut_route_candidate_mean__valid"].any()
+    # This fixture's history is completely explained by the relay span.
+    # The signed autonomous support is still defined, but the shortcut product
+    # is exactly zero because route incompleteness is zero.
+    assert audit["shortcut_route_candidate_mean__valid"].all()
+    np.testing.assert_allclose(audit["shortcut_route_candidate_mean"], 0.0)
     assert not any("pathway_" in name for name in audit)
     assert not any("route_contraction" in name for name in audit)
     assert len(audit) <= 150

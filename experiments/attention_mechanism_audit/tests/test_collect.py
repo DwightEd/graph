@@ -207,7 +207,7 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     assert first["selected_samples_seen"] == 3
     assert first["eligible_samples"] is None
     assert first["complete"] is False
-    assert first["version"] == collect_module.VERSION == 9
+    assert first["version"] == collect_module.VERSION == 10
     assert first["labels_used"] is False
     assert first["task_types"] == ["QA", "Summary", "Data2txt"]
     assert first["capture_spec"] == {
@@ -258,7 +258,7 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     assert first_rows[0]["evidence_tokens"] == 0
     assert first_rows[0]["response_tokens"] == 1
     assert first_rows[0]["target_token_ids"] == [63]
-    assert first_rows[0]["artifact_contract"]["version"] == 9
+    assert first_rows[0]["artifact_contract"]["version"] == 10
     saved = torch.load(output / "samples" / "summary.pt", weights_only=True)
     assert set(saved) == {
         "artifact_contract",
@@ -366,7 +366,7 @@ def test_input_stamps_are_readable_and_detect_changes(tmp_path):
 def test_capture_all_uses_its_formal_state_directory_without_touching_old_states(
     tmp_path, monkeypatch
 ):
-    assert collect_module.STATE_DIRECTORY == "shortcut_route_state"
+    assert collect_module.STATE_DIRECTORY == "shortcut_route_state_v10"
     output = tmp_path / "output"
     old_manifest = output / "mechanism_state" / "train" / "manifest.json"
     old_manifest.parent.mkdir(parents=True)

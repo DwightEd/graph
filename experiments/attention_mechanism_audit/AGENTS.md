@@ -121,11 +121,11 @@ this directory. The rules below define the current experiment.
   serialization, and resume. `graph.py` exposes the sparse dual-register view.
   `detect.py` computes only fixed raw scores. `evaluate.py` is the label-opening
   boundary.
-- Schema 9 requires a fresh capture under `shortcut_route_state/train/` and
-  `shortcut_route_state/test/`. Do not adapt old artifacts in place and do not
-  delete them; historical output directories remain preserved. Write v9 task
-  reports under `shortcut_route_v9/{qa,summary,data2txt}/` instead of replacing
-  earlier reports.
+- Schema 10 requires a fresh capture under `shortcut_route_state_v10/train/`
+  and `shortcut_route_state_v10/test/`. Do not adapt old artifacts in place and
+  do not delete them; historical output directories remain preserved. Write v10
+  task reports under `shortcut_route_v10/{qa,summary,data2txt}/` instead of
+  replacing earlier reports.
 - Use the single foreground entry:
 
       bash experiments/attention_mechanism_audit/run_all.sh
