@@ -640,3 +640,68 @@ def test_sample_plot_consumes_only_the_new_compact_trace(tmp_path, monkeypatch):
     assert "prompt_edge_log_volume" in seen["layers"]
     assert not any(name.startswith("pathway_") for name in seen["layers"])
     assert "label" not in seen["record"]
+
+
+def test_paired_shortcut_endpoint_control_uses_common_validity():
+    arrays = {
+        "label": np.asarray([False, True, False, True, False, True]),
+        "source_id": np.asarray(["a", "a", "b", "b", "c", "c"]),
+        "shortcut_route_candidate_mean": np.asarray(
+            [0.0, 1.0, 0.1, 0.9, 100.0, -100.0]
+        ),
+        "shortcut_route_rewired_control_mean": np.asarray(
+            [1.0, 0.0, 0.1, 0.9, -100.0, 100.0]
+        ),
+        "shortcut_route_candidate_mean__valid": np.asarray(
+            [True, True, True, True, True, False]
+        ),
+        "shortcut_route_rewired_control_mean__valid": np.asarray(
+            [True, True, True, True, False, True]
+        ),
+    }
+
+    result = evaluate.shortcut_endpoint_control_summary(
+        arrays, bootstrap=0, seed=7
+    )
+
+    assert result["valid_tokens"] == 4
+    assert result["valid_sources"] == 2
+    np.testing.assert_allclose(result["observed_auroc"], 1.0)
+    np.testing.assert_allclose(result["rewired_auroc"], 0.25)
+    np.testing.assert_allclose(result["auroc_difference"], 0.75)
+    assert result["bootstrap_replicates"] == 0
+
+
+def test_paired_shortcut_endpoint_bootstrap_resamples_identical_sources():
+    source = np.repeat(np.asarray(["a", "b", "c", "d"]), 2)
+    label = np.tile(np.asarray([False, True]), 4)
+    arrays = {
+        "label": label,
+        "source_id": source,
+        "shortcut_route_candidate_mean": np.tile([0.0, 1.0], 4),
+        "shortcut_route_rewired_control_mean": np.tile([1.0, 0.0], 4),
+        "shortcut_route_candidate_mean__valid": np.ones(8, dtype=bool),
+        "shortcut_route_rewired_control_mean__valid": np.ones(8, dtype=bool),
+    }
+
+    result = evaluate.shortcut_endpoint_control_summary(
+        arrays, bootstrap=50, seed=11
+    )
+
+    assert result["bootstrap_replicates"] == 50
+    np.testing.assert_allclose(result["auroc_difference"], 1.0)
+    np.testing.assert_allclose(result["auroc_difference_ci95"], [1.0, 1.0])
+    assert result["average_precision_difference_ci95"][0] is not None
+    assert result["average_precision_difference_ci95"][1] is not None
+
+
+def test_paired_shortcut_endpoint_control_reports_missing_arrays():
+    result = evaluate.shortcut_endpoint_control_summary(
+        {"label": np.asarray([False, True]), "source_id": np.asarray(["a", "a"])},
+        bootstrap=0,
+        seed=1,
+    )
+
+    assert result["auroc_difference"] is None
+    assert "missing" in result["unavailable_reason"]
+

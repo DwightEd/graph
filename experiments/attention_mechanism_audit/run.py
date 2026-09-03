@@ -116,6 +116,25 @@ def _print_report(report: dict) -> None:
                 f"AP={result['average_precision']:.6f} "
                 f"CI={ci(result['average_precision_ci95'])}"
             )
+    endpoint = report.get("shortcut_endpoint_control", {})
+    if endpoint:
+        print("PAIRED observed shortcut candidate - adjacent endpoint rewire")
+        if endpoint.get("auroc_difference") is None:
+            print(
+                "paired    shortcut endpoint control          "
+                f"dAUROC=n/a dAP=n/a reason={endpoint.get('unavailable_reason', 'n/a')}"
+            )
+        else:
+            print(
+                "paired    shortcut endpoint control          "
+                f"tokens={endpoint['valid_tokens']} sources={endpoint['valid_sources']} "
+                f"observed_AUROC={endpoint['observed_auroc']:.6f} "
+                f"rewired_AUROC={endpoint['rewired_auroc']:.6f} "
+                f"dAUROC={endpoint['auroc_difference']:.6f} "
+                f"CI={ci(endpoint['auroc_difference_ci95'])} "
+                f"dAP={endpoint['average_precision_difference']:.6f} "
+                f"CI={ci(endpoint['average_precision_difference_ci95'])}"
+            )
     print("POST-HOC matched hallucinated - correct token differences")
     audit = report["group_difference_audit"]
     for name in PRINTED_AUDIT_ORDER:

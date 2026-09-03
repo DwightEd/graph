@@ -146,6 +146,14 @@ coefficient values, and the response-value multiset while breaking the exact
 carrier endpoint. All scalar measurements are post-capture views of the saved
 Gram; they do not replace the raw geometry.
 
+The endpoint claim is evaluated as a paired control. The observed shortcut
+candidate and its adjacent-rewired counterpart are restricted to the
+intersection of their preregistered validity masks, then compared by
+observed-minus-rewired AUROC and average precision. Confidence intervals
+resample the same `source_id` clusters for both views. Separate AUCs on
+separate valid subsets are retained for diagnosis but cannot establish that
+exact endpoint identity carries information.
+
 ## Raw controls and evaluation boundary
 
 All scores are fixed raw equations over target-token log probabilities:

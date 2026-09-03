@@ -75,9 +75,11 @@ this directory. The rules below define the current experiment.
   them.
 - The route-completion hypothesis is specific: a supported response relay has
   a full history write explained by direct evidence plus evidence-conditioned
-  carrier/gate writes. A shortcut is the residual history write that remains
-  aligned with autonomous history after this evidence-support subspace is
-  removed. Compare observed endpoints with the fixed adjacent-endpoint rewire.
+  carrier/gate writes. The fixed shortcut candidate is route incompleteness
+  multiplied by the positive signed contribution of autonomous history to the
+  full-history direction; do not residualize two algebraically identical
+  remainder vectors. Compare observed and adjacent-rewired candidates on their
+  common fixed token set and source-bootstrap their AUROC/AP difference.
 - Keep the established full-prompt collapse measurements only as a historical
   QA audit. They are not the current detector and must not be generalized from
   the earlier QA result to Summary or Data2txt.

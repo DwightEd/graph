@@ -476,6 +476,155 @@ def shortcut_detection_summary(
     return result
 
 
+def _paired_source_bootstrap_difference(
+    label: np.ndarray,
+    observed: np.ndarray,
+    rewired: np.ndarray,
+    source_id: np.ndarray,
+    *,
+    replicates: int,
+    seed: int,
+) -> dict[str, object]:
+    """Bootstrap observed-minus-rewired metrics on identical source clusters."""
+
+    groups = np.unique(source_id)
+    rows = {group: np.flatnonzero(source_id == group) for group in groups}
+    random = np.random.default_rng(seed)
+    values = []
+    for _ in range(replicates):
+        chosen = random.choice(groups, len(groups), replace=True)
+        index = np.concatenate([rows[group] for group in chosen])
+        if np.unique(label[index]).size != 2:
+            continue
+        values.append(
+            (
+                roc_auc_score(label[index], observed[index])
+                - roc_auc_score(label[index], rewired[index]),
+                average_precision_score(label[index], observed[index])
+                - average_precision_score(label[index], rewired[index]),
+            )
+        )
+    values = np.asarray(values, dtype=np.float64)
+    if not len(values):
+        return {
+            "replicates": 0,
+            "auroc_difference_ci95": [None, None],
+            "average_precision_difference_ci95": [None, None],
+        }
+    return {
+        "replicates": int(len(values)),
+        "auroc_difference_ci95": [
+            float(value) for value in np.quantile(values[:, 0], (0.025, 0.975))
+        ],
+        "average_precision_difference_ci95": [
+            float(value) for value in np.quantile(values[:, 1], (0.025, 0.975))
+        ],
+    }
+
+
+def shortcut_endpoint_control_summary(
+    arrays: Mapping[str, np.ndarray],
+    *,
+    bootstrap: int,
+    seed: int,
+) -> dict[str, object]:
+    """Compare observed and rewired shortcut candidates on one paired token set."""
+
+    observed_name = "shortcut_route_candidate_mean"
+    rewired_name = "shortcut_route_rewired_control_mean"
+    required = (
+        "label",
+        "source_id",
+        observed_name,
+        rewired_name,
+        f"{observed_name}__valid",
+        f"{rewired_name}__valid",
+    )
+    summary: dict[str, object] = {
+        "estimand": "observed_candidate_minus_adjacent_endpoint_rewire",
+        "token_scope": "intersection_of_observed_and_rewired_fixed_validity_masks",
+        "bootstrap_unit": "source_id_cluster",
+        "valid_tokens": 0,
+        "valid_sources": 0,
+        "observed_auroc": None,
+        "rewired_auroc": None,
+        "auroc_difference": None,
+        "auroc_difference_ci95": [None, None],
+        "observed_average_precision": None,
+        "rewired_average_precision": None,
+        "average_precision_difference": None,
+        "average_precision_difference_ci95": [None, None],
+        "bootstrap_replicates": 0,
+    }
+    missing = [name for name in required if name not in arrays]
+    if missing:
+        summary["unavailable_reason"] = (
+            "paired endpoint-control arrays are missing: " + ", ".join(missing)
+        )
+        return summary
+
+    observed = np.asarray(arrays[observed_name], dtype=np.float64)
+    rewired = np.asarray(arrays[rewired_name], dtype=np.float64)
+    valid = np.asarray(arrays[f"{observed_name}__valid"], dtype=bool)
+    valid &= np.asarray(arrays[f"{rewired_name}__valid"], dtype=bool)
+    valid &= np.isfinite(observed) & np.isfinite(rewired)
+    label = np.asarray(arrays["label"], dtype=bool)[valid]
+    source = np.asarray(arrays["source_id"])[valid]
+    observed = observed[valid]
+    rewired = rewired[valid]
+    summary.update(
+        {
+            "valid_tokens": int(valid.sum()),
+            "valid_sources": int(np.unique(source).size),
+        }
+    )
+    if not len(label):
+        summary["unavailable_reason"] = "no token is valid for both endpoint views"
+        return summary
+    if np.unique(label).size != 2:
+        summary["unavailable_reason"] = (
+            "paired endpoint-control subset does not contain both labels"
+        )
+        return summary
+
+    observed_metrics = _binary_metrics(label, observed)
+    rewired_metrics = _binary_metrics(label, rewired)
+    summary.update(
+        {
+            "observed_auroc": observed_metrics["auroc"],
+            "rewired_auroc": rewired_metrics["auroc"],
+            "auroc_difference": (
+                observed_metrics["auroc"] - rewired_metrics["auroc"]
+            ),
+            "observed_average_precision": observed_metrics["average_precision"],
+            "rewired_average_precision": rewired_metrics["average_precision"],
+            "average_precision_difference": (
+                observed_metrics["average_precision"]
+                - rewired_metrics["average_precision"]
+            ),
+        }
+    )
+    if bootstrap:
+        interval = _paired_source_bootstrap_difference(
+            label,
+            observed,
+            rewired,
+            source,
+            replicates=bootstrap,
+            seed=seed,
+        )
+        summary.update(
+            {
+                "auroc_difference_ci95": interval["auroc_difference_ci95"],
+                "average_precision_difference_ci95": interval[
+                    "average_precision_difference_ci95"
+                ],
+                "bootstrap_replicates": interval["replicates"],
+            }
+        )
+    return summary
+
+
 def _position_match_design(
     label: np.ndarray,
     sample_id: np.ndarray,
@@ -1047,6 +1196,11 @@ def build_report(
         "detection": detection,
         "shortcut_route_detection": shortcut_detection_summary(
             arrays, bootstrap=bootstrap, seed=seed + len(SCORE_ORDER)
+        ),
+        "shortcut_endpoint_control": shortcut_endpoint_control_summary(
+            arrays,
+            bootstrap=bootstrap,
+            seed=seed + len(SCORE_ORDER) + len(SHORTCUT_SCORE_NAMES),
         ),
         "shortcut_score_definitions": SHORTCUT_SCORE_DEFINITIONS,
         "detector": dict(detector),
