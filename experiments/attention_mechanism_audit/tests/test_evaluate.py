@@ -21,6 +21,14 @@ def _artifact(tokens: int = 2) -> dict:
     gram = torch.zeros(layers, tokens, registers, layers)
     for register, diagonal in enumerate(([1.0, 4.0, 9.0], [16.0, 25.0, 36.0])):
         gram[:, :, register] = torch.diag(torch.tensor(diagonal))[:, None]
+    shortcut_vectors = torch.zeros(layers, tokens, 7, 3)
+    shortcut_vectors[..., 0, 0] = 1.0
+    shortcut_vectors[..., 2, 0] = 1.0
+    shortcut_vectors[..., 4, 1] = 1.0
+    shortcut_vectors[..., 5, 1] = 1.0
+    shortcut_route_gram = torch.einsum(
+        "ltkd,ltmd->ltkm", shortcut_vectors, shortcut_vectors
+    )
     trace = {
         "register_route_source_index": torch.zeros(
             layers, tokens, registers, 1, dtype=torch.int32
@@ -78,6 +86,11 @@ def _artifact(tokens: int = 2) -> dict:
         "final_register_norm": torch.tensor([5.0, 7.0])
         .expand(1, tokens, registers)
         .clone(),
+        "shortcut_route_gram": shortcut_route_gram,
+        "shortcut_head_gram": shortcut_route_gram[:, :, None].expand(
+            layers, tokens, heads, 7, 7
+        ).clone(),
+        "shortcut_rewire_valid": torch.ones(layers, tokens, dtype=torch.bool),
     }
     for family in ("attention", "edge"):
         trace[f"prompt_{family}_effective_sources"] = torch.full((layers, tokens), 3.0)
@@ -132,6 +145,11 @@ def test_rich_audit_preserves_registers_routes_and_causal_equations():
     )
     np.testing.assert_allclose(audit["interaction_mlp_norm_mean"], 0.5)
     assert "prompt_edge_log_volume_layer_shift" in audit
+    np.testing.assert_allclose(audit["shortcut_relay_completion_mean"], 1.0)
+    np.testing.assert_allclose(audit["shortcut_route_incompleteness_mean"], 0.0)
+    # This fixture's history is completely explained by the relay span, so
+    # no residual exists on which an autonomous alignment could be defined.
+    assert not audit["shortcut_route_candidate_mean__valid"].any()
     assert not any("pathway_" in name for name in audit)
     assert not any("route_contraction" in name for name in audit)
     assert len(audit) <= 150

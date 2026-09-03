@@ -266,6 +266,17 @@ def test_capture_uses_one_four_branch_pass_and_saves_aligned_state():
     assert trace["register_step_gram"].shape == (2, 4, 2, 2)
     assert trace["interaction_norm"].shape == (2, 4, 4)
     assert trace["final_register_norm"].shape == (1, 4, 2)
+    assert trace["shortcut_route_gram"].shape == (2, 4, 7, 7)
+    assert trace["shortcut_head_gram"].shape == (2, 4, 4, 7, 7)
+    assert trace["shortcut_rewire_valid"].shape == (2, 4)
+    assert torch.allclose(
+        trace["shortcut_route_gram"],
+        trace["shortcut_route_gram"].transpose(-1, -2),
+    )
+    assert torch.allclose(
+        trace["shortcut_head_gram"],
+        trace["shortcut_head_gram"].transpose(-1, -2),
+    )
     assert ROLE_NAMES == (
         "evidence",
         "other_prompt",

@@ -16,12 +16,14 @@ import torch
 
 from research_dataset import open_research_dataset
 
-from .capture import (
+from .capture import FunctionalTraceReplay
+from .schema import (
     BRANCH_NAMES,
     REGISTER_NAMES,
     REGISTER_STAGE_NAMES,
     ROLE_NAMES,
-    FunctionalTraceReplay,
+    SHORTCUT_REWIRE,
+    SHORTCUT_VECTOR_NAMES,
 )
 from .data import (
     TASK_TYPES,
@@ -31,8 +33,8 @@ from .data import (
 )
 
 SCHEMA = "ragtruth-mechanism-state"
-VERSION = 8
-STATE_DIRECTORY = "dual_register_state"
+VERSION = 9
+STATE_DIRECTORY = "shortcut_route_state"
 _MODEL_SUFFIXES = {
     ".bin",
     ".json",
@@ -84,6 +86,8 @@ def _capture_spec(top_k: int, route_cover_mass: float) -> dict[str, Any]:
         "registers": list(REGISTER_NAMES),
         "register_stages": list(REGISTER_STAGE_NAMES),
         "source_roles": list(ROLE_NAMES),
+        "shortcut_vectors": list(SHORTCUT_VECTOR_NAMES),
+        "shortcut_rewire": SHORTCUT_REWIRE,
         "route_cover_mass": float(route_cover_mass),
         "top_k": int(top_k),
     }

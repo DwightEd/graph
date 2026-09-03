@@ -8,9 +8,9 @@ from typing import Any
 
 import numpy as np
 
-REGISTER_NAMES = ("evidence_adoption", "autonomous_history")
-STAGE_NAMES = ("input_state", "attention_write", "mlp_write", "output_state")
-ROLE_NAMES = ("evidence", "other_prompt", "response_history", "predictor_self")
+from .schema import REGISTER_NAMES, REGISTER_STAGE_NAMES, ROLE_NAMES
+
+STAGE_NAMES = REGISTER_STAGE_NAMES
 
 
 def _array(value: Any) -> np.ndarray:

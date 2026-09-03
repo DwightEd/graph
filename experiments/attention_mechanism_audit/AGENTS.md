@@ -6,8 +6,9 @@ this directory. The rules below define the current experiment.
 ## Method
 
 - Maintain one implementation of the **dual-register attention mechanism
-  audit**. Do not restore the retired incidence-graph framing or make
-  `unsupported_history_takeover` the fixed primary detector.
+  audit with shortcut-route validation**. Do not restore the retired incidence-
+  graph framing or make `unsupported_history_takeover` or a new shortcut
+  statistic the fixed primary detector before full-data evaluation.
 - Let `P = response_start`. Response target `t` is evaluated at its causal
   predictor `q_t = P - 1 + t`. Preserve target, source, layer, and query-head
   identity throughout capture. Predictor self is distinct from strict response
@@ -65,6 +66,17 @@ this directory. The rules below define the current experiment.
   expanded into invented edges. Connect explicit routes to their aligned
   attention-stage nodes, but keep the sparse view distinct from a complete
   cross-layer ancestry graph.
+- Capture, for every `(layer,target)`, the residual-space Gram of the full
+  strict-history write, direct-evidence write, evidence-conditioned history
+  carrier and gate writes, autonomous-history write, and an adjacent-endpoint
+  rewiring control. Preserve the matching per-head Gram. These are the raw
+  audit objects; scalar completion scores are derived later and never replace
+  them.
+- The route-completion hypothesis is specific: a supported response relay has
+  a full history write explained by direct evidence plus evidence-conditioned
+  carrier/gate writes. A shortcut is the residual history write that remains
+  aligned with autonomous history after this evidence-support subspace is
+  removed. Compare observed endpoints with the fixed adjacent-endpoint rewire.
 - Keep the established full-prompt collapse measurements only as a historical
   QA audit. They are not the current detector and must not be generalized from
   the earlier QA result to Summary or Data2txt.
@@ -108,10 +120,10 @@ this directory. The rules below define the current experiment.
   serialization, and resume. `graph.py` exposes the sparse dual-register view.
   `detect.py` computes only fixed raw scores. `evaluate.py` is the label-opening
   boundary.
-- Schema 8 requires a fresh capture under `dual_register_state/train/` and
-  `dual_register_state/test/`. Do not adapt old artifacts in place and do not
-  delete them; historical output directories remain preserved. Write v8 task
-  reports under `dual_register_v8/{qa,summary,data2txt}/` instead of replacing
+- Schema 9 requires a fresh capture under `shortcut_route_state/train/` and
+  `shortcut_route_state/test/`. Do not adapt old artifacts in place and do not
+  delete them; historical output directories remain preserved. Write v9 task
+  reports under `shortcut_route_v9/{qa,summary,data2txt}/` instead of replacing
   earlier reports.
 - Use the single foreground entry:
 
@@ -121,6 +133,6 @@ this directory. The rules below define the current experiment.
   evaluates the three tasks separately. Do not launch hidden or per-task
   background jobs.
 - Test predictor alignment, branch removals, role partitioning, layer closure,
-  register Gram construction, global sparse selection and exact tails, raw
-  score equations, validity masks, and label sealing. Synthetic correctness is
-  not empirical validation.
+  register Gram construction, shortcut-route Gram geometry, endpoint rewiring,
+  global sparse selection and exact tails, raw score equations, validity masks,
+  and label sealing. Synthetic correctness is not empirical validation.

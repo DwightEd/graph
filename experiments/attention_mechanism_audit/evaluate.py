@@ -13,11 +13,7 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 from research_dataset import open_research_dataset
 
-from .capture import (
-    REGISTER_NAMES,
-    REGISTER_STAGE_NAMES,
-    ROLE_NAMES,
-)
+from .schema import REGISTER_NAMES, REGISTER_STAGE_NAMES, ROLE_NAMES
 from .collect import (
     SCHEMA,
     VERSION,
@@ -28,6 +24,11 @@ from .collect import (
 from .data import canonical_task_type
 from .detect import SCORE_DEFINITIONS, SCORE_NAMES, factorial_contrasts, score_records
 from .graph import build_graph
+from .shortcut import (
+    SHORTCUT_SCORE_DEFINITIONS,
+    SHORTCUT_SCORE_NAMES,
+    shortcut_token_metrics,
+)
 from .visualize import plot_population, plot_sample_dashboard
 
 SCORE_ORDER = SCORE_NAMES
@@ -56,6 +57,12 @@ ONSET_AUDITS = {
     "raw_takeover",
     *(f"register_{register}_terminal_norm" for register in REGISTER_NAMES),
     *(f"register_{register}_step_principal_energy" for register in REGISTER_NAMES),
+    "shortcut_relay_completion_mean",
+    "shortcut_route_completion_mean",
+    "shortcut_route_incompleteness_mean",
+    "shortcut_endpoint_rewire_gap_mean",
+    "shortcut_autonomous_residual_alignment_mean",
+    "shortcut_route_candidate_mean",
 }
 _EPS = 1e-12
 
@@ -297,6 +304,7 @@ def token_audit_metrics(artifact: Mapping[str, Any]) -> dict[str, np.ndarray]:
             "raw_interaction": contrasts[:, 2],
         }
     )
+    metrics.update(shortcut_token_metrics(artifact))
     return {
         name: np.asarray(value, dtype=np.float32) for name, value in metrics.items()
     }
@@ -402,6 +410,70 @@ def detection_summary(
             )
         results[name] = result
     return results
+
+
+def shortcut_detection_summary(
+    arrays: Mapping[str, np.ndarray],
+    *,
+    bootstrap: int,
+    seed: int,
+) -> dict[str, dict[str, Any]]:
+    """Evaluate preregistered shortcut candidates with their own validity masks."""
+
+    result: dict[str, dict[str, Any]] = {}
+    for offset, name in enumerate(SHORTCUT_SCORE_NAMES):
+        validity_name = f"{name}__valid"
+        if name not in arrays or validity_name not in arrays:
+            result[name] = {
+                "valid_tokens": 0,
+                "valid_sources": 0,
+                "auroc": None,
+                "average_precision": None,
+                "ap_lift": None,
+                "auroc_ci95": [None, None],
+                "average_precision_ci95": [None, None],
+                "unavailable_reason": "shortcut route arrays are not present",
+            }
+            continue
+        valid = np.asarray(arrays[validity_name], dtype=bool)
+        valid &= np.isfinite(arrays[name])
+        label = arrays["label"][valid]
+        score = arrays[name][valid]
+        source = arrays["source_id"][valid]
+        current: dict[str, Any] = {
+            "valid_tokens": int(valid.sum()),
+            "valid_sources": int(np.unique(source).size),
+            "auroc": None,
+            "average_precision": None,
+            "ap_lift": None,
+            "auroc_ci95": [None, None],
+            "average_precision_ci95": [None, None],
+        }
+        if len(label) and np.unique(label).size == 2:
+            current.update(_binary_metrics(label, score))
+            if bootstrap:
+                interval = _source_bootstrap(
+                    label,
+                    score,
+                    source,
+                    replicates=bootstrap,
+                    seed=seed + offset,
+                )
+                current.update(
+                    {
+                        "auroc_ci95": [
+                            interval["auroc_low"],
+                            interval["auroc_high"],
+                        ],
+                        "average_precision_ci95": [
+                            interval["average_precision_low"],
+                            interval["average_precision_high"],
+                        ],
+                        "bootstrap_replicates": interval["replicates"],
+                    }
+                )
+        result[name] = current
+    return result
 
 
 def _position_match_design(
@@ -563,7 +635,17 @@ def _has_onset_audit(name: str) -> bool:
 def _requires_strict_history(name: str) -> bool:
     return any(
         marker in name
-        for marker in ("history", "autonomous", "interaction", "takeover", "symmetric")
+        for marker in (
+            "history",
+            "autonomous",
+            "interaction",
+            "takeover",
+            "symmetric",
+            "shortcut",
+            "relay",
+            "rewire",
+            "completion",
+        )
     )
 
 
@@ -963,12 +1045,16 @@ def build_report(
         "detection_token_scope": "intersection_of_fixed_score_validity_masks",
         "detection_bootstrap_unit": "source_id_cluster",
         "detection": detection,
+        "shortcut_route_detection": shortcut_detection_summary(
+            arrays, bootstrap=bootstrap, seed=seed + len(SCORE_ORDER)
+        ),
+        "shortcut_score_definitions": SHORTCUT_SCORE_DEFINITIONS,
         "detector": dict(detector),
         "labels_used_during": "posthoc_evaluation_only_after_score_freeze",
         "analysis_scope": (
             "label-free finite-difference evidence-adoption versus autonomous-"
-            "history registers with raw causal controls and posthoc mechanism "
-            "audit by task"
+            "history registers, exact response-relay Gram geometry, endpoint-"
+            "rewiring controls, and posthoc mechanism audit by task"
         ),
     }
 

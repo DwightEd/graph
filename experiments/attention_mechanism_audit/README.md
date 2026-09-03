@@ -119,6 +119,31 @@ The older full-prompt collapse statistic remains only as a historical QA
 audit. Its QA behavior did not generalize across Summary and Data2txt, so it is
 not the present method or a task-general detector.
 
+## Shortcut-route hypothesis
+
+A current token may legitimately read a previous response token. The audit
+therefore does not call response attention a shortcut by itself. It tests
+whether the strict-history write is supported by the evidence-conditioned
+state of those response carriers. For every layer and prediction event it
+stores the residual-space Gram of:
+
+```text
+full history write
+direct evidence write
+evidence relay: mean(A) delta(V)
+evidence-conditioned gate: delta(A) mean(V)
+autonomous history write after the evidence cut
+adjacent-endpoint rewired relay and gate controls
+```
+
+The observed route is complete when the full history write lies in the span of
+direct evidence and evidence-conditioned relay/gate writes. The shortcut
+candidate is the remaining history component when it is aligned with the
+autonomous-history write. The adjacent swap preserves target rows, heads,
+coefficient values, and the response-value multiset while breaking the exact
+carrier endpoint. All scalar measurements are post-capture views of the saved
+Gram; they do not replace the raw geometry.
+
 ## Raw controls and evaluation boundary
 
 All scores are fixed raw equations over target-token log probabilities:
@@ -151,11 +176,11 @@ are reported separately using token-micro AUROC, sklearn average precision
 - `evaluate.py` opens labels for final metrics and post-hoc audits.
 - `run.py` is the foreground CLI.
 
-Schema 8 must be recaptured into
-`outputs/<observer-model>/dual_register_state/{train,test}/`. Older capture
+Schema 9 must be recaptured into
+`outputs/<observer-model>/shortcut_route_state/{train,test}/`. Older capture
 directories are preserved as historical artifacts and are not adapted or
 deleted. New reports are written under
-`outputs/<observer-model>/dual_register_v8/{qa,summary,data2txt}/`, so the
+`outputs/<observer-model>/shortcut_route_v9/{qa,summary,data2txt}/`, so the
 earlier task reports are not overwritten.
 
 Run the complete audit once in the foreground:

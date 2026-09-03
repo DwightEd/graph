@@ -55,6 +55,11 @@ def _trace(response_tokens: int = 1):
         "register_step_gram": torch.zeros(layers, response_tokens, registers, layers),
         "interaction_norm": torch.zeros(layers, response_tokens, 4),
         "final_register_norm": torch.zeros(1, response_tokens, registers),
+        "shortcut_route_gram": torch.zeros(layers, response_tokens, 7, 7),
+        "shortcut_head_gram": torch.zeros(layers, response_tokens, heads, 7, 7),
+        "shortcut_rewire_valid": torch.zeros(
+            layers, response_tokens, dtype=torch.bool
+        ),
     }
     for family in ("attention", "edge"):
         trace[f"prompt_{family}_effective_sources"] = torch.zeros(
@@ -201,7 +206,7 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     assert first["selected_samples_seen"] == 3
     assert first["eligible_samples"] is None
     assert first["complete"] is False
-    assert first["version"] == collect_module.VERSION == 8
+    assert first["version"] == collect_module.VERSION == 9
     assert first["labels_used"] is False
     assert first["task_types"] == ["QA", "Summary", "Data2txt"]
     assert first["capture_spec"] == {
@@ -219,6 +224,16 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
             "response_history",
             "predictor_self",
         ],
+        "shortcut_vectors": [
+            "full_history_write",
+            "direct_evidence_write",
+            "evidence_relay_carrier",
+            "evidence_relay_gate",
+            "autonomous_history_write",
+            "rewired_evidence_relay_carrier",
+            "rewired_evidence_relay_gate",
+        ],
+        "shortcut_rewire": "adjacent_response_endpoint_swap",
         "route_cover_mass": 0.8,
         "top_k": 8,
     }
@@ -242,7 +257,7 @@ def test_capture_split_captures_all_tasks_and_resumes_without_replaying_samples(
     assert first_rows[0]["evidence_tokens"] == 0
     assert first_rows[0]["response_tokens"] == 1
     assert first_rows[0]["target_token_ids"] == [63]
-    assert first_rows[0]["artifact_contract"]["version"] == 8
+    assert first_rows[0]["artifact_contract"]["version"] == 9
     saved = torch.load(output / "samples" / "summary.pt", weights_only=True)
     assert set(saved) == {
         "artifact_contract",
@@ -350,7 +365,7 @@ def test_input_stamps_are_readable_and_detect_changes(tmp_path):
 def test_capture_all_uses_its_formal_state_directory_without_touching_old_states(
     tmp_path, monkeypatch
 ):
-    assert collect_module.STATE_DIRECTORY == "dual_register_state"
+    assert collect_module.STATE_DIRECTORY == "shortcut_route_state"
     output = tmp_path / "output"
     old_manifest = output / "mechanism_state" / "train" / "manifest.json"
     old_manifest.parent.mkdir(parents=True)

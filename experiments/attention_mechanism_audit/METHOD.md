@@ -93,3 +93,44 @@ The audit does not claim complete causal flow, unique token ancestry, or
 identification of parametric knowledge. AVWO tracing is prior art; the formal
 question is whether response-history routes remain evidence-conditioned or
 become autonomous, including the explicit role of MLP finite differences.
+
+## Shortcut-route completeness audit
+
+For prediction position `q`, let `H_q` denote strict response-history sources.
+The full response-history write is
+
+\[
+h_q^l = W_O^l\operatorname{concat}_a\sum_{j\in H_q}
+A_{F,qj}^{l,a}V_{F,j}^{l,\kappa(a)}.
+\]
+
+Deleting direct evidence gives the exact midpoint decomposition over response
+carriers
+
+\[
+e_{\mathrm{carrier},q}^l = W_O^l\operatorname{concat}_a
+\sum_{j\in H_q}\frac{A_F+A_{noE}}{2}
+(V_F-V_{noE}),
+\]
+
+\[
+e_{\mathrm{gate},q}^l = W_O^l\operatorname{concat}_a
+\sum_{j\in H_q}(A_F-A_{noE})
+\frac{V_F+V_{noE}}{2}.
+\]
+
+The direct evidence write and the exact history-root write for `noE - noEH`
+complete the observed vector set. Capture stores their aggregate and per-head
+Gram matrices. It also swaps adjacent response value endpoints before the two
+relay calculations. This control keeps the coefficient and value multisets but
+breaks the observed endpoint pairing with at most one-token displacement inside
+each pair.
+
+Let `S=[direct evidence, carrier, gate]`. Route completion is the fraction of
+the full-history energy projected onto `span(S)`. The shortcut candidate is the
+unexplained energy fraction multiplied by the positive cosine between the
+residualized full-history and autonomous-history writes. These directions are
+frozen before labels are opened. They remain mechanism-audit candidates; the
+locked primary detector is unchanged until full QA, Summary, and Data2txt
+evaluation supports replacement.
+

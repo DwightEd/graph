@@ -8,13 +8,7 @@ from typing import Any
 
 import numpy as np
 
-REGISTER_NAMES = ("evidence_adoption", "autonomous_history")
-REGISTER_STAGE_NAMES = (
-    "input_state",
-    "attention_write",
-    "mlp_write",
-    "output_state",
-)
+from .schema import REGISTER_NAMES, REGISTER_STAGE_NAMES
 SCORE_NAMES = (
     "evidence_bypass",
     "symmetric_route_capture",

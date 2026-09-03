@@ -10,19 +10,20 @@ from typing import Any
 import torch
 from torch.nn import functional as F
 
-ROLE_NAMES = ("evidence", "other_prompt", "response_history", "predictor_self")
-EVIDENCE, OTHER_PROMPT, HISTORY, SELF = range(len(ROLE_NAMES))
-
-BRANCH_NAMES = ("full", "no_evidence", "no_history", "no_evidence_history")
-BRANCH_REMOVALS = (None, "evidence", "history", "both")
-REGISTER_NAMES = ("evidence_adoption", "autonomous_history")
-REGISTER_BRANCH_PAIRS = ((0, 1), (1, 3))
-REGISTER_STAGE_NAMES = (
-    "input_state",
-    "attention_write",
-    "mlp_write",
-    "output_state",
+from .schema import (
+    BRANCH_NAMES,
+    BRANCH_REMOVALS,
+    EVIDENCE,
+    HISTORY,
+    OTHER_PROMPT,
+    REGISTER_BRANCH_PAIRS,
+    REGISTER_NAMES,
+    REGISTER_STAGE_NAMES,
+    ROLE_NAMES,
+    SELF,
+    SHORTCUT_VECTOR_NAMES,
 )
+from .shortcut import capture_shortcut_geometry
 
 
 @dataclass
@@ -274,6 +275,24 @@ class FunctionalTraceReplay:
                 response_tokens,
                 len(REGISTER_NAMES),
                 dtype=torch.float32,
+            ),
+            "shortcut_route_gram": torch.zeros(
+                layers,
+                response_tokens,
+                len(SHORTCUT_VECTOR_NAMES),
+                len(SHORTCUT_VECTOR_NAMES),
+                dtype=torch.float32,
+            ),
+            "shortcut_head_gram": torch.zeros(
+                layers,
+                response_tokens,
+                self.heads,
+                len(SHORTCUT_VECTOR_NAMES),
+                len(SHORTCUT_VECTOR_NAMES),
+                dtype=torch.float32,
+            ),
+            "shortcut_rewire_valid": torch.zeros(
+                layers, response_tokens, dtype=torch.bool
             ),
         }
         for family in ("attention", "edge"):
@@ -683,6 +702,21 @@ class FunctionalTraceReplay:
                         & (source[None] < query[:, None]),
                         self_source,
                     )
+                    shortcut = capture_shortcut_geometry(
+                        actual_attention,
+                        values[index][:, :query_stop],
+                        roles,
+                        q_to_kv=self.q_to_kv,
+                        output_weight=self.layers[index].self_attn.o_proj.weight,
+                        output_gram=self.output_grams[index],
+                    )
+                    for name, value in shortcut.items():
+                        target = trace[f"shortcut_{name}"][
+                            index, row_start:row_stop
+                        ]
+                        target.copy_(
+                            value.detach().to(dtype=target.dtype, device="cpu")
+                        )
                     register_route = self._register_routes(
                         index,
                         actual_attention,

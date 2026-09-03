@@ -11,6 +11,7 @@ import torch
 from .collect import capture_all
 from .data import TASK_TYPES
 from .evaluate import SCORE_ORDER, evaluate_all, plot_saved_sample
+from .shortcut import SHORTCUT_SCORE_NAMES
 
 PRINTED_AUDIT_ORDER = (
     "causal_evidence_support",
@@ -36,6 +37,18 @@ PRINTED_AUDIT_ORDER = (
     "register_autonomous_history_response_history_root_contribution_mean",
     "register_evidence_adoption_response_history_effective_routes_mean",
     "register_autonomous_history_response_history_effective_routes_mean",
+    "shortcut_history_write_norm_mean",
+    "shortcut_direct_evidence_write_norm_mean",
+    "shortcut_evidence_relay_write_norm_mean",
+    "shortcut_autonomous_history_write_norm_mean",
+    "shortcut_relay_completion_mean",
+    "shortcut_route_completion_mean",
+    "shortcut_route_incompleteness_mean",
+    "shortcut_rewired_route_completion_mean",
+    "shortcut_endpoint_rewire_gap_mean",
+    "shortcut_autonomous_residual_alignment_mean",
+    "shortcut_route_candidate_mean",
+    "shortcut_route_rewired_control_mean",
 )
 
 DEFAULT_MODEL = Path(
@@ -50,7 +63,7 @@ DEFAULT_SOURCE_INFO = Path(
     "/share/home/tm902089733300000/a903202310/lys/data/"
     "RAGTruth/dataset/source_info.jsonl"
 )
-REPORT_DIRECTORY = "dual_register_v8"
+REPORT_DIRECTORY = "shortcut_route_v9"
 
 
 def _print_report(report: dict) -> None:
@@ -87,6 +100,20 @@ def _print_report(report: dict) -> None:
             f"CI={ci(result['average_precision_ci95'])} "
             f"lift={result['ap_lift']:.3f}"
         )
+    shortcut = report.get("shortcut_route_detection", {})
+    if shortcut:
+        print("POST-HOC fixed shortcut-route candidates")
+        for name in SHORTCUT_SCORE_NAMES:
+            result = shortcut[name]
+            if result["auroc"] is None:
+                print(f"audit-AUC {name:38s} AUROC=n/a AP=n/a")
+                continue
+            print(
+                f"audit-AUC {name:38s} "
+                f"AUROC={result['auroc']:.6f} CI={ci(result['auroc_ci95'])} "
+                f"AP={result['average_precision']:.6f} "
+                f"CI={ci(result['average_precision_ci95'])}"
+            )
     print("POST-HOC matched hallucinated - correct token differences")
     audit = report["group_difference_audit"]
     for name in PRINTED_AUDIT_ORDER:
