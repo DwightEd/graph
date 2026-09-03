@@ -1,1 +1,1 @@
-python -m experiments.attention_mechanism_audit.run build
+PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True python -m experiments.attention_mechanism_audit.run build "$@"
