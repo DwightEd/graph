@@ -1,0 +1,48 @@
+name: validate-shortcut-route-audit-refactor
+
+on:
+  push:
+    branches:
+      - agent/continue-source-origin-flow
+    paths:
+      - ".github/workflows/shortcut-route-audit-refactor.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-materialize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/continue-source-origin-flow
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Apply refactor
+        shell: bash
+        run: |
+          python .bootstrap/apply_shortcut_route_refactor.py
+          rm -f .bootstrap/apply_shortcut_route_refactor.py
+          rmdir .bootstrap 2>/dev/null || true
+          python -m compileall -q experiments/attention_mechanism_audit
+          bash -n experiments/attention_mechanism_audit/run_all.sh
+      - name: Install test dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install transformers numpy scipy scikit-learn matplotlib networkx tqdm pytest
+      - name: Run mechanism-audit tests
+        shell: bash
+        run: pytest -q experiments/attention_mechanism_audit/tests
+      - name: Commit tested refactor
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Audit response shortcut routes through evidence relays"
+          git push origin HEAD:agent/continue-source-origin-flow
