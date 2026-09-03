@@ -106,7 +106,7 @@ def parser():
     parser.add_argument("--output", type=Path, default=OUTPUT)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--dtype", choices=("bfloat16", "float16"), default="bfloat16")
-    parser.add_argument("--predictor-batch", type=int, default=8)
+    parser.add_argument("--predictor-batch", type=int, default=1)
     parser.add_argument("--edge-cover", type=float, default=0.95)
     parser.add_argument("--edge-budget", type=int, default=64)
     parser.add_argument("--limit", type=int)
