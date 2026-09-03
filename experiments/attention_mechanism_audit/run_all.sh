@@ -1,1 +1,1 @@
-python -m experiments.attention_mechanism_audit.run all
+python -m experiments.attention_mechanism_audit.run build
