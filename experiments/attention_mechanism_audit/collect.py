@@ -29,7 +29,7 @@ def capture_split(
     *,
     device: str = "cuda:0",
     dtype: torch.dtype = torch.bfloat16,
-    predictor_batch: int = 8,
+    predictor_batch: int = 1,
     edge_cover: float = 0.95,
     edge_budget: int = 64,
     limit: int | None = None,
