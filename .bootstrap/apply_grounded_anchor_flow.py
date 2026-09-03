@@ -111,6 +111,32 @@ replace_once(
 capture = "experiments/attention_mechanism_audit/capture.py"
 replace_once(
     capture,
+    '''    if hasattr(cache, "to_legacy_cache"):
+        cache = cache.to_legacy_cache()
+    elif hasattr(cache, "key_cache"):
+        cache = tuple(zip(cache.key_cache, cache.value_cache))
+    return tuple((key.detach(), value.detach()) for key, value in cache)
+''',
+    '''    if hasattr(cache, "to_legacy_cache"):
+        cache = cache.to_legacy_cache()
+    elif hasattr(cache, "layers"):
+        cache = ((layer.keys, layer.values) for layer in cache.layers)
+    elif hasattr(cache, "key_cache"):
+        cache = zip(cache.key_cache, cache.value_cache)
+    return tuple((key.detach(), value.detach()) for key, value in cache)
+''',
+)
+replace_once(
+    capture,
+    '''    return DynamicCache.from_legacy_cache(tuple(layers))
+''',
+    '''    if hasattr(DynamicCache, "from_legacy_cache"):
+        return DynamicCache.from_legacy_cache(tuple(layers))
+    return DynamicCache(tuple(layers))
+''',
+)
+replace_once(
+    capture,
     '''            "schema": "functional-message-graph-v1",
             "objective": "teacher_forced_target_logprob",
 ''',
