@@ -86,6 +86,13 @@ cross-layer, and output links are stored separately as structural edge types.
 Thus a downstream graph method receives the actual computation incidence, not
 an invented GNN message function.
 
+Every causal source and every head contributes to `node_profile`.  The
+same all-source atoms are also reduced only across layer/head into
+`token_flow[response_target, source, channel]`, where the four channels are
+positive function, negative function, attention, and exact residual-message
+norm.  This compact temporal DAG preserves every source endpoint for downstream
+flow algorithms without persisting every 128-dimensional head message.
+
 Every causal source and every head contributes to `node_profile`:
 
 ```text
@@ -146,7 +153,7 @@ The new artifacts are written under
 
 ```text
 experiments/attention_mechanism_audit/outputs/Meta-Llama-3.1-8B-Instruct/
-  functional_message_graph_v1/{train,test}/
+  functional_message_graph/{train,test}/
 ```
 
 The old v10 output directories are not read, adapted, or deleted.

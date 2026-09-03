@@ -16,8 +16,10 @@ def _legacy_cache(cache: Any) -> tuple[tuple[torch.Tensor, torch.Tensor], ...]:
 
     if hasattr(cache, "to_legacy_cache"):
         cache = cache.to_legacy_cache()
+    elif hasattr(cache, "layers"):
+        cache = ((layer.keys, layer.values) for layer in cache.layers)
     elif hasattr(cache, "key_cache"):
-        cache = tuple(zip(cache.key_cache, cache.value_cache))
+        cache = zip(cache.key_cache, cache.value_cache)
     return tuple((key.detach(), value.detach()) for key, value in cache)
 
 
@@ -38,7 +40,9 @@ def _batched_prefix(
         layers.append((key, value))
     from transformers.cache_utils import DynamicCache
 
-    return DynamicCache.from_legacy_cache(tuple(layers))
+    if hasattr(DynamicCache, "from_legacy_cache"):
+        return DynamicCache.from_legacy_cache(tuple(layers))
+    return DynamicCache(tuple(layers))
 
 
 class FunctionalMessageReplay:
@@ -229,8 +233,9 @@ class FunctionalMessageReplay:
 
         graph = builder.finish()
         return {
-            "schema": "functional-message-graph-v1",
+            "schema": "functional-message-graph-v2",
             "objective": "teacher_forced_target_logprob",
+            "evidence_mask": evidence.detach().cpu(),
             "gradient_scope": "independent one-token predictor; no later-target loss",
             **graph.__dict__,
         }

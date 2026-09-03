@@ -4,6 +4,7 @@ from experiments.attention_mechanism_audit.graph import (
     GraphBuilder,
     PROFILE_CHANNELS,
     ROLE_NAMES,
+    TOKEN_FLOW_CHANNELS,
     source_roles,
 )
 
@@ -85,6 +86,30 @@ def test_dense_profile_uses_all_edges_and_selected_edges_close_with_tail():
     )
     assert graph.edge_index.shape[1] <= 2
     assert graph.edge_head_message.shape == (graph.edge_index.shape[1], 3)
+    assert graph.token_flow.shape == (3, 8, len(TOKEN_FLOW_CHANNELS))
+
+    value_by_head = value[:, q_to_kv]
+    head_gradient = torch.nn.functional.linear(
+        gradient, output_weight.T
+    ).reshape(2, 3)
+    function = attention * torch.einsum(
+        "shd,hd->hs", value_by_head, head_gradient
+    )
+    head_message = attention.T[..., None] * value_by_head
+    transport = torch.einsum(
+        "shd,hde,she->hs", head_message, block_gram, head_message
+    ).clamp_min(0).sqrt()
+    expected_flow = torch.stack(
+        (
+            function.clamp_min(0).sum(dim=0),
+            (-function).clamp_min(0).sum(dim=0),
+            attention.sum(dim=0),
+            transport.sum(dim=0),
+        ),
+        dim=-1,
+    )
+    torch.testing.assert_close(graph.token_flow[0, :5], expected_flow)
+    assert torch.count_nonzero(graph.token_flow[0, 5:]) == 0
 
     selected = torch.zeros_like(graph.node_profile[0, 0].float())
     for edge in range(graph.edge_index.shape[1]):

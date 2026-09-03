@@ -12,7 +12,7 @@ from research_dataset import open_research_dataset
 from .capture import FunctionalMessageReplay
 from .data import evidence_mask, load_sources, task_name
 
-STATE_DIRECTORY = "functional_message_graph_v1"
+STATE_DIRECTORY = "functional_message_graph"
 
 
 def _read_index(path: Path) -> list[dict[str, Any]]:
@@ -46,7 +46,7 @@ def capture_split(
     manifest_path = output / "manifest.json"
     rows = _read_index(index_path)
     identity = {
-        "schema": "functional-message-graph-v1",
+        "schema": "functional-message-graph-v2",
         "split_root": str(Path(split_root).resolve()),
         "source_info": str(Path(source_info).resolve()),
         "model": str(Path(model_path).resolve()),
@@ -67,7 +67,9 @@ def capture_split(
             encoding="utf-8",
         )
     completed = {row["sample_id"] for row in rows}
-    remaining = None if limit is None else max(limit - len(rows), 0)
+    selected = {task: 0 for task in ("QA", "Summary", "Data2txt")}
+    for row in rows:
+        selected[task_name(row["task_type"])] += 1
 
     sources = load_sources(source_info)
     tokenizer = AutoTokenizer.from_pretrained(str(model_path), local_files_only=True)
@@ -75,15 +77,17 @@ def capture_split(
         model_path, device=device, dtype=dtype
     )
     masks: dict[str, torch.Tensor] = {}
-    written = 0
-
     for sample_id in dataset.sample_ids:
+        if limit is not None and all(count >= limit for count in selected.values()):
+            break
         sample_id = str(sample_id)
         if sample_id in completed:
             continue
-        if remaining is not None and written >= remaining:
-            break
         sample = dataset[sample_id]
+        current_task = task_name(sample.task_type)
+        if limit is not None and selected[current_task] >= limit:
+            continue
+        selected[current_task] += 1
         attention = sample.attention()
         source_id = str(sample.source_id)
         mask = masks.get(source_id)
@@ -111,7 +115,7 @@ def capture_split(
         graph.update(
             sample_id=sample_id,
             source_id=source_id,
-            task_type=task_name(sample.task_type),
+            task_type=current_task,
             generator_model=sample.generator_model,
             predictor_batch=int(predictor_batch),
             edge_cover=float(edge_cover),
@@ -135,7 +139,6 @@ def capture_split(
         with index_path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(row, sort_keys=True) + "\n")
         rows.append(row)
-        written += 1
 
     complete = limit is None and len(rows) == len(dataset.sample_ids)
     manifest = {

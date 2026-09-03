@@ -19,6 +19,12 @@ PROFILE_CHANNELS = (
     "positive_function",
     "negative_function",
 )
+TOKEN_FLOW_CHANNELS = (
+    "positive_function",
+    "negative_function",
+    "attention",
+    "residual_message_norm",
+)
 STAGE_PRE, STAGE_ATTN, STAGE_OUT = range(3)
 EDGE_ATTENTION, EDGE_RESIDUAL, EDGE_MLP, EDGE_LAYER, EDGE_OUTPUT = range(5)
 
@@ -84,6 +90,7 @@ class FunctionalMessageGraph:
     node_profile: torch.Tensor
     mlp_profile: torch.Tensor
     node_embedding: torch.Tensor
+    token_flow: torch.Tensor
     edge_index: torch.Tensor
     edge_layer: torch.Tensor
     edge_head: torch.Tensor
@@ -115,6 +122,7 @@ class GraphBuilder:
     mlp_profile: torch.Tensor = field(init=False)
     target_logprob: torch.Tensor = field(init=False)
     target_margin: torch.Tensor = field(init=False)
+    token_flow: torch.Tensor = field(init=False)
     _source: list[torch.Tensor] = field(default_factory=list)
     _target: list[torch.Tensor] = field(default_factory=list)
     _layer: list[torch.Tensor] = field(default_factory=list)
@@ -134,6 +142,12 @@ class GraphBuilder:
         self.mlp_profile = torch.zeros(response, self.layers, 3, dtype=torch.float32)
         self.target_logprob = torch.zeros(response, dtype=torch.float32)
         self.target_margin = torch.zeros(response, dtype=torch.float32)
+        self.token_flow = torch.zeros(
+            response,
+            self.token_count,
+            len(TOKEN_FLOW_CHANNELS),
+            dtype=torch.float32,
+        )
 
     @property
     def token_count(self) -> int:
@@ -175,6 +189,15 @@ class GraphBuilder:
         ).clamp_min(0).sqrt()
         dense = _profile(attention, transport, function, roles)
         self.profile[target, layer] = dense.cpu()
+        source_count = attention.shape[1]
+        self.token_flow[target, :source_count, 0] += (
+            function.clamp_min(0).sum(dim=0).cpu()
+        )
+        self.token_flow[target, :source_count, 1] += (
+            (-function).clamp_min(0).sum(dim=0).cpu()
+        )
+        self.token_flow[target, :source_count, 2] += attention.sum(dim=0).cpu()
+        self.token_flow[target, :source_count, 3] += transport.sum(dim=0).cpu()
 
         priority = function.abs()
         if float(priority.sum()) == 0:
@@ -277,6 +300,7 @@ class GraphBuilder:
             node_profile=profile,
             mlp_profile=mlp,
             node_embedding=embedding,
+            token_flow=self.token_flow,
             edge_index=edge_index,
             edge_layer=edge_layer,
             edge_head=edge_head,

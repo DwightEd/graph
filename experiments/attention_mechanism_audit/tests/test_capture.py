@@ -32,8 +32,10 @@ def test_tiny_llama_builds_functional_message_graph():
         edge_budget=0,
     )
 
-    assert graph["schema"] == "functional-message-graph-v1"
+    assert graph["schema"] == "functional-message-graph-v2"
+    assert graph["evidence_mask"].tolist() == [False, True, True, False]
     assert graph["node_profile"].shape[:3] == (3, 2, 4)
+    assert graph["token_flow"].shape == (3, 7, 4)
     assert graph["node_embedding"].shape[0] == 3
     assert graph["edge_index"].shape[0] == 2
     assert graph["edge_head_message"].shape[1] == 6
