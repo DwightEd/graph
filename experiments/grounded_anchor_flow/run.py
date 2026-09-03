@@ -77,6 +77,7 @@ def run_all(args):
         device=args.device,
         dtype={"bfloat16": torch.bfloat16, "float16": torch.float16}[args.dtype],
         predictor_batch=args.predictor_batch,
+        prefix_chunk=args.prefix_chunk,
         edge_cover=args.edge_cover,
         edge_budget=args.edge_budget,
         limit=args.limit,
@@ -107,6 +108,7 @@ def parser():
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--dtype", choices=("bfloat16", "float16"), default="bfloat16")
     parser.add_argument("--predictor-batch", type=int, default=1)
+    parser.add_argument("--prefix-chunk", type=int, default=128)
     parser.add_argument("--edge-cover", type=float, default=0.95)
     parser.add_argument("--edge-budget", type=int, default=64)
     parser.add_argument("--limit", type=int)
