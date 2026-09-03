@@ -156,7 +156,7 @@ class FunctionalMessageReplay:
             )
 
         try:
-            with torch.inference_mode():
+            with torch.no_grad():
                 full = self.model.model(
                     input_ids=ids[:-1][None],
                     use_cache=True,
