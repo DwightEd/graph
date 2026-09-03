@@ -24,7 +24,9 @@ jobs:
       - name: Apply refactor
         shell: bash
         run: |
+          python .bootstrap/fix_shortcut_refactor_patch.py
           python .bootstrap/apply_shortcut_route_refactor.py
+          rm -f .bootstrap/fix_shortcut_refactor_patch.py
           rm -f .bootstrap/apply_shortcut_route_refactor.py
           rmdir .bootstrap 2>/dev/null || true
           python -m compileall -q experiments/attention_mechanism_audit
