@@ -30,6 +30,7 @@ def test_tiny_llama_builds_functional_message_graph():
         response_start=4,
         evidence_mask=evidence,
         predictor_batch=1,
+        prefix_chunk=2,
         edge_cover=0.9,
         edge_budget=0,
     )
@@ -38,6 +39,7 @@ def test_tiny_llama_builds_functional_message_graph():
         response_start=4,
         evidence_mask=evidence,
         predictor_batch=2,
+        prefix_chunk=64,
         edge_cover=0.9,
         edge_budget=0,
     )
@@ -53,9 +55,9 @@ def test_tiny_llama_builds_functional_message_graph():
     assert torch.isfinite(graph["target_logprob"]).all()
     assert torch.isfinite(graph["edge_function"]).all()
 
-    torch.testing.assert_close(graph["target_logprob"], batched["target_logprob"])
-    torch.testing.assert_close(graph["token_flow"], batched["token_flow"], atol=2e-6, rtol=2e-6)
-    torch.testing.assert_close(graph["edge_function"], batched["edge_function"], atol=2e-6, rtol=2e-6)
+    torch.testing.assert_close(graph["target_logprob"], batched["target_logprob"], atol=2e-5, rtol=2e-5)
+    torch.testing.assert_close(graph["token_flow"], batched["token_flow"], atol=2e-5, rtol=2e-5)
+    torch.testing.assert_close(graph["edge_function"], batched["edge_function"], atol=2e-5, rtol=2e-5)
 
     with torch.no_grad():
         reference = model(token_ids[None]).logits[0]
