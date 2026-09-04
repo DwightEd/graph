@@ -43,7 +43,7 @@ def load_model(path: Path, device: str, dtype: str):
     model = AutoModelForCausalLM.from_pretrained(
         str(path),
         local_files_only=True,
-        dtype=DTYPE[dtype],
+        torch_dtype=DTYPE[dtype],
         attn_implementation="eager",
     ).to(device).eval()
     tokenizer = AutoTokenizer.from_pretrained(str(path), local_files_only=True)
