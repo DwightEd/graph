@@ -105,8 +105,13 @@ def _baseline_final(model, cache: ForwardCache) -> Tensor:
         )[0].detach().cpu()
 
 
-def _log_normalizer(model, hidden: Tensor, chunk: int) -> Tensor:
-    """Compute per-event logsumexp without materializing token x vocabulary."""
+def _vocabulary_summary(
+    model,
+    hidden: Tensor,
+    target: Tensor,
+    chunk: int,
+) -> tuple[Tensor, Tensor]:
+    """Compute logsumexp and target logits through the same vocabulary scan."""
 
     weight = model.lm_head.weight
     bias = getattr(model.lm_head, "bias", None)
@@ -117,12 +122,17 @@ def _log_normalizer(model, hidden: Tensor, chunk: int) -> Tensor:
         dtype=torch.float32,
         device=hidden.device,
     )
+    target_logit = torch.empty_like(normalizer)
     for begin in range(0, len(weight), chunk):
         end = min(begin + chunk, len(weight))
         current_bias = None if bias is None else bias[begin:end]
         logits = F.linear(projected, weight[begin:end], current_bias).float()
         normalizer = torch.logaddexp(normalizer, torch.logsumexp(logits, dim=1))
-    return normalizer
+        inside = (target >= begin) & (target < end)
+        if bool(inside.any()):
+            rows = torch.nonzero(inside, as_tuple=True)[0]
+            target_logit[rows] = logits[rows, target[rows] - begin]
+    return normalizer, target_logit
 
 
 def vocabulary_effect(
@@ -152,19 +162,13 @@ def vocabulary_effect(
     top_k = min(int(top_k), len(weight))
 
     with torch.inference_mode():
-        baseline_log_z = _log_normalizer(model, baseline_model, chunk)
-        cut_log_z = _log_normalizer(model, cut_model, chunk)
-        target_weight_model = weight.index_select(0, target)
-        target_bias = (
-            torch.zeros(len(target), device=device)
-            if bias is None
-            else bias.index_select(0, target).float()
+        baseline_log_z, baseline_target_logit = _vocabulary_summary(
+            model, baseline_model, target, chunk
         )
-        baseline_target_logprob = (
-            torch.einsum("td,td->t", baseline_model, target_weight_model).float()
-            + target_bias
-            - baseline_log_z
+        cut_log_z, cut_target_logit = _vocabulary_summary(
+            model, cut_model, target, chunk
         )
+        baseline_target_logprob = baseline_target_logit - baseline_log_z
         recorded = cache.baseline_target_logprob.to(device)
         tolerance = 5e-2 if weight.dtype == torch.bfloat16 else 1e-2
         if not torch.allclose(
@@ -178,16 +182,10 @@ def vocabulary_effect(
                 f"baseline vocabulary reconstruction mismatch: max_abs={error:.6g}"
             )
 
-        cut_target_logprob = (
-            torch.einsum("td,td->t", cut_model, target_weight_model).float()
-            + target_bias
-            - cut_log_z
-        )
+        cut_target_logprob = cut_target_logit - cut_log_z
         target_logprob_gain = baseline_target_logprob - cut_target_logprob
         normalizer_gain = baseline_log_z - cut_log_z
-        # The normalizer is common to every vocabulary candidate, so adding it
-        # back gives the exact target-logit intervention effect used for ranks.
-        target_logit_gain = target_logprob_gain + normalizer_gain
+        target_logit_gain = baseline_target_logit - cut_target_logit
 
         candidate_gain = torch.empty(
             (len(target), 0), dtype=torch.float32, device=device
@@ -222,7 +220,7 @@ def vocabulary_effect(
             target_rank += (gain > target_logit_gain[:, None]).sum(1)
             target_inside = (target >= begin) & (target < end)
             if bool(target_inside.any()):
-                rows = torch.flatnonzero(target_inside)
+                rows = torch.nonzero(target_inside, as_tuple=True)[0]
                 gain[rows, target[rows] - begin] = -torch.inf
             best_other = torch.maximum(best_other, gain.max(1).values)
 
