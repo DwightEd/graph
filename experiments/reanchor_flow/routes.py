@@ -1,4 +1,4 @@
-"""One-pass token routing traces for prompt revisits and future anchors."""
+"""One-pass token routing traces for re-anchor mechanism discovery."""
 
 from __future__ import annotations
 
@@ -17,6 +17,9 @@ class RouteTrace:
     prompt_share: Tensor
     evidence_share: Tensor
     history_share: Tensor
+    prompt_lift: Tensor
+    evidence_lift: Tensor
+    history_lift: Tensor
     nonlocality: Tensor
     prompt_breadth: Tensor
     route_change: Tensor
@@ -25,11 +28,7 @@ class RouteTrace:
 
 
 class RouteAccumulator:
-    """Observe native attention and ``A * ||W_O V||`` without storing all heads.
-
-    ``nonlocality`` is a continuous clipped expected source distance. It does
-    not require a source to be farther than a hard token threshold.
-    """
+    """Observe native attention and ``A * ||W_O V||`` without storing all heads."""
 
     def __init__(
         self,
@@ -77,6 +76,9 @@ class RouteAccumulator:
                 "prompt_share",
                 "evidence_share",
                 "history_share",
+                "prompt_lift",
+                "evidence_lift",
+                "history_lift",
                 "nonlocality",
                 "prompt_breadth",
                 "route_change",
@@ -87,6 +89,7 @@ class RouteAccumulator:
             head_shape = (self.layer_count, heads, events)
             self._detail = {
                 "prompt_head": torch.full(head_shape, float("nan")),
+                "evidence_head": torch.full(head_shape, float("nan")),
                 "nonlocal_head": torch.full(head_shape, float("nan")),
                 "route_change_head": torch.full(head_shape, float("nan")),
                 "future_head": torch.full(head_shape, float("nan")),
@@ -133,8 +136,6 @@ class RouteAccumulator:
         repeated_value: Tensor,
         output_weight: Tensor,
     ) -> None:
-        """Consume one contiguous absolute-query chunk emitted by the forward."""
-
         probability = probability.detach()[0].float()
         value = repeated_value.detach()[0]
         heads, chunk_queries, sources = probability.shape
@@ -154,7 +155,7 @@ class RouteAccumulator:
             self._gram_cache[layer] = gram
         norm = self._norm_cache.get(layer)
         if norm is None:
-            norm = source_norm(value, output_weight.detach(), gram)
+            norm = source_norm(value, output_weight.detach(), gram).float()
             self._norm_cache[layer] = norm
         state = self._layer_state(layer, heads, sources, probability.device)
 
@@ -167,12 +168,26 @@ class RouteAccumulator:
             query = torch.arange(begin, query_end, device=probability.device)
             source = torch.arange(sources, device=probability.device)
             event = slice(begin - self.row_start, query_end - self.row_start)
+            evidence_mask = self.prompt_evidence.to(probability.device)
 
             prompt = distribution[:, :, : self.response_start]
             prompt_share = prompt.sum(-1)
-            evidence_mask = self.prompt_evidence.to(probability.device)
             evidence_share = prompt[:, :, evidence_mask].sum(-1)
             history_share = distribution[:, :, self.response_start :].sum(-1)
+
+            visible = source[None] <= query[:, None]
+            available = norm[:, None, :] * visible[None]
+            available = available / available.sum(-1, keepdim=True).clamp_min(1e-12)
+            prompt_null = available[:, :, : self.response_start].sum(-1)
+            evidence_null = available[:, :, : self.response_start][
+                :, :, evidence_mask
+            ].sum(-1)
+            history_null = available[:, :, self.response_start :].sum(-1)
+            prompt_lift = torch.log((prompt_share + 1e-12) / (prompt_null + 1e-12))
+            evidence_lift = torch.log(
+                (evidence_share + 1e-12) / (evidence_null + 1e-12)
+            )
+            history_lift = torch.log((history_share + 1e-12) / (history_null + 1e-12))
 
             distance = (query[:, None] - source[None]).clamp_min(0).float()
             distance_weight = (distance / self.distance_scale).clamp_max(1.0)
@@ -189,9 +204,7 @@ class RouteAccumulator:
             entropy = entropy.masked_fill(prompt_share <= 1e-12, 0)
 
             change_head = torch.full(
-                (heads, len(query)),
-                float("nan"),
-                device=probability.device,
+                (heads, len(query)), float("nan"), device=probability.device
             )
             rolling: list[Tensor] = state["rolling"]  # type: ignore[assignment]
             future_sum: Tensor = state["future_sum"]  # type: ignore[assignment]
@@ -208,23 +221,31 @@ class RouteAccumulator:
                     rolling.pop(0)
 
                 generated_position = absolute_query + 1
-                future_lag = generated_position - response_sources
-                valid = (future_lag >= 1) & (future_lag <= self.future_horizon)
+                lag = generated_position - response_sources
+                valid = (lag >= 1) & (lag <= self.future_horizon)
                 if bool(valid.any()):
                     future_sum[:, : len(response_sources)] += (
                         current[:, self.response_start :] * valid[None]
                     )
                     future_count[: len(response_sources)] += valid
 
-            self._fields["prompt_share"][layer, event] = prompt_share.mean(0).cpu()
-            self._fields["evidence_share"][layer, event] = evidence_share.mean(0).cpu()
-            self._fields["history_share"][layer, event] = history_share.mean(0).cpu()
-            self._fields["nonlocality"][layer, event] = nonlocality.mean(0).cpu()
-            self._fields["prompt_breadth"][layer, event] = entropy.mean(0).cpu()
-            self._fields["route_change"][layer, event] = change_head.mean(0).cpu()
+            values = {
+                "prompt_share": prompt_share,
+                "evidence_share": evidence_share,
+                "history_share": history_share,
+                "prompt_lift": prompt_lift,
+                "evidence_lift": evidence_lift,
+                "history_lift": history_lift,
+                "nonlocality": nonlocality,
+                "prompt_breadth": entropy,
+                "route_change": change_head,
+            }
+            for name, value in values.items():
+                self._fields[name][layer, event] = value.mean(0).cpu()
 
             if self._detail is not None:
                 self._detail["prompt_head"][layer, :, event] = prompt_share.cpu()
+                self._detail["evidence_head"][layer, :, event] = evidence_share.cpu()
                 self._detail["nonlocal_head"][layer, :, event] = nonlocality.cpu()
                 self._detail["route_change_head"][layer, :, event] = change_head.cpu()
                 self._detail["edge_map"][event] += (
@@ -260,6 +281,9 @@ class RouteAccumulator:
             prompt_share=self._fields["prompt_share"],
             evidence_share=self._fields["evidence_share"],
             history_share=self._fields["history_share"],
+            prompt_lift=self._fields["prompt_lift"],
+            evidence_lift=self._fields["evidence_lift"],
+            history_lift=self._fields["history_lift"],
             nonlocality=self._fields["nonlocality"],
             prompt_breadth=self._fields["prompt_breadth"],
             route_change=self._fields["route_change"],
