@@ -1,4 +1,4 @@
-"""One-pass capture for internal prompt-revisit and anchor rhythm."""
+"""One-pass capture for prompt-revisit, nonlocal-review and anchor rhythm."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from .claims import sentence_boundaries
 from .rhythm import build_rhythm
 from .routes import RouteAccumulator
 
-CAPTURE_SCHEMA = 4
+CAPTURE_SCHEMA = 5
 
 
 @dataclass(frozen=True)
@@ -49,7 +49,7 @@ def capture_sample(
     query_chunk: int = 64,
     route_window: int = 4,
     future_horizon: int = 16,
-    far_lag: int = 32,
+    distance_scale: int = 16,
     peak_quantile: float = 0.9,
     max_lag: int = 3,
     detail: bool = False,
@@ -61,7 +61,7 @@ def capture_sample(
         prompt_evidence_mask,
         route_window=route_window,
         future_horizon=future_horizon,
-        far_lag=far_lag,
+        distance_scale=distance_scale,
         detail=detail,
     )
     cache = baseline_forward(
@@ -95,25 +95,31 @@ def capture_sample(
         "prompt_share_layer": trace.prompt_share,
         "evidence_share_layer": trace.evidence_share,
         "history_share_layer": trace.history_share,
-        "far_prompt_share_layer": trace.far_prompt_share,
+        "nonlocality_layer": trace.nonlocality,
         "prompt_breadth_layer": trace.prompt_breadth,
         "route_change_layer": trace.route_change,
         "future_influence_layer": trace.future_influence,
         "route_change": rhythm.route_change,
-        "prompt_revisit": rhythm.prompt_revisit,
-        "evidence_revisit": rhythm.evidence_revisit,
+        "prompt_share": rhythm.prompt_share,
+        "evidence_share": rhythm.evidence_share,
         "history_share": rhythm.history_share,
+        "nonlocality": rhythm.nonlocality,
         "prompt_breadth": rhythm.prompt_breadth,
         "future_influence": rhythm.future_influence,
-        "revisit_delta": rhythm.revisit_delta,
+        "prompt_delta": rhythm.prompt_delta,
         "evidence_delta": rhythm.evidence_delta,
-        "revisit_peak": rhythm.revisit_peaks,
+        "nonlocal_delta": rhythm.nonlocal_delta,
+        "prompt_peak": rhythm.prompt_peaks,
+        "review_peak": rhythm.review_peaks,
         "anchor_peak": rhythm.anchor_peaks,
-        "revisit_peak_kind": rhythm.peak_kind,
-        "paired_anchor": rhythm.paired_anchor,
-        "coupling_rate": rhythm.coupling_rate,
-        "coupling_null_rate": rhythm.null_rate,
-        "median_anchor_lag": rhythm.median_lag,
+        "prompt_paired_anchor": rhythm.prompt_paired_anchor,
+        "review_paired_anchor": rhythm.review_paired_anchor,
+        "prompt_coupling_rate": rhythm.prompt_coupling_rate,
+        "prompt_coupling_null_rate": rhythm.prompt_null_rate,
+        "prompt_median_anchor_lag": rhythm.prompt_median_lag,
+        "review_coupling_rate": rhythm.review_coupling_rate,
+        "review_coupling_null_rate": rhythm.review_null_rate,
+        "review_median_anchor_lag": rhythm.review_median_lag,
         "sentence_boundary_position": sentence_boundaries(
             tokenizer, ids.numpy(), response_start
         ),
@@ -123,6 +129,7 @@ def capture_sample(
         arrays.update(
             detail_edge_map=trace.detail["edge_map"],
             detail_prompt_head=trace.detail["prompt_head"],
+            detail_nonlocal_head=trace.detail["nonlocal_head"],
             detail_route_change_head=trace.detail["route_change_head"],
             detail_future_head=trace.detail["future_head"],
             token_text=decode_tokens(tokenizer, ids.numpy()),
