@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import math
 from pathlib import Path
 
 import torch
@@ -88,7 +89,9 @@ def analyze(args) -> dict:
 
 
 def compact_number(value) -> str:
-    return "NA" if value is None else f"{float(value):.4f}"
+    if value is None or not math.isfinite(float(value)):
+        return "NA"
+    return f"{float(value):.4f}"
 
 
 def compact_ci(summary: dict) -> str:
