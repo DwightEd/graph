@@ -35,8 +35,7 @@ jobs:
           python -m pip install numpy matplotlib scipy scikit-learn "transformers>=4.57,<4.58" tqdm pytest
       - name: Run focused tests
         shell: bash
-        run: |
-          pytest -q experiments/reanchor_flow/tests
+        run: pytest -q experiments/reanchor_flow/tests
       - name: Commit tested experiment
         shell: bash
         run: |
@@ -44,5 +43,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Add claim re-anchor flow discovery experiment"
+          git commit -m "Add one-model claim re-anchor flow discovery"
           git push origin HEAD:agent/reanchor-flow-discovery
