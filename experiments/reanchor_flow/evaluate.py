@@ -1,4 +1,4 @@
-"""Open labels after capture and write concise population rhythm reports."""
+"""Open labels after capture and write concise mechanism reports."""
 
 from __future__ import annotations
 
@@ -14,28 +14,46 @@ from experiments.common.ragtruth_alignment import TASK_TYPES, canonical_task_typ
 from .artifacts import load_result
 from .capture import CAPTURE_SCHEMA
 from .report import task_summary
-from .visualize import save_population_figure, save_sample_figure
+from .visualize import (
+    save_mechanism_figure,
+    save_population_figure,
+    save_sample_figure,
+    save_sample_mechanism_figure,
+)
 
-ARRAY_FIELDS = (
+BASE_FIELDS = (
     "prompt_delta",
-    "nonlocal_delta",
     "evidence_delta",
+    "nonlocal_delta",
     "route_change",
     "future_influence",
-    "prompt_breadth",
+    "prompt_lift",
+    "history_lift",
+    "transition_peak",
     "prompt_peak",
     "review_peak",
     "anchor_peak",
     "prompt_paired_anchor",
     "review_paired_anchor",
-)
-SCALAR_FIELDS = (
     "prompt_coupling_rate",
     "prompt_coupling_null_rate",
     "prompt_median_anchor_lag",
     "review_coupling_rate",
     "review_coupling_null_rate",
     "review_median_anchor_lag",
+    "evidence_share_layer",
+)
+MECHANISM_FIELDS = (
+    "evidence_state_presence",
+    "evidence_state_control",
+    "evidence_readout_gain",
+    "evidence_effect",
+    "other_prompt_effect",
+    "prompt_effect",
+    "evidence_prompt_interaction",
+    "history_effect",
+    "evidence_peak_control",
+    "evidence_late_control_loss",
 )
 
 
@@ -55,7 +73,7 @@ def json_ready(value):
 
 def validate_result(result: dict, token_ids, response_start: int) -> int:
     if int(np.asarray(result["capture_schema"]).item()) != CAPTURE_SCHEMA:
-        raise ValueError("stale routing-rhythm artifact")
+        raise ValueError("stale re-anchor artifact")
     prediction = np.asarray(result["prediction_position"], dtype=np.int64)
     query = np.asarray(result["query_position"], dtype=np.int64)
     target = np.asarray(result["target_token_id"], dtype=np.int64)
@@ -100,20 +118,25 @@ def evaluate_results(
             "source_id": str(entry["source_id"]),
             "label": label,
             "target_token_id": np.asarray(result["target_token_id"], dtype=np.int64),
-            **{name: np.asarray(result[name]) for name in ARRAY_FIELDS},
-            **{
-                name: float(np.asarray(result[name]).item())
-                for name in SCALAR_FIELDS
-            },
+            "mechanism": bool(int(np.asarray(result.get("mechanism", 0)).item())),
+            **{name: np.asarray(result[name]) for name in BASE_FIELDS},
         }
+        if row["mechanism"]:
+            row.update({name: np.asarray(result[name]) for name in MECHANISM_FIELDS})
         by_task[task].append(row)
+
         if int(np.asarray(result.get("detail", 0)).item()):
+            stem = output / "figures" / f"sample_{task}_{entry['sample_id']}"
             save_sample_figure(
-                output / "figures" / f"sample_{task}_{entry['sample_id']}.png",
-                result,
-                label,
-                title=f"{task} {entry['sample_id']}",
+                stem.with_suffix(".png"), result, label, title=f"{task} {entry['sample_id']}"
             )
+            if row["mechanism"]:
+                save_sample_mechanism_figure(
+                    stem.with_name(stem.name + "_mechanism").with_suffix(".png"),
+                    result,
+                    label,
+                    title=f"{task} {entry['sample_id']}",
+                )
 
     reports = {}
     for task_index, task in enumerate(TASK_TYPES):
@@ -127,10 +150,12 @@ def evaluate_results(
                 radius=curve_radius,
             )
         )
-        report["scope"] = "teacher-forced observer routing rhythm"
-        path = output / "reports" / task.casefold() / "rhythm_report.json"
+        report["scope"] = "teacher-forced observer; grouped cuts affect response-query rows"
+        path = output / "reports" / task.casefold() / "mechanism_report.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-        save_population_figure(path.parent / "rhythm_summary.png", report["curves"])
+        save_population_figure(path.parent / "rhythm_summary.png", report)
+        if report["mechanism"]["samples"]:
+            save_mechanism_figure(path.parent / "mechanism_atlas.png", report["mechanism"])
         reports[task] = report
     return reports
