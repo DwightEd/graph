@@ -3,6 +3,6 @@ matplotlib
 scipy
 scikit-learn
 torch
-transformers>=4.43,<5
+transformers>=4.57,<4.58
 tqdm
 pytest

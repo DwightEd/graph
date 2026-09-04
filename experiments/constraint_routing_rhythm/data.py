@@ -1,4 +1,4 @@
-"""RAGTruth prompts and their exact external-evidence tokens."""
+"""RAGTruth prompt and evidence-token alignment."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ def canonical_task_type(value: object) -> str:
 
 
 def load_source_info(path: str | Path) -> dict[str, dict]:
-    """Load label-free ``source_info.jsonl`` rows keyed by source ID."""
+    """Load label-free source rows by source ID."""
 
     sources: dict[str, dict] = {}
     with Path(path).open(encoding="utf-8") as stream:
@@ -36,7 +36,7 @@ def load_source_info(path: str | Path) -> dict[str, dict]:
 
 
 def render_historical_prompt(tokenizer, prompt: str) -> str:
-    """Render the system/user prefix used to create the attention cache."""
+    """Recreate the chat prefix used by the cached token sequence."""
 
     return tokenizer.apply_chat_template(
         [
@@ -48,7 +48,7 @@ def render_historical_prompt(tokenizer, prompt: str) -> str:
     )
 
 
-def _cpu_array(values) -> np.ndarray:
+def token_array(values) -> np.ndarray:
     if hasattr(values, "detach"):
         values = values.detach().cpu().numpy()
     return np.asarray(values, dtype=np.int64)
@@ -60,7 +60,7 @@ def build_evidence_mask(
     cached_token_ids,
     response_start: int,
 ) -> np.ndarray:
-    """Mark external evidence in a cached QA, Summary, or Data2txt prompt."""
+    """Mark exactly the external-evidence characters' overlapping tokens."""
 
     prompt = str(source["prompt"])
     task = canonical_task_type(source["task_type"])
@@ -77,7 +77,7 @@ def build_evidence_mask(
     )
     rebuilt_ids = np.asarray(encoded["input_ids"], dtype=np.int64)
     offsets = np.asarray(encoded["offset_mapping"], dtype=np.int64)
-    cached_prefix = _cpu_array(cached_token_ids)[:response_start]
+    cached_prefix = token_array(cached_token_ids)[:response_start]
     if rebuilt_ids.shape != (response_start,) or not np.array_equal(
         rebuilt_ids, cached_prefix
     ):

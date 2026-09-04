@@ -1,87 +1,94 @@
-# Layer-Ordered Attention Graphs for Hallucination Detection
+# Constraint Routing Rhythm for Hallucination Analysis
 
-当前 active experiment 是 `experiments/directed_route_hypergraph/`。它把每个 prompt-response 样本构造成保留 layer、head、source、target 和 unresolved mass 的有向 attention-row hypergraph，并用三个无标签目标训练 64D token encoder：
-
-```text
-clean sparse attention
-├─ local typed rows
-├─ ordered P/R/U provenance
-└─ ordered exact-endpoint layout
-            |
-corrupted graph -> neural hypergraph encoder -> frozen 64D token embeddings
-                                             -> PCA-kNN -> frozen scores
-                                             -> post-hoc labels only
-```
-
-新增的 endpoint layout 使用真实 Transformer 层序组合 sparse attention transitions，并将 cache 未解析质量保守地送入 absorbing sink。它受 Information Flow 的矩阵路径组合启发，但不含 hidden state、`W_V/W_O` 或真实 residual contribution，因此只是 attention-transport proxy，不是论文算法复现或因果贡献估计。
-
-GroundedRoute 是稳定的 typed token-graph baseline；Information Flow 目录是冻结 GCN 上的 deterministic transport control；HoloRoute、P-Cut 和其他旧路线只保留为历史与对照。旧 P-Cut 的 full-QA closure AUROC 为 `0.4209`，本次优化没有重新启用 route cuts 或翻转其方向。
-
-## 目录
+当前正式研究实现位于 `experiments/constraint_routing_rhythm/`。它不再把
+attention graph 本身当作创新点，而是按下面的证据链研究 evidence constraint
+是否真正控制输出：
 
 ```text
-research_dataset.py                     unified data interface
-experiments/directed_route_hypergraph/  current ordered-layout experiment
-experiments/grounded_route/             typed token-graph baseline and evaluator
-experiments/information_flow/           deterministic attention-transport control
-experiments/head_resolved_shortcut_route/ independent AVWO association audit
-experiments/dbgnn_reference/            DBGNN / GCN reference
-experiments/holoroute/                   historical baselines and failed P-Cut record
-docs/RESEARCH_STATUS.md                 current claims, gates and next experiment
-docs/INFORMATION_FLOW_METHOD_AUDIT.md   paper audit and design boundary
-docs/EXPERIMENT_HISTORY.md              durable experiment history
+functional local/global route visualization
+                    ↓
+evidence uptake → response carrier → later delivery
+                    ↓
+post-softmax evidence Value-message deletion + downstream rerun
+                    ↓
+ConstraintDeficit = cut margin - baseline margin
 ```
 
-## 运行
+baseline 使用逐 query-head、GQA 对齐的
+`A * ||W_O[head] V[kv(head), source]||`。它产生两个描述量：窗口化
+`FunctionalReach` 与严格层序的 evidence-conditioned `RelayCapacity` 两跳瓶颈。
+二者只用于可视化和提出 carrier；唯一主检测量是全 evidence-source cut 后固定
+target-versus-runner margin 的有符号变化。没有 GNN、代理模型、最小电路搜索、
+artifact 身份摘要链或多特征分类器。
+
+carrier 只由 `RelayCapacity` 提出，`FunctionalReach` 不参与筛选；两者是否真的
+形成 preplan–anchor 相位关系必须用 held-out circular-shift null 检验。若要进一步
+声称“约束整合”，还必须增加 support/conflict evidence polarity swap，而不能只凭
+attention 或一次删除干预命名机制。
+
+完整方法、近邻工作边界与停止条件见
+[`experiments/constraint_routing_rhythm/METHOD.md`](experiments/constraint_routing_rhythm/METHOD.md)。
+
+## 一键运行
+
+先跑每任务一例的 smoke：
 
 ```bash
-bash experiments/directed_route_hypergraph/run_qa.sh
+bash experiments/constraint_routing_rhythm/run_all.sh --smoke
 ```
 
-关键无标签目标消融：
-
-```text
-local only        FLOW_WEIGHT=0 LAYOUT_WEIGHT=0
-local + P/R/U     FLOW_WEIGHT=0.5 LAYOUT_WEIGHT=0
-local + endpoint  FLOW_WEIGHT=0 LAYOUT_WEIGHT=0.25
-all objectives    FLOW_WEIGHT=0.5 LAYOUT_WEIGHT=0.25
-reverse target    LAYOUT_ORDER=reverse
-```
-
-基线与结构控制仍可独立运行：
+建议先跑 20×3 个样本的 pilot：
 
 ```bash
-bash experiments/grounded_route/run_qa.sh
-bash experiments/grounded_route/evaluation/run_controls_qa.sh
-bash experiments/information_flow/run_qa.sh
+bash experiments/constraint_routing_rhythm/run_all.sh \
+  --limit 20 --audit-limit 2 --plot-limit 2 \
+  --output experiments/constraint_routing_rhythm/outputs/pilot
 ```
 
-独立的逐头真实 AVWO shortcut-route 关联审计运行：
+正式运行：
 
 ```bash
-bash experiments/head_resolved_shortcut_route/run_all.sh
+bash experiments/constraint_routing_rhythm/run_all.sh \
+  --output /path/to/output
 ```
 
-该入口采集全部 train/test shard，并分别评价 QA、Summary 和 Data2txt；它不替代
-当前无监督图检测主线，也不把关联结果声明为完整因果机制验证。
+脚本已有当前机器的模型、attention cache 与 RAGTruth `source_info.jsonl` 默认
+路径；其他机器可用 `--model`、`--cache`、`--source-info` 覆盖。主路径逐样本、
+逐分支顺序运行，每个样本约两个完整前向；`--audit-limit 0` 可关闭小子集的额外
+机制诊断。
+
+GPU 上若已有其他进程占用数 GB 显存，8B 模型仍会 OOM。先运行：
+
+```bash
+nvidia-smi
+```
+
+确认目标卡基本空闲后再执行。allocator 设置只能缓解碎片，不能释放其他进程的
+显存。
+
+## 代码结构
+
+| 路径 | 责任 |
+|---|---|
+| `research_dataset.py` | 统一数据与 evaluation-only labels 边界 |
+| `experiments/constraint_routing_rhythm/routes.py` | 流式功能消息路由 |
+| `experiments/constraint_routing_rhythm/rhythm.py` | local/global 与 evidence-carrier 图 |
+| `experiments/constraint_routing_rhythm/intervene.py` | 真实 Value-message gate 与重前向 |
+| `experiments/constraint_routing_rhythm/capture.py` | 单样本主干预及 audit |
+| `experiments/constraint_routing_rhythm/analyze.py` | label-free 遍历、释放、保存、画图 |
+| `experiments/constraint_routing_rhythm/evaluate.py` | 最后才读取标签并分任务评价 |
+| `experiments/constraint_routing_rhythm/run.py` | `analyze/evaluate/all` 三个入口 |
+
+GroundedRoute、Information Flow、directed route hypergraph 等目录只作为既有基线或
+历史实验，不属于这套实现。
 
 ## 测试
 
 ```bash
-python -m compileall -q \
-  experiments/grounded_route \
-  experiments/directed_route_hypergraph \
-  experiments/information_flow
-
-bash -n experiments/directed_route_hypergraph/run.sh
-bash -n experiments/directed_route_hypergraph/run_qa.sh
-
-python -m pytest -q \
-  experiments/grounded_route/tests \
-  experiments/grounded_route/evaluation/tests \
-  experiments/directed_route_hypergraph/tests \
-  experiments/information_flow/tests \
-  experiments/holoroute/tests
+python -m pytest -q experiments/constraint_routing_rhythm/tests
+python -m ruff check experiments/constraint_routing_rhythm
+bash -n experiments/constraint_routing_rhythm/run_all.sh
 ```
 
-当前仓库没有记录 ordered-layout 的正式 RAGTruth 结果。synthetic tests 只验证质量守恒、层序、因果前缀、exact endpoint、梯度和 artifact 边界，不能替代真实任务评估。
+合成测试只验证实现闭合，不等于真实机制结论。当前尚未在这里记录正式 RAGTruth
+结果；主分数、功能节律和 U/D carrier 是否成立，必须由真实运行及预注册对照决定。
