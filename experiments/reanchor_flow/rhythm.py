@@ -1,4 +1,4 @@
-"""Automatic prompt-revisit and future-anchor discovery."""
+"""Automatic prompt-revisit, nonlocal-review and future-anchor discovery."""
 
 from __future__ import annotations
 
@@ -10,20 +10,26 @@ import numpy as np
 @dataclass(frozen=True)
 class RhythmSignals:
     route_change: np.ndarray
-    prompt_revisit: np.ndarray
-    evidence_revisit: np.ndarray
+    prompt_share: np.ndarray
+    evidence_share: np.ndarray
     history_share: np.ndarray
+    nonlocality: np.ndarray
     prompt_breadth: np.ndarray
     future_influence: np.ndarray
-    revisit_delta: np.ndarray
+    prompt_delta: np.ndarray
     evidence_delta: np.ndarray
-    revisit_peaks: np.ndarray
+    nonlocal_delta: np.ndarray
+    prompt_peaks: np.ndarray
+    review_peaks: np.ndarray
     anchor_peaks: np.ndarray
-    peak_kind: np.ndarray
-    paired_anchor: np.ndarray
-    coupling_rate: float
-    null_rate: float
-    median_lag: float
+    prompt_paired_anchor: np.ndarray
+    review_paired_anchor: np.ndarray
+    prompt_coupling_rate: float
+    prompt_null_rate: float
+    prompt_median_lag: float
+    review_coupling_rate: float
+    review_null_rate: float
+    review_median_lag: float
 
 
 def finite_layer_mean(values) -> np.ndarray:
@@ -87,33 +93,43 @@ def local_peaks(values, quantile: float, min_gap: int = 2) -> np.ndarray:
     return selected
 
 
-def pair_peaks(revisit, anchor, max_lag: int) -> np.ndarray:
-    revisit_index = np.flatnonzero(revisit)
+def pair_peaks(event, anchor, max_lag: int) -> np.ndarray:
+    event_index = np.flatnonzero(event)
     anchor_index = np.flatnonzero(anchor)
-    paired = np.full(len(revisit), -1, dtype=np.int64)
-    for start in revisit_index:
+    paired = np.full(len(event), -1, dtype=np.int64)
+    for start in event_index:
         candidate = anchor_index[(anchor_index >= start) & (anchor_index <= start + max_lag)]
         if len(candidate):
             paired[start] = int(candidate[0])
     return paired
 
 
-def coupling_rate(revisit, anchor, max_lag: int) -> float:
-    count = int(np.count_nonzero(revisit))
+def coupling_rate(event, anchor, max_lag: int) -> float:
+    count = int(np.count_nonzero(event))
     if not count:
         return float("nan")
-    return float(np.count_nonzero(pair_peaks(revisit, anchor, max_lag) >= 0) / count)
+    return float(np.count_nonzero(pair_peaks(event, anchor, max_lag) >= 0) / count)
 
 
-def circular_null(revisit, anchor, max_lag: int) -> float:
-    if len(revisit) < 3 or not np.any(revisit) or not np.any(anchor):
+def circular_null(event, anchor, max_lag: int) -> float:
+    if len(event) < 3 or not np.any(event) or not np.any(anchor):
         return float("nan")
     rates = [
-        coupling_rate(revisit, np.roll(anchor, shift), max_lag)
+        coupling_rate(event, np.roll(anchor, shift), max_lag)
         for shift in range(1, len(anchor))
     ]
     rates = np.asarray(rates, dtype=np.float64)
     return float(np.nanmean(rates)) if np.isfinite(rates).any() else float("nan")
+
+
+def coupling_summary(event, anchor, max_lag: int) -> tuple[np.ndarray, float, float, float]:
+    paired = pair_peaks(event, anchor, max_lag)
+    rate = coupling_rate(event, anchor, max_lag)
+    null = circular_null(event, anchor, max_lag)
+    matched = np.flatnonzero(paired >= 0)
+    lag = paired[matched] - matched
+    median_lag = float(np.median(lag)) if len(lag) else float("nan")
+    return paired, rate, null, median_lag
 
 
 def build_rhythm(
@@ -123,48 +139,54 @@ def build_rhythm(
     peak_quantile: float = 0.9,
     max_lag: int = 3,
 ) -> RhythmSignals:
-    """Collapse only the layer axis after retaining the token trajectory."""
+    """Discover two event types before testing their relation to future anchors.
+
+    Prompt revisit is a renewed share assigned to any prompt token. Nonlocal
+    review is a renewed continuous expected source distance, so it means
+    leaving the immediate neighborhood rather than crossing a hard distance.
+    """
 
     route_change = finite_layer_mean(trace.route_change)
-    prompt_revisit = finite_layer_mean(trace.far_prompt_share)
-    evidence_revisit = finite_layer_mean(trace.evidence_share)
+    prompt_share = finite_layer_mean(trace.prompt_share)
+    evidence_share = finite_layer_mean(trace.evidence_share)
     history_share = finite_layer_mean(trace.history_share)
+    nonlocality = finite_layer_mean(trace.nonlocality)
     prompt_breadth = finite_layer_mean(trace.prompt_breadth)
     future_influence = finite_layer_mean(trace.future_influence)
 
-    revisit_delta = rolling_delta(prompt_revisit, revisit_window)
-    evidence_delta = rolling_delta(evidence_revisit, revisit_window)
-    revisit_peaks = local_peaks(revisit_delta, peak_quantile)
+    prompt_delta = rolling_delta(prompt_share, revisit_window)
+    evidence_delta = rolling_delta(evidence_share, revisit_window)
+    nonlocal_delta = rolling_delta(nonlocality, revisit_window)
+    prompt_peaks = local_peaks(prompt_delta, peak_quantile)
+    review_peaks = local_peaks(nonlocal_delta, peak_quantile)
     anchor_peaks = local_peaks(future_influence, peak_quantile)
-    paired = pair_peaks(revisit_peaks, anchor_peaks, max_lag)
 
-    peak_kind = np.zeros(len(revisit_peaks), dtype=np.int8)
-    peak_index = np.flatnonzero(revisit_peaks)
-    if len(peak_index):
-        breadth = prompt_breadth[peak_index]
-        peak_kind[peak_index[breadth <= 0.35]] = 1
-        peak_kind[peak_index[breadth >= 0.65]] = 2
-        peak_kind[peak_index[(breadth > 0.35) & (breadth < 0.65)]] = 3
-
-    rate = coupling_rate(revisit_peaks, anchor_peaks, max_lag)
-    null = circular_null(revisit_peaks, anchor_peaks, max_lag)
-    matched = np.flatnonzero(paired >= 0)
-    lags = paired[matched] - matched
-    median_lag = float(np.median(lags)) if len(lags) else float("nan")
+    prompt_paired, prompt_rate, prompt_null, prompt_lag = coupling_summary(
+        prompt_peaks, anchor_peaks, max_lag
+    )
+    review_paired, review_rate, review_null, review_lag = coupling_summary(
+        review_peaks, anchor_peaks, max_lag
+    )
     return RhythmSignals(
         route_change=route_change,
-        prompt_revisit=prompt_revisit,
-        evidence_revisit=evidence_revisit,
+        prompt_share=prompt_share,
+        evidence_share=evidence_share,
         history_share=history_share,
+        nonlocality=nonlocality,
         prompt_breadth=prompt_breadth,
         future_influence=future_influence,
-        revisit_delta=revisit_delta,
+        prompt_delta=prompt_delta,
         evidence_delta=evidence_delta,
-        revisit_peaks=revisit_peaks,
+        nonlocal_delta=nonlocal_delta,
+        prompt_peaks=prompt_peaks,
+        review_peaks=review_peaks,
         anchor_peaks=anchor_peaks,
-        peak_kind=peak_kind,
-        paired_anchor=paired,
-        coupling_rate=rate,
-        null_rate=null,
-        median_lag=median_lag,
+        prompt_paired_anchor=prompt_paired,
+        review_paired_anchor=review_paired,
+        prompt_coupling_rate=prompt_rate,
+        prompt_null_rate=prompt_null,
+        prompt_median_lag=prompt_lag,
+        review_coupling_rate=review_rate,
+        review_null_rate=review_null,
+        review_median_lag=review_lag,
     )
