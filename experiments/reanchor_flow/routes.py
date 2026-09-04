@@ -1,4 +1,4 @@
-"""Layer-resolved routing summaries from native attention messages."""
+"""One-pass token routing traces for prompt revisits and future anchors."""
 
 from __future__ import annotations
 
@@ -7,173 +7,117 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-ROLE_NAMES = ("evidence", "other_prompt", "history")
-GRAM_HEAD_CHUNK = 4
-GRAM_CACHE_ATTRIBUTE = "_reanchor_output_gram_cpu"
+from .message_norm import model_gram_cache, output_gram, source_norm
 
 
 @dataclass(frozen=True)
 class RouteTrace:
-    """Small CPU traces with shape ``[layer, response_event, role]``."""
+    """Compact CPU traces, normally shaped ``[layer, response_event]``."""
 
-    functional_share: Tensor
-    attention_share: Tensor
-    functional_mass: Tensor
-    functional_null: Tensor
-    attention_null: Tensor
+    prompt_share: Tensor
+    evidence_share: Tensor
+    history_share: Tensor
+    far_prompt_share: Tensor
+    prompt_breadth: Tensor
+    route_change: Tensor
+    future_influence: Tensor
+    detail: dict[str, Tensor] | None
 
 
 class RouteAccumulator:
-    """Reduce ``A`` and ``A * ||W_O[h]V[h,s]||`` during the forward.
+    """Observe native attention and ``A * ||W_O V||`` without storing all heads."""
 
-    Each row describes messages read at query ``q`` to predict token
-    ``p=q+1``. Layer order is retained; no artificial token-to-token path is
-    constructed.
-    """
-
-    def __init__(self, model, response_start: int, prompt_evidence_mask) -> None:
+    def __init__(
+        self,
+        model,
+        response_start: int,
+        prompt_evidence_mask,
+        *,
+        route_window: int = 4,
+        future_horizon: int = 16,
+        far_lag: int = 32,
+        detail: bool = False,
+    ) -> None:
+        if route_window < 1 or future_horizon < 1 or far_lag < 1:
+            raise ValueError("routing windows must be positive")
         prompt = torch.as_tensor(prompt_evidence_mask, dtype=torch.bool).flatten()
         if len(prompt) != response_start:
             raise ValueError("evidence mask must cover the complete prompt")
-        self.row_start = response_start - 1
-        self.response_start = response_start
+
+        self.response_start = int(response_start)
+        self.row_start = self.response_start - 1
         self.layer_count = int(model.config.num_hidden_layers)
+        self.route_window = int(route_window)
+        self.future_horizon = int(future_horizon)
+        self.far_lag = int(far_lag)
         self.prompt_evidence = prompt
-        self._role_mask: Tensor | None = None
-        self._functional: Tensor | None = None
-        self._attention: Tensor | None = None
-        self._mass: Tensor | None = None
-        self._functional_null: Tensor | None = None
-        self._attention_null: Tensor | None = None
-        self._covered: Tensor | None = None
-        self._source_norm: dict[int, Tensor] = {}
-        self._staging: dict[int, Tensor] = {}
+        self.keep_detail = bool(detail)
+
         self._next_query = [0] * self.layer_count
-        self._flushed: set[int] = set()
-        gram_cache = getattr(model, GRAM_CACHE_ATTRIBUTE, None)
-        if gram_cache is None:
-            gram_cache = {}
-            setattr(model, GRAM_CACHE_ATTRIBUTE, gram_cache)
-        self._gram_cache: dict[int, Tensor] = gram_cache
+        self._states: dict[int, dict[str, object]] = {}
+        self._shape: tuple[int, int, int] | None = None
+        self._fields: dict[str, Tensor] = {}
+        self._detail: dict[str, Tensor] | None = None
+        self._gram_cache = model_gram_cache(model)
 
-    @staticmethod
-    def output_gram(output_weight: Tensor, heads: int, head_dim: int) -> Tensor:
-        """Cacheable CPU Gram matrices for the query-head blocks of ``W_O``."""
-
-        hidden = output_weight.shape[0]
-        if output_weight.shape != (hidden, heads * head_dim):
-            raise ValueError("W_O input width does not match the query heads")
-        weight = output_weight.view(hidden, heads, head_dim).permute(1, 2, 0)
-        gram_device = torch.empty(
-            (heads, head_dim, head_dim),
-            device=output_weight.device,
-            dtype=torch.float32,
-        )
-        for begin in range(0, heads, GRAM_HEAD_CHUNK):
-            end = min(begin + GRAM_HEAD_CHUNK, heads)
-            block = weight[begin:end].float()
-            chunk = torch.bmm(block, block.transpose(1, 2))
-            gram_device[begin:end].copy_(chunk)
-            del block, chunk
-        return gram_device.cpu()
-
-    @classmethod
-    def source_norm(
-        cls,
-        value: Tensor,
-        output_weight: Tensor,
-        gram: Tensor | None = None,
-    ) -> Tensor:
-        """Norm of every query-head Value after its matching ``W_O`` block."""
-
-        heads, sources, head_dim = value.shape
-        hidden = output_weight.shape[0]
-        if output_weight.shape != (hidden, heads * head_dim):
-            raise ValueError("W_O input width does not match the query heads")
-        if gram is None:
-            gram = cls.output_gram(output_weight, heads, head_dim)
-        if gram.shape != (heads, head_dim, head_dim):
-            raise ValueError("cached W_O Gram matrices have the wrong shape")
-
-        # Four heads at a time avoids full W_O/value float32 copies while
-        # keeping the quadratic-form evaluation vectorized.
-        gram_device = gram.to(value.device)
-        norm = torch.empty(
-            (heads, sources), device=value.device, dtype=torch.float32
-        )
-        for begin in range(0, heads, GRAM_HEAD_CHUNK):
-            end = min(begin + GRAM_HEAD_CHUNK, heads)
-            head_value = value[begin:end].float()
-            squared = torch.einsum(
-                "hsd,hde,hse->hs",
-                head_value,
-                gram_device[begin:end],
-                head_value,
-            )
-            norm[begin:end] = squared.clamp_min(0).sqrt()
-            del head_value, squared
-        return norm
-
-    def _initialize(self, sources: int, device: torch.device) -> None:
+    def _initialize(self, heads: int, sources: int) -> None:
         events = sources - self.row_start
         if events < 1:
             raise ValueError("response has no prediction events")
-        role = torch.zeros(sources, len(ROLE_NAMES), device=device)
-        evidence = torch.zeros(sources, dtype=torch.bool, device=device)
-        evidence[: self.response_start] = self.prompt_evidence.to(device)
-        role[evidence, 0] = 1
-        role[: self.response_start, 1] = (~evidence[: self.response_start]).float()
-        role[self.response_start :, 2] = 1
-        self._role_mask = role
-        shape = (self.layer_count, events, len(ROLE_NAMES))
-        self._functional = torch.zeros(shape, dtype=torch.float32)
-        self._attention = torch.zeros(shape, dtype=torch.float32)
-        self._mass = torch.zeros((self.layer_count, events), dtype=torch.float32)
-        self._functional_null = torch.zeros(shape, dtype=torch.float32)
-        self._attention_null = torch.zeros(shape, dtype=torch.float32)
-        self._covered = torch.zeros((self.layer_count, events), dtype=torch.bool)
+        self._shape = (heads, sources, events)
+        shape = (self.layer_count, events)
+        self._fields = {
+            name: torch.full(shape, float("nan"), dtype=torch.float32)
+            for name in (
+                "prompt_share",
+                "evidence_share",
+                "history_share",
+                "far_prompt_share",
+                "prompt_breadth",
+                "route_change",
+                "future_influence",
+            )
+        }
+        if self.keep_detail:
+            head_shape = (self.layer_count, heads, events)
+            self._detail = {
+                "prompt_head": torch.full(head_shape, float("nan")),
+                "route_change_head": torch.full(head_shape, float("nan")),
+                "future_head": torch.full(head_shape, float("nan")),
+                "edge_map": torch.zeros((events, sources), dtype=torch.float32),
+            }
 
-    def _stage_layer(self, layer: int, norm: Tensor) -> Tensor:
-        """Allocate one O(events) GPU buffer and fill its availability nulls."""
+    def _layer_state(
+        self,
+        layer: int,
+        heads: int,
+        sources: int,
+        device: torch.device,
+    ) -> dict[str, object]:
+        state = self._states.get(layer)
+        if state is None:
+            events = sources - self.row_start
+            state = {
+                "rolling": [],
+                "future_sum": torch.zeros((heads, events), device=device),
+                "future_count": torch.zeros(events, device=device),
+            }
+            self._states[layer] = state
+        return state
 
-        roles = len(ROLE_NAMES)
-        events = norm.shape[1] - self.row_start
-        stage = torch.empty(
-            (events, 4 * roles + 1), device=norm.device, dtype=torch.float32
-        )
-
-        role = self._role_mask
-        visible_count = role.cumsum(dim=0)[self.row_start :]
-        stage[:, 3 * roles : 4 * roles] = visible_count / visible_count.sum(
-            dim=1, keepdim=True
-        )
-
-        source_capacity = norm.sum(dim=0)
-        visible_capacity = (source_capacity[:, None] * role).cumsum(dim=0)[
-            self.row_start :
-        ]
-        stage[:, 2 * roles : 3 * roles] = visible_capacity / visible_capacity.sum(
-            dim=1, keepdim=True
-        ).clamp_min(1e-12)
-        self._staging[layer] = stage
-        return stage
-
-    def _flush_layer(self, layer: int) -> None:
-        """Transfer all summaries for one layer to CPU in one operation."""
-
-        if not bool(self._covered[layer].all()):
-            raise RuntimeError(f"route layer {layer} has missing query chunks")
-        roles = len(ROLE_NAMES)
-        host = self._staging.pop(layer).cpu()
-        self._functional[layer].copy_(host[:, :roles])
-        self._attention[layer].copy_(host[:, roles : 2 * roles])
-        self._functional_null[layer].copy_(host[:, 2 * roles : 3 * roles])
-        self._attention_null[layer].copy_(host[:, 3 * roles : 4 * roles])
-        self._mass[layer].copy_(host[:, 4 * roles])
-        self._source_norm.pop(layer, None)
-        self._flushed.add(layer)
-        if len(self._flushed) == self.layer_count:
-            self._role_mask = None
+    @staticmethod
+    def _js(current: Tensor, reference: Tensor) -> Tensor:
+        eps = 1e-12
+        middle = 0.5 * (current + reference)
+        first = (
+            current
+            * (current.clamp_min(eps).log() - middle.clamp_min(eps).log())
+        ).sum(-1)
+        second = (
+            reference
+            * (reference.clamp_min(eps).log() - middle.clamp_min(eps).log())
+        ).sum(-1)
+        return 0.5 * (first + second) / torch.log(current.new_tensor(2.0))
 
     def observe_chunk(
         self,
@@ -183,60 +127,106 @@ class RouteAccumulator:
         repeated_value: Tensor,
         output_weight: Tensor,
     ) -> None:
-        """Consume one absolute query chunk emitted by the manual forward."""
-
-        probability = probability.detach()[0]
+        probability = probability.detach()[0].float()
         value = repeated_value.detach()[0]
         heads, chunk_queries, sources = probability.shape
-        if chunk_queries < 1:
-            raise ValueError("attention query chunk must not be empty")
-        if value.shape[:2] != (heads, sources):
-            raise ValueError("attention Value rows do not match query heads")
-        if not 0 <= layer < self.layer_count:
-            raise ValueError(f"invalid layer index: {layer}")
         if query_start != self._next_query[layer]:
-            raise ValueError(
-                f"layer {layer} query chunks must be contiguous and non-overlapping"
-            )
-        end = query_start + chunk_queries
-        if end > sources:
-            raise ValueError("attention query chunk exceeds the source sequence")
-        self._next_query[layer] = end
-        if self._role_mask is None:
-            self._initialize(sources, probability.device)
-        elif len(self._role_mask) != sources:
-            raise ValueError("attention source count changed between layers")
+            raise ValueError("query chunks must be contiguous and non-overlapping")
+        query_end = query_start + chunk_queries
+        self._next_query[layer] = query_end
 
-        norm = self._source_norm.get(layer)
-        if norm is None:
-            gram = self._gram_cache.get(layer)
-            if gram is None:
-                gram = self.output_gram(output_weight.detach(), heads, value.shape[-1])
-                self._gram_cache[layer] = gram
-            norm = self.source_norm(value, output_weight.detach(), gram)
-            self._source_norm[layer] = norm
-        stage = self._staging.get(layer)
-        if stage is None:
-            stage = self._stage_layer(layer, norm)
+        if self._shape is None:
+            self._initialize(heads, sources)
+        elif self._shape[:2] != (heads, sources):
+            raise ValueError("attention shape changed between layers")
+
+        gram = self._gram_cache.get(layer)
+        if gram is None:
+            gram = output_gram(output_weight.detach(), heads, value.shape[-1])
+            self._gram_cache[layer] = gram
+        norm = source_norm(value, output_weight.detach(), gram)
+        state = self._layer_state(layer, heads, sources, probability.device)
 
         begin = max(query_start, self.row_start)
-        if begin < end:
-            local = probability[:, begin - query_start :].float()
-            capacity = local * norm[:, None]
-            role = self._role_mask
-            attention = torch.einsum("hqs,sr->qr", local, role) / heads
-            functional = torch.einsum("hqs,sr->qr", capacity, role) / heads
-            total = functional.sum(dim=1)
-            functional = functional / total[:, None].clamp_min(1e-12)
-            event = slice(begin - self.row_start, end - self.row_start)
-            roles = len(ROLE_NAMES)
-            stage[event, :roles] = functional
-            stage[event, roles : 2 * roles] = attention
-            stage[event, 4 * roles] = total
-            self._covered[layer, event] = True
+        if begin < query_end:
+            local = probability[:, begin - query_start : query_end - query_start]
+            capacity = local * norm[:, None, :]
+            incoming = capacity.sum(-1)
+            distribution = capacity / incoming[..., None].clamp_min(1e-12)
 
-        if end == sources:
-            self._flush_layer(layer)
+            query = torch.arange(begin, query_end, device=probability.device)
+            source = torch.arange(sources, device=probability.device)
+            event = slice(begin - self.row_start, query_end - self.row_start)
+
+            prompt = distribution[:, :, : self.response_start]
+            prompt_share = prompt.sum(-1)
+            evidence_mask = self.prompt_evidence.to(probability.device)
+            evidence_share = prompt[:, :, evidence_mask].sum(-1)
+            history_share = distribution[:, :, self.response_start :].sum(-1)
+
+            lag = query[:, None] - source[None]
+            far = (source[None] < self.response_start) & (lag >= self.far_lag)
+            far_prompt_share = (distribution * far[None]).sum(-1)
+
+            prompt_probability = prompt / prompt_share[..., None].clamp_min(1e-12)
+            entropy = -(
+                prompt_probability * prompt_probability.clamp_min(1e-12).log()
+            ).sum(-1)
+            if self.response_start > 1:
+                entropy = entropy / torch.log(
+                    entropy.new_tensor(float(self.response_start))
+                )
+            entropy = entropy.masked_fill(prompt_share <= 1e-12, 0)
+
+            change_head = torch.full(
+                (heads, len(query)), float("nan"), device=probability.device
+            )
+            rolling: list[Tensor] = state["rolling"]
+            future_sum: Tensor = state["future_sum"]
+            future_count: Tensor = state["future_count"]
+            response_sources = source[self.response_start :]
+
+            for offset, absolute_query in enumerate(query.tolist()):
+                current = distribution[:, offset]
+                if rolling:
+                    reference = torch.stack(rolling, dim=0).mean(0)
+                    change_head[:, offset] = self._js(current, reference)
+                rolling.append(current.detach())
+                if len(rolling) > self.route_window:
+                    rolling.pop(0)
+
+                generated_position = absolute_query + 1
+                future_lag = generated_position - response_sources
+                valid = (future_lag >= 1) & (future_lag <= self.future_horizon)
+                if bool(valid.any()):
+                    future_sum[:, : len(response_sources)] += (
+                        current[:, self.response_start :] * valid[None]
+                    )
+                    future_count[: len(response_sources)] += valid
+
+            self._fields["prompt_share"][layer, event] = prompt_share.mean(0).cpu()
+            self._fields["evidence_share"][layer, event] = evidence_share.mean(0).cpu()
+            self._fields["history_share"][layer, event] = history_share.mean(0).cpu()
+            self._fields["far_prompt_share"][layer, event] = far_prompt_share.mean(0).cpu()
+            self._fields["prompt_breadth"][layer, event] = entropy.mean(0).cpu()
+            self._fields["route_change"][layer, event] = change_head.mean(0).cpu()
+
+            if self._detail is not None:
+                self._detail["prompt_head"][layer, :, event] = prompt_share.cpu()
+                self._detail["route_change_head"][layer, :, event] = change_head.cpu()
+                self._detail["edge_map"][event] += (
+                    distribution.mean(0).cpu() / self.layer_count
+                )
+
+        if query_end == sources:
+            state = self._states.pop(layer)
+            future_sum = state["future_sum"]
+            future_count = state["future_count"]
+            future = future_sum / future_count[None].clamp_min(1)
+            future[:, future_count <= 0] = float("nan")
+            self._fields["future_influence"][layer] = future.mean(0).cpu()
+            if self._detail is not None:
+                self._detail["future_head"][layer] = future.cpu()
 
     def observe(
         self,
@@ -245,17 +235,20 @@ class RouteAccumulator:
         repeated_value: Tensor,
         output_weight: Tensor,
     ) -> None:
-        """Compatibility entry point for an unchunked forward."""
-
         self.observe_chunk(layer, 0, probability, repeated_value, output_weight)
 
     def finish(self) -> RouteTrace:
-        if self._covered is None or not bool(self._covered.all()):
-            raise RuntimeError("route accumulator did not receive every response row")
+        if self._shape is None or self._states:
+            raise RuntimeError("route accumulator did not receive a complete forward")
+        if self._next_query != [self._shape[1]] * self.layer_count:
+            raise RuntimeError("one or more layers are incomplete")
         return RouteTrace(
-            functional_share=self._functional,
-            attention_share=self._attention,
-            functional_mass=self._mass,
-            functional_null=self._functional_null,
-            attention_null=self._attention_null,
+            prompt_share=self._fields["prompt_share"],
+            evidence_share=self._fields["evidence_share"],
+            history_share=self._fields["history_share"],
+            far_prompt_share=self._fields["far_prompt_share"],
+            prompt_breadth=self._fields["prompt_breadth"],
+            route_change=self._fields["route_change"],
+            future_influence=self._fields["future_influence"],
+            detail=self._detail,
         )

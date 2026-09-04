@@ -1,1 +1,1 @@
-"""Exposure-adjusted claim-boundary re-anchor audit."""
+"""Internal prompt-revisit and future-anchor rhythm audit."""
