@@ -1,4 +1,4 @@
-"""One-pass capture for prompt-revisit, nonlocal-review and anchor rhythm."""
+"""One-pass rhythm capture plus optional grouped causal mechanism audit."""
 
 from __future__ import annotations
 
@@ -10,10 +10,11 @@ import torch
 from experiments.common.llama_message_intervention import baseline_forward
 
 from .claims import sentence_boundaries
+from .mechanism import capture_mechanism
 from .rhythm import build_rhythm
 from .routes import RouteAccumulator
 
-CAPTURE_SCHEMA = 5
+CAPTURE_SCHEMA = 6
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,7 @@ def capture_sample(
     peak_quantile: float = 0.9,
     max_lag: int = 3,
     detail: bool = False,
+    mechanism: bool = False,
 ) -> SampleCapture:
     ids = torch.as_tensor(token_ids, dtype=torch.long).cpu()
     observer = RouteAccumulator(
@@ -64,12 +66,13 @@ def capture_sample(
         distance_scale=distance_scale,
         detail=detail,
     )
+    checkpoints = range(len(model.model.layers)) if mechanism else (0,)
     cache = baseline_forward(
         model,
         ids,
         response_start,
         observer=observer,
-        checkpoint_layers=(0,),
+        checkpoint_layers=checkpoints,
         attention_query_chunk=query_chunk,
     )
     trace = observer.finish()
@@ -95,6 +98,9 @@ def capture_sample(
         "prompt_share_layer": trace.prompt_share,
         "evidence_share_layer": trace.evidence_share,
         "history_share_layer": trace.history_share,
+        "prompt_lift_layer": trace.prompt_lift,
+        "evidence_lift_layer": trace.evidence_lift,
+        "history_lift_layer": trace.history_lift,
         "nonlocality_layer": trace.nonlocality,
         "prompt_breadth_layer": trace.prompt_breadth,
         "route_change_layer": trace.route_change,
@@ -103,12 +109,16 @@ def capture_sample(
         "prompt_share": rhythm.prompt_share,
         "evidence_share": rhythm.evidence_share,
         "history_share": rhythm.history_share,
+        "prompt_lift": rhythm.prompt_lift,
+        "evidence_lift": rhythm.evidence_lift,
+        "history_lift": rhythm.history_lift,
         "nonlocality": rhythm.nonlocality,
         "prompt_breadth": rhythm.prompt_breadth,
         "future_influence": rhythm.future_influence,
         "prompt_delta": rhythm.prompt_delta,
         "evidence_delta": rhythm.evidence_delta,
         "nonlocal_delta": rhythm.nonlocal_delta,
+        "transition_peak": rhythm.transition_peaks,
         "prompt_peak": rhythm.prompt_peaks,
         "review_peak": rhythm.review_peaks,
         "anchor_peak": rhythm.anchor_peaks,
@@ -124,11 +134,22 @@ def capture_sample(
             tokenizer, ids.numpy(), response_start
         ),
         "detail": int(detail),
+        "mechanism": 0,
     }
+    if mechanism:
+        arrays.update(
+            capture_mechanism(
+                model,
+                cache,
+                response_start,
+                prompt_evidence_mask,
+            )
+        )
     if detail and trace.detail is not None:
         arrays.update(
             detail_edge_map=trace.detail["edge_map"],
             detail_prompt_head=trace.detail["prompt_head"],
+            detail_evidence_head=trace.detail["evidence_head"],
             detail_nonlocal_head=trace.detail["nonlocal_head"],
             detail_route_change_head=trace.detail["route_change_head"],
             detail_future_head=trace.detail["future_head"],
