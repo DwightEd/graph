@@ -59,6 +59,7 @@ class RouteAccumulator:
         self._fields: dict[str, Tensor] = {}
         self._detail: dict[str, Tensor] | None = None
         self._gram_cache = model_gram_cache(model)
+        self._norm_cache: dict[int, Tensor] = {}
 
     def _initialize(self, heads: int, sources: int) -> None:
         events = sources - self.row_start
@@ -127,6 +128,8 @@ class RouteAccumulator:
         repeated_value: Tensor,
         output_weight: Tensor,
     ) -> None:
+        """Consume one contiguous absolute-query chunk emitted by the forward."""
+
         probability = probability.detach()[0].float()
         value = repeated_value.detach()[0]
         heads, chunk_queries, sources = probability.shape
@@ -144,15 +147,17 @@ class RouteAccumulator:
         if gram is None:
             gram = output_gram(output_weight.detach(), heads, value.shape[-1])
             self._gram_cache[layer] = gram
-        norm = source_norm(value, output_weight.detach(), gram)
+        norm = self._norm_cache.get(layer)
+        if norm is None:
+            norm = source_norm(value, output_weight.detach(), gram)
+            self._norm_cache[layer] = norm
         state = self._layer_state(layer, heads, sources, probability.device)
 
         begin = max(query_start, self.row_start)
         if begin < query_end:
             local = probability[:, begin - query_start : query_end - query_start]
             capacity = local * norm[:, None, :]
-            incoming = capacity.sum(-1)
-            distribution = capacity / incoming[..., None].clamp_min(1e-12)
+            distribution = capacity / capacity.sum(-1)[..., None].clamp_min(1e-12)
 
             query = torch.arange(begin, query_end, device=probability.device)
             source = torch.arange(sources, device=probability.device)
@@ -179,11 +184,13 @@ class RouteAccumulator:
             entropy = entropy.masked_fill(prompt_share <= 1e-12, 0)
 
             change_head = torch.full(
-                (heads, len(query)), float("nan"), device=probability.device
+                (heads, len(query)),
+                float("nan"),
+                device=probability.device,
             )
-            rolling: list[Tensor] = state["rolling"]
-            future_sum: Tensor = state["future_sum"]
-            future_count: Tensor = state["future_count"]
+            rolling: list[Tensor] = state["rolling"]  # type: ignore[assignment]
+            future_sum: Tensor = state["future_sum"]  # type: ignore[assignment]
+            future_count: Tensor = state["future_count"]  # type: ignore[assignment]
             response_sources = source[self.response_start :]
 
             for offset, absolute_query in enumerate(query.tolist()):
@@ -197,31 +204,45 @@ class RouteAccumulator:
 
                 generated_position = absolute_query + 1
                 future_lag = generated_position - response_sources
-                valid = (future_lag >= 1) & (future_lag <= self.future_horizon)
+                valid = (
+                    (future_lag >= 1)
+                    & (future_lag <= self.future_horizon)
+                )
                 if bool(valid.any()):
                     future_sum[:, : len(response_sources)] += (
                         current[:, self.response_start :] * valid[None]
                     )
                     future_count[: len(response_sources)] += valid
 
-            self._fields["prompt_share"][layer, event] = prompt_share.mean(0).cpu()
-            self._fields["evidence_share"][layer, event] = evidence_share.mean(0).cpu()
-            self._fields["history_share"][layer, event] = history_share.mean(0).cpu()
-            self._fields["far_prompt_share"][layer, event] = far_prompt_share.mean(0).cpu()
+            self._fields["prompt_share"][layer, event] = (
+                prompt_share.mean(0).cpu()
+            )
+            self._fields["evidence_share"][layer, event] = (
+                evidence_share.mean(0).cpu()
+            )
+            self._fields["history_share"][layer, event] = (
+                history_share.mean(0).cpu()
+            )
+            self._fields["far_prompt_share"][layer, event] = (
+                far_prompt_share.mean(0).cpu()
+            )
             self._fields["prompt_breadth"][layer, event] = entropy.mean(0).cpu()
             self._fields["route_change"][layer, event] = change_head.mean(0).cpu()
 
             if self._detail is not None:
                 self._detail["prompt_head"][layer, :, event] = prompt_share.cpu()
-                self._detail["route_change_head"][layer, :, event] = change_head.cpu()
+                self._detail["route_change_head"][layer, :, event] = (
+                    change_head.cpu()
+                )
                 self._detail["edge_map"][event] += (
                     distribution.mean(0).cpu() / self.layer_count
                 )
 
         if query_end == sources:
+            self._norm_cache.pop(layer, None)
             state = self._states.pop(layer)
-            future_sum = state["future_sum"]
-            future_count = state["future_count"]
+            future_sum = state["future_sum"]  # type: ignore[assignment]
+            future_count = state["future_count"]  # type: ignore[assignment]
             future = future_sum / future_count[None].clamp_min(1)
             future[:, future_count <= 0] = float("nan")
             self._fields["future_influence"][layer] = future.mean(0).cpu()

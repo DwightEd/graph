@@ -127,7 +127,9 @@ def analyze_split(
         response_start = int(cached.response_idx)
         source_id = str(sample.source_id)
         generator = str(getattr(sample, "generator_model", "") or "")
-        cached_observer = cache_model or str(getattr(sample, "observer_model", "") or "")
+        cached_observer = cache_model or str(
+            getattr(sample, "observer_model", "") or ""
+        )
         sample.release_attention()
         if max_events is not None:
             token_ids = token_ids[: response_start + max_events]
@@ -140,7 +142,6 @@ def analyze_split(
             if plot_sample_id is not None
             else detailed < plot_limit
         )
-        print(f"capture {task} {counts[task]}: {sample_id}", flush=True)
         captured = capture_sample(
             model,
             tokenizer,
