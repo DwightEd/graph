@@ -2,11 +2,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from experiments.reanchor_flow.rhythm import (
-    build_rhythm,
-    pair_peaks,
-    rolling_delta,
-)
+from experiments.reanchor_flow.rhythm import build_rhythm, pair_peaks, rolling_delta
 
 
 def test_rolling_delta_uses_only_previous_events():
@@ -17,45 +13,39 @@ def test_rolling_delta_uses_only_previous_events():
 
 
 def blank_trace(layers=2, events=12):
+    zero = np.zeros((layers, events))
     return SimpleNamespace(
-        route_change=np.zeros((layers, events)),
-        prompt_share=np.zeros((layers, events)),
-        evidence_share=np.zeros((layers, events)),
-        history_share=np.zeros((layers, events)),
-        nonlocality=np.zeros((layers, events)),
+        route_change=zero.copy(),
+        prompt_share=zero.copy(),
+        evidence_share=zero.copy(),
+        history_share=zero.copy(),
+        prompt_lift=zero.copy(),
+        evidence_lift=zero.copy(),
+        history_lift=zero.copy(),
+        nonlocality=zero.copy(),
         prompt_breadth=np.full((layers, events), 0.4),
-        future_influence=np.zeros((layers, events)),
+        future_influence=zero.copy(),
     )
 
 
-def test_prompt_revisit_pairs_with_later_anchor():
+def test_internal_transition_and_prompt_revisit_are_independent():
     trace = blank_trace()
     trace.route_change[:, 6] = 1.0
     trace.prompt_share[:, 6] = 1.0
     trace.evidence_share[:, 6] = 0.8
     trace.future_influence[:, 7] = 1.0
-    result = build_rhythm(
-        trace,
-        revisit_window=3,
-        peak_quantile=0.8,
-        max_lag=2,
-    )
+    result = build_rhythm(trace, revisit_window=3, peak_quantile=0.8, max_lag=2)
+    assert result.transition_peaks[6]
     assert result.prompt_peaks[6]
     assert result.anchor_peaks[7]
     assert result.prompt_paired_anchor[6] == 7
-    assert result.prompt_coupling_rate == 1.0
 
 
-def test_nonlocal_review_is_detected_independently_of_prompt():
+def test_nonlocal_review_is_detected_without_prompt_revisit():
     trace = blank_trace()
     trace.nonlocality[:, 5] = 1.0
     trace.future_influence[:, 6] = 1.0
-    result = build_rhythm(
-        trace,
-        revisit_window=3,
-        peak_quantile=0.8,
-        max_lag=2,
-    )
+    result = build_rhythm(trace, revisit_window=3, peak_quantile=0.8, max_lag=2)
     assert result.review_peaks[5]
     assert not result.prompt_peaks.any()
     assert result.review_paired_anchor[5] == 6

@@ -1,58 +1,73 @@
-# Internal Routing Rhythm Audit
+# Re-Anchor Mechanism Audit
 
-The audit discovers model-internal events for every response token `p`, using the predictor
-`q=p-1`. Punctuation is shown only as a visual reference.
+The audit is token-aligned: response token `p` is analysed at its causal predictor `q=p-1`.
+It now tests the complete registered chain instead of only drawing revisit peaks.
 
-The Value-aware source distribution is
+## What is measured
 
-```text
-P(s | p,l,h) ∝ A[l,h,q,s] * ||W_O[l,h] V[l,g(h),s]||
-```
+1. **Normal direct-route drift.** Prompt/history message shares are divided by a Value-capacity
+   availability null. Their slopes are estimated only on fully correct responses.
+2. **Internal transition and re-entry.** Route-change peaks are detected from the complete source
+   distribution, independently of prompt/evidence share. Prompt and evidence changes at those peaks
+   are compared with circularly shifted event locations.
+3. **Hallucination onset.** The first token of every hallucinated span is matched to a nearby clean
+   token in the same response.
+4. **Deep mechanism pass.** A baseline and four grouped message cuts measure direct evidence entry,
+   evidence/other-prompt interaction, response-history control, layerwise evidence-conditioned
+   state presence, layerwise fixed-readout control, late control loss, and final readout gain.
 
-Four token trajectories are retained:
-
-- `route_change`: JS change from the preceding source distributions;
-- `prompt_delta`: renewed transport from any prompt token;
-- `nonlocal_delta`: renewed continuous expected source distance, not a hard far-token cutoff;
-- `future_influence`: later tokens' reuse of the generated token.
-
-Prompt-revisit peaks and nonlocal-review peaks are detected independently. Each is paired with
-future-anchor peaks and compared with a circular-shift null. Reports include both pooled peak
-coupling and the source-level mean coupling lift with a bootstrap confidence interval, so a
-population claim is not inferred from one sample or from pooled peaks alone.
+The deep cuts delete source Value messages only on response-query rows. They test direct re-entry
+into response computation; they do not claim to remove every possible semantic relay already stored
+inside another prompt token. `other prompt` is an operational question/instruction group, not a
+hand-labelled validator. Exact support/validator claims require a controlled dataset.
 
 ## Run
 
+Smoke, including one deep sample per task:
+
 ```bash
 bash experiments/reanchor_flow/run_all.sh --smoke --query-chunk 32
-
-bash experiments/reanchor_flow/run_all.sh \
-  --limit 20 \
-  --query-chunk 64 \
-  --output experiments/reanchor_flow/outputs/pilot_v5
-
-bash experiments/reanchor_flow/run_all.sh --query-chunk 64
 ```
 
-`--distance-scale 16` is the distance at which the continuous nonlocal weight saturates. A source
-at lag `d` receives weight `min(d / distance_scale, 1)`; no source is excluded by a distance gate.
+All samples with a 30-sample-per-task deep audit:
 
-To draw one sample:
+```bash
+bash experiments/reanchor_flow/run_all.sh \
+  --query-chunk 64 \
+  --mechanism-limit 30 \
+  --output experiments/reanchor_flow/outputs/mechanism_v6_30
+```
+
+Deep audit every selected sample:
+
+```bash
+bash experiments/reanchor_flow/run_all.sh \
+  --query-chunk 64 \
+  --mechanism-limit -1 \
+  --output experiments/reanchor_flow/outputs/mechanism_v6_full
+```
+
+One selected sample automatically receives both a route figure and a layerwise mechanism figure:
 
 ```bash
 bash experiments/reanchor_flow/run_all.sh \
   --plot-sample-id 12471 \
   --plot-limit 0 \
-  --output experiments/reanchor_flow/outputs/sample_12471_v5
+  --query-chunk 32 \
+  --output experiments/reanchor_flow/outputs/sample_12471_v6
 ```
 
-Default outputs:
+## Outputs
 
 ```text
-outputs/<model>/rhythm_v5/
-  results/<task>/<sample>.npz
-  figures/sample_<task>_<sample>.png
-  reports/<task>/rhythm_report.json
-  reports/<task>/rhythm_summary.png
-  run_manifest.json
+results/<task>/<sample>.npz
+figures/sample_<task>_<sample>.png
+figures/sample_<task>_<sample>_mechanism.png
+reports/<task>/mechanism_report.json
+reports/<task>/rhythm_summary.png
+reports/<task>/mechanism_atlas.png
+run_manifest.json
 ```
+
+The terminal prints only H0 direct drift, H1 transition/re-entry, H2 onset differences, and the H3/H4
+mechanism effects. No classifier or AUROC is used at this discovery stage.
