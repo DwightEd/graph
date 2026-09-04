@@ -1,4 +1,4 @@
-"""Stream one-pass routing-rhythm captures to disk."""
+"""Stream one-pass rhythm and optional deep mechanism captures to disk."""
 
 from __future__ import annotations
 
@@ -30,11 +30,7 @@ def save_json(path: Path, value: dict) -> None:
 
 
 def same_model(recorded: str, requested: str) -> bool:
-    return (
-        not recorded
-        or recorded == requested
-        or Path(recorded).name == Path(requested).name
-    )
+    return not recorded or recorded == requested or Path(recorded).name == Path(requested).name
 
 
 def open_manifest(output: Path, config: dict) -> dict:
@@ -69,11 +65,10 @@ def analyze_split(
     max_lag: int = 3,
     plot_limit: int = 1,
     plot_sample_id: str | None = None,
+    mechanism_limit: int = 0,
 ) -> dict[str, int]:
     dataset = open_research_dataset(
-        dataset_root,
-        device="cpu",
-        retain_embedded_labels=False,
+        dataset_root, device="cpu", retain_embedded_labels=False
     )
     cache_model = str(getattr(dataset, "spec", {}).get("model_path", ""))
     if not same_model(cache_model, model_path):
@@ -97,6 +92,7 @@ def analyze_split(
         "max_lag": max_lag,
         "plot_limit": plot_limit,
         "plot_sample_id": plot_sample_id,
+        "mechanism_limit_per_task": mechanism_limit,
     }
     manifest = open_manifest(output, config)
     manifest["samples"] = [
@@ -105,6 +101,13 @@ def analyze_split(
     completed = {str(row["sample_id"]) for row in manifest["samples"]}
     detailed = sum(bool(row.get("detail")) for row in manifest["samples"])
     counts = {task: 0 for task in TASK_TYPES}
+    mechanism_counts = {
+        task: sum(
+            bool(row.get("mechanism")) and row.get("task_type") == task
+            for row in manifest["samples"]
+        )
+        for task in TASK_TYPES
+    }
     sources = load_source_info(source_info)
 
     for dataset_sample_id in dataset.sample_ids:
@@ -147,6 +150,9 @@ def analyze_split(
             if plot_sample_id is not None
             else detailed < plot_limit
         )
+        mechanism = plot_sample_id is not None or mechanism_limit < 0 or (
+            mechanism_limit > 0 and mechanism_counts[task] < mechanism_limit
+        )
         captured = capture_sample(
             model,
             tokenizer,
@@ -164,6 +170,7 @@ def analyze_split(
             peak_quantile=peak_quantile,
             max_lag=max_lag,
             detail=detail,
+            mechanism=mechanism,
         )
         captured.arrays.update(
             generator_model=generator,
@@ -179,11 +186,13 @@ def analyze_split(
                 "task_type": task,
                 "result": result_path.relative_to(output).as_posix(),
                 "detail": detail,
+                "mechanism": mechanism,
             }
         )
         save_json(output / MANIFEST, manifest)
         completed.add(sample_id)
         detailed += int(detail)
+        mechanism_counts[task] += int(mechanism)
         del captured, evidence_mask, token_ids, sample
         gc.collect()
         if torch.cuda.is_available():
@@ -191,11 +200,10 @@ def analyze_split(
         if plot_sample_id is not None:
             break
 
-    if plot_sample_id is not None and not any(
-        str(row["sample_id"]) == plot_sample_id for row in manifest["samples"]
-    ):
+    if plot_sample_id is not None and plot_sample_id not in completed:
         raise ValueError(f"sample id not found: {plot_sample_id}")
     manifest["analysis_complete"] = True
     manifest["selected_samples"] = counts
+    manifest["mechanism_samples"] = mechanism_counts
     save_json(output / MANIFEST, manifest)
     return counts
