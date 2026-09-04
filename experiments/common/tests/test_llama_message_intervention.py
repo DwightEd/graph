@@ -82,6 +82,104 @@ def test_source_target_mask_preserves_other_queries() -> None:
     torch.testing.assert_close(output[0, 0, 0], torch.tensor([2.0, 0.0]))
 
 
+def test_query_chunking_matches_full_attention_and_reports_absolute_rows() -> None:
+    query, key, value, mask = attention_inputs()
+
+    class Observer:
+        def __init__(self):
+            self.starts = []
+
+        def observe_chunk(self, _layer, start, *_):
+            self.starts.append(start)
+
+    observer = Observer()
+    full = gated_attention(TinyAttention(0), query, key, value, mask, 1.0)
+    chunked = gated_attention(
+        TinyAttention(0),
+        query,
+        key,
+        value,
+        mask,
+        1.0,
+        observer=observer,
+        query_chunk=1,
+    )
+    torch.testing.assert_close(chunked, full)
+    assert observer.starts == [0, 1]
+
+
+def test_gated_query_chunking_matches_full_for_nondivisible_chunks() -> None:
+    torch.manual_seed(11)
+    query = torch.randn(1, 1, 5, 2)
+    key = torch.randn(1, 1, 5, 2)
+    value = torch.randn(1, 1, 5, 2)
+    mask = intervention.causal_mask(5, query.dtype, query.device)
+    early = torch.zeros(5, 5, dtype=torch.bool)
+    early[3, 1] = True
+    gate = MessageGate(
+        split_layer=1,
+        early_edges=early,
+        source_mask=torch.tensor([True, False, False, False, False]),
+        source_targets=torch.tensor([False, False, True, False, True]),
+    )
+
+    full = gated_attention(
+        TinyAttention(0), query, key, value, mask, 1.0, gate=gate
+    )
+    chunked = gated_attention(
+        TinyAttention(0),
+        query,
+        key,
+        value,
+        mask,
+        1.0,
+        gate=gate,
+        query_chunk=2,
+    )
+    torch.testing.assert_close(chunked, full)
+
+
+def test_chunked_attention_broadcasts_single_query_mask() -> None:
+    torch.manual_seed(13)
+    query = torch.randn(1, 1, 5, 2)
+    key = torch.randn(1, 1, 5, 2)
+    value = torch.randn(1, 1, 5, 2)
+    mask = torch.tensor([[[[0.0, 0.0, 0.0, 0.0, -torch.inf]]]])
+
+    full = gated_attention(TinyAttention(0), query, key, value, mask, 1.0)
+    chunked = gated_attention(
+        TinyAttention(0), query, key, value, mask, 1.0, query_chunk=2
+    )
+    torch.testing.assert_close(chunked, full)
+
+
+def test_deleted_edges_only_materializes_requested_query_chunk() -> None:
+    gate = MessageGate(
+        split_layer=1,
+        source_mask=torch.tensor([True, False, False, False, False]),
+        source_targets=torch.tensor([False, False, True, True, False]),
+    )
+    deleted = intervention.deleted_edges(
+        gate,
+        layer=0,
+        query_begin=2,
+        query_end=4,
+        sources=5,
+        device=torch.device("cpu"),
+    )
+    assert deleted is not None
+    assert deleted.shape == (2, 5)
+    torch.testing.assert_close(
+        deleted,
+        torch.tensor(
+            [
+                [True, False, False, False, False],
+                [True, False, False, False, False],
+            ]
+        ),
+    )
+
+
 def test_early_and_late_edge_masks_respect_split() -> None:
     query, key, value, mask = attention_inputs()
     early = torch.zeros(2, 2, dtype=torch.bool)
@@ -147,6 +245,24 @@ def test_prediction_positions_use_the_previous_query() -> None:
     cache = baseline_forward(tiny_model(), tokens, response_start=4)
     torch.testing.assert_close(cache.query, torch.tensor([3, 4, 5]))
     torch.testing.assert_close(cache.target, tokens[cache.query + 1])
+
+
+def test_chunked_manual_forward_matches_unchunked_forward() -> None:
+    tokens = torch.tensor([1, 2, 3, 4, 5, 6, 7])
+    model = tiny_model()
+    full = baseline_forward(model, tokens, response_start=4)
+    chunked = baseline_forward(
+        model, tokens, response_start=4, attention_query_chunk=2
+    )
+    torch.testing.assert_close(
+        chunked.full_margin, full.full_margin, atol=1e-6, rtol=1e-5
+    )
+    torch.testing.assert_close(
+        chunked.baseline_target_logprob,
+        full.baseline_target_logprob,
+        atol=1e-6,
+        rtol=1e-5,
+    )
 
 
 def test_fixed_readout_matches_native_logits() -> None:

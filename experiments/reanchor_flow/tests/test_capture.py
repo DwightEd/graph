@@ -1,15 +1,30 @@
-import numpy as np
+import torch
 
-from experiments.reanchor_flow.capture import all_layer_gate
+from experiments.reanchor_flow.capture import evidence_gate, evidence_source_mask
 
 
-def test_all_layer_gate_uses_prediction_to_query_offset():
-    edges = np.zeros((6, 6), dtype=bool)
-    edges[0, 3] = True
-    edges[3, 4] = True
-    gate = all_layer_gate(edges, layer_count=4)
+def test_evidence_mask_stays_in_teacher_forcing_source_coordinates():
+    evidence = evidence_source_mask([False, True, True], 6, response_start=3)
+    torch.testing.assert_close(
+        evidence,
+        torch.tensor([False, True, True, False, False, False]),
+    )
+
+
+def test_direct_cut_starts_at_query_before_first_response_token():
+    evidence = evidence_source_mask([False, True, True], 6, response_start=3)
+    gate = evidence_gate(
+        evidence, response_start=3, layer_count=4, direct_response_only=True
+    )
+    assert gate.source_targets.tolist() == [False, False, True, True, True, True]
     assert gate.split_layer == 4
+
+
+def test_global_cut_keeps_mlp_parametric_path_available():
+    evidence = evidence_source_mask([False, True, True], 6, response_start=3)
+    gate = evidence_gate(
+        evidence, response_start=3, layer_count=4, direct_response_only=False
+    )
+    assert gate.source_targets is None
+    assert gate.early_edges is None
     assert gate.late_edges is None
-    assert gate.source_mask is None
-    assert gate.early_edges[2, 0]
-    assert gate.early_edges[3, 3]

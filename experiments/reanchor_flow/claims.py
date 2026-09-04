@@ -9,6 +9,10 @@ import numpy as np
 
 _END = re.compile(r"(?:[.!?;。！？；]+[\"'”’\)\]]*\s*$|\n+\s*$)")
 
+RESPONSE_START = 0
+NATURAL_BOUNDARY = 1
+FORCED_CHUNK = 2
+
 
 @dataclass(frozen=True)
 class ClaimSpan:
@@ -16,16 +20,7 @@ class ClaimSpan:
 
     start: int
     stop: int
-
-    @property
-    def sink(self) -> int:
-        """Last generated token in the span."""
-
-        return self.stop - 1
-
-    @property
-    def length(self) -> int:
-        return self.stop - self.start
+    boundary_kind: int
 
 
 def split_claims(
@@ -58,19 +53,18 @@ def split_claims(
     ]
     spans: list[ClaimSpan] = []
     start = response_start
+    boundary_kind = RESPONSE_START
     for offset, piece in enumerate(pieces):
         position = response_start + offset
         length = position + 1 - start
-        if (length >= min_tokens and _END.search(piece)) or length >= max_tokens:
-            spans.append(ClaimSpan(start, position + 1))
+        natural_end = length >= min_tokens and bool(_END.search(piece))
+        forced_end = length >= max_tokens
+        if natural_end or forced_end:
+            spans.append(ClaimSpan(start, position + 1, boundary_kind))
             start = position + 1
+            boundary_kind = NATURAL_BOUNDARY if natural_end else FORCED_CHUNK
 
     response_stop = response_start + len(pieces)
-    if start < response_stop:
-        tail = ClaimSpan(start, response_stop)
-        if tail.length >= min_tokens:
-            spans.append(tail)
-        elif spans:
-            previous = spans[-1]
-            spans[-1] = ClaimSpan(previous.start, tail.stop)
+    if response_stop - start >= min_tokens:
+        spans.append(ClaimSpan(start, response_stop, boundary_kind))
     return spans

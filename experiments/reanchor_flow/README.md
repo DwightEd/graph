@@ -1,142 +1,150 @@
-# Claim Re-Anchor Flow Discovery
+# Re-Anchor Phenomenon Audit v3
 
-This experiment tests one graph-specific observation before defining another
-hallucination detector:
+This experiment tests whether a re-anchor phenomenon exists before any
+hallucination detector is trained. The old claim-level AUROC score is not the
+main result: one scalar failing to rank hallucinations cannot decide whether a
+multi-stage mechanism exists.
 
-> Ordinary generation gradually shifts from prompt sources to response history.
-> A new factual claim should interrupt that drift: evidence is reread at the
-> claim boundary, the first claim tokens become carriers, and evidence-seeded
-> paths remain connected to the claim sink. Hallucination may appear as a
-> missed re-anchor.
+## Primary variables
 
-The same frozen model produces every graph view and every path intervention. A
-single teacher-forced forward simultaneously records the functional graph and
-its attention-only control; optional path cuts are rerun in that model.
+At the query `q=p-1` that predicts response token `p`, the observer records per
+layer and source role:
 
-## One global event graph
+- attention share `A`;
+- transported-message share `A * ||W_O V||`;
+- an availability null for each share.
 
-For response token position `p`, the predictor is `q=p-1`. The route row at `q`
-is lifted into the causal edge
+The attention null is the fraction of currently visible source tokens in each
+role. The functional null also weights every visible source by
+`sum_h ||W_O[h] V[h,s]||`. Thus a growing response-history pool cannot by
+itself produce a positive result.
+
+The main signal is
 
 ```text
-source token s -> predicted token p
+role log lift = log(observed share / availability-null share)
+evidence specificity = evidence log lift - other-prompt log lift
 ```
 
-with capacity
+The subtraction distinguishes an evidence re-read from a generic return to the
+question, instruction, BOS, or other prompt tokens. Attention-only results are
+reported beside `AVW_O` results rather than presented as transported content.
 
-\[
-C_{s,p}=\operatorname{mean}_{l,h}
-A_{l,h,p-1,s}\,\|W_l^{O,[h]}V_{l,g(h),s}\|_2.
-\]
+## Three preregistered phenomenon tests
 
-This coordinate includes the immediately preceding response token without
-creating a query self-loop. The attention control uses the same graph and model
-but replaces the capacity by `A`. Each target column is normalized over causal
-sources.
+1. **H1, exposure-adjusted drift.** Compare the last and first response thirds.
+   Evidence enrichment should fall and history enrichment should rise after
+   correcting for the number/capacity of visible sources. Raw share drift is
+   descriptive only.
+2. **H2, clean boundary re-anchor.** At natural punctuation boundaries, compare
+   the center-only evidence-specificity entry change with up to three distributed
+   local controls inside the same clean span. Length-forced chunks are excluded.
+3. **H3, missed entry.** Pair hallucination runs beginning exactly at a natural
+   boundary with nearby clean boundaries in the same response, matching only
+   pre-event position and preferably preceding punctuation. This is a difference-in-differences
+   relative to each boundary's own pre-window and is gated on H2 being supported.
+   Near-boundary and late onsets are reported separately and never pooled into
+   the primary status.
 
-For a claim ending at sink `t`, the code computes the FlowTracer-style backward
-potential
+Only event offset `0` is used for the pre-outcome H2/H3 statistic. Its
+query has not seen the token being predicted. Offsets `>0` are visualized as
+post-generation persistence/recovery, not treated as a cause of that error.
+The long plotting window never determines which events enter a scalar test.
 
-\[
-h(i)=\sum_{k>i}W_{i,k}h(k),\qquad h(t)=1.
-\]
+Sentence boundaries and the complete RAG evidence span are still proxies. A
+positive v3 result justifies the next experiment with atomic-claim boundaries
+and claim-specific support/validator roots; it does not already establish that
+full mechanism.
 
-Let `B` be the first `anchor_width` claim tokens. A second dynamic program sums
-all evidence-to-sink path products whose first visit to `B` occurs before the
-sink. This is `evidence_reanchor_flow`. It is genuinely global: a chain
-`evidence -> boundary -> later response -> sink` can score highly when the
-direct evidence-to-sink edge is zero.
+## Optional whole-evidence controls
 
-## What is frozen before labels
+`--causal-cuts` adds two reruns:
 
-For every response token, artifacts save functional and attention-only incoming
-shares from evidence, other prompt tokens, and response history. For every
-label-free sentence-like claim proxy, they save:
+- delete evidence messages into response queries;
+- delete evidence messages into every query.
 
-- total evidence path mass reaching the claim sink;
-- evidence path mass crossing the first claim tokens;
-- prior-response-seeded path mass through the same boundary;
-- direct evidence-to-sink mass;
-- bag-of-edges evidence mass inside the claim;
-- the boundary reread pulse;
-- a role/lag-preserving endpoint rewire;
-- an all-layer graph and a middle-third functional control from the same pass.
+Both interventions happen after softmax without renormalization. MLPs stay
+active, so parametric knowledge can compensate. These controls measure whether
+the fixed answer currently depends on attention-mediated evidence; they are not
+called localized re-anchor-circuit interventions.
 
-The pilot boundary splitter uses punctuation/newlines only. It is not a semantic
-claim parser. Controlled atomic-claim annotations can replace it without
-changing the graph algorithm.
+## Memory and runtime
 
-## Graph necessity audit
+Attention scores, causal masks, and deletion masks are all constructed by query
+chunk. `W_O` Gram matrices are built in four-head blocks, cached once per model
+on CPU, and reused across samples. Route summaries remain on GPU for one layer
+and transfer to CPU once per layer, then each sample is saved and released
+before the next sample.
 
-On a small label-blind, source-disjoint subset, the strongest evidence-connected
-claim in each audited sample receives four real reruns:
-
-1. remove the dominant functional global-flow backbone;
-2. remove the attention-only backbone;
-3. remove the same number of individually largest-capacity edges without using
-   path connectivity;
-4. remove source endpoints matched by source role and approximate lag.
-
-Each token edge `s -> p` is mapped back to native attention coordinates
-`query=p-1, source=s`. The gate is applied after softmax and before the Value
-sum, without renormalization, and every later Transformer operation is rerun.
-The graph claim survives only if the functional backbone causes a larger
-absolute margin change than the attention, edge-bag, and matched-endpoint
-controls.
-
-## Evaluation and visualizations
-
-Hallucination labels are opened only after graph artifacts and path cuts are
-saved. The preregistered discovery ranking is
-
-\[
--\operatorname{evidence\_reanchor\_flow},
-\]
-
-with separate attention, middle-layer, direct, bag, reread, and rewired
-controls. QA, Summary, and Data2txt are reported separately. Figures show:
-
-- the normal evidence-to-history transition;
-- claim-aligned evidence reread and history curves;
-- claim-level global re-anchor flow versus controls;
-- the full source-to-predicted-token DAG and the audited backbone.
-
-This is a mechanism-discovery experiment, not a final detector. Stop the graph
-claim if global flow does not outperform direct/bag/rewired controls, or if its
-selected backbone is not more influential under real reruns.
+The default `--query-chunk 64` is usually appropriate for a 24 GiB GPU. Use 32
+when the GPU is shared.
 
 ## Run
 
-From the repository root:
+Smoke test:
 
 ```bash
-bash experiments/reanchor_flow/run_all.sh --smoke
+bash experiments/reanchor_flow/run_all.sh --smoke --query-chunk 32
 ```
 
-Pilot:
+Twenty samples per task, observational audit only:
 
 ```bash
 bash experiments/reanchor_flow/run_all.sh \
   --limit 20 \
-  --audit-limit 3 \
-  --plot-limit 3 \
-  --output experiments/reanchor_flow/outputs/pilot
+  --query-chunk 64 \
+  --output experiments/reanchor_flow/outputs/pilot20_v3
 ```
 
-A full test-split run omits `--limit`. Outputs are written to:
-
-```text
-<output>/results/<Task>/<sample>.npz
-<output>/figures/<Task>/<sample>.png
-<output>/reports/<task>/report.json
-<output>/reports/<task>/claim_aligned_reanchor.png
-<output>/run_manifest.json
-```
-
-## Tests
+Full audit:
 
 ```bash
-python -m pytest -q experiments/reanchor_flow/tests
-python -m compileall -q experiments/reanchor_flow
+bash experiments/reanchor_flow/run_all.sh --query-chunk 64
+```
+
+Add the expensive evidence-dependence controls only to a balanced pilot:
+
+```bash
+bash experiments/reanchor_flow/run_all.sh \
+  --limit 20 \
+  --query-chunk 32 \
+  --causal-cuts \
+  --output experiments/reanchor_flow/outputs/causal_pilot_v3
+```
+
+The default output is deliberately new:
+
+```text
+experiments/reanchor_flow/outputs/<model>/phenomenon_v3/
+  results/<Task>/<sample>.npz
+  figures/<Task>/<sample>.png
+  reports/<task>/phenomenon_report.json
+  reports/<task>/phenomenon_audit.png
+  run_manifest.json
+```
+
+Schema-v1/v2 outputs are rejected instead of being silently mixed with v3.
+
+## Interpret the report
+
+| Result | Valid conclusion |
+|---|---|
+| H1 fails | Raw prompt/history drift was source-pool geometry, or this observer has no preference drift. |
+| H1 passes, H2 fails | Global drift exists, but no sentence-boundary evidence-specific reset is detected. |
+| H2 passes, H3 fails | A boundary rhythm exists, but missed entry is not supported as the hallucination mechanism. |
+| H2 passes, H3 inconclusive | Increase exact-boundary positive/source counts before detector design. |
+| H1-H3 pass | Align atomic claims to support/validators and test localized integration, overwrite, and readout interventions. |
+
+An interval crossing zero is `inconclusive`, never evidence that the mechanism
+does not exist. If generator and observer differ, generation-mechanism statuses
+are withheld; only teacher-forced observer processing is reported.
+
+## Verify
+
+```bash
+python -m pytest -q \
+  experiments/reanchor_flow/tests \
+  experiments/common/tests/test_llama_message_intervention.py
+python -m compileall -q experiments/common experiments/reanchor_flow
 bash -n experiments/reanchor_flow/run_all.sh
 ```

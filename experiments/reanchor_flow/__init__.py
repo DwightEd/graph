@@ -1,1 +1,1 @@
-"""Claim-boundary re-anchor flow discovery."""
+"""Exposure-adjusted claim-boundary re-anchor audit."""

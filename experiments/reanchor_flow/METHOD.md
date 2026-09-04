@@ -1,142 +1,231 @@
-# Method: claim-boundary re-anchor flow
+# Method: exposure-adjusted re-anchor audit
 
-## 1. Pre-registered observations
+## 1. What this experiment can decide
 
-The experiment tests three observations, not a learned feature combination.
+The audit separates four questions that a claim-level AUROC collapses:
 
-1. During ordinary continuation, evidence/prompt incoming mass should decline
-   while response-history mass rises.
-2. At a factual claim boundary, correct generation should exhibit an evidence
-   reread pulse and an evidence-seeded global path through the first claim
-   tokens to the claim sink.
-3. Hallucinated claims should more often lack this re-anchor flow. The graph
-   interpretation is accepted only if it survives attention-only, direct-edge,
-   edge-bag, middle-layer, and role/lag-preserving rewiring controls.
+1. Does ordinary continuation develop a preference for response history over
+   prompt evidence?
+2. Does a new content boundary interrupt that preference with an
+   evidence-specific read?
+3. Is that entry response weaker when a hallucination begins at the boundary?
+4. Is the output dependent on attention-mediated external evidence even while
+   MLP parametric knowledge remains available?
 
-## 2. Causal coordinates
+The first three are preregistered observational tests. The fourth is an
+optional whole-evidence dependence control. None is called a full causal graph.
 
-For response token `x[p]`, the predictive query is `q=p-1`. A query-row message
-is lifted into the event edge `s -> p`, never `s -> q`. Thus the token just
-generated at `p` can become a source for later predicted tokens, while no fake
-self-loop is introduced at the query coordinate.
+## 2. Exact prediction coordinates
 
-## 3. Edge capacity from the same frozen model
-
-For query head `h` and its actual GQA KV head `g(h)`, define
+If response token $y_t$ occupies absolute position $p_t$, its predictive
+state is at
 
 \[
-\kappa_{l,h,q,s}
-=A_{l,h,q,s}\|W_l^{O,[h]}V_{l,g(h),s}\|_2.
+q_t=p_t-1.
 \]
 
-The main graph averages this capacity over all heads and layers. This matches
-the endpoint-level path cuts, which remove the selected source-target pair in
-all layers and heads. The same forward also produces two controls: an all-layer
-attention graph and a middle-third functional graph. Target columns are
-normalized over causal sources to form `W`.
+Every reported event is indexed by $p_t$, while the observed attention row is
+$q_t$. Evaluation verifies both $q_t+1=p_t$ and the target token ID.
 
-The capacity records residual-write magnitude, not support or veto. Signed
-causal meaning is supplied only by the real path-deletion reruns.
+The removed v1 graph treated $p_t$ as though the predictive state at $q_t$
+were written into token $p_t$. Teacher forcing does not contain that edge.
+It also averaged layers before traversal, permitting paths whose layer order was
+impossible. Its scalar can be reproduced as a historical result, but it is not
+a Transformer computation path.
 
-## 4. Target-conditioned global flow
+## 3. Observed message and availability null
 
-For claim sink `t`, backward path potential is
+For layer $l$, query head $h$, its actual GQA KV head $g(h)$, query $q$,
+and source $s$, define the transported-message magnitude
 
 \[
-h_t(i)=\sum_{k=i+1}^{t}W_{i,k}h_t(k),\qquad h_t(t)=1.
+c_{l,h,q,s}
+=
+A_{l,h,q,s}
+\left\lVert W_l^{O,[h]}V_{l,g(h),s}\right\rVert_2.
 \]
 
-It equals the sum of products over all directed paths from `i` to `t`. For the
-boundary set `B` containing the first claim tokens, define
+For role $r\in\{E,O,H\}$, corresponding to evidence, other prompt, and
+response history, the observed functional share is
 
 \[
-g_t(i)=
-\begin{cases}
-h_t(i),&i\in B,\\
-\sum_{k>i}W_{i,k}g_t(k),&i\notin B.
-\end{cases}
+R^r_{l,p}
+=
+\frac{\sum_h\sum_{s\in r}c_{l,h,p-1,s}}
+{\sum_h\sum_{s\le p-1}c_{l,h,p-1,s}}.
 \]
 
-Then
+Raw attention role share is retained as a selection-only control.
+
+### Why raw shares are not a phenomenon test
+
+At response event $t$, exactly $t$ history tokens are available. Under
+uniform attention,
 
 \[
-F_E(B\to t)=|E|^{-1}\sum_{s\in E}g_t(s)
+R^H(t)=\frac{t}{n_{prompt}+t},\qquad
+R^E(t)=\frac{n_E}{n_{prompt}+t}.
 \]
 
-is the evidence-to-sink path mass that first crosses the claim boundary set.
-The closure fraction divides this by
-`|E|^{-1} sum_s h_t(s)`. A response-seeded version is reported separately; it
-is not treated as additive provenance because response nodes can themselves
-carry evidence.
-
-## 5. Claim proxy and local observations
-
-The pilot uses sentence-like spans defined by decoded punctuation and newlines.
-The first `anchor_width` tokens form `B`; the last token is the claim sink.
-This boundary is label-free and route-independent, but not a semantic claim
-annotation. Stronger controlled experiments should replace it with fixed
-atomic claims and support/validator spans.
-
-For every response token, the graph also reports incoming evidence, other
-prompt, and response-history shares. The claim-start reread pulse subtracts the
-median evidence inflow over the preceding fixed window from evidence inflow at
-the boundary.
-
-## 6. Structural controls
-
-- **Attention:** identical DAG and flow algorithm, edge weights from `A` only.
-- **Middle functional:** the same functional capacity using the middle third of
-  layers, matching the layer choice in FlowTracer-style analyses.
-- **Direct:** one-hop evidence mass entering the claim sink.
-- **Bag:** average evidence edge mass across claim tokens, without path
-  incidence.
-- **Rewire:** within each target, permute edge weights among sources with the
-  same evidence/prompt/response role and logarithmic lag bin.
-
-All are evaluated on the same claims. A graph gain is meaningful only when its
-source-cluster bootstrap interval is positive.
-
-## 7. Causal path audit
-
-For a claim sink, the Doob-conditioned transition is
+Thus history rises and evidence falls without any learned routing change. v3
+constructs a layer- and event-specific null. For attention, it is the visible
+token fraction. For functional routing it is
 
 \[
-P_t(i,k)=\frac{W_{i,k}h_t(k)}{h_t(i)}.
+B^r_{l,p}
+=
+\frac{
+\sum_{s\in r,\,s\le p-1}\sum_h
+\left\lVert W_l^{O,[h]}V_{l,g(h),s}\right\rVert_2
+}{
+\sum_{s\le p-1}\sum_h
+\left\lVert W_l^{O,[h]}V_{l,g(h),s}\right\rVert_2
+}.
 \]
 
-Uniform evidence-source flow is propagated through `P_t`; the highest edge
-flows covering a fixed mass define a functional backbone. Its token endpoint
-pairs are removed in the original model at `query=p-1`, post-softmax and
-pre-Value-sum. The same model then recomputes every downstream residual,
-attention, and MLP operation. Attention-backbone, top-capacity edge-bag, and
-role/lag-matched endpoint masks are rerun identically.
-
-Graph structure is causally supported only when
+The primary role enrichment is
 
 \[
-|\Delta\mu_{functional}|>
-|\Delta\mu_{attention}|,
-|\Delta\mu_{bag}|,
-|\Delta\mu_{matched}|.
+L^r_{l,p}=\log\frac{R^r_{l,p}+\epsilon}{B^r_{l,p}+\epsilon}.
 \]
 
-No hallucination label participates in selecting audited sources, claims, or
-paths.
+The main evidence variable additionally removes a generic prompt return:
 
-## 8. Scope and stopping rules
+\[
+S_{l,p}=L^E_{l,p}-L^O_{l,p}.
+\]
 
-The experiment can establish a recurring global structural correlate and test
-whether paths selected by the graph matter to the observer model. It does not
-yet distinguish support facts from validator constraints, isolate MLP
-parametric knowledge, or recover a different generator's original free
-trajectory.
+So $S>0$ means a preference for RAG evidence beyond the instruction,
+question, BOS, and other prompt content. Layer indices are never collapsed
+before these quantities are computed.
 
-Stop or narrow the claim when any of the following occurs:
+## 4. Pre-outcome event coordinate
 
-- correct claim boundaries do not show a reproducible evidence reread pulse
-  over mid-claim controls;
-- functional global flow does not beat direct, bag, attention, and rewired
-  controls;
-- role/lag rewiring preserves the result;
-- the selected functional backbone is no more influential than matched cuts;
-- the effect exists only in one task and fails to transfer.
+For a boundary at response index $b$, define its entry change using only the
+current predictor and earlier events:
+
+\[
+J_S(b)
+=
+S_b-\frac1w\sum_{k=-w}^{-1}S_{b+k},\qquad w=5.
+\]
+
+At $b$, the model query is $q=b-1$; it has not seen the token being
+predicted. This is the primary H2/H3 statistic. A three-token post-window and a
+longer event curve are descriptive only: after offset zero, generated tokens
+have entered response history and may be consequences rather than causes.
+
+Scalar inclusion requires only the scalar window. Plot-window truncation never
+removes an otherwise valid scalar event.
+
+## 5. Hypotheses
+
+### H1: exposure-adjusted preference drift
+
+For every fully clean response, compare the last and first thirds of $L^E$ and $L^H$.
+The preregistered signs are
+
+\[
+\Delta L^E<0,\qquad \Delta L^H>0.
+\]
+
+Raw share changes are reported with a warning and cannot support H1.
+
+### H2: natural-boundary evidence specificity
+
+The label-free splitter records whether a span began at response start, after
+natural punctuation, or after a length cap. Length-forced chunks are excluded.
+A clean natural boundary is compared with up to three complete local-control
+positions distributed inside the same span:
+
+\[
+D_{clean}=J_S(b_{boundary})-J_S(b_{inside}).
+\]
+
+The expected sign is $D_{clean}>0$. History release, the three-token pulse,
+and early/middle/late layer bands are secondary descriptions.
+
+This is a sentence-boundary proxy, not yet an atomic factual-claim test.
+
+### H3: missed entry closed against H2
+
+The primary positive group contains annotation runs whose first hallucinated
+token occurs exactly at a natural boundary. The test is
+
+\[
+M=
+\mathbb E[J_S(b)\mid hallucination\ starts\ at\ b]
+-
+\mathbb E[J_S(b)\mid clean\ boundary],
+\]
+
+with expected $M<0$. Because each $J_S$ is already current-minus-past, this
+is a difference-in-differences across event time and correctness group. It uses
+no token after the error begins.
+
+Each exact-onset boundary is matched to a clean natural boundary in the same
+response within a response-position caliper; matching prefers the same
+preceding punctuation token. Only pre-event matching variables are used. H3 status is
+withheld unless H2 is independently supported: without a normal boundary
+re-anchor phenomenon there is nothing well-defined to call "missed".
+
+Onsets within the first three tokens and late onsets are reported separately.
+They never enter the primary H3 status. A second analysis matches every
+hallucination onset to a clean token within the same response. Token identity is
+used only inside a position caliper; otherwise the nearest position inside the
+same caliper wins. This
+matched 1:1 analysis is exploratory, and its AP is not comparable with detector
+AP at natural prevalence.
+
+## 6. Statistics and scope gate
+
+Effects are averaged within source before inference. Whole sources are the
+bootstrap unit. Reports contain event/source counts, equal-source estimates,
+95% source-bootstrap intervals, and sign-flip tests where applicable.
+
+- `supported`: the full interval has the preregistered sign;
+- `contradicted`: the full interval has the opposite sign;
+- `inconclusive`: otherwise, including insufficient independent sources.
+
+If generator and observer differ, the data only show how the observer processes
+a fixed answer under teacher forcing. Observer statistics remain visible, but
+all generation-mechanism statuses become `not_tested_for_generation`.
+
+## 7. Whole-evidence dependence controls
+
+Optional post-softmax gates remove evidence messages without renormalizing
+attention:
+
+\[
+A_{q,s}V_s\longrightarrow 0\quad(s\in E).
+\]
+
+The direct-response cut targets response queries. The global cut targets every
+query, including potential carriers. All MLPs remain active. For the fixed
+target-versus-runner margin,
+
+\[
+C_t=m_t^{full}-m_t^{cut}.
+\]
+
+$C_t>0$ means external attention-mediated evidence helps this target despite
+any parametric compensation. A small $C_t$ does not imply that RAG evidence is
+generally unnecessary, and these global cuts do not localize integration,
+overwrite, or readout silence.
+
+## 8. Decision to build a graph
+
+A global information-flow graph is justified only if H2 is stable and H3 has
+adequate exact-boundary power. The next graph must use layer-position residual
+states plus explicit attention, MLP, and readout stages, and it must add
+explanatory value beyond these event-local contrasts.
+
+The next causal experiment should separate:
+
+1. evidence entry;
+2. support/validator integration;
+3. persistence versus prior/history overwrite;
+4. residual evidence that is silent at final readout.
+
+If graph connectivity, cuts, or path interactions do not outperform matched
+local summaries, the graph has not earned a role in the method.

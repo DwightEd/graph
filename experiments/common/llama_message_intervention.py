@@ -34,6 +34,7 @@ class ForwardCache:
     full_margin: Tensor
     baseline_target_logprob: Tensor
     baseline_entropy: Tensor
+    attention_query_chunk: int | None
 
 
 @dataclass(frozen=True)
@@ -111,22 +112,39 @@ def position_embeddings(model: Any, hidden: Tensor) -> tuple[Tensor, Tensor]:
 def deleted_edges(
     gate: MessageGate | None,
     layer: int,
-    tokens: int,
+    query_begin: int,
+    query_end: int,
+    sources: int,
     device: torch.device,
 ) -> Tensor | None:
     if gate is None:
         return None
-    deleted = torch.zeros(tokens, tokens, dtype=torch.bool, device=device)
+    deleted = torch.zeros(
+        query_end - query_begin,
+        sources,
+        dtype=torch.bool,
+        device=device,
+    )
     if gate.source_mask is not None:
-        source_edges = gate.source_mask.to(device=device, dtype=torch.bool)[None]
+        source_edges = gate.source_mask[:sources].to(
+            device=device,
+            dtype=torch.bool,
+        )[None]
         if gate.source_targets is not None:
-            targets = gate.source_targets.to(device=device, dtype=torch.bool)[:, None]
+            targets = gate.source_targets[query_begin:query_end].to(
+                device=device,
+                dtype=torch.bool,
+            )[:, None]
             source_edges = targets & source_edges
         deleted |= source_edges
     if layer < gate.split_layer and gate.early_edges is not None:
-        deleted |= gate.early_edges.to(device=device, dtype=torch.bool)
+        deleted |= gate.early_edges[
+            query_begin:query_end, :sources
+        ].to(device=device, dtype=torch.bool)
     if layer >= gate.split_layer and gate.late_edges is not None:
-        deleted |= gate.late_edges.to(device=device, dtype=torch.bool)
+        deleted |= gate.late_edges[
+            query_begin:query_end, :sources
+        ].to(device=device, dtype=torch.bool)
     return deleted if deleted.any() else None
 
 
@@ -140,33 +158,76 @@ def gated_attention(
     *,
     gate: MessageGate | None = None,
     observer: AttentionObserver | None = None,
+    query_chunk: int | None = None,
 ) -> Tensor:
     """Compute eager attention and optionally remove selected Value messages."""
 
     key = repeat_kv(key, module.num_key_value_groups)
     value = repeat_kv(value, module.num_key_value_groups)
-    probability = torch.matmul(query, key.transpose(2, 3)) * scaling
-    if attention_mask is not None:
-        probability = probability + attention_mask[..., : key.shape[-2]]
-    probability = probability.softmax(dim=-1, dtype=torch.float32).to(query.dtype)
-    probability = F.dropout(
-        probability,
-        p=float(getattr(module, "attention_dropout", 0.0)),
-        training=module.training,
-    )
+    queries = query.shape[-2]
+    sources = key.shape[-2]
+    chunk = queries if query_chunk is None else int(query_chunk)
+    if chunk < 1:
+        raise ValueError("attention query chunk must be positive")
 
-    if observer is not None:
-        observer(module.layer_idx, probability, value, module.o_proj.weight)
+    outputs = []
+    source_position = torch.arange(sources, device=query.device)
+    for begin in range(0, queries, chunk):
+        end = min(begin + chunk, queries)
+        probability = torch.matmul(
+            query[:, :, begin:end], key.transpose(2, 3)
+        ) * scaling
+        if attention_mask is None:
+            future = source_position[None] > torch.arange(
+                begin, end, device=query.device
+            )[:, None]
+            probability = probability.masked_fill(
+                future[None, None], torch.finfo(probability.dtype).min
+            )
+        else:
+            if attention_mask.shape[-2] == 1:
+                chunk_mask = attention_mask[..., :, :sources]
+            else:
+                chunk_mask = attention_mask[..., begin:end, :sources]
+            probability = probability + chunk_mask
+        probability = probability.softmax(dim=-1, dtype=torch.float32).to(query.dtype)
+        probability = F.dropout(
+            probability,
+            p=float(getattr(module, "attention_dropout", 0.0)),
+            training=module.training,
+        )
 
-    deleted = deleted_edges(
-        gate,
-        module.layer_idx,
-        probability.shape[-1],
-        probability.device,
-    )
-    if deleted is not None:
-        probability = probability.masked_fill(deleted[None, None], 0)
-    return torch.matmul(probability, value).transpose(1, 2).contiguous()
+        if observer is not None:
+            observe_chunk = getattr(observer, "observe_chunk", None)
+            if callable(observe_chunk):
+                observe_chunk(
+                    module.layer_idx,
+                    begin,
+                    probability,
+                    value,
+                    module.o_proj.weight,
+                )
+            elif begin == 0 and end == queries:
+                observer(module.layer_idx, probability, value, module.o_proj.weight)
+            else:
+                raise TypeError(
+                    "chunked attention requires an observer with observe_chunk()"
+                )
+
+        deleted = deleted_edges(
+            gate,
+            module.layer_idx,
+            begin,
+            end,
+            sources,
+            query.device,
+        )
+        if deleted is not None:
+            probability = probability.masked_fill(
+                deleted[None, None], 0
+            )
+        outputs.append(torch.matmul(probability, value))
+    return torch.cat(outputs, dim=2).transpose(1, 2).contiguous()
 
 
 def llama_attention(
@@ -176,6 +237,7 @@ def llama_attention(
     rotary: tuple[Tensor, Tensor],
     gate: MessageGate | None,
     observer: AttentionObserver | None,
+    attention_query_chunk: int | None,
 ) -> Tensor:
     """Run one Llama attention block without a Transformers backend registry."""
 
@@ -210,6 +272,7 @@ def llama_attention(
         scaling,
         gate=gate,
         observer=observer,
+        query_chunk=attention_query_chunk,
     )
     return module.o_proj(output.reshape(batch, tokens, query_heads * head_dim))
 
@@ -223,10 +286,15 @@ def forward_layers(
     observer: AttentionObserver | None = None,
     save_inputs: dict[int, Tensor] | None = None,
     save_layers: set[int] | None = None,
+    attention_query_chunk: int | None = None,
 ) -> Tensor:
     """Run an exact full-sequence Llama decoder suffix."""
 
-    mask = causal_mask(hidden.shape[1], hidden.dtype, hidden.device)
+    mask = (
+        None
+        if attention_query_chunk is not None
+        else causal_mask(hidden.shape[1], hidden.dtype, hidden.device)
+    )
     rotary = position_embeddings(model, hidden)
     for layer_index, layer in enumerate(
         model.model.layers[start_layer:],
@@ -245,6 +313,7 @@ def forward_layers(
             rotary,
             gate,
             observer,
+            attention_query_chunk,
         )
         hidden = residual + attention_output
         hidden = hidden + layer.mlp(layer.post_attention_layernorm(hidden))
@@ -293,6 +362,7 @@ def baseline_forward(
     response_start: int,
     observer: AttentionObserver | None = None,
     checkpoint_layers: Sequence[int] = (0,),
+    attention_query_chunk: int | None = None,
 ) -> ForwardCache:
     """Capture a baseline and fixed target-versus-runner readout."""
 
@@ -315,6 +385,7 @@ def baseline_forward(
             observer=observer,
             save_inputs=layer_input,
             save_layers=checkpoints,
+            attention_query_chunk=attention_query_chunk,
         )
         response_hidden = hidden[0].index_select(0, query.to(device))
         runner_parts: list[Tensor] = []
@@ -365,6 +436,7 @@ def baseline_forward(
         full_margin=margin.cpu(),
         baseline_target_logprob=torch.cat(logprob_parts).cpu(),
         baseline_entropy=torch.cat(entropy_parts).cpu(),
+        attention_query_chunk=attention_query_chunk,
     )
 
 
@@ -423,6 +495,7 @@ def rerun_gate(
             checkpoint,
             gate=gate_to(gate, device),
             observer=observer,
+            attention_query_chunk=cache.attention_query_chunk,
         )
         response_hidden = hidden.index_select(1, cache.query.to(device))
         margin = torch.einsum(

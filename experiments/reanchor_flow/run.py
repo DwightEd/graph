@@ -1,4 +1,4 @@
-"""Foreground CLI for claim-boundary re-anchor flow discovery."""
+"""Foreground CLI for the re-anchor phenomenon audit."""
 
 from __future__ import annotations
 
@@ -35,7 +35,12 @@ DTYPE = {
 def output_root(args) -> Path:
     if args.output:
         return args.output
-    root = Path(__file__).resolve().parent / "outputs" / args.model.name
+    root = (
+        Path(__file__).resolve().parent
+        / "outputs"
+        / args.model.name
+        / "phenomenon_v3"
+    )
     return root / "smoke" if args.smoke else root
 
 
@@ -62,17 +67,14 @@ def analyze(args) -> dict:
         output_root(args),
         model_path=str(args.model),
         model_id=args.model.name,
+        dtype=args.dtype,
         limit=limit,
-        audit_limit=args.audit_limit,
         plot_limit=args.plot_limit,
         max_events=max_events,
         query_chunk=args.query_chunk,
         min_claim_tokens=args.min_claim_tokens,
         max_claim_tokens=args.max_claim_tokens,
-        anchor_width=args.anchor_width,
-        reread_window=args.reread_window,
-        backbone_cover=args.backbone_cover,
-        backbone_edges=args.backbone_edges,
+        causal_cuts=args.causal_cuts,
     )
     del model, tokenizer
     gc.collect()
@@ -88,13 +90,33 @@ def evaluate(args) -> dict:
         args.cache / "test",
         bootstrap=args.bootstrap,
         seed=args.seed,
+        pre=args.pre_window,
+        post=args.post_window,
+        curve_low=args.curve_low,
+        curve_high=args.curve_high,
     )
     for task, report in reports.items():
-        primary = report["metrics"][report["primary"]]
+        status = report["hypothesis_status"]
+        observer = report["observer_hypothesis_status"]
+        scope = (
+            "generation"
+            if report["model_scope"]["generation_claims_allowed"]
+            else "observer-only; generation status withheld"
+        )
+        boundary = report["correct_boundary_vs_within_claim"]["evidence_specificity"]
+        missed = report["missed_reanchor_at_claim_boundary"]["exact_boundary_primary"]
         print(
-            f"{task:9s} claims={report['claims']} "
-            f"positives={report['hallucinated_claims']} "
-            f"AUROC={primary['auroc']} AP={primary['average_precision']}"
+            f"{task:9s} scope={scope}\n"
+            f"  reported status={status}\n"
+            f"  observer H1={observer['H1_exposure_adjusted_preference_drift']} "
+            f"H2={observer['H2_natural_boundary_evidence_specificity']} "
+            f"H3={observer['H3_exact_boundary_missed_entry_association']}\n"
+            f"  clean boundary-minus-control={boundary['source_mean']} "
+            f"CI95={boundary['ci95']} n={boundary['events']}\n"
+            f"  hallucinated-minus-clean boundary entry={missed['source_mean']} "
+            f"CI95={missed['ci95']} pairs={missed['matched_pairs']}/"
+            f"{missed['candidate_hallucinations']} sources={missed['sources']}\n"
+            f"  next: {report['recommended_next_step']}"
         )
     return reports
 
@@ -112,22 +134,36 @@ def add_common(command) -> None:
     command.add_argument("--device", default="cuda:0")
     command.add_argument("--dtype", choices=tuple(DTYPE), default="bfloat16")
     command.add_argument("--limit", type=int)
-    command.add_argument("--audit-limit", type=int, default=2)
     command.add_argument("--plot-limit", type=int, default=3)
     command.add_argument("--max-events", type=int)
-    command.add_argument("--query-chunk", type=int, default=128)
+    command.add_argument(
+        "--query-chunk",
+        type=int,
+        default=64,
+        help="queries per attention matmul; lower this if GPU memory is tight",
+    )
     command.add_argument("--min-claim-tokens", type=int, default=2)
     command.add_argument("--max-claim-tokens", type=int, default=96)
-    command.add_argument("--anchor-width", type=int, default=3)
-    command.add_argument("--reread-window", type=int, default=5)
-    command.add_argument("--backbone-cover", type=float, default=0.8)
-    command.add_argument("--backbone-edges", type=int, default=32)
+    command.add_argument(
+        "--causal-cuts",
+        action="store_true",
+        help="also rerun direct and global evidence-source cuts (three forwards total)",
+    )
     command.add_argument("--smoke", action="store_true")
+
+
+def add_evaluation(command) -> None:
+    command.add_argument("--bootstrap", type=int, default=1000)
+    command.add_argument("--seed", type=int, default=2026)
+    command.add_argument("--pre-window", type=int, default=5)
+    command.add_argument("--post-window", type=int, default=3)
+    command.add_argument("--curve-low", type=int, default=-5)
+    command.add_argument("--curve-high", type=int, default=10)
 
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
-        description="One-model claim re-anchor flow discovery"
+        description="Layer-resolved claim re-anchor phenomenon audit"
     )
     commands = root.add_subparsers(dest="command", required=True)
     analyze_command = commands.add_parser("analyze")
@@ -136,20 +172,43 @@ def parser() -> argparse.ArgumentParser:
 
     evaluate_command = commands.add_parser("evaluate")
     add_common(evaluate_command)
-    evaluate_command.add_argument("--bootstrap", type=int, default=400)
-    evaluate_command.add_argument("--seed", type=int, default=2026)
+    add_evaluation(evaluate_command)
     evaluate_command.set_defaults(handler=evaluate)
 
     all_command = commands.add_parser("all")
     add_common(all_command)
-    all_command.add_argument("--bootstrap", type=int, default=400)
-    all_command.add_argument("--seed", type=int, default=2026)
+    add_evaluation(all_command)
     all_command.set_defaults(handler=run_all)
     return root
 
 
+def validate_args(args) -> None:
+    for name in ("limit", "max_events"):
+        value = getattr(args, name, None)
+        if value is not None and value < 1:
+            raise ValueError(f"--{name.replace('_', '-')} must be positive")
+    if args.query_chunk < 1:
+        raise ValueError("--query-chunk must be positive")
+    if args.plot_limit < 0:
+        raise ValueError("--plot-limit cannot be negative")
+    if args.min_claim_tokens < 1 or args.max_claim_tokens < args.min_claim_tokens:
+        raise ValueError("claim token bounds are inconsistent")
+    if hasattr(args, "bootstrap"):
+        if args.bootstrap < 0:
+            raise ValueError("--bootstrap cannot be negative")
+        if args.pre_window < 1 or args.post_window < 1:
+            raise ValueError("event windows must be positive")
+        if args.curve_low >= 0 or args.curve_high < 0:
+            raise ValueError("event curve must straddle offset zero")
+
+
 def main() -> None:
-    args = parser().parse_args()
+    command_parser = parser()
+    args = command_parser.parse_args()
+    try:
+        validate_args(args)
+    except ValueError as error:
+        command_parser.error(str(error))
     args.handler(args)
 
 

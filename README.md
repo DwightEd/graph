@@ -1,27 +1,21 @@
-# Claim Re-Anchor Flow for Hallucination Analysis
+# Re-Anchor Phenomenon Audit
 
-当前现象发现主线位于 `experiments/reanchor_flow/`。它使用同一个冻结的
-Llama observer，在一次 teacher-forced forward 中构造 attention-only 与
-`A||W_OV||` token DAG，并研究新的事实 claim 是否重新接入 evidence：
+当前主线位于 `experiments/reanchor_flow/`。目标不是先调一个幻觉检测分数，而是依次检验：
 
-```text
-normal prompt -> response-history drift
-                    ↓
-claim-boundary evidence reread
-                    ↓
-evidence-seeded global flow through boundary anchors
-                    ↓
-claim sink
-```
+1. 正常生成是否从 prompt evidence 逐渐转向 response history；
+2. 非幻觉内容边界是否相对同句伪边界重新读取 evidence；
+3. 真实 hallucination span 的首 token 是否出现更弱的重锚定。
 
-对每个 claim，代码计算 FlowTracer-style backward potential、全局
-`evidence -> boundary -> sink` 路径质量，以及 direct、edge-bag、middle-layer、
-attention-only 和 role/lag-preserving rewire 对照。小规模 label-blind audit 会在
-同一模型中真实删除 graph-selected backbone，并与非连通强边和 matched endpoint
-比较。该实验先验证图结构是否必要，不预设最终 hallucination detector。
+旧版本的 `source token -> predicted token` 压平图已经退出主方法。预测 token `p` 的
+logit 来自 query state `q=p-1`，但该 state 不会在 teacher forcing 中写入 `p` 的
+hidden state；将 `p` 继续作为下一跳 carrier 会形成不存在的计算路径。跨 layer
+平均后再做 path rollout 也会拼接出违反层序的路径。
 
-`experiments/constraint_routing_rhythm/` 保留为 evidence-channel sensitivity 与
-两跳 relay baseline。它的 `ConstraintDeficit` 不作为 re-anchor-flow 的主分数。
+v3 保存每个 target token、每层的 evidence / other-prompt / history attention
+share、对应的 `A * ||W_O V||` message-magnitude share，以及两者的可见源 null。
+主变量是 `log(observed/null)`，因此 history token 数量机械增长不能伪造 H1；
+`evidence lift - other-prompt lift` 进一步排除了泛化 prompt 回看。H3 只用错误
+token 尚未进入上下文的 offset 0，并将 exact-boundary、near 与 late onset 分开。
 
 ## 一键运行
 
@@ -32,52 +26,59 @@ conda run --no-capture-output -n research \
   bash experiments/reanchor_flow/run_all.sh --smoke
 ```
 
-Pilot：
+先跑 20 个样本/任务的现象 pilot：
 
 ```bash
 conda run --no-capture-output -n research \
   bash experiments/reanchor_flow/run_all.sh \
     --limit 20 \
-    --audit-limit 3 \
-    --plot-limit 3 \
-    --output experiments/reanchor_flow/outputs/pilot
+    --query-chunk 64 \
+    --output experiments/reanchor_flow/outputs/pilot20_v3
 ```
 
-完整 test split 运行时去掉 `--limit`。
+`--query-chunk` 现在作用于 attention score/softmax 本身，真实降低显存峰值。GPU
+被共享时可改成 `--query-chunk 32`。
+
+只有当 H1-H3 值得继续时，再加入两次证据干预：
+
+```bash
+conda run --no-capture-output -n research \
+  bash experiments/reanchor_flow/run_all.sh \
+    --limit 20 \
+    --query-chunk 64 \
+    --causal-cuts \
+    --output experiments/reanchor_flow/outputs/causal_pilot
+```
+
+新默认结果目录为 `experiments/reanchor_flow/outputs/<model>/phenomenon_v3/`。
+availability null 是新的捕获量，旧 NPZ 无法可靠补算，因此 v1/v2 会被明确拒绝，
+不会静默混用。
 
 ## 模块责任
 
-| 路径 | 唯一责任 |
+| 路径 | 责任 |
 |---|---|
-| `research_dataset.py` | 统一数据入口与 evaluation-only labels 边界 |
-| `experiments/common/ragtruth_alignment.py` | RAGTruth task/source/evidence token 对齐 |
-| `experiments/common/llama_message_intervention.py` | registry-free Llama 前向、消息观察、post-softmax Value-message gate 与 suffix rerun |
-| `experiments/reanchor_flow/claims.py` | label-free claim proxy |
-| `experiments/reanchor_flow/routes.py` | 同一次前向归约 attention 与 `A||W_OV||` 路由 |
-| `experiments/reanchor_flow/graph.py` | `source token -> predicted token` DAG 与结构对照 |
-| `experiments/reanchor_flow/potential.py` | sink-conditioned path potential |
-| `experiments/reanchor_flow/flow.py` | re-anchor flow 与 dominant backbone |
-| `experiments/reanchor_flow/capture.py` | 单样本图视图和真实 path-cut 编排 |
-| `experiments/reanchor_flow/analyze.py` | label-free 遍历、保存与样本图 |
-| `experiments/reanchor_flow/evaluate.py` | 冻结 artifacts 后读取标签并评价 |
+| `experiments/common/llama_message_intervention.py` | Llama 前向、真正的 query chunk、message gate 和 rerun |
+| `experiments/reanchor_flow/routes.py` | 逐层、逐事件、逐 source-role 的消息统计 |
+| `experiments/reanchor_flow/claims.py` | label-free sentence-like boundary proxy |
+| `experiments/reanchor_flow/events.py` | 事件窗口、幻觉起点与同响应匹配对照 |
+| `experiments/reanchor_flow/capture.py` | 单样本 baseline 与可选 evidence cuts |
+| `experiments/reanchor_flow/analyze.py` | 流式遍历、逐样本落盘和显存释放 |
+| `experiments/reanchor_flow/signals.py` | artifact 一致性校验与 availability-adjusted 信号 |
+| `experiments/reanchor_flow/hypotheses.py` | H1-H3 对照、scope gate 与统计报告 |
+| `experiments/reanchor_flow/evaluate.py` | 流式加载 NPZ、标签开启与报告写盘 |
+| `experiments/reanchor_flow/metrics.py` | source-cluster 统计 |
+| `experiments/reanchor_flow/visualize.py` | layer/event 曲线与置信带 |
 | `experiments/reanchor_flow/run.py` | CLI |
 
-共享干预实现直接调用 Llama 层的 `q_proj/k_proj/v_proj/o_proj`、RMSNorm、residual
-和 MLP，不再依赖 Hugging Face 不同版本中变化的 `AttentionInterface`、
-`AttentionMaskInterface` 或 `ALL_ATTENTION_FUNCTIONS` 注册表。首次样本会用短前缀
-验证手写完整前向与模型原生前向闭合。
-
-## 测试
+## 验证
 
 ```bash
-python -m pytest -q experiments/common/tests
-python -m pytest -q experiments/reanchor_flow/tests
-python -m pytest -q experiments/constraint_routing_rhythm/tests
-python -m compileall -q experiments/common experiments/reanchor_flow \
-  experiments/constraint_routing_rhythm
+python -m pytest -q experiments/reanchor_flow/tests \
+  experiments/common/tests/test_llama_message_intervention.py
+python -m compileall -q experiments/common experiments/reanchor_flow
 bash -n experiments/reanchor_flow/run_all.sh
 ```
 
-合成测试只验证实现语义，不等于真实机制结论。正式结论仍取决于 full graph 是否
-稳定优于 attention、direct、bag、rewire，并且 graph-selected 连通路径的真实删除
-是否比同质量散边造成更大的输出变化。
+详见 `experiments/reanchor_flow/METHOD.md`。若 generator 与 observer 不同，报告只属于
+teacher-forced observer 对固定答案的处理机制，不能声称恢复了原生成模型的电路。
