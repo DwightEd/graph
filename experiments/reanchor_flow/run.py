@@ -36,7 +36,7 @@ DTYPE = {
 def output_root(args) -> Path:
     if args.output:
         return args.output
-    root = Path(__file__).resolve().parent / "outputs" / args.model.name / "mechanism_v6"
+    root = Path(__file__).resolve().parent / "outputs" / args.model.name / "mechanism_v7"
     return root / "smoke" if args.smoke else root
 
 
@@ -117,13 +117,21 @@ def evaluate(args) -> dict:
         print(
             f"{task:9s} samples={report['samples']} tokens={report['tokens']} "
             f"positives={report['positive_tokens']} prevalence={number(report['prevalence'])} "
-            f"mechanism_samples={mechanism['samples']} pairs={mechanism['onset_pairs']}"
+            f"mechanism_samples={mechanism['samples']} "
+            f"mechanism_sources={mechanism['sources']} "
+            f"pairs={mechanism['onset_pairs']} "
+            f"pair_sources={mechanism['onset_pair_sources']}"
         )
         print(
             "  H0 direct drift: "
             + effect("prompt_slope", shift["prompt_lift_slope"])
             + "  "
             + effect("history_slope", shift["history_lift_slope"])
+            + "  "
+            + effect(
+                "prompt_vs_history",
+                shift["conditional_prompt_history_log_odds_slope"],
+            )
         )
         print(
             "  H1 transition: "
@@ -131,13 +139,17 @@ def evaluate(args) -> dict:
             + "  "
             + effect("evidence", transition["evidence_delta"])
             + "  "
-            + effect("future", transition["future_influence"])
+            + effect("predictor_reuse", transition["predictor_reuse"])
+            + "  "
+            + effect("emitted_anchor", transition["emitted_token_anchor"])
         )
         print(
             "  H2 onset-clean: "
             + effect("evidence_entry", onset["evidence_delta"])
             + "  "
-            + effect("future_anchor", onset["future_influence"])
+            + effect("predictor_reuse", onset["predictor_reuse"])
+            + "  "
+            + effect("emitted_token_anchor", onset["emitted_token_anchor"])
         )
         if mechanism["samples"]:
             deep = mechanism["onset_minus_clean"]
@@ -157,6 +169,31 @@ def evaluate(args) -> dict:
                 + "  "
                 + effect("readout_gain", deep["evidence_readout_gain"])
             )
+            if deep["context_adoption_margin"]["events"]:
+                print(
+                    "  functional context: "
+                    + effect(
+                        "distribution_js", deep["context_distribution_js"]
+                    )
+                    + "  "
+                    + effect(
+                        "target_logprob_gain",
+                        deep["context_target_logprob_gain"],
+                    )
+                    + "  "
+                    + effect(
+                        "adoption_margin", deep["context_adoption_margin"]
+                    )
+                    + "  "
+                    + effect(
+                        "target_log_rank", deep["context_target_log_rank"]
+                    )
+                )
+        decisions = report["registered_decisions"]
+        print(
+            "  decisions: "
+            + " ".join(f"{name}={status}" for name, status in decisions.items())
+        )
     return reports
 
 

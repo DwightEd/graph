@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .events import match_onsets
+from .events import match_events, match_onsets
 from .stats import curve_ci, mean_ci, source_means
 
 BROAD_SIGNALS = (
@@ -12,7 +12,8 @@ BROAD_SIGNALS = (
     "nonlocal_delta",
     "evidence_delta",
     "route_change",
-    "future_influence",
+    "predictor_reuse",
+    "emitted_token_anchor",
 )
 MECHANISM_SIGNALS = (
     "evidence_effect",
@@ -21,7 +22,140 @@ MECHANISM_SIGNALS = (
     "history_effect",
     "evidence_readout_gain",
     "evidence_late_control_loss",
+    "context_distribution_js",
+    "context_target_logprob_gain",
+    "context_adoption_margin",
+    "context_target_log_rank",
 )
+
+
+def interval_direction(summary: dict, expected: str) -> str:
+    """Classify a preregistered sign without consulting its point estimate."""
+
+    low, high = summary.get("ci95", (None, None))
+    if low is None or high is None:
+        return "inconclusive"
+    if expected == "positive":
+        if low > 0:
+            return "supported"
+        if high < 0:
+            return "contradicted"
+    elif expected == "negative":
+        if high < 0:
+            return "supported"
+        if low > 0:
+            return "contradicted"
+    else:
+        raise ValueError("expected direction must be positive or negative")
+    return "inconclusive"
+
+
+def matched_onsets(row: dict) -> list[tuple[int, int]]:
+    prediction = np.asarray(row["prediction_position"], dtype=np.int64)
+    boundary = np.isin(
+        prediction,
+        np.asarray(row["sentence_boundary_position"], dtype=np.int64),
+    )
+    relative_position = np.linspace(0.0, 1.0, len(prediction))
+    return match_onsets(
+        row["label"],
+        row["target_token_id"],
+        covariates={
+            "relative_position": relative_position,
+            "entropy": np.asarray(row["baseline_entropy"], dtype=np.float64),
+            "target_logprob": np.asarray(
+                row["baseline_target_logprob"], dtype=np.float64
+            ),
+        },
+        boundary=boundary,
+    )
+
+
+def matched_transition_events(row: dict) -> list[tuple[int, int]]:
+    prediction = np.asarray(row["prediction_position"], dtype=np.int64)
+    boundary = np.isin(
+        prediction,
+        np.asarray(row["sentence_boundary_position"], dtype=np.int64),
+    )
+    return match_events(
+        row["transition_peak"],
+        row["target_token_id"],
+        covariates={
+            "relative_position": np.linspace(0.0, 1.0, len(prediction)),
+            "entropy": np.asarray(row["baseline_entropy"], dtype=np.float64),
+            "target_logprob": np.asarray(
+                row["baseline_target_logprob"], dtype=np.float64
+            ),
+        },
+        boundary=boundary,
+    )
+
+
+def matching_balance(
+    rows: list[dict],
+    *,
+    bootstrap: int,
+    seed: int,
+    transition: bool = False,
+) -> dict:
+    fields = {
+        "relative_position_gap": ([], []),
+        "entropy_gap": ([], []),
+        "target_logprob_gap": ([], []),
+    }
+    boundary_match, token_match, pairs = [], [], 0
+    match_sources: list[str] = []
+    for row in rows:
+        source = row["source_id"]
+        prediction = np.asarray(row["prediction_position"], dtype=np.int64)
+        relative = np.linspace(0.0, 1.0, len(prediction))
+        entropy = np.asarray(row["baseline_entropy"], dtype=np.float64)
+        logprob = np.asarray(row["baseline_target_logprob"], dtype=np.float64)
+        token = np.asarray(row["target_token_id"])
+        boundary = np.isin(
+            prediction,
+            np.asarray(row["sentence_boundary_position"], dtype=np.int64),
+        )
+        pairs_for_row = (
+            matched_transition_events(row) if transition else matched_onsets(row)
+        )
+        for onset, clean in pairs_for_row:
+            pairs += 1
+            match_sources.append(source)
+            for name, values in (
+                ("relative_position_gap", relative),
+                ("entropy_gap", entropy),
+                ("target_logprob_gap", logprob),
+            ):
+                fields[name][0].append(abs(float(values[onset] - values[clean])))
+                fields[name][1].append(source)
+            boundary_match.append(float(boundary[onset] == boundary[clean]))
+            token_match.append(float(token[onset] == token[clean]))
+    return {
+        "pairs": pairs,
+        "sources": len(set(match_sources)),
+        **{
+            f"mean_absolute_{name}": mean_ci(
+                values,
+                sources,
+                repeats=bootstrap,
+                seed=seed + index,
+            )
+            for index, (name, (values, sources)) in enumerate(fields.items())
+        },
+        "boundary_match_fraction": mean_ci(
+            boundary_match,
+            match_sources,
+            repeats=bootstrap,
+            seed=seed + 10,
+        ),
+        "token_match_fraction": mean_ci(
+            token_match,
+            match_sources,
+            repeats=bootstrap,
+            seed=seed + 11,
+        ),
+    }
 
 
 def centered(values, center: int, radius: int) -> np.ndarray | None:
@@ -99,33 +233,72 @@ def coupling_population(rows: list[dict], kind: str, *, bootstrap: int, seed: in
 
 def normal_summary(rows: list[dict], *, bootstrap: int, seed: int) -> dict:
     correct = [row for row in rows if not np.asarray(row["label"], dtype=bool).any()]
-    prompt_slope, history_slope, sources = [], [], []
-    transition = {name: [] for name in ("prompt_delta", "evidence_delta", "future_influence")}
+    slopes = {
+        name: []
+        for name in (
+            "prompt_lift",
+            "history_lift",
+            "conditional_prompt_history_log_odds",
+            "raw_prompt_share",
+            "raw_history_share",
+        )
+    }
+    slope_sources = {name: [] for name in slopes}
+    transition = {
+        name: []
+        for name in (
+            "prompt_delta",
+            "evidence_delta",
+            "predictor_reuse",
+            "emitted_token_anchor",
+        )
+    }
     transition_sources = {name: [] for name in transition}
     transition_peaks = 0
+    transition_pairs = 0
     for row in correct:
         source = row["source_id"]
-        p = slope(row["prompt_lift"])
-        h = slope(row["history_lift"])
-        if np.isfinite(p) and np.isfinite(h):
-            prompt_slope.append(p)
-            history_slope.append(h)
-            sources.append(source)
+        candidates = {
+            "prompt_lift": row["prompt_lift"],
+            "history_lift": row["history_lift"],
+            "conditional_prompt_history_log_odds": (
+                np.asarray(row["prompt_lift"], dtype=np.float64)
+                - np.asarray(row["history_lift"], dtype=np.float64)
+            ),
+            "raw_prompt_share": row["prompt_share"],
+            "raw_history_share": row["history_share"],
+        }
+        for name, values in candidates.items():
+            value = slope(values)
+            if np.isfinite(value):
+                slopes[name].append(value)
+                slope_sources[name].append(source)
         peak = np.asarray(row["transition_peak"], dtype=bool)
         transition_peaks += int(peak.sum())
-        for name in transition:
-            value = circular_event_lift(row[name], peak)
-            if np.isfinite(value):
-                transition[name].append(value)
-                transition_sources[name].append(source)
+        pairs = matched_transition_events(row)
+        transition_pairs += len(pairs)
+        for event, clean in pairs:
+            for name in transition:
+                series = np.asarray(row[name], dtype=np.float64)
+                value = series[event] - series[clean]
+                if np.isfinite(value):
+                    transition[name].append(float(value))
+                    transition_sources[name].append(source)
+    direct_route_shift = {
+        f"{name}_slope": mean_ci(
+            values,
+            slope_sources[name],
+            repeats=bootstrap,
+            seed=seed + index,
+        )
+        for index, (name, values) in enumerate(slopes.items())
+    }
     return {
         "correct_samples": len(correct),
-        "direct_route_shift": {
-            "prompt_lift_slope": mean_ci(prompt_slope, sources, repeats=bootstrap, seed=seed),
-            "history_lift_slope": mean_ci(history_slope, sources, repeats=bootstrap, seed=seed + 1),
-        },
+        "direct_route_shift": direct_route_shift,
         "internal_transition": {
             "peaks": transition_peaks,
+            "matched_pairs": transition_pairs,
             **{
                 name: mean_ci(
                     transition[name],
@@ -153,6 +326,7 @@ def mechanism_summary(rows: list[dict], *, bootstrap: int, seed: int) -> dict:
     }
     curve_sources = {name: [] for name in curves}
     pairs = 0
+    pair_sources: set[str] = set()
     layer_count = 0
     for row in rows:
         source = row["source_id"]
@@ -161,10 +335,17 @@ def mechanism_summary(rows: list[dict], *, bootstrap: int, seed: int) -> dict:
         presence = np.asarray(row["evidence_state_presence"], dtype=float)
         control = np.asarray(row["evidence_state_control"], dtype=float)
         layer_count = max(layer_count, presence.shape[0])
-        for onset, clean in match_onsets(label, row["target_token_id"]):
+        for onset, clean in matched_onsets(row):
             pairs += 1
+            pair_sources.add(source)
             values = {"evidence_entry": entry}
-            values.update({name: np.asarray(row[name], dtype=float) for name in MECHANISM_SIGNALS})
+            values.update(
+                {
+                    name: np.asarray(row[name], dtype=float)
+                    for name in MECHANISM_SIGNALS
+                    if name in row
+                }
+            )
             for name, series in values.items():
                 difference = series[onset] - series[clean]
                 if np.isfinite(difference):
@@ -184,7 +365,9 @@ def mechanism_summary(rows: list[dict], *, bootstrap: int, seed: int) -> dict:
                     curve_sources[name].append(source)
     return {
         "samples": len(rows),
+        "sources": len({row["source_id"] for row in rows}),
         "onset_pairs": pairs,
+        "onset_pair_sources": len(pair_sources),
         "onset_minus_clean": {
             name: mean_ci(
                 effects[name], sources[name], repeats=bootstrap, seed=seed + index
@@ -211,7 +394,7 @@ def task_summary(rows: list[dict], *, bootstrap: int, seed: int, radius: int) ->
     for row in rows:
         source = row["source_id"]
         label = np.asarray(row["label"], dtype=bool)
-        pairs = match_onsets(label, row["target_token_id"])
+        pairs = matched_onsets(row)
         onset_pairs += len(pairs)
         for onset, clean in pairs:
             for name in BROAD_SIGNALS:
@@ -228,21 +411,67 @@ def task_summary(rows: list[dict], *, bootstrap: int, seed: int, radius: int) ->
                     clean_curves.append(negative)
                     curve_sources.append(source)
     offset = np.arange(-radius, radius + 1)
+    correct_rows = [
+        row for row in rows if not np.asarray(row["label"], dtype=bool).any()
+    ]
+    normal = normal_summary(rows, bootstrap=bootstrap, seed=seed)
+    shift = normal["direct_route_shift"]
+    transition = normal["internal_transition"]
+    onset_summary = {
+        name: mean_ci(
+            broad_effect[name], broad_source[name], repeats=bootstrap, seed=seed + 60 + index
+        )
+        for index, name in enumerate(BROAD_SIGNALS)
+    }
+    decisions = {
+        "H0_prompt_lift_decreases": interval_direction(
+            shift["prompt_lift_slope"], "negative"
+        ),
+        "H0_history_lift_increases": interval_direction(
+            shift["history_lift_slope"], "positive"
+        ),
+        "H1_generic_prompt_reentry": interval_direction(
+            transition["prompt_delta"], "positive"
+        ),
+        "H1_evidence_reentry": interval_direction(
+            transition["evidence_delta"], "positive"
+        ),
+        "H1_predictor_state_reuse": interval_direction(
+            transition["predictor_reuse"], "positive"
+        ),
+        "H1_emitted_token_future_coupling": interval_direction(
+            transition["emitted_token_anchor"], "positive"
+        ),
+        "H2_missed_evidence_entry": interval_direction(
+            onset_summary["evidence_delta"], "negative"
+        ),
+        "H2_predictor_state_reuse": interval_direction(
+            onset_summary["predictor_reuse"], "positive"
+        ),
+        "H2_emitted_token_anchor_association": interval_direction(
+            onset_summary["emitted_token_anchor"], "positive"
+        ),
+    }
     return {
         "samples": len(rows),
         "tokens": tokens,
         "positive_tokens": positives,
         "prevalence": positives / tokens if tokens else None,
         "onset_pairs": onset_pairs,
-        "normal": normal_summary(rows, bootstrap=bootstrap, seed=seed),
+        "normal": normal,
         "prompt_to_anchor": coupling_population(rows, "prompt", bootstrap=bootstrap, seed=seed + 50),
         "nonlocal_to_anchor": coupling_population(rows, "review", bootstrap=bootstrap, seed=seed + 51),
-        "onset_minus_matched_clean": {
-            name: mean_ci(
-                broad_effect[name], broad_source[name], repeats=bootstrap, seed=seed + 60 + index
-            )
-            for index, name in enumerate(BROAD_SIGNALS)
-        },
+        "onset_minus_matched_clean": onset_summary,
+        "matching_balance": matching_balance(
+            rows, bootstrap=bootstrap, seed=seed + 70
+        ),
+        "transition_matching_balance": matching_balance(
+            correct_rows,
+            bootstrap=bootstrap,
+            seed=seed + 71,
+            transition=True,
+        ),
+        "registered_decisions": decisions,
         "onset_evidence_curve": {
             "offset": offset.tolist(),
             "hallucination": curve_ci(

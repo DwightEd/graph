@@ -18,6 +18,7 @@ class RhythmSignals:
     history_lift: np.ndarray
     nonlocality: np.ndarray
     prompt_breadth: np.ndarray
+    predictor_reuse: np.ndarray
     future_influence: np.ndarray
     prompt_delta: np.ndarray
     evidence_delta: np.ndarray
@@ -147,6 +148,7 @@ def build_rhythm(
     history_lift = finite_layer_mean(trace.history_lift)
     nonlocality = finite_layer_mean(trace.nonlocality)
     prompt_breadth = finite_layer_mean(trace.prompt_breadth)
+    predictor_reuse = finite_layer_mean(trace.predictor_reuse)
     future_influence = finite_layer_mean(trace.future_influence)
 
     prompt_delta = rolling_delta(prompt_share, revisit_window)
@@ -173,6 +175,7 @@ def build_rhythm(
         history_lift=history_lift,
         nonlocality=nonlocality,
         prompt_breadth=prompt_breadth,
+        predictor_reuse=predictor_reuse,
         future_influence=future_influence,
         prompt_delta=prompt_delta,
         evidence_delta=evidence_delta,

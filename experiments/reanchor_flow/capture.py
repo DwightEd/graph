@@ -14,7 +14,7 @@ from .mechanism import capture_mechanism
 from .rhythm import build_rhythm
 from .routes import RouteAccumulator
 
-CAPTURE_SCHEMA = 6
+CAPTURE_SCHEMA = 7
 
 
 @dataclass(frozen=True)
@@ -91,7 +91,9 @@ def capture_sample(
         "model_id": model_id,
         "response_start": response_start,
         "query_position": cache.query,
+        "predictor_position": cache.query,
         "prediction_position": cache.query + 1,
+        "emitted_position": cache.query + 1,
         "target_token_id": cache.target,
         "baseline_target_logprob": cache.baseline_target_logprob,
         "baseline_entropy": cache.baseline_entropy,
@@ -104,7 +106,19 @@ def capture_sample(
         "nonlocality_layer": trace.nonlocality,
         "prompt_breadth_layer": trace.prompt_breadth,
         "route_change_layer": trace.route_change,
+        "predictor_reuse_layer": trace.predictor_reuse,
         "future_influence_layer": trace.future_influence,
+        "emitted_token_anchor_layer": trace.future_influence,
+        "head_attention_prompt_mass": trace.head["attention_prompt_mass"],
+        "head_attention_evidence_mass": trace.head["attention_evidence_mass"],
+        "head_attention_history_mass": trace.head["attention_history_mass"],
+        "head_prompt_transport_share": trace.head["prompt_share"],
+        "head_evidence_transport_share": trace.head["evidence_share"],
+        "head_history_transport_share": trace.head["history_share"],
+        "head_nonlocality": trace.head["nonlocality"],
+        "head_route_change": trace.head["route_change"],
+        "head_predictor_reuse": trace.head["predictor_reuse"],
+        "head_emitted_token_anchor": trace.head["future_influence"],
         "route_change": rhythm.route_change,
         "prompt_share": rhythm.prompt_share,
         "evidence_share": rhythm.evidence_share,
@@ -114,7 +128,9 @@ def capture_sample(
         "history_lift": rhythm.history_lift,
         "nonlocality": rhythm.nonlocality,
         "prompt_breadth": rhythm.prompt_breadth,
+        "predictor_reuse": rhythm.predictor_reuse,
         "future_influence": rhythm.future_influence,
+        "emitted_token_anchor": rhythm.future_influence,
         "prompt_delta": rhythm.prompt_delta,
         "evidence_delta": rhythm.evidence_delta,
         "nonlocal_delta": rhythm.nonlocal_delta,
@@ -152,6 +168,7 @@ def capture_sample(
             detail_evidence_head=trace.detail["evidence_head"],
             detail_nonlocal_head=trace.detail["nonlocal_head"],
             detail_route_change_head=trace.detail["route_change_head"],
+            detail_predictor_reuse_head=trace.detail["predictor_reuse_head"],
             detail_future_head=trace.detail["future_head"],
             token_text=decode_tokens(tokenizer, ids.numpy()),
             detail_prompt_evidence_mask=np.asarray(prompt_evidence_mask, dtype=bool),

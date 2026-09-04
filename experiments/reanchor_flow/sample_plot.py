@@ -61,7 +61,12 @@ def save_sample_figure(
             "prompt re-entry": robust_z(result["prompt_delta"]),
             "evidence re-entry": robust_z(result["evidence_delta"]),
             "nonlocal review": robust_z(result["nonlocal_delta"]),
-            "future influence": robust_z(result["future_influence"]),
+            "predictor reuse": robust_z(
+                result.get("predictor_reuse", np.full(len(event), np.nan))
+            ),
+            "emitted-token anchor": robust_z(
+                result.get("emitted_token_anchor", result["future_influence"])
+            ),
         }
         for name, values in curves.items():
             axes[0, 1].plot(event, values, label=name)
@@ -90,9 +95,9 @@ def save_sample_figure(
         )
         axes[0, 1].scatter(
             np.flatnonzero(anchor_peak),
-            curves["future influence"][anchor_peak],
+            curves["emitted-token anchor"][anchor_peak],
             marker="^",
-            label="anchor peak",
+            label="emitted-anchor peak",
         )
         axes[0, 1].axhline(0, linewidth=0.6)
         axes[0, 1].set_title("B  Internal transition and re-entry", loc="left")

@@ -1,6 +1,6 @@
 import numpy as np
 
-from experiments.reanchor_flow.report import coupling_population
+from experiments.reanchor_flow.report import coupling_population, interval_direction
 
 
 def row(source, rate, null, peaks=2):
@@ -28,3 +28,11 @@ def test_population_summary_reports_source_level_lift():
     assert result["sample_lift"]["sources"] == 2
     assert result["sample_lift"]["mean"] == 0.25
     assert result["positive_source_fraction"] == 0.5
+
+
+def test_interval_direction_uses_ci_not_point_estimate():
+    positive = {"mean": -99.0, "ci95": [0.1, 0.4]}
+    crossing = {"mean": 2.0, "ci95": [-0.1, 0.4]}
+    assert interval_direction(positive, "positive") == "supported"
+    assert interval_direction(positive, "negative") == "contradicted"
+    assert interval_direction(crossing, "positive") == "inconclusive"

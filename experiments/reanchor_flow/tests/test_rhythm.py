@@ -24,6 +24,7 @@ def blank_trace(layers=2, events=12):
         history_lift=zero.copy(),
         nonlocality=zero.copy(),
         prompt_breadth=np.full((layers, events), 0.4),
+        predictor_reuse=zero.copy(),
         future_influence=zero.copy(),
     )
 

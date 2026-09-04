@@ -52,19 +52,27 @@ def save_population_figure(path: str | Path, report: dict) -> Path:
         axes[0, 0].set_ylabel("Exposure-adjusted slope")
 
         transition = report["normal"]["internal_transition"]
-        for index, name in enumerate(("prompt_delta", "evidence_delta", "future_influence")):
+        transition_names = (
+            "prompt_delta",
+            "evidence_delta",
+            "predictor_reuse",
+            "emitted_token_anchor",
+        )
+        for index, name in enumerate(transition_names):
             _point(axes[0, 1], index, transition[name], name.replace("_", " "))
         axes[0, 1].axhline(0, linewidth=0.7)
-        axes[0, 1].set_xticks(range(3), ["prompt", "evidence", "future"])
+        axes[0, 1].set_xticks(
+            range(4), ["prompt", "evidence", "predictor reuse", "emitted anchor"]
+        )
         axes[0, 1].set_title("B  At internal route transitions")
-        axes[0, 1].set_ylabel("Peak minus circular null")
+        axes[0, 1].set_ylabel("Event minus matched non-event")
 
         for index, key in enumerate(("prompt_to_anchor", "nonlocal_to_anchor")):
             summary = report[key]["sample_lift"]
             _point(axes[1, 0], index, summary, key.replace("_to_anchor", ""))
         axes[1, 0].axhline(0, linewidth=0.7)
         axes[1, 0].set_xticks([0, 1], ["prompt revisit", "nonlocal review"])
-        axes[1, 0].set_title("C  Event → future-anchor coupling")
+        axes[1, 0].set_title("C  Event → emitted-anchor coupling (sensitivity)")
         axes[1, 0].set_ylabel("Per-source lift over circular null")
 
         curve = report["onset_evidence_curve"]

@@ -47,10 +47,38 @@ def test_accumulator_keeps_token_and_layer_trajectories():
     assert result.prompt_share.shape == (2, 3)
     assert result.nonlocality.shape == (2, 3)
     assert result.route_change.shape == (2, 3)
+    assert result.predictor_reuse.shape == (2, 3)
     assert result.future_influence.shape == (2, 3)
+    assert result.head["route_change"].shape == (2, 2, 3)
+    assert result.head["attention_evidence_mass"].shape == (2, 2, 3)
+    assert result.head["route_change"].dtype == torch.float16
     assert result.detail["edge_map"].shape == (3, 5)
     assert result.detail["nonlocal_head"].shape == (2, 2, 3)
     assert torch.isfinite(result.future_influence[:, :2]).all()
+
+
+def test_predictor_reuse_is_not_emitted_token_anchor():
+    model = SimpleNamespace(config=SimpleNamespace(num_hidden_layers=1))
+    accumulator = RouteAccumulator(
+        model,
+        response_start=3,
+        prompt_evidence_mask=[True, False, False],
+        route_window=1,
+        future_horizon=2,
+        distance_scale=2,
+    )
+    probability = torch.zeros(1, 1, 6, 6)
+    for query in range(6):
+        probability[0, 0, query, query] = 1
+    # Event 0 is predicted at q=2 and emits p=3.  Both future rows reuse q=2
+    # while never reading p=3, so the two coordinates must disagree.
+    probability[0, 0, 3:5] = 0
+    probability[0, 0, 3:5, 2] = 1
+    value = torch.ones(1, 1, 6, 2)
+    accumulator.observe(0, probability, value, torch.eye(2))
+    result = accumulator.finish()
+    torch.testing.assert_close(result.predictor_reuse[0, 0], torch.tensor(1.0))
+    torch.testing.assert_close(result.future_influence[0, 0], torch.tensor(0.0))
 
 
 def test_nonlocality_is_continuous_expected_distance():

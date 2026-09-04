@@ -22,7 +22,9 @@ def draw_top_graph(axis, result: dict, label: np.ndarray) -> None:
     prompt_peak = np.asarray(result["prompt_peak"], dtype=bool)
     review_peak = np.asarray(result["review_peak"], dtype=bool)
     anchor_peak = np.asarray(result["anchor_peak"], dtype=bool)
-    future = np.asarray(result["future_influence"], dtype=float)
+    future = np.asarray(
+        result.get("emitted_token_anchor", result["future_influence"]), dtype=float
+    )
     events, _ = edge.shape
 
     target_candidates = (
@@ -122,7 +124,12 @@ def draw_top_graph(axis, result: dict, label: np.ndarray) -> None:
     scatter(transition_nodes, marker="o", s=response_sizes(transition_nodes), label="route transition")
     scatter(prompt_nodes_response, marker="D", s=response_sizes(prompt_nodes_response), label="prompt re-entry")
     scatter(review_nodes, marker="P", s=response_sizes(review_nodes), label="nonlocal review")
-    scatter(anchor_nodes, marker="^", s=response_sizes(anchor_nodes), label="future anchor")
+    scatter(
+        anchor_nodes,
+        marker="^",
+        s=response_sizes(anchor_nodes),
+        label="emitted-token anchor",
+    )
     hallucinated = [
         node
         for node in response_nodes

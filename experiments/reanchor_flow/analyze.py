@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gc
+import hashlib
 import json
 from pathlib import Path
 
@@ -20,6 +21,58 @@ from .artifacts import save_result
 from .capture import CAPTURE_SCHEMA, capture_sample
 
 MANIFEST = "run_manifest.json"
+
+
+def _hash_rank(*parts: str) -> bytes:
+    joined = "\x1f".join(parts).encode("utf-8")
+    return hashlib.sha256(joined).digest()
+
+
+def _select_mechanism_records(
+    records: list[tuple[str, str, str]], limit: int
+) -> set[str]:
+    """Select a deterministic, source-diverse mechanism subset per task."""
+
+    selected: set[str] = set()
+    for task in TASK_TYPES:
+        task_records = [record for record in records if record[0] == task]
+        by_source: dict[str, list[str]] = {}
+        for _, source_id, sample_id in task_records:
+            by_source.setdefault(source_id, []).append(sample_id)
+        primary = []
+        for source_id, sample_ids in by_source.items():
+            sample_id = min(
+                sample_ids,
+                key=lambda item: _hash_rank(task, source_id, item),
+            )
+            primary.append((source_id, sample_id))
+        primary.sort(key=lambda item: _hash_rank(task, item[0]))
+        chosen = [sample_id for _, sample_id in primary[:limit]]
+        if len(chosen) < limit:
+            remaining = sorted(
+                (
+                    (source_id, sample_id)
+                    for _, source_id, sample_id in task_records
+                    if sample_id not in chosen
+                ),
+                key=lambda item: _hash_rank(task, item[0], item[1]),
+            )
+            chosen.extend(sample_id for _, sample_id in remaining[: limit - len(chosen)])
+        selected.update(chosen)
+    return selected
+
+
+def _mechanism_sample_ids(dataset, limit: int, capture_limit: int | None) -> set[str]:
+    records: list[tuple[str, str, str]] = []
+    counts = {task: 0 for task in TASK_TYPES}
+    for dataset_sample_id in dataset.sample_ids:
+        sample = dataset[dataset_sample_id]
+        task = canonical_task_type(sample.task_type)
+        if capture_limit is None or counts[task] < capture_limit:
+            counts[task] += 1
+            records.append((task, str(sample.source_id), str(dataset_sample_id)))
+        sample.release_attention()
+    return _select_mechanism_records(records, limit)
 
 
 def save_json(path: Path, value: dict) -> None:
@@ -93,6 +146,7 @@ def analyze_split(
         "plot_limit": plot_limit,
         "plot_sample_id": plot_sample_id,
         "mechanism_limit_per_task": mechanism_limit,
+        "mechanism_sampling": "source_hash_v1",
     }
     manifest = open_manifest(output, config)
     manifest["samples"] = [
@@ -109,6 +163,11 @@ def analyze_split(
         for task in TASK_TYPES
     }
     sources = load_source_info(source_info)
+    mechanism_selection = (
+        _mechanism_sample_ids(dataset, mechanism_limit, limit)
+        if mechanism_limit > 0 and plot_sample_id is None
+        else set()
+    )
 
     for dataset_sample_id in dataset.sample_ids:
         if limit is not None and all(counts[task] >= limit for task in TASK_TYPES):
@@ -150,8 +209,10 @@ def analyze_split(
             if plot_sample_id is not None
             else detailed < plot_limit
         )
-        mechanism = plot_sample_id is not None or mechanism_limit < 0 or (
-            mechanism_limit > 0 and mechanism_counts[task] < mechanism_limit
+        mechanism = (
+            plot_sample_id is not None
+            or mechanism_limit < 0
+            or sample_id in mechanism_selection
         )
         captured = capture_sample(
             model,

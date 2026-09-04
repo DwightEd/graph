@@ -8,6 +8,11 @@ c_{l,h,p,s}=A_{l,h,q,s}\lVert W_{O,l,h}V_{l,g(h),s}\rVert_2,
 P_{l,h,p}(s)=c_{l,h,p,s}/\sum_u c_{l,h,p,u}.
 \]
 
+Schema v7 preserves the core `P`-derived traces at `[layer, head, event]`; layer/head means are only
+descriptive summaries. Capacity is not yet the signed message vector, so it is called transport
+budget/share rather than semantic contribution. The operator-graph extension is specified in
+`RESEARCH_PLAN.md`.
+
 The code tests four stages instead of treating a prompt-revisit peak as the whole mechanism.
 
 ## H0: normal direct-route drift
@@ -27,19 +32,27 @@ it does not identify the semantic ancestry already stored inside response tokens
 
 A model-internal transition is a peak of the Jensen-Shannon change of the complete source
 distribution. It is selected independently of prompt/evidence share. At those peaks the audit tests,
-relative to circularly shifted event locations, whether there is renewed prompt transport, renewed
-RAG-evidence transport, and subsequent future influence. Punctuation is only a visual reference.
+relative to matched non-events in the same answer, whether there is renewed prompt transport,
+renewed RAG-context transport, predictor-state reuse, and emitted-token anchoring. Controls prefer
+the same token and boundary state and balance relative position, entropy and target log-probability.
+Circular shifts remain only a sensitivity summary for event-to-anchor coupling.
 
 Prompt revisit means a renewed share assigned to any prompt source. Nonlocal review uses the
 continuous weight `min((q-s)/D,1)` and therefore has no hard far-token threshold. Future influence is
-the mean normalized message share later prediction events assign to token `p` within horizon `H`.
+split into two coordinates within horizon `H`:
+
+- `predictor_reuse[p]`: later prediction rows read source `q=p-1`;
+- `emitted_token_anchor[p]`: later prediction rows read source `p` after that token exists.
+
+The legacy `future_influence` artifact is an alias for the second quantity.
 
 ## H2: hallucination-onset entry and anchoring
 
 After capture, each first hallucinated token is matched to a nearby clean token in the same response.
 The audit compares evidence-entry change at `q=p-1`, before the error token has entered history, and
-future influence after the token is generated. The latter measures propagation of an error, not its
-cause.
+both future quantities after the token is generated. Emitted-token anchoring measures propagation of
+an error, not its cause; predictor reuse tests a distinct hidden-state coordinate. Teacher forcing
+does not create a hidden-state edge from predictor `q` to emitted-token position `p`.
 
 ## H3: grouped functional integration
 
@@ -59,6 +72,23 @@ For fixed target-versus-runner margin `F`, evidence and other-prompt necessity a
 
 The interaction is reported together with both main effects because valid integration can be
 additive. `other prompt` is not claimed to be a hand-labelled validator.
+
+The context cut is also evaluated against the complete vocabulary without storing a token-by-vocab
+artifact. For baseline distribution `p` and cut distribution `p^{-C}`, the code saves distribution
+JS, the top context-supported candidates under
+
+\[
+d_t^C(v)=\log p_t(v)-\log p_t^{-C}(v),
+\]
+
+the observed target's gain/rank, and adoption margin
+
+\[
+A_t^C=d_t^C(y_t)-\max_{v\ne y_t}d_t^C(v).
+\]
+
+Because the present mask covers the whole external context rather than a claim-specific support
+span, these fields deliberately use the prefix `context`, not `evidence` or `fact`.
 
 ## H4: persistence, override and readout silence
 

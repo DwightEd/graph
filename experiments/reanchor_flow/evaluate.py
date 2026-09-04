@@ -22,6 +22,13 @@ from .visualize import (
 )
 
 BASE_FIELDS = (
+    "prediction_position",
+    "baseline_target_logprob",
+    "baseline_entropy",
+    "sentence_boundary_position",
+    "prompt_share",
+    "evidence_share",
+    "history_share",
     "prompt_delta",
     "evidence_delta",
     "nonlocal_delta",
@@ -43,6 +50,10 @@ BASE_FIELDS = (
     "review_median_anchor_lag",
     "evidence_share_layer",
 )
+OPTIONAL_BASE_FIELDS = (
+    "predictor_reuse",
+    "emitted_token_anchor",
+)
 MECHANISM_FIELDS = (
     "evidence_state_presence",
     "evidence_state_control",
@@ -54,6 +65,15 @@ MECHANISM_FIELDS = (
     "history_effect",
     "evidence_peak_control",
     "evidence_late_control_loss",
+)
+OPTIONAL_MECHANISM_FIELDS = (
+    "context_distribution_js",
+    "context_target_logprob_gain",
+    "context_candidate_id",
+    "context_candidate_logprob_gain",
+    "context_target_rank",
+    "context_target_log_rank",
+    "context_adoption_margin",
 )
 
 
@@ -72,7 +92,8 @@ def json_ready(value):
 
 
 def validate_result(result: dict, token_ids, response_start: int) -> int:
-    if int(np.asarray(result["capture_schema"]).item()) != CAPTURE_SCHEMA:
+    schema = int(np.asarray(result["capture_schema"]).item())
+    if schema not in (6, CAPTURE_SCHEMA):
         raise ValueError("stale re-anchor artifact")
     prediction = np.asarray(result["prediction_position"], dtype=np.int64)
     query = np.asarray(result["query_position"], dtype=np.int64)
@@ -81,9 +102,57 @@ def validate_result(result: dict, token_ids, response_start: int) -> int:
         raise ValueError("prediction positions are not token aligned")
     if not np.array_equal(query + 1, prediction):
         raise ValueError("query/target relation is not q=p-1")
+    if "predictor_position" in result and not np.array_equal(
+        np.asarray(result["predictor_position"], dtype=np.int64), query
+    ):
+        raise ValueError("predictor positions do not match query positions")
+    if "emitted_position" in result and not np.array_equal(
+        np.asarray(result["emitted_position"], dtype=np.int64), prediction
+    ):
+        raise ValueError("emitted positions do not match prediction positions")
     if not np.array_equal(target, np.asarray(token_ids)[prediction]):
         raise ValueError("target token ids changed")
-    return len(prediction)
+    count = len(prediction)
+    if schema == CAPTURE_SCHEMA:
+        required = (
+            "predictor_position",
+            "emitted_position",
+            "predictor_reuse",
+            "emitted_token_anchor",
+            "head_attention_prompt_mass",
+            "head_attention_evidence_mass",
+            "head_attention_history_mass",
+            "head_prompt_transport_share",
+            "head_evidence_transport_share",
+            "head_history_transport_share",
+            "head_nonlocality",
+            "head_route_change",
+            "head_predictor_reuse",
+            "head_emitted_token_anchor",
+        )
+        missing = [name for name in required if name not in result]
+        if missing:
+            raise ValueError(f"incomplete schema v7 artifact: {missing}")
+        for name in ("predictor_reuse", "emitted_token_anchor"):
+            if np.asarray(result[name]).shape != (count,):
+                raise ValueError(f"{name} is not aligned to prediction events")
+        for name in required[4:]:
+            value = np.asarray(result[name])
+            if value.ndim != 3 or value.shape[-1] != count:
+                raise ValueError(f"{name} must have shape [layer, head, event]")
+        if not np.allclose(
+            np.asarray(result["future_influence"], dtype=np.float64),
+            np.asarray(result["emitted_token_anchor"], dtype=np.float64),
+            equal_nan=True,
+        ):
+            raise ValueError("legacy future alias differs from emitted-token anchor")
+        if bool(int(np.asarray(result.get("mechanism", 0)).item())):
+            missing = [
+                name for name in OPTIONAL_MECHANISM_FIELDS if name not in result
+            ]
+            if missing:
+                raise ValueError(f"incomplete schema v7 mechanism artifact: {missing}")
+    return count
 
 
 def evaluate_results(
@@ -98,7 +167,7 @@ def evaluate_results(
     manifest = json.loads((output / "run_manifest.json").read_text(encoding="utf-8"))
     if not manifest.get("analysis_complete"):
         raise ValueError("analysis is incomplete")
-    if manifest.get("config", {}).get("capture_schema") != CAPTURE_SCHEMA:
+    if manifest.get("config", {}).get("capture_schema") not in (6, CAPTURE_SCHEMA):
         raise ValueError("output belongs to another capture schema")
 
     dataset = open_research_dataset(dataset_root, device="cpu", retain_embedded_labels=True)
@@ -121,8 +190,28 @@ def evaluate_results(
             "mechanism": bool(int(np.asarray(result.get("mechanism", 0)).item())),
             **{name: np.asarray(result[name]) for name in BASE_FIELDS},
         }
+        row.update(
+            {
+                name: np.asarray(result[name])
+                for name in OPTIONAL_BASE_FIELDS
+                if name in result
+            }
+        )
+        if "predictor_reuse" not in row:
+            row["predictor_reuse"] = np.full(count, np.nan, dtype=np.float64)
+        if "emitted_token_anchor" not in row:
+            row["emitted_token_anchor"] = np.asarray(
+                result["future_influence"], dtype=np.float64
+            )
         if row["mechanism"]:
             row.update({name: np.asarray(result[name]) for name in MECHANISM_FIELDS})
+            row.update(
+                {
+                    name: np.asarray(result[name])
+                    for name in OPTIONAL_MECHANISM_FIELDS
+                    if name in result
+                }
+            )
         by_task[task].append(row)
 
         if int(np.asarray(result.get("detail", 0)).item()):

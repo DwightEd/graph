@@ -12,7 +12,12 @@ from .message_norm import model_gram_cache, output_gram, source_norm
 
 @dataclass(frozen=True)
 class RouteTrace:
-    """Compact CPU traces, normally shaped ``[layer, response_event]``."""
+    """CPU traces aligned to prediction events.
+
+    Population summaries are ``[layer, event]``.  ``head`` preserves the
+    corresponding ``[layer, head, event]`` tensors for event discovery; these
+    must not be reconstructed from the layer/head means.
+    """
 
     prompt_share: Tensor
     evidence_share: Tensor
@@ -23,12 +28,14 @@ class RouteTrace:
     nonlocality: Tensor
     prompt_breadth: Tensor
     route_change: Tensor
+    predictor_reuse: Tensor
     future_influence: Tensor
+    head: dict[str, Tensor]
     detail: dict[str, Tensor] | None
 
 
 class RouteAccumulator:
-    """Observe native attention and ``A * ||W_O V||`` without storing all heads."""
+    """Observe native attention and head-preserving ``A * ||W_O V||`` routes."""
 
     def __init__(
         self,
@@ -60,6 +67,7 @@ class RouteAccumulator:
         self._states: dict[int, dict[str, object]] = {}
         self._shape: tuple[int, int, int] | None = None
         self._fields: dict[str, Tensor] = {}
+        self._head_fields: dict[str, Tensor] = {}
         self._detail: dict[str, Tensor] | None = None
         self._gram_cache = model_gram_cache(model)
         self._norm_cache: dict[int, Tensor] = {}
@@ -82,17 +90,28 @@ class RouteAccumulator:
                 "nonlocality",
                 "prompt_breadth",
                 "route_change",
+                "predictor_reuse",
+                "future_influence",
+            )
+        }
+        head_shape = (self.layer_count, heads, events)
+        self._head_fields = {
+            name: torch.full(head_shape, float("nan"), dtype=torch.float16)
+            for name in (
+                "attention_prompt_mass",
+                "attention_evidence_mass",
+                "attention_history_mass",
+                "prompt_share",
+                "evidence_share",
+                "history_share",
+                "nonlocality",
+                "route_change",
+                "predictor_reuse",
                 "future_influence",
             )
         }
         if self.keep_detail:
-            head_shape = (self.layer_count, heads, events)
             self._detail = {
-                "prompt_head": torch.full(head_shape, float("nan")),
-                "evidence_head": torch.full(head_shape, float("nan")),
-                "nonlocal_head": torch.full(head_shape, float("nan")),
-                "route_change_head": torch.full(head_shape, float("nan")),
-                "future_head": torch.full(head_shape, float("nan")),
                 "edge_map": torch.zeros((events, sources), dtype=torch.float32),
             }
 
@@ -108,8 +127,10 @@ class RouteAccumulator:
             events = sources - self.row_start
             state = {
                 "rolling": [],
-                "future_sum": torch.zeros((heads, events), device=device),
-                "future_count": torch.zeros(events, device=device),
+                "predictor_sum": torch.zeros((heads, events), device=device),
+                "predictor_count": torch.zeros(events, device=device),
+                "emitted_sum": torch.zeros((heads, events), device=device),
+                "emitted_count": torch.zeros(events, device=device),
             }
             self._states[layer] = state
         return state
@@ -174,6 +195,11 @@ class RouteAccumulator:
             prompt_share = prompt.sum(-1)
             evidence_share = prompt[:, :, evidence_mask].sum(-1)
             history_share = distribution[:, :, self.response_start :].sum(-1)
+            attention_prompt_mass = local[:, :, : self.response_start].sum(-1)
+            attention_evidence_mass = local[:, :, : self.response_start][
+                :, :, evidence_mask
+            ].sum(-1)
+            attention_history_mass = local[:, :, self.response_start :].sum(-1)
 
             visible = source[None] <= query[:, None]
             available = norm[:, None, :] * visible[None]
@@ -207,8 +233,11 @@ class RouteAccumulator:
                 (heads, len(query)), float("nan"), device=probability.device
             )
             rolling: list[Tensor] = state["rolling"]  # type: ignore[assignment]
-            future_sum: Tensor = state["future_sum"]  # type: ignore[assignment]
-            future_count: Tensor = state["future_count"]  # type: ignore[assignment]
+            predictor_sum: Tensor = state["predictor_sum"]  # type: ignore[assignment]
+            predictor_count: Tensor = state["predictor_count"]  # type: ignore[assignment]
+            emitted_sum: Tensor = state["emitted_sum"]  # type: ignore[assignment]
+            emitted_count: Tensor = state["emitted_count"]  # type: ignore[assignment]
+            predictor_sources = source[self.row_start :]
             response_sources = source[self.response_start :]
 
             for offset, absolute_query in enumerate(query.tolist()):
@@ -220,14 +249,28 @@ class RouteAccumulator:
                 if len(rolling) > self.route_window:
                     rolling.pop(0)
 
-                generated_position = absolute_query + 1
-                lag = generated_position - response_sources
-                valid = (lag >= 1) & (lag <= self.future_horizon)
-                if bool(valid.any()):
-                    future_sum[:, : len(response_sources)] += (
-                        current[:, self.response_start :] * valid[None]
+                predictor_lag = absolute_query - predictor_sources
+                predictor_valid = (predictor_lag >= 1) & (
+                    predictor_lag <= self.future_horizon
+                )
+                if bool(predictor_valid.any()):
+                    predictor_sum += (
+                        current[:, self.row_start :] * predictor_valid[None]
                     )
-                    future_count[: len(response_sources)] += valid
+                    predictor_count += predictor_valid
+
+                # Event e predicts the emitted token p=q+1.  Once p exists in
+                # the teacher-forced prefix, later prediction rows may use its
+                # token state.  This is distinct from reusing predictor q.
+                emitted_lag = absolute_query + 1 - response_sources
+                emitted_valid = (emitted_lag >= 1) & (
+                    emitted_lag <= self.future_horizon
+                )
+                if bool(emitted_valid.any()):
+                    emitted_sum[:, : len(response_sources)] += (
+                        current[:, self.response_start :] * emitted_valid[None]
+                    )
+                    emitted_count[: len(response_sources)] += emitted_valid
 
             values = {
                 "prompt_share": prompt_share,
@@ -243,11 +286,26 @@ class RouteAccumulator:
             for name, value in values.items():
                 self._fields[name][layer, event] = value.mean(0).cpu()
 
+            for name in (
+                "prompt_share",
+                "evidence_share",
+                "history_share",
+                "nonlocality",
+                "route_change",
+            ):
+                self._head_fields[name][layer, :, event] = values[name].to(
+                    device="cpu", dtype=torch.float16
+                )
+            for name, value in (
+                ("attention_prompt_mass", attention_prompt_mass),
+                ("attention_evidence_mass", attention_evidence_mass),
+                ("attention_history_mass", attention_history_mass),
+            ):
+                self._head_fields[name][layer, :, event] = value.to(
+                    device="cpu", dtype=torch.float16
+                )
+
             if self._detail is not None:
-                self._detail["prompt_head"][layer, :, event] = prompt_share.cpu()
-                self._detail["evidence_head"][layer, :, event] = evidence_share.cpu()
-                self._detail["nonlocal_head"][layer, :, event] = nonlocality.cpu()
-                self._detail["route_change_head"][layer, :, event] = change_head.cpu()
                 self._detail["edge_map"][event] += (
                     distribution.mean(0).cpu() / self.layer_count
                 )
@@ -255,13 +313,18 @@ class RouteAccumulator:
         if query_end == sources:
             self._norm_cache.pop(layer, None)
             state = self._states.pop(layer)
-            future_sum = state["future_sum"]  # type: ignore[assignment]
-            future_count = state["future_count"]  # type: ignore[assignment]
-            future = future_sum / future_count[None].clamp_min(1)
-            future[:, future_count <= 0] = float("nan")
-            self._fields["future_influence"][layer] = future.mean(0).cpu()
-            if self._detail is not None:
-                self._detail["future_head"][layer] = future.cpu()
+            for field, prefix in (
+                ("predictor_reuse", "predictor"),
+                ("future_influence", "emitted"),
+            ):
+                total: Tensor = state[f"{prefix}_sum"]  # type: ignore[assignment]
+                count: Tensor = state[f"{prefix}_count"]  # type: ignore[assignment]
+                average = total / count[None].clamp_min(1)
+                average[:, count <= 0] = float("nan")
+                self._fields[field][layer] = average.mean(0).cpu()
+                self._head_fields[field][layer] = average.to(
+                    device="cpu", dtype=torch.float16
+                )
 
     def observe(
         self,
@@ -287,6 +350,20 @@ class RouteAccumulator:
             nonlocality=self._fields["nonlocality"],
             prompt_breadth=self._fields["prompt_breadth"],
             route_change=self._fields["route_change"],
+            predictor_reuse=self._fields["predictor_reuse"],
             future_influence=self._fields["future_influence"],
-            detail=self._detail,
+            head=self._head_fields,
+            detail=(
+                None
+                if self._detail is None
+                else {
+                    **self._detail,
+                    "prompt_head": self._head_fields["prompt_share"],
+                    "evidence_head": self._head_fields["evidence_share"],
+                    "nonlocal_head": self._head_fields["nonlocality"],
+                    "route_change_head": self._head_fields["route_change"],
+                    "predictor_reuse_head": self._head_fields["predictor_reuse"],
+                    "future_head": self._head_fields["future_influence"],
+                }
+            ),
         )
