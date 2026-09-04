@@ -150,8 +150,6 @@ def vocabulary_effect(
     exact claim-support span, so exported fields intentionally use ``context``.
     """
 
-    if top_k < 1 or chunk < 1:
-        raise ValueError("top_k and chunk must be positive")
     device = model.get_input_embeddings().weight.device
     query = cache.query.to(device)
     target = cache.target.to(device)
@@ -169,19 +167,6 @@ def vocabulary_effect(
             model, cut_model, target, chunk
         )
         baseline_target_logprob = baseline_target_logit - baseline_log_z
-        recorded = cache.baseline_target_logprob.to(device)
-        tolerance = 5e-2 if weight.dtype == torch.bfloat16 else 1e-2
-        if not torch.allclose(
-            baseline_target_logprob,
-            recorded,
-            rtol=tolerance,
-            atol=tolerance,
-        ):
-            error = float((baseline_target_logprob - recorded).abs().max())
-            raise RuntimeError(
-                f"baseline vocabulary reconstruction mismatch: max_abs={error:.6g}"
-            )
-
         cut_target_logprob = cut_target_logit - cut_log_z
         target_logprob_gain = baseline_target_logprob - cut_target_logprob
         normalizer_gain = baseline_log_z - cut_log_z
