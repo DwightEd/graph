@@ -1,6 +1,6 @@
 name: validate-reanchor-flow-discovery
 
-# Payload revision 3: all six archive chunks are present.
+# Payload revision 4: run pytest through the repository Python module path.
 on:
   push:
     branches:
@@ -36,7 +36,7 @@ jobs:
           python -m pip install numpy matplotlib scipy scikit-learn "transformers>=4.57,<4.58" tqdm pytest
       - name: Run focused tests
         shell: bash
-        run: pytest -q experiments/reanchor_flow/tests
+        run: python -m pytest -q experiments/reanchor_flow/tests
       - name: Commit tested experiment
         shell: bash
         run: |
