@@ -1,7 +1,7 @@
 """Exact Value-message deletion for Llama relay motifs.
 
 The custom attention backend applies binary gates after softmax and before the
-Value sum.  Deleted probability mass is not redistributed.  A rerun starts at
+Value sum. Deleted probability mass is not redistributed. A rerun starts at
 the first affected decoder layer and recomputes every later attention, residual
 update, and MLP while keeping the target-versus-runner readout fixed.
 """
@@ -15,7 +15,7 @@ from typing import Any
 import torch
 from torch import Tensor
 from torch.nn import functional as F
-from transformers import AttentionInterface, AttentionMaskInterface
+from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 
 ATTENTION_BACKEND = "constraint_routing_gate"
 READOUT_CHUNK = 64
@@ -27,35 +27,29 @@ VALIDATED_ATTRIBUTE = "_constraint_routing_backend_validated"
 class ForwardCache:
     """CPU state needed for an exact suffix rerun at any decoder layer."""
 
-    layer_input: dict[int, Tensor]  # checkpoint layer -> [source, hidden]
+    layer_input: dict[int, Tensor]
     layer_count: int
-    query: Tensor  # [response]
-    target: Tensor  # [response]
-    runner: Tensor  # [response]
-    readout_direction: Tensor  # [response, hidden]
-    full_margin: Tensor  # [response]
-    baseline_target_logprob: Tensor  # FP32 [response]
-    baseline_entropy: Tensor  # FP32 [response], nats
+    query: Tensor
+    target: Tensor
+    runner: Tensor
+    readout_direction: Tensor
+    full_margin: Tensor
+    baseline_target_logprob: Tensor
+    baseline_entropy: Tensor
 
 
 @dataclass(frozen=True)
 class RelayGate:
-    """Token-message sets deleted on either side of a layer split.
+    """Token-message sets deleted on either side of a layer split."""
 
-    Edge matrices are indexed ``[target, source]``.  Upstream edges are gated
-    in layers ``< split_layer`` and downstream edges in layers
-    ``>= split_layer``.  Evidence sources, when enabled, are gated in every
-    layer and for every target and query head.
-    """
-
-    upstream_edges: Tensor  # bool [source, source]
-    downstream_edges: Tensor  # bool [source, source]
+    upstream_edges: Tensor
+    downstream_edges: Tensor
     split_layer: int
     cut_evidence: bool
     cut_upstream: bool
     cut_downstream: bool
-    evidence_mask: Tensor  # bool [source]
-    evidence_targets: Tensor | None = None  # optional bool [target]
+    evidence_mask: Tensor
+    evidence_targets: Tensor | None = None
 
 
 AttentionObserver = Callable[[int, Tensor, Tensor, Tensor], None]
@@ -79,7 +73,7 @@ def gated_eager_attention(
     query: Tensor,
     key: Tensor,
     value: Tensor,
-    attention_mask: Tensor,
+    attention_mask: Tensor | None,
     scaling: float,
     dropout: float = 0.0,
     relay_gate: RelayGate | None = None,
@@ -91,12 +85,11 @@ def gated_eager_attention(
     key = repeat_kv(key, module.num_key_value_groups)
     value = repeat_kv(value, module.num_key_value_groups)
     probability = torch.matmul(query, key.transpose(2, 3)) * scaling
-    probability = probability + attention_mask[..., : key.shape[-2]]
+    if attention_mask is not None:
+        probability = probability + attention_mask[..., : key.shape[-2]]
     probability = probability.softmax(dim=-1, dtype=torch.float32).to(query.dtype)
     probability = F.dropout(probability, p=dropout, training=module.training)
 
-    # The observer consumes the native probabilities online.  Returning None
-    # prevents Transformers from retaining a full attention matrix per layer.
     if relay_observer is not None:
         relay_observer(module.layer_idx, probability, value, module.o_proj.weight)
 
@@ -119,19 +112,29 @@ def gated_eager_attention(
     return output.transpose(1, 2).contiguous(), None
 
 
-def install_attention_backend(model: Any) -> None:
-    """Use the same functional attention implementation in all model runs."""
+def set_attention_backend(model: Any, name: str) -> None:
+    """Select an attention backend across Transformers 4.48+ APIs."""
 
-    AttentionInterface.register(ATTENTION_BACKEND, gated_eager_attention)
-    AttentionMaskInterface.register(
-        ATTENTION_BACKEND,
-        AttentionMaskInterface()["eager"],
-    )
-    model.set_attn_implementation(ATTENTION_BACKEND)
+    setter = getattr(model, "set_attn_implementation", None)
+    if setter is None:
+        model.config._attn_implementation = name
+    else:
+        setter(name)
+
+
+def install_attention_backend(model: Any) -> None:
+    """Register and select the gated eager backend without mask-registry hooks."""
+
+    register = getattr(ALL_ATTENTION_FUNCTIONS, "register", None)
+    if register is None:
+        ALL_ATTENTION_FUNCTIONS[ATTENTION_BACKEND] = gated_eager_attention
+    else:
+        register(ATTENTION_BACKEND, gated_eager_attention)
+    set_attention_backend(model, ATTENTION_BACKEND)
 
 
 def causal_mask(tokens: int, dtype: torch.dtype, device: torch.device) -> Tensor:
-    """Build the explicit mask required by a custom Transformers backend."""
+    """Build the explicit causal mask used by every custom-backend rerun."""
 
     mask = torch.full(
         (tokens, tokens),
@@ -168,7 +171,7 @@ def forward_layers(
             save_layers is None or layer_index in save_layers
         ):
             save_inputs[layer_index] = hidden[0].detach().cpu()
-        hidden = layer(
+        output = layer(
             hidden,
             attention_mask=mask,
             position_embeddings=rotary,
@@ -176,6 +179,7 @@ def forward_layers(
             relay_gate=gate,
             relay_observer=observer,
         )
+        hidden = output[0] if isinstance(output, tuple) else output
     return model.model.norm(hidden)
 
 
@@ -183,12 +187,7 @@ def validate_attention_backend(
     model: Any,
     token_ids: Tensor | Sequence[int],
 ) -> float:
-    """Check native eager against an executed all-one custom gate once.
-
-    This check uses an unpadded full sequence without a KV cache, matching the
-    experiment's scope.  At most eight tokens are used, so it does not
-    reproduce the sample's quadratic peak.
-    """
+    """Check native eager against an all-one custom gate once."""
 
     device = model.get_input_embeddings().weight.device
     ids = torch.as_tensor(token_ids, dtype=torch.long).flatten()
@@ -208,17 +207,13 @@ def validate_attention_backend(
     )
 
     model.eval()
-    model.set_attn_implementation("eager")
+    set_attention_backend(model, "eager")
     with torch.inference_mode():
         native = model.model(input_ids=ids, use_cache=False).last_hidden_state
 
     install_attention_backend(model)
     with torch.inference_mode():
-        custom = model.model(
-            input_ids=ids,
-            use_cache=False,
-            relay_gate=all_one,
-        ).last_hidden_state
+        custom = forward_layers(model, model.model.embed_tokens(ids), 0, gate=all_one)
 
     tolerance = {
         torch.float32: (1e-5, 1e-6),
@@ -244,13 +239,7 @@ def baseline_forward(
     observer: AttentionObserver | None = None,
     checkpoint_layers: Sequence[int] = (0,),
 ) -> ForwardCache:
-    """Run a teacher-forced baseline with a fixed, FP32 margin readout.
-
-    The runner is selected once from native-dtype baseline logits.  Target and
-    runner weights are then converted separately to FP32 before subtraction;
-    every intervention reuses that same readout direction.  Target log-probability
-    and entropy are computed in FP32 from those same chunked baseline logits.
-    """
+    """Run a teacher-forced baseline with a fixed, FP32 margin readout."""
 
     if getattr(model.config, "attention_bias", False):
         raise ValueError(
@@ -275,10 +264,9 @@ def baseline_forward(
     checkpoints.add(0)
     layer_input: dict[int, Tensor] = {}
     with torch.inference_mode():
-        hidden = model.model.embed_tokens(source_ids)
         hidden = forward_layers(
             model,
-            hidden,
+            model.model.embed_tokens(source_ids),
             0,
             observer=observer,
             save_inputs=layer_input,
@@ -340,7 +328,7 @@ def first_changed_layer(gate: RelayGate, layer_count: int) -> int | None:
 
 
 def gate_to(gate: RelayGate, device: torch.device) -> RelayGate:
-    """Move only the three small gate masks needed by the active sample."""
+    """Move the active sample's gate masks to the model device."""
 
     return RelayGate(
         upstream_edges=gate.upstream_edges.to(device=device, dtype=torch.bool),
