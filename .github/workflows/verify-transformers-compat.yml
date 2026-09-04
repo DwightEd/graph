@@ -27,11 +27,45 @@ jobs:
           python -m pip install numpy matplotlib scipy scikit-learn tqdm pytest "transformers==${{ matrix.transformers }}"
       - run: |
           python - <<'PY'
+          import torch
           import transformers
-          import experiments.constraint_routing_rhythm.intervene as intervene
+          from transformers import LlamaConfig, LlamaForCausalLM
+          from experiments.constraint_routing_rhythm.intervene import (
+              RelayGate,
+              baseline_forward,
+              rerun_gate,
+          )
           import experiments.reanchor_flow.run
-          print(transformers.__version__)
-          print(type(intervene.ALL_ATTENTION_FUNCTIONS).__name__)
+
+          config = LlamaConfig(
+              vocab_size=64,
+              hidden_size=32,
+              intermediate_size=64,
+              num_hidden_layers=2,
+              num_attention_heads=4,
+              num_key_value_heads=2,
+              max_position_embeddings=64,
+              attention_bias=False,
+          )
+          model = LlamaForCausalLM(config).eval()
+          token_ids = torch.tensor([1, 2, 3, 4, 5, 6, 7])
+          cache = baseline_forward(model, token_ids, response_start=4)
+          empty = torch.zeros((6, 6), dtype=torch.bool)
+          selected = empty.clone()
+          selected[3, 0] = True
+          gate = RelayGate(
+              upstream_edges=selected,
+              downstream_edges=empty,
+              split_layer=2,
+              cut_evidence=False,
+              cut_upstream=True,
+              cut_downstream=False,
+              evidence_mask=torch.zeros(6, dtype=torch.bool),
+          )
+          delta = rerun_gate(model, cache, gate)
+          assert delta.shape == (3,)
+          assert torch.isfinite(delta).all()
+          print(transformers.__version__, delta.tolist())
           PY
           python -m compileall -q experiments/constraint_routing_rhythm/intervene.py experiments/reanchor_flow
           python -m pytest -q experiments/reanchor_flow/tests
