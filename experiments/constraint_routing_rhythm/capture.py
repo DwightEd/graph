@@ -7,7 +7,13 @@ from dataclasses import dataclass
 import torch
 from torch import Tensor
 
-from .intervene import ForwardCache, RelayGate, baseline_forward, rerun_gate
+from experiments.common.llama_message_intervention import (
+    ForwardCache,
+    MessageGate,
+    baseline_forward,
+    rerun_gate,
+)
+
 from .rhythm import Rhythm, build_rhythm, relay_diagnostics
 from .routes import FunctionalRouteAccumulator, FunctionalRoutes
 
@@ -55,7 +61,7 @@ def matched_non_evidence_mask(
     matched = torch.zeros_like(evidence)
     for root in order:
         cost = (available - root).abs() / max(response_start, 1)
-        cost = cost + (mass.index_select(0, available) - mass[root]).abs() / mass_scale
+        cost += (mass.index_select(0, available) - mass[root]).abs() / mass_scale
         choice = cost.argmin()
         matched[available[choice]] = True
         available = torch.cat((available[:choice], available[choice + 1 :]))
@@ -71,19 +77,16 @@ def relay_gate(
     cut_upstream: bool = False,
     cut_downstream: bool = False,
     direct_response_only: bool = False,
-) -> RelayGate:
-    evidence_targets = None
+) -> MessageGate:
+    targets = None
     if direct_response_only:
-        evidence_targets = torch.arange(len(evidence)) >= rhythm.query_position[0]
-    return RelayGate(
-        upstream_edges=rhythm.upstream_edges,
-        downstream_edges=rhythm.downstream_edges,
+        targets = torch.arange(len(evidence)) >= rhythm.query_position[0]
+    return MessageGate(
         split_layer=split_layer,
-        cut_evidence=cut_evidence,
-        cut_upstream=cut_upstream,
-        cut_downstream=cut_downstream,
-        evidence_mask=evidence,
-        evidence_targets=evidence_targets,
+        early_edges=rhythm.upstream_edges if cut_upstream else None,
+        late_edges=rhythm.downstream_edges if cut_downstream else None,
+        source_mask=evidence if cut_evidence else None,
+        source_targets=targets,
     )
 
 
@@ -188,7 +191,6 @@ def capture_sample(
         build_endpoints=audit_relay,
     )
 
-    # This signed, unnormalized rerun effect is the only detection score.
     deficit = rerun_gate(
         model,
         cache,
@@ -199,8 +201,7 @@ def capture_sample(
     cut_margin = cache.full_margin + deficit
 
     empty = torch.full_like(deficit, torch.nan)
-    direct = empty
-    matched_delta = empty
+    direct = matched_delta = empty
     upstream = downstream = joint = interaction = empty
     audited = bool(audit_relay and rhythm.carrier_mask.any())
     matched = None

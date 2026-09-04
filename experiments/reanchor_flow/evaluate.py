@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from research_dataset import open_research_dataset
-from experiments.constraint_routing_rhythm.data import TASK_TYPES, canonical_task_type
+from experiments.common.ragtruth_alignment import TASK_TYPES, canonical_task_type
 
 from .artifacts import load_result
 from .metrics import metric, paired_bootstrap, paired_effect
@@ -39,8 +39,16 @@ def aligned_curves(rows: list[dict], low: int = -5, high: int = 10) -> dict[str,
     offsets = np.arange(low, high + 1)
     groups = ("correct", "hallucinated", "control")
     channels = ("evidence", "history")
-    sums = {(group, channel): np.zeros(len(offsets)) for group in groups for channel in channels}
-    counts = {(group, channel): np.zeros(len(offsets), dtype=np.int64) for group in groups for channel in channels}
+    sums = {
+        (group, channel): np.zeros(len(offsets))
+        for group in groups
+        for channel in channels
+    }
+    counts = {
+        (group, channel): np.zeros(len(offsets), dtype=np.int64)
+        for group in groups
+        for channel in channels
+    }
 
     def add(row: dict, center: int, group: str) -> None:
         for number, shift in enumerate(offsets):
@@ -77,7 +85,9 @@ def aligned_curves(rows: list[dict], low: int = -5, high: int = 10) -> dict[str,
                 out=np.full(len(offsets), np.nan),
                 where=counts[(group, channel)] > 0,
             ).tolist()
-            result[f"{group}_{channel}_count"] = counts[(group, channel)].tolist()
+            result[f"{group}_{channel}_count"] = counts[
+                (group, channel)
+            ].tolist()
     return result
 
 
@@ -97,7 +107,6 @@ def task_report(task: str, rows: list[dict], bootstrap: int, seed: int) -> dict:
             for name, field in CONTROLS.items()
         }
     )
-    # Lower evidence-seeded flow is the preregistered missed-re-anchor direction.
     score = {name: -value for name, value in raw.items()}
 
     graph_necessity = {
@@ -182,7 +191,9 @@ def evaluate_results(
     seed: int = 2026,
 ) -> dict[str, dict]:
     output = Path(output_root)
-    manifest = json.loads((output / "run_manifest.json").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (output / "run_manifest.json").read_text(encoding="utf-8")
+    )
     if not manifest.get("analysis_complete"):
         raise ValueError("analysis is incomplete")
     frozen = [

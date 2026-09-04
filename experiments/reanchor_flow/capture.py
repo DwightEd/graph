@@ -8,8 +8,8 @@ import hashlib
 import numpy as np
 import torch
 
-from experiments.constraint_routing_rhythm.intervene import (
-    RelayGate,
+from experiments.common.llama_message_intervention import (
+    MessageGate,
     baseline_forward,
     rerun_gate,
 )
@@ -76,17 +76,12 @@ def metric_table(
     }
 
 
-def all_layer_gate(edge_mask: np.ndarray, layer_count: int) -> RelayGate:
-    query_mask = torch.as_tensor(token_edges_to_query_mask(edge_mask), dtype=torch.bool)
-    empty = torch.zeros_like(query_mask)
-    return RelayGate(
-        upstream_edges=query_mask,
-        downstream_edges=empty,
+def all_layer_gate(edge_mask: np.ndarray, layer_count: int) -> MessageGate:
+    return MessageGate(
         split_layer=layer_count,
-        cut_evidence=False,
-        cut_upstream=True,
-        cut_downstream=False,
-        evidence_mask=torch.zeros(query_mask.shape[0], dtype=torch.bool),
+        early_edges=torch.as_tensor(
+            token_edges_to_query_mask(edge_mask), dtype=torch.bool
+        ),
     )
 
 
@@ -216,7 +211,6 @@ def capture_sample(
         )
     )
 
-    # The all-layer endpoint graph matches the all-layer endpoint cuts below.
     functional = build_token_dag(maps.functional.numpy(), response_start)
     attention = build_token_dag(maps.attention.numpy(), response_start)
     middle = build_token_dag(maps.functional_middle.numpy(), response_start)

@@ -9,7 +9,7 @@ from pathlib import Path
 import torch
 
 from research_dataset import open_research_dataset
-from experiments.constraint_routing_rhythm.data import (
+from experiments.common.ragtruth_alignment import (
     TASK_TYPES,
     build_evidence_mask,
     canonical_task_type,

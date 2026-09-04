@@ -9,7 +9,7 @@ def test_all_layer_gate_uses_prediction_to_query_offset():
     edges[3, 4] = True
     gate = all_layer_gate(edges, layer_count=4)
     assert gate.split_layer == 4
-    assert gate.cut_upstream
-    assert not gate.cut_downstream
-    assert gate.upstream_edges[2, 0]
-    assert gate.upstream_edges[3, 3]
+    assert gate.late_edges is None
+    assert gate.source_mask is None
+    assert gate.early_edges[2, 0]
+    assert gate.early_edges[3, 3]
