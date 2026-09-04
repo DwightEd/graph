@@ -1,4 +1,4 @@
-"""Automatic prompt-revisit, nonlocal-review and future-anchor discovery."""
+"""Automatic internal transition, prompt-revisit and future-anchor discovery."""
 
 from __future__ import annotations
 
@@ -13,12 +13,16 @@ class RhythmSignals:
     prompt_share: np.ndarray
     evidence_share: np.ndarray
     history_share: np.ndarray
+    prompt_lift: np.ndarray
+    evidence_lift: np.ndarray
+    history_lift: np.ndarray
     nonlocality: np.ndarray
     prompt_breadth: np.ndarray
     future_influence: np.ndarray
     prompt_delta: np.ndarray
     evidence_delta: np.ndarray
     nonlocal_delta: np.ndarray
+    transition_peaks: np.ndarray
     prompt_peaks: np.ndarray
     review_peaks: np.ndarray
     anchor_peaks: np.ndarray
@@ -62,16 +66,11 @@ def robust_z(values) -> np.ndarray:
     scale = 1.4826 * np.median(np.abs(values[finite] - center))
     if scale <= 1e-12:
         scale = np.std(values[finite])
-    if scale <= 1e-12:
-        result[finite] = 0.0
-    else:
-        result[finite] = (values[finite] - center) / scale
+    result[finite] = 0.0 if scale <= 1e-12 else (values[finite] - center) / scale
     return result
 
 
 def local_peaks(values, quantile: float, min_gap: int = 2) -> np.ndarray:
-    """Return sparse positive local maxima above a within-sequence quantile."""
-
     score = np.asarray(values, dtype=np.float64)
     selected = np.zeros(len(score), dtype=bool)
     finite = score[np.isfinite(score)]
@@ -114,11 +113,10 @@ def coupling_rate(event, anchor, max_lag: int) -> float:
 def circular_null(event, anchor, max_lag: int) -> float:
     if len(event) < 3 or not np.any(event) or not np.any(anchor):
         return float("nan")
-    rates = [
-        coupling_rate(event, np.roll(anchor, shift), max_lag)
-        for shift in range(1, len(anchor))
-    ]
-    rates = np.asarray(rates, dtype=np.float64)
+    rates = np.asarray(
+        [coupling_rate(event, np.roll(anchor, shift), max_lag) for shift in range(1, len(anchor))],
+        dtype=np.float64,
+    )
     return float(np.nanmean(rates)) if np.isfinite(rates).any() else float("nan")
 
 
@@ -128,8 +126,7 @@ def coupling_summary(event, anchor, max_lag: int) -> tuple[np.ndarray, float, fl
     null = circular_null(event, anchor, max_lag)
     matched = np.flatnonzero(paired >= 0)
     lag = paired[matched] - matched
-    median_lag = float(np.median(lag)) if len(lag) else float("nan")
-    return paired, rate, null, median_lag
+    return paired, rate, null, float(np.median(lag)) if len(lag) else float("nan")
 
 
 def build_rhythm(
@@ -139,17 +136,15 @@ def build_rhythm(
     peak_quantile: float = 0.9,
     max_lag: int = 3,
 ) -> RhythmSignals:
-    """Discover two event types before testing their relation to future anchors.
-
-    Prompt revisit is a renewed share assigned to any prompt token. Nonlocal
-    review is a renewed continuous expected source distance, so it means
-    leaving the immediate neighborhood rather than crossing a hard distance.
-    """
+    """Find generic route transitions before asking whether they re-anchor."""
 
     route_change = finite_layer_mean(trace.route_change)
     prompt_share = finite_layer_mean(trace.prompt_share)
     evidence_share = finite_layer_mean(trace.evidence_share)
     history_share = finite_layer_mean(trace.history_share)
+    prompt_lift = finite_layer_mean(trace.prompt_lift)
+    evidence_lift = finite_layer_mean(trace.evidence_lift)
+    history_lift = finite_layer_mean(trace.history_lift)
     nonlocality = finite_layer_mean(trace.nonlocality)
     prompt_breadth = finite_layer_mean(trace.prompt_breadth)
     future_influence = finite_layer_mean(trace.future_influence)
@@ -157,6 +152,7 @@ def build_rhythm(
     prompt_delta = rolling_delta(prompt_share, revisit_window)
     evidence_delta = rolling_delta(evidence_share, revisit_window)
     nonlocal_delta = rolling_delta(nonlocality, revisit_window)
+    transition_peaks = local_peaks(route_change, peak_quantile)
     prompt_peaks = local_peaks(prompt_delta, peak_quantile)
     review_peaks = local_peaks(nonlocal_delta, peak_quantile)
     anchor_peaks = local_peaks(future_influence, peak_quantile)
@@ -172,12 +168,16 @@ def build_rhythm(
         prompt_share=prompt_share,
         evidence_share=evidence_share,
         history_share=history_share,
+        prompt_lift=prompt_lift,
+        evidence_lift=evidence_lift,
+        history_lift=history_lift,
         nonlocality=nonlocality,
         prompt_breadth=prompt_breadth,
         future_influence=future_influence,
         prompt_delta=prompt_delta,
         evidence_delta=evidence_delta,
         nonlocal_delta=nonlocal_delta,
+        transition_peaks=transition_peaks,
         prompt_peaks=prompt_peaks,
         review_peaks=review_peaks,
         anchor_peaks=anchor_peaks,
