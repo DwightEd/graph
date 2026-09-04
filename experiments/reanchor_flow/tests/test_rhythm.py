@@ -16,18 +16,22 @@ def test_rolling_delta_uses_only_previous_events():
     assert result[3] == 2.0
 
 
-def test_revisit_peak_pairs_with_later_anchor():
-    layers, events = 2, 12
-    trace = SimpleNamespace(
+def blank_trace(layers=2, events=12):
+    return SimpleNamespace(
         route_change=np.zeros((layers, events)),
-        far_prompt_share=np.zeros((layers, events)),
+        prompt_share=np.zeros((layers, events)),
         evidence_share=np.zeros((layers, events)),
         history_share=np.zeros((layers, events)),
+        nonlocality=np.zeros((layers, events)),
         prompt_breadth=np.full((layers, events), 0.4),
         future_influence=np.zeros((layers, events)),
     )
+
+
+def test_prompt_revisit_pairs_with_later_anchor():
+    trace = blank_trace()
     trace.route_change[:, 6] = 1.0
-    trace.far_prompt_share[:, 6] = 1.0
+    trace.prompt_share[:, 6] = 1.0
     trace.evidence_share[:, 6] = 0.8
     trace.future_influence[:, 7] = 1.0
     result = build_rhythm(
@@ -36,13 +40,28 @@ def test_revisit_peak_pairs_with_later_anchor():
         peak_quantile=0.8,
         max_lag=2,
     )
-    assert result.revisit_peaks[6]
+    assert result.prompt_peaks[6]
     assert result.anchor_peaks[7]
-    assert result.paired_anchor[6] == 7
-    assert result.coupling_rate == 1.0
+    assert result.prompt_paired_anchor[6] == 7
+    assert result.prompt_coupling_rate == 1.0
+
+
+def test_nonlocal_review_is_detected_independently_of_prompt():
+    trace = blank_trace()
+    trace.nonlocality[:, 5] = 1.0
+    trace.future_influence[:, 6] = 1.0
+    result = build_rhythm(
+        trace,
+        revisit_window=3,
+        peak_quantile=0.8,
+        max_lag=2,
+    )
+    assert result.review_peaks[5]
+    assert not result.prompt_peaks.any()
+    assert result.review_paired_anchor[5] == 6
 
 
 def test_pair_peaks_does_not_match_past_anchor():
-    revisit = np.array([False, False, True, False])
+    event = np.array([False, False, True, False])
     anchor = np.array([False, True, False, False])
-    assert pair_peaks(revisit, anchor, 2)[2] == -1
+    assert pair_peaks(event, anchor, 2)[2] == -1
