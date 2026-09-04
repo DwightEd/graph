@@ -1,4 +1,4 @@
-"""Stream captured artifacts into the re-anchor phenomenon reports."""
+"""Open labels after capture and write concise rhythm reports."""
 
 from __future__ import annotations
 
@@ -13,14 +13,22 @@ from experiments.common.ragtruth_alignment import TASK_TYPES, canonical_task_typ
 
 from .artifacts import load_result
 from .capture import CAPTURE_SCHEMA
-from .hypotheses import task_report
-from .signals import compact_row
-from .visualize import save_population_figure
+from .report import task_summary
+from .visualize import save_population_figure, save_sample_figure
+
+ROW_FIELDS = (
+    "revisit_delta",
+    "route_change",
+    "future_influence",
+    "prompt_breadth",
+    "revisit_peak",
+    "anchor_peak",
+    "revisit_peak_kind",
+    "paired_anchor",
+)
 
 
 def json_ready(value):
-    """Convert NumPy objects and non-finite floats to strict JSON values."""
-
     if isinstance(value, dict):
         return {str(key): json_ready(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -34,70 +42,84 @@ def json_ready(value):
     return value
 
 
+def validate_result(result: dict, token_ids, response_start: int) -> int:
+    if int(np.asarray(result["capture_schema"]).item()) != CAPTURE_SCHEMA:
+        raise ValueError("stale routing-rhythm artifact")
+    prediction = np.asarray(result["prediction_position"], dtype=np.int64)
+    query = np.asarray(result["query_position"], dtype=np.int64)
+    target = np.asarray(result["target_token_id"], dtype=np.int64)
+    if not np.array_equal(prediction, response_start + np.arange(len(prediction))):
+        raise ValueError("prediction positions are not token aligned")
+    if not np.array_equal(query + 1, prediction):
+        raise ValueError("query/target relation is not q=p-1")
+    if not np.array_equal(target, np.asarray(token_ids)[prediction]):
+        raise ValueError("target token ids changed")
+    return len(prediction)
+
+
 def evaluate_results(
     output_root: str | Path,
     dataset_root: str | Path,
     *,
     bootstrap: int = 1000,
     seed: int = 2026,
-    pre: int = 5,
-    post: int = 3,
-    curve_low: int = -5,
-    curve_high: int = 10,
+    curve_radius: int = 6,
 ) -> dict[str, dict]:
     output = Path(output_root)
     manifest = json.loads((output / "run_manifest.json").read_text(encoding="utf-8"))
     if not manifest.get("analysis_complete"):
         raise ValueError("analysis is incomplete")
     if manifest.get("config", {}).get("capture_schema") != CAPTURE_SCHEMA:
-        raise ValueError(
-            "output uses a stale audit schema; rerun analyze in a new --output directory"
-        )
-    config = manifest["config"]
-    if str(Path(dataset_root).resolve()) != str(Path(config["dataset_root"]).resolve()):
-        raise ValueError("evaluation dataset differs from the capture manifest")
-    sample_ids = [str(entry["sample_id"]) for entry in manifest["samples"]]
-    result_paths = [str(entry["result"]) for entry in manifest["samples"]]
-    if len(sample_ids) != len(set(sample_ids)) or len(result_paths) != len(set(result_paths)):
-        raise ValueError("run manifest contains duplicate samples or result paths")
+        raise ValueError("output belongs to another capture schema")
 
-    dataset = open_research_dataset(
-        dataset_root, device="cpu", retain_embedded_labels=True
-    )
-    label_store = dataset.prepare_evaluation_labels([])
-    by_task: dict[str, list[dict]] = {task: [] for task in TASK_TYPES}
+    dataset = open_research_dataset(dataset_root, device="cpu", retain_embedded_labels=True)
+    labels = dataset.prepare_evaluation_labels([])
+    by_task = {task: [] for task in TASK_TYPES}
     for entry in manifest["samples"]:
         result = load_result(output / entry["result"])
         sample = dataset[str(entry["sample_id"])]
-        try:
-            row = compact_row(entry, result, sample, label_store, config)
-            by_task[canonical_task_type(sample.task_type)].append(row)
-        finally:
-            sample.release_attention()
-        del result
+        cached = sample.attention()
+        response_start = int(cached.response_idx)
+        token_ids = cached.token_ids.detach().cpu().numpy()
+        count = validate_result(result, token_ids, response_start)
+        label = np.asarray(labels.response_labels(sample), dtype=bool)[:count]
+        sample.release_attention()
+        task = canonical_task_type(sample.task_type)
+        by_task[task].append(
+            {
+                "source_id": str(entry["source_id"]),
+                "label": label,
+                "target_token_id": np.asarray(result["target_token_id"], dtype=np.int64),
+                **{name: np.asarray(result[name]) for name in ROW_FIELDS},
+                "coupling_null_rate": float(
+                    np.asarray(result["coupling_null_rate"]).item()
+                ),
+            }
+        )
+        if int(np.asarray(result.get("detail", 0)).item()):
+            save_sample_figure(
+                output / "figures" / f"sample_{task}_{entry['sample_id']}.png",
+                result,
+                label,
+                title=f"{task} {entry['sample_id']}",
+            )
 
     reports = {}
-    for number, task in enumerate(TASK_TYPES):
+    for task_index, task in enumerate(TASK_TYPES):
         if not by_task[task]:
             continue
-        report = task_report(
-            task,
-            by_task[task],
-            bootstrap=bootstrap,
-            seed=seed + 100 * number,
-            pre=pre,
-            post=post,
-            curve_low=curve_low,
-            curve_high=curve_high,
+        report = json_ready(
+            task_summary(
+                by_task[task],
+                bootstrap=bootstrap,
+                seed=seed + 100 * task_index,
+                radius=curve_radius,
+            )
         )
-        report = json_ready(report)
-        report_path = output / "reports" / task.casefold() / "phenomenon_report.json"
-        report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(
-            json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8"
-        )
-        save_population_figure(
-            report_path.parent / "phenomenon_audit.png", report["event_curves"]
-        )
+        report["scope"] = "teacher-forced observer routing rhythm"
+        path = output / "reports" / task.casefold() / "rhythm_report.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        save_population_figure(path.parent / "rhythm_summary.png", report["curves"])
         reports[task] = report
     return reports

@@ -1,4 +1,4 @@
-"""One-pass, layer-resolved capture for the re-anchor phenomenon audit."""
+"""One-pass capture for internal prompt-revisit and anchor rhythm."""
 
 from __future__ import annotations
 
@@ -7,16 +7,13 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 
-from experiments.common.llama_message_intervention import (
-    MessageGate,
-    baseline_forward,
-    rerun_gate,
-)
+from experiments.common.llama_message_intervention import baseline_forward
 
-from .claims import split_claims
+from .claims import sentence_boundaries
+from .rhythm import build_rhythm
 from .routes import RouteAccumulator
 
-CAPTURE_SCHEMA = 3
+CAPTURE_SCHEMA = 4
 
 
 @dataclass(frozen=True)
@@ -24,29 +21,17 @@ class SampleCapture:
     arrays: dict[str, object]
 
 
-def evidence_source_mask(prompt_mask, source_count: int, response_start: int) -> torch.Tensor:
-    prompt = torch.as_tensor(prompt_mask, dtype=torch.bool).flatten()
-    if len(prompt) != response_start:
-        raise ValueError("evidence mask must cover the complete prompt")
-    evidence = torch.zeros(source_count, dtype=torch.bool)
-    evidence[:response_start] = prompt
-    return evidence
-
-
-def evidence_gate(
-    evidence: torch.Tensor,
-    response_start: int,
-    layer_count: int,
-    *,
-    direct_response_only: bool,
-) -> MessageGate:
-    targets = None
-    if direct_response_only:
-        targets = torch.arange(len(evidence)) >= response_start - 1
-    return MessageGate(
-        split_layer=layer_count,
-        source_mask=evidence,
-        source_targets=targets,
+def decode_tokens(tokenizer, token_ids) -> np.ndarray:
+    return np.asarray(
+        [
+            tokenizer.decode(
+                [int(token)],
+                skip_special_tokens=False,
+                clean_up_tokenization_spaces=False,
+            )
+            for token in np.asarray(token_ids).reshape(-1)
+        ],
+        dtype="U32",
     )
 
 
@@ -61,68 +46,39 @@ def capture_sample(
     source_id: str,
     task_type: str,
     model_id: str,
-    causal_cuts: bool = False,
-    query_chunk: int = 128,
-    min_claim_tokens: int = 2,
-    max_claim_tokens: int = 96,
+    query_chunk: int = 64,
+    route_window: int = 4,
+    future_horizon: int = 16,
+    far_lag: int = 32,
+    peak_quantile: float = 0.9,
+    max_lag: int = 3,
+    detail: bool = False,
 ) -> SampleCapture:
-    """Capture observed routing once and optionally run two evidence cuts.
-
-    The functional trace is message magnitude, not causal attribution. Optional
-    cuts separately test direct response reads and all attention-mediated paths;
-    MLP parametric knowledge remains active in both reruns.
-    """
-
     ids = torch.as_tensor(token_ids, dtype=torch.long).cpu()
-    source_count = len(ids) - 1
-    evidence = evidence_source_mask(
-        prompt_evidence_mask, source_count, response_start
+    observer = RouteAccumulator(
+        model,
+        response_start,
+        prompt_evidence_mask,
+        route_window=route_window,
+        future_horizon=future_horizon,
+        far_lag=far_lag,
+        detail=detail,
     )
-    if not bool(evidence.any()):
-        raise ValueError("the declared evidence span contains no tokens")
-
-    accumulator = RouteAccumulator(model, response_start, prompt_evidence_mask)
     cache = baseline_forward(
         model,
         ids,
         response_start,
-        observer=accumulator,
+        observer=observer,
         checkpoint_layers=(0,),
         attention_query_chunk=query_chunk,
     )
-    routes = accumulator.finish()
-    del accumulator
-    functional = routes.functional_share.numpy()
-    attention = routes.attention_share.numpy()
-    claims = split_claims(
-        tokenizer,
-        ids.numpy(),
-        response_start,
-        min_tokens=min_claim_tokens,
-        max_tokens=max_claim_tokens,
+    trace = observer.finish()
+    rhythm = build_rhythm(
+        trace,
+        revisit_window=route_window,
+        peak_quantile=peak_quantile,
+        max_lag=max_lag,
     )
-
-    if causal_cuts:
-        direct_delta = rerun_gate(
-            model,
-            cache,
-            evidence_gate(
-                evidence,
-                response_start,
-                cache.layer_count,
-                direct_response_only=True,
-            ),
-        )
-        global_delta = rerun_gate(
-            model,
-            cache,
-            evidence_gate(
-                evidence,
-                response_start,
-                cache.layer_count,
-                direct_response_only=False,
-            ),
-        )
 
     arrays: dict[str, object] = {
         "capture_schema": CAPTURE_SCHEMA,
@@ -131,27 +87,45 @@ def capture_sample(
         "task_type": task_type,
         "model_id": model_id,
         "response_start": response_start,
-        "evidence_tokens": int(evidence.sum()),
         "query_position": cache.query,
         "prediction_position": cache.query + 1,
         "target_token_id": cache.target,
-        "runner_token_id": cache.runner,
-        "baseline_margin": cache.full_margin,
         "baseline_target_logprob": cache.baseline_target_logprob,
         "baseline_entropy": cache.baseline_entropy,
-        "functional_role_share": functional,
-        "attention_role_share": attention,
-        "functional_availability_null": routes.functional_null.numpy(),
-        "attention_availability_null": routes.attention_null.numpy(),
-        "functional_message_mass": routes.functional_mass,
-        "causal_cuts": causal_cuts,
-        "claim_start": np.asarray([claim.start for claim in claims], dtype=np.int64),
-        "claim_stop": np.asarray([claim.stop for claim in claims], dtype=np.int64),
-        "claim_boundary_kind": np.asarray(
-            [claim.boundary_kind for claim in claims], dtype=np.int8
+        "prompt_share_layer": trace.prompt_share,
+        "evidence_share_layer": trace.evidence_share,
+        "history_share_layer": trace.history_share,
+        "far_prompt_share_layer": trace.far_prompt_share,
+        "prompt_breadth_layer": trace.prompt_breadth,
+        "route_change_layer": trace.route_change,
+        "future_influence_layer": trace.future_influence,
+        "route_change": rhythm.route_change,
+        "prompt_revisit": rhythm.prompt_revisit,
+        "evidence_revisit": rhythm.evidence_revisit,
+        "history_share": rhythm.history_share,
+        "prompt_breadth": rhythm.prompt_breadth,
+        "future_influence": rhythm.future_influence,
+        "revisit_delta": rhythm.revisit_delta,
+        "evidence_delta": rhythm.evidence_delta,
+        "revisit_peak": rhythm.revisit_peaks,
+        "anchor_peak": rhythm.anchor_peaks,
+        "revisit_peak_kind": rhythm.peak_kind,
+        "paired_anchor": rhythm.paired_anchor,
+        "coupling_rate": rhythm.coupling_rate,
+        "coupling_null_rate": rhythm.null_rate,
+        "median_anchor_lag": rhythm.median_lag,
+        "sentence_boundary_position": sentence_boundaries(
+            tokenizer, ids.numpy(), response_start
         ),
+        "detail": int(detail),
     }
-    if causal_cuts:
-        arrays["direct_evidence_cut_delta"] = direct_delta
-        arrays["global_evidence_cut_delta"] = global_delta
-    return SampleCapture(arrays=arrays)
+    if detail and trace.detail is not None:
+        arrays.update(
+            detail_edge_map=trace.detail["edge_map"],
+            detail_prompt_head=trace.detail["prompt_head"],
+            detail_route_change_head=trace.detail["route_change_head"],
+            detail_future_head=trace.detail["future_head"],
+            token_text=decode_tokens(tokenizer, ids.numpy()),
+            detail_prompt_evidence_mask=np.asarray(prompt_evidence_mask, dtype=bool),
+        )
+    return SampleCapture(arrays)

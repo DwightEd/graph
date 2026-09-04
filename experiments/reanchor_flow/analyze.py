@@ -1,4 +1,4 @@
-"""Stream label-free, layer-resolved re-anchor observations to disk."""
+"""Stream one-pass routing-rhythm captures to disk."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ from experiments.common.ragtruth_alignment import (
 
 from .artifacts import save_result
 from .capture import CAPTURE_SCHEMA, capture_sample
-from .visualize import save_sample_figure
 
 MANIFEST = "run_manifest.json"
 
@@ -40,17 +39,14 @@ def same_model(recorded: str, requested: str) -> bool:
 
 def open_manifest(output: Path, config: dict) -> dict:
     path = output / MANIFEST
-    if path.is_file():
-        manifest = json.loads(path.read_text(encoding="utf-8"))
-        if manifest["config"] != config:
-            raise ValueError(
-                "output contains another method version or configuration; "
-                "choose a new --output directory"
-            )
-        manifest["analysis_complete"] = False
-        return manifest
-    output.mkdir(parents=True, exist_ok=True)
-    return {"config": config, "analysis_complete": False, "samples": []}
+    if not path.is_file():
+        output.mkdir(parents=True, exist_ok=True)
+        return {"config": config, "analysis_complete": False, "samples": []}
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    if manifest.get("config") != config:
+        raise ValueError("output contains another configuration; choose a new --output")
+    manifest["analysis_complete"] = False
+    return manifest
 
 
 def analyze_split(
@@ -64,13 +60,16 @@ def analyze_split(
     model_id: str,
     dtype: str,
     limit: int | None = None,
-    plot_limit: int = 3,
     max_events: int | None = None,
-    query_chunk: int = 128,
-    min_claim_tokens: int = 2,
-    max_claim_tokens: int = 96,
-    causal_cuts: bool = False,
-) -> dict[str, dict[str, int]]:
+    query_chunk: int = 64,
+    route_window: int = 4,
+    future_horizon: int = 16,
+    far_lag: int = 32,
+    peak_quantile: float = 0.9,
+    max_lag: int = 3,
+    plot_limit: int = 1,
+    plot_sample_id: str | None = None,
+) -> dict[str, int]:
     dataset = open_research_dataset(
         dataset_root,
         device="cpu",
@@ -78,9 +77,8 @@ def analyze_split(
     )
     cache_model = str(getattr(dataset, "spec", {}).get("model_path", ""))
     if not same_model(cache_model, model_path):
-        raise ValueError("cached observer and graph/intervention model differ")
+        raise ValueError("cached observer and current model differ")
 
-    sources = load_source_info(source_info)
     output = Path(output_root)
     config = {
         "capture_schema": CAPTURE_SCHEMA,
@@ -91,61 +89,58 @@ def analyze_split(
         "source_info": str(Path(source_info).resolve()),
         "limit_per_task": limit,
         "max_events": max_events,
-        "min_claim_tokens": min_claim_tokens,
-        "max_claim_tokens": max_claim_tokens,
-        "causal_cuts": causal_cuts,
+        "query_chunk": query_chunk,
+        "route_window": route_window,
+        "future_horizon": future_horizon,
+        "far_lag": far_lag,
+        "peak_quantile": peak_quantile,
+        "max_lag": max_lag,
+        "plot_limit": plot_limit,
+        "plot_sample_id": plot_sample_id,
     }
     manifest = open_manifest(output, config)
     manifest["samples"] = [
-        row
-        for row in manifest["samples"]
-        if (output / row["result"]).is_file()
+        row for row in manifest["samples"] if (output / row["result"]).is_file()
     ]
     completed = {str(row["sample_id"]) for row in manifest["samples"]}
-    counts = {
-        task: {"selected": 0, "saved": 0, "skipped": 0}
-        for task in TASK_TYPES
-    }
+    detailed = sum(bool(row.get("detail")) for row in manifest["samples"])
+    counts = {task: 0 for task in TASK_TYPES}
+    sources = load_source_info(source_info)
 
     for dataset_sample_id in dataset.sample_ids:
-        if limit is not None and all(
-            counts[task]["selected"] >= limit for task in TASK_TYPES
-        ):
+        if limit is not None and all(counts[task] >= limit for task in TASK_TYPES):
             break
         sample = dataset[dataset_sample_id]
         sample_id = str(dataset_sample_id)
         task = canonical_task_type(sample.task_type)
-        if limit is not None and counts[task]["selected"] >= limit:
+        if limit is not None and counts[task] >= limit:
             sample.release_attention()
             continue
-        ordinal = counts[task]["selected"]
-        counts[task]["selected"] += 1
+        counts[task] += 1
         result_path = output / "results" / task / f"{sample_id}.npz"
         if sample_id in completed and result_path.is_file():
             sample.release_attention()
-            counts[task]["skipped"] += 1
             continue
 
         cached = sample.attention()
         token_ids = cached.token_ids.detach().cpu().clone()
         response_start = int(cached.response_idx)
         source_id = str(sample.source_id)
-        generator = getattr(sample, "generator_model", None)
-        observer = getattr(sample, "observer_model", None)
-        generator = "" if generator is None else str(generator)
-        cached_observer = cache_model or ("" if observer is None else str(observer))
-        observer = str(Path(model_path).resolve())
-        del cached
+        generator = str(getattr(sample, "generator_model", "") or "")
+        cached_observer = cache_model or str(getattr(sample, "observer_model", "") or "")
         sample.release_attention()
-        if not same_model(cached_observer, model_path):
-            raise ValueError(f"sample observer differs from current model: {sample_id}")
         if max_events is not None:
             token_ids = token_ids[: response_start + max_events]
 
         evidence_mask = build_evidence_mask(
             sources[source_id], tokenizer, token_ids, response_start
         )
-        print(f"capture {task} {ordinal + 1}: {sample_id}", flush=True)
+        detail = (
+            sample_id == plot_sample_id
+            if plot_sample_id is not None
+            else detailed < plot_limit
+        )
+        print(f"capture {task} {counts[task]}: {sample_id}", flush=True)
         captured = capture_sample(
             model,
             tokenizer,
@@ -156,61 +151,39 @@ def analyze_split(
             source_id=source_id,
             task_type=task,
             model_id=model_id,
-            causal_cuts=causal_cuts,
             query_chunk=query_chunk,
-            min_claim_tokens=min_claim_tokens,
-            max_claim_tokens=max_claim_tokens,
+            route_window=route_window,
+            future_horizon=future_horizon,
+            far_lag=far_lag,
+            peak_quantile=peak_quantile,
+            max_lag=max_lag,
+            detail=detail,
         )
-        captured.arrays["generator_model"] = generator
-        captured.arrays["observer_model"] = observer
-        captured.arrays["cached_observer_model"] = cached_observer
-        captured.arrays["query_chunk"] = query_chunk
-        captured.arrays["dtype"] = dtype
+        captured.arrays.update(
+            generator_model=generator,
+            observer_model=str(Path(model_path).resolve()),
+            cached_observer_model=cached_observer,
+            dtype=dtype,
+        )
         save_result(result_path, captured.arrays)
-
-        if ordinal < plot_limit:
-            convert = getattr(tokenizer, "convert_ids_to_tokens", None)
-            labels = None
-            if callable(convert):
-                labels = [
-                    str(token)
-                    for token in convert(token_ids[response_start:].tolist())
-                ]
-            save_sample_figure(
-                output / "figures" / task / f"{sample_id}.png",
-                captured,
-                response_labels=labels,
-                title=f"{task}: {sample_id}",
-            )
-
         manifest["samples"].append(
             {
                 "sample_id": sample_id,
                 "source_id": source_id,
                 "task_type": task,
-                "model_id": model_id,
-                "dtype": dtype,
                 "result": result_path.relative_to(output).as_posix(),
-                "events": len(token_ids) - response_start,
-                "generator_model": generator,
-                "observer_model": observer,
-                "cached_observer_model": cached_observer,
-                "query_chunk": query_chunk,
-                "same_generator_observer": bool(generator)
-                and same_model(generator, model_path),
+                "detail": detail,
             }
         )
         save_json(output / MANIFEST, manifest)
         completed.add(sample_id)
-        counts[task]["saved"] += 1
+        detailed += int(detail)
         del captured, evidence_mask, token_ids, sample
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
     manifest["analysis_complete"] = True
-    manifest["selected_samples"] = {
-        task: counts[task]["selected"] for task in TASK_TYPES
-    }
+    manifest["selected_samples"] = counts
     save_json(output / MANIFEST, manifest)
     return counts

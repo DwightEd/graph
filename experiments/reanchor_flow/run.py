@@ -1,4 +1,4 @@
-"""Foreground CLI for the re-anchor phenomenon audit."""
+"""Foreground CLI for prompt-revisit and future-anchor discovery."""
 
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ def output_root(args) -> Path:
         Path(__file__).resolve().parent
         / "outputs"
         / args.model.name
-        / "phenomenon_v3"
+        / "rhythm_v4"
     )
     return root / "smoke" if args.smoke else root
 
@@ -58,7 +58,7 @@ def load_model(path: Path, device: str, dtype: str):
 def analyze(args) -> dict:
     model, tokenizer = load_model(args.model, args.device, args.dtype)
     limit = 1 if args.smoke and args.limit is None else args.limit
-    max_events = 24 if args.smoke and args.max_events is None else args.max_events
+    max_events = 96 if args.smoke and args.max_events is None else args.max_events
     counts = analyze_split(
         model,
         tokenizer,
@@ -69,19 +69,31 @@ def analyze(args) -> dict:
         model_id=args.model.name,
         dtype=args.dtype,
         limit=limit,
-        plot_limit=args.plot_limit,
         max_events=max_events,
         query_chunk=args.query_chunk,
-        min_claim_tokens=args.min_claim_tokens,
-        max_claim_tokens=args.max_claim_tokens,
-        causal_cuts=args.causal_cuts,
+        route_window=args.route_window,
+        future_horizon=args.future_horizon,
+        far_lag=args.far_lag,
+        peak_quantile=args.peak_quantile,
+        max_lag=args.max_lag,
+        plot_limit=args.plot_limit,
+        plot_sample_id=args.plot_sample_id,
     )
     del model, tokenizer
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    print(counts)
+    print("captured " + " ".join(f"{task}={count}" for task, count in counts.items()))
     return counts
+
+
+def compact_number(value) -> str:
+    return "nan" if value is None else f"{float(value):.4f}"
+
+
+def compact_ci(summary: dict) -> str:
+    low, high = summary["ci95"]
+    return f"[{compact_number(low)},{compact_number(high)}]"
 
 
 def evaluate(args) -> dict:
@@ -90,33 +102,27 @@ def evaluate(args) -> dict:
         args.cache / "test",
         bootstrap=args.bootstrap,
         seed=args.seed,
-        pre=args.pre_window,
-        post=args.post_window,
-        curve_low=args.curve_low,
-        curve_high=args.curve_high,
+        curve_radius=args.curve_radius,
     )
     for task, report in reports.items():
-        status = report["hypothesis_status"]
-        observer = report["observer_hypothesis_status"]
-        scope = (
-            "generation"
-            if report["model_scope"]["generation_claims_allowed"]
-            else "observer-only; generation status withheld"
-        )
-        boundary = report["correct_boundary_vs_within_claim"]["evidence_specificity"]
-        missed = report["missed_reanchor_at_claim_boundary"]["exact_boundary_primary"]
+        onset = report["onset_minus_matched_clean"]
+        revisit = onset["revisit_delta"]
+        anchor = onset["future_influence"]
         print(
-            f"{task:9s} scope={scope}\n"
-            f"  reported status={status}\n"
-            f"  observer H1={observer['H1_exposure_adjusted_preference_drift']} "
-            f"H2={observer['H2_natural_boundary_evidence_specificity']} "
-            f"H3={observer['H3_exact_boundary_missed_entry_association']}\n"
-            f"  clean boundary-minus-control={boundary['source_mean']} "
-            f"CI95={boundary['ci95']} n={boundary['events']}\n"
-            f"  hallucinated-minus-clean boundary entry={missed['source_mean']} "
-            f"CI95={missed['ci95']} pairs={missed['matched_pairs']}/"
-            f"{missed['candidate_hallucinations']} sources={missed['sources']}\n"
-            f"  next: {report['recommended_next_step']}"
+            f"{task:9s} samples={report['samples']} tokens={report['tokens']} "
+            f"positives={report['positive_tokens']} "
+            f"revisit_peaks={report['revisit_peaks']} "
+            f"anchor_peaks={report['anchor_peaks']} "
+            f"coupling={compact_number(report['coupling_rate'])} "
+            f"null={compact_number(report['circular_null_rate'])} "
+            f"lift={compact_number(report['coupling_lift'])} "
+            f"lag={compact_number(report['median_anchor_lag'])}"
+        )
+        print(
+            f"  onset-clean revisit={compact_number(revisit['mean'])} "
+            f"CI={compact_ci(revisit)} "
+            f"anchor={compact_number(anchor['mean'])} "
+            f"CI={compact_ci(anchor)} pairs={report['onset_pairs']}"
         )
     return reports
 
@@ -134,47 +140,36 @@ def add_common(command) -> None:
     command.add_argument("--device", default="cuda:0")
     command.add_argument("--dtype", choices=tuple(DTYPE), default="bfloat16")
     command.add_argument("--limit", type=int)
-    command.add_argument("--plot-limit", type=int, default=3)
     command.add_argument("--max-events", type=int)
-    command.add_argument(
-        "--query-chunk",
-        type=int,
-        default=64,
-        help="queries per attention matmul; lower this if GPU memory is tight",
-    )
-    command.add_argument("--min-claim-tokens", type=int, default=2)
-    command.add_argument("--max-claim-tokens", type=int, default=96)
-    command.add_argument(
-        "--causal-cuts",
-        action="store_true",
-        help="also rerun direct and global evidence-source cuts (three forwards total)",
-    )
+    command.add_argument("--query-chunk", type=int, default=64)
+    command.add_argument("--route-window", type=int, default=4)
+    command.add_argument("--future-horizon", type=int, default=16)
+    command.add_argument("--far-lag", type=int, default=32)
+    command.add_argument("--peak-quantile", type=float, default=0.9)
+    command.add_argument("--max-lag", type=int, default=3)
+    command.add_argument("--plot-limit", type=int, default=1)
+    command.add_argument("--plot-sample-id")
     command.add_argument("--smoke", action="store_true")
 
 
 def add_evaluation(command) -> None:
     command.add_argument("--bootstrap", type=int, default=1000)
     command.add_argument("--seed", type=int, default=2026)
-    command.add_argument("--pre-window", type=int, default=5)
-    command.add_argument("--post-window", type=int, default=3)
-    command.add_argument("--curve-low", type=int, default=-5)
-    command.add_argument("--curve-high", type=int, default=10)
+    command.add_argument("--curve-radius", type=int, default=6)
 
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
-        description="Layer-resolved claim re-anchor phenomenon audit"
+        description="Internal prompt-revisit and anchor rhythm audit"
     )
     commands = root.add_subparsers(dest="command", required=True)
     analyze_command = commands.add_parser("analyze")
     add_common(analyze_command)
     analyze_command.set_defaults(handler=analyze)
-
     evaluate_command = commands.add_parser("evaluate")
     add_common(evaluate_command)
     add_evaluation(evaluate_command)
     evaluate_command.set_defaults(handler=evaluate)
-
     all_command = commands.add_parser("all")
     add_common(all_command)
     add_evaluation(all_command)
@@ -183,23 +178,27 @@ def parser() -> argparse.ArgumentParser:
 
 
 def validate_args(args) -> None:
+    for name in (
+        "query_chunk",
+        "route_window",
+        "future_horizon",
+        "far_lag",
+        "max_lag",
+    ):
+        if getattr(args, name) < 1:
+            raise ValueError(f"--{name.replace('_', '-')} must be positive")
     for name in ("limit", "max_events"):
-        value = getattr(args, name, None)
+        value = getattr(args, name)
         if value is not None and value < 1:
             raise ValueError(f"--{name.replace('_', '-')} must be positive")
-    if args.query_chunk < 1:
-        raise ValueError("--query-chunk must be positive")
+    if not 0 < args.peak_quantile < 1:
+        raise ValueError("--peak-quantile must lie in (0,1)")
     if args.plot_limit < 0:
         raise ValueError("--plot-limit cannot be negative")
-    if args.min_claim_tokens < 1 or args.max_claim_tokens < args.min_claim_tokens:
-        raise ValueError("claim token bounds are inconsistent")
-    if hasattr(args, "bootstrap"):
-        if args.bootstrap < 0:
-            raise ValueError("--bootstrap cannot be negative")
-        if args.pre_window < 1 or args.post_window < 1:
-            raise ValueError("event windows must be positive")
-        if args.curve_low >= 0 or args.curve_high < 0:
-            raise ValueError("event curve must straddle offset zero")
+    if hasattr(args, "bootstrap") and args.bootstrap < 0:
+        raise ValueError("--bootstrap cannot be negative")
+    if hasattr(args, "curve_radius") and args.curve_radius < 1:
+        raise ValueError("--curve-radius must be positive")
 
 
 def main() -> None:
