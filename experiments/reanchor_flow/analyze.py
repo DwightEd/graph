@@ -112,6 +112,9 @@ def analyze_split(
             break
         sample = dataset[dataset_sample_id]
         sample_id = str(dataset_sample_id)
+        if plot_sample_id is not None and sample_id != plot_sample_id:
+            sample.release_attention()
+            continue
         task = canonical_task_type(sample.task_type)
         if limit is not None and counts[task] >= limit:
             sample.release_attention()
@@ -120,6 +123,8 @@ def analyze_split(
         result_path = output / "results" / task / f"{sample_id}.npz"
         if sample_id in completed and result_path.is_file():
             sample.release_attention()
+            if plot_sample_id is not None:
+                break
             continue
 
         cached = sample.attention()
@@ -183,7 +188,13 @@ def analyze_split(
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        if plot_sample_id is not None:
+            break
 
+    if plot_sample_id is not None and not any(
+        str(row["sample_id"]) == plot_sample_id for row in manifest["samples"]
+    ):
+        raise ValueError(f"sample id not found: {plot_sample_id}")
     manifest["analysis_complete"] = True
     manifest["selected_samples"] = counts
     save_json(output / MANIFEST, manifest)
