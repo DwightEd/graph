@@ -26,3 +26,4 @@ jobs:
           python -m pytest -q experiments/common/tests/test_llama_message_intervention.py
           python -m pytest -q experiments/reanchor_flow/tests
           bash -n experiments/reanchor_flow/run_all.sh
+          echo v6-complete
