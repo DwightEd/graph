@@ -1,5 +1,6 @@
 name: validate-reanchor-flow-discovery
 
+# Payload revision 3: all six archive chunks are present.
 on:
   push:
     branches:
