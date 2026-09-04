@@ -33,7 +33,7 @@ def test_accumulator_keeps_token_and_layer_trajectories():
         prompt_evidence_mask=[True, False, False],
         route_window=2,
         future_horizon=2,
-        far_lag=1,
+        distance_scale=2,
         detail=True,
     )
     probability = torch.zeros(1, 2, 5, 5)
@@ -45,7 +45,33 @@ def test_accumulator_keeps_token_and_layer_trajectories():
         accumulator.observe(layer, probability, value, output)
     result = accumulator.finish()
     assert result.prompt_share.shape == (2, 3)
+    assert result.nonlocality.shape == (2, 3)
     assert result.route_change.shape == (2, 3)
     assert result.future_influence.shape == (2, 3)
     assert result.detail["edge_map"].shape == (3, 5)
+    assert result.detail["nonlocal_head"].shape == (2, 2, 3)
     assert torch.isfinite(result.future_influence[:, :2]).all()
+
+
+def test_nonlocality_is_continuous_expected_distance():
+    model = SimpleNamespace(config=SimpleNamespace(num_hidden_layers=1))
+    accumulator = RouteAccumulator(
+        model,
+        response_start=2,
+        prompt_evidence_mask=[True, False],
+        route_window=1,
+        future_horizon=2,
+        distance_scale=2,
+    )
+    probability = torch.zeros(1, 1, 4, 4)
+    probability[0, 0, 0, 0] = 1
+    probability[0, 0, 1, 1] = 1
+    probability[0, 0, 2, 2] = 1
+    probability[0, 0, 3, 1] = 0.5
+    probability[0, 0, 3, 2] = 0.5
+    value = torch.ones(1, 1, 4, 2)
+    output = torch.eye(2)
+    accumulator.observe(0, probability, value, output)
+    result = accumulator.finish()
+    # At q=3, lag 1 receives weight 0.5 and lag 2 receives weight 1.0.
+    torch.testing.assert_close(result.nonlocality[0, 2], torch.tensor(0.75))

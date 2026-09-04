@@ -1,16 +1,25 @@
 # Internal Routing Rhythm Audit
 
-This experiment first discovers model-internal events; punctuation is only a visual reference.
-For every response token `p` (observed at `q=p-1`) it records:
+The audit discovers model-internal events for every response token `p`, using the predictor
+`q=p-1`. Punctuation is shown only as a visual reference.
 
-- `route_change`: JS change of the full `A ||W_O V||` source distribution;
-- `revisit_delta`: renewed transport from far prompt tokens relative to the previous window;
-- `prompt_breadth`: selective re-read versus broad prompt review;
-- `future_influence`: how strongly later queries reuse token `p`.
+The Value-aware source distribution is
 
-Revisit peaks and future-influence peaks are detected independently. Their short-lag coupling is
-compared with a circular-shift null. Hallucination labels are opened only after capture, to compare
-the first hallucinated token with a nearby clean token in the same response.
+```text
+P(s | p,l,h) ∝ A[l,h,q,s] * ||W_O[l,h] V[l,g(h),s]||
+```
+
+Four token trajectories are retained:
+
+- `route_change`: JS change from the preceding source distributions;
+- `prompt_delta`: renewed transport from any prompt token;
+- `nonlocal_delta`: renewed continuous expected source distance, not a hard far-token cutoff;
+- `future_influence`: later tokens' reuse of the generated token.
+
+Prompt-revisit peaks and nonlocal-review peaks are detected independently. Each is paired with
+future-anchor peaks and compared with a circular-shift null. Reports include both pooled peak
+coupling and the source-level mean coupling lift with a bootstrap confidence interval, so a
+population claim is not inferred from one sample or from pooled peaks alone.
 
 ## Run
 
@@ -20,31 +29,30 @@ bash experiments/reanchor_flow/run_all.sh --smoke --query-chunk 32
 bash experiments/reanchor_flow/run_all.sh \
   --limit 20 \
   --query-chunk 64 \
-  --output experiments/reanchor_flow/outputs/pilot_v4
+  --output experiments/reanchor_flow/outputs/pilot_v5
 
 bash experiments/reanchor_flow/run_all.sh --query-chunk 64
 ```
 
-To draw a particular sample:
+`--distance-scale 16` is the distance at which the continuous nonlocal weight saturates. A source
+at lag `d` receives weight `min(d / distance_scale, 1)`; no source is excluded by a distance gate.
+
+To draw one sample:
 
 ```bash
 bash experiments/reanchor_flow/run_all.sh \
   --plot-sample-id 12471 \
   --plot-limit 0 \
-  --output experiments/reanchor_flow/outputs/sample_12471_v4
+  --output experiments/reanchor_flow/outputs/sample_12471_v5
 ```
 
-## Outputs
+Default outputs:
 
 ```text
-outputs/<model>/rhythm_v4/
+outputs/<model>/rhythm_v5/
   results/<task>/<sample>.npz
   figures/sample_<task>_<sample>.png
   reports/<task>/rhythm_report.json
   reports/<task>/rhythm_summary.png
   run_manifest.json
 ```
-
-The terminal prints only peak coupling and hallucination-onset matched effects. The one-sample
-figure contains the source-to-token route map, the revisit-anchor curves, a head-resolved prompt
-read map, and a sparse top-route graph.

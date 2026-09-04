@@ -1,9 +1,10 @@
-"""Foreground CLI for prompt-revisit and future-anchor discovery."""
+"""Foreground CLI for prompt-revisit, nonlocal-review and anchor discovery."""
 
 from __future__ import annotations
 
 import argparse
 import gc
+import math
 from pathlib import Path
 
 import torch
@@ -39,7 +40,7 @@ def output_root(args) -> Path:
         Path(__file__).resolve().parent
         / "outputs"
         / args.model.name
-        / "rhythm_v4"
+        / "rhythm_v5"
     )
     return root / "smoke" if args.smoke else root
 
@@ -73,7 +74,7 @@ def analyze(args) -> dict:
         query_chunk=args.query_chunk,
         route_window=args.route_window,
         future_horizon=args.future_horizon,
-        far_lag=args.far_lag,
+        distance_scale=args.distance_scale,
         peak_quantile=args.peak_quantile,
         max_lag=args.max_lag,
         plot_limit=args.plot_limit,
@@ -88,12 +89,26 @@ def analyze(args) -> dict:
 
 
 def compact_number(value) -> str:
-    return "nan" if value is None else f"{float(value):.4f}"
+    if value is None or not math.isfinite(float(value)):
+        return "NA"
+    return f"{float(value):.4f}"
 
 
 def compact_ci(summary: dict) -> str:
     low, high = summary["ci95"]
     return f"[{compact_number(low)},{compact_number(high)}]"
+
+
+def coupling_text(name: str, summary: dict) -> str:
+    sample = summary["sample_lift"]
+    return (
+        f"  {name} pooled={compact_number(summary['pooled_rate'])} "
+        f"null={compact_number(summary['pooled_null'])} "
+        f"lift={compact_number(summary['pooled_lift'])} "
+        f"sample_lift={compact_number(sample['mean'])} CI={compact_ci(sample)} "
+        f"positive_sources={compact_number(summary['positive_source_fraction'])} "
+        f"lag={compact_number(summary['median_anchor_lag'])}"
+    )
 
 
 def evaluate(args) -> dict:
@@ -106,23 +121,23 @@ def evaluate(args) -> dict:
     )
     for task, report in reports.items():
         onset = report["onset_minus_matched_clean"]
-        revisit = onset["revisit_delta"]
+        prompt = onset["prompt_delta"]
+        nonlocal_effect = onset["nonlocal_delta"]
         anchor = onset["future_influence"]
         print(
             f"{task:9s} samples={report['samples']} tokens={report['tokens']} "
             f"positives={report['positive_tokens']} "
-            f"revisit_peaks={report['revisit_peaks']} "
-            f"anchor_peaks={report['anchor_peaks']} "
-            f"coupling={compact_number(report['coupling_rate'])} "
-            f"null={compact_number(report['circular_null_rate'])} "
-            f"lift={compact_number(report['coupling_lift'])} "
-            f"lag={compact_number(report['median_anchor_lag'])}"
+            f"prevalence={compact_number(report['prevalence'])} "
+            f"anchors={report['anchor_peaks']}"
         )
+        print(coupling_text("prompt->anchor", report["prompt_to_anchor"]))
+        print(coupling_text("nonlocal->anchor", report["nonlocal_to_anchor"]))
         print(
-            f"  onset-clean revisit={compact_number(revisit['mean'])} "
-            f"CI={compact_ci(revisit)} "
-            f"anchor={compact_number(anchor['mean'])} "
-            f"CI={compact_ci(anchor)} pairs={report['onset_pairs']}"
+            f"  onset-clean prompt={compact_number(prompt['mean'])} CI={compact_ci(prompt)} "
+            f"nonlocal={compact_number(nonlocal_effect['mean'])} "
+            f"CI={compact_ci(nonlocal_effect)} "
+            f"anchor={compact_number(anchor['mean'])} CI={compact_ci(anchor)} "
+            f"pairs={report['onset_pairs']}"
         )
     return reports
 
@@ -144,7 +159,12 @@ def add_common(command) -> None:
     command.add_argument("--query-chunk", type=int, default=64)
     command.add_argument("--route-window", type=int, default=4)
     command.add_argument("--future-horizon", type=int, default=16)
-    command.add_argument("--far-lag", type=int, default=32)
+    command.add_argument(
+        "--distance-scale",
+        type=int,
+        default=16,
+        help="lag where continuous nonlocal weight saturates; no hard far-token cutoff",
+    )
     command.add_argument("--peak-quantile", type=float, default=0.9)
     command.add_argument("--max-lag", type=int, default=3)
     command.add_argument("--plot-limit", type=int, default=1)
@@ -160,7 +180,7 @@ def add_evaluation(command) -> None:
 
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
-        description="Internal prompt-revisit and anchor rhythm audit"
+        description="Internal prompt-revisit, nonlocal-review and anchor rhythm audit"
     )
     commands = root.add_subparsers(dest="command", required=True)
     analyze_command = commands.add_parser("analyze")
@@ -182,7 +202,7 @@ def validate_args(args) -> None:
         "query_chunk",
         "route_window",
         "future_horizon",
-        "far_lag",
+        "distance_scale",
         "max_lag",
     ):
         if getattr(args, name) < 1:

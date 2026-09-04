@@ -25,7 +25,7 @@ def test_tiny_llama_emits_complete_rhythm_trace():
         prompt_evidence_mask=[True, True, False, False],
         route_window=2,
         future_horizon=3,
-        far_lag=2,
+        distance_scale=2,
         detail=True,
     )
     baseline_forward(
@@ -37,5 +37,6 @@ def test_tiny_llama_emits_complete_rhythm_trace():
     )
     trace = observer.finish()
     assert trace.prompt_share.shape == (2, 4)
+    assert trace.nonlocality.shape == (2, 4)
     assert trace.future_influence.shape == (2, 4)
     assert trace.detail["edge_map"].shape == (4, 7)

@@ -1,4 +1,4 @@
-"""Open labels after capture and write concise rhythm reports."""
+"""Open labels after capture and write concise population rhythm reports."""
 
 from __future__ import annotations
 
@@ -16,15 +16,26 @@ from .capture import CAPTURE_SCHEMA
 from .report import task_summary
 from .visualize import save_population_figure, save_sample_figure
 
-ROW_FIELDS = (
-    "revisit_delta",
+ARRAY_FIELDS = (
+    "prompt_delta",
+    "nonlocal_delta",
+    "evidence_delta",
     "route_change",
     "future_influence",
     "prompt_breadth",
-    "revisit_peak",
+    "prompt_peak",
+    "review_peak",
     "anchor_peak",
-    "revisit_peak_kind",
-    "paired_anchor",
+    "prompt_paired_anchor",
+    "review_paired_anchor",
+)
+SCALAR_FIELDS = (
+    "prompt_coupling_rate",
+    "prompt_coupling_null_rate",
+    "prompt_median_anchor_lag",
+    "review_coupling_rate",
+    "review_coupling_null_rate",
+    "review_median_anchor_lag",
 )
 
 
@@ -85,17 +96,17 @@ def evaluate_results(
         label = np.asarray(labels.response_labels(sample), dtype=bool)[:count]
         sample.release_attention()
         task = canonical_task_type(sample.task_type)
-        by_task[task].append(
-            {
-                "source_id": str(entry["source_id"]),
-                "label": label,
-                "target_token_id": np.asarray(result["target_token_id"], dtype=np.int64),
-                **{name: np.asarray(result[name]) for name in ROW_FIELDS},
-                "coupling_null_rate": float(
-                    np.asarray(result["coupling_null_rate"]).item()
-                ),
-            }
-        )
+        row = {
+            "source_id": str(entry["source_id"]),
+            "label": label,
+            "target_token_id": np.asarray(result["target_token_id"], dtype=np.int64),
+            **{name: np.asarray(result[name]) for name in ARRAY_FIELDS},
+            **{
+                name: float(np.asarray(result[name]).item())
+                for name in SCALAR_FIELDS
+            },
+        }
+        by_task[task].append(row)
         if int(np.asarray(result.get("detail", 0)).item()):
             save_sample_figure(
                 output / "figures" / f"sample_{task}_{entry['sample_id']}.png",
