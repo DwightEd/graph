@@ -119,7 +119,7 @@ def evaluate(args) -> dict:
     for task, report in reports.items():
         onset = report["onset_minus_matched_clean"]
         prompt = onset["prompt_delta"]
-        nonlocal = onset["nonlocal_delta"]
+        nonlocal_effect = onset["nonlocal_delta"]
         anchor = onset["future_influence"]
         print(
             f"{task:9s} samples={report['samples']} tokens={report['tokens']} "
@@ -131,7 +131,8 @@ def evaluate(args) -> dict:
         print(coupling_text("nonlocal->anchor", report["nonlocal_to_anchor"]))
         print(
             f"  onset-clean prompt={compact_number(prompt['mean'])} CI={compact_ci(prompt)} "
-            f"nonlocal={compact_number(nonlocal['mean'])} CI={compact_ci(nonlocal)} "
+            f"nonlocal={compact_number(nonlocal_effect['mean'])} "
+            f"CI={compact_ci(nonlocal_effect)} "
             f"anchor={compact_number(anchor['mean'])} CI={compact_ci(anchor)} "
             f"pairs={report['onset_pairs']}"
         )
