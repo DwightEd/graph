@@ -1,4 +1,4 @@
-"""Target-conditioned path potential and flow on a causal DAG."""
+"""FlowTracer-style target-conditioned path potential on a causal token DAG."""
 
 from __future__ import annotations
 
@@ -17,6 +17,8 @@ class PathMass:
 
 
 def target_potential(transition: np.ndarray, sink: int) -> np.ndarray:
+    """Sum products over all directed paths from every node to ``sink``."""
+
     graph = np.asarray(transition, dtype=np.float64)
     if graph.ndim != 2 or graph.shape[0] != graph.shape[1]:
         raise ValueError("transition must be square")
@@ -41,6 +43,7 @@ def first_hit_path_mass(transition, sink: int, sources, anchors) -> PathMass:
     source = source[(source >= 0) & (source < sink)]
     if not len(source):
         return PathMass(0.0, 0.0, 0.0)
+
     potential = target_potential(graph, sink)
     hit = np.zeros_like(potential)
     hit[sink] = potential[sink] if sink in anchor else 0.0
@@ -59,7 +62,7 @@ def first_hit_path_mass(transition, sink: int, sources, anchors) -> PathMass:
 
 
 def conditioned_flow(transition, sink: int, sources) -> tuple[np.ndarray, np.ndarray]:
-    """Return sink-conditioned edge and node flow from uniform sources."""
+    """Return sink-conditioned edge and node flow from uniform source seeds."""
 
     graph = np.asarray(transition, dtype=np.float64)
     potential = target_potential(graph, sink)
@@ -69,6 +72,7 @@ def conditioned_flow(transition, sink: int, sources) -> tuple[np.ndarray, np.nda
     node_flow = np.zeros(len(graph), dtype=np.float64)
     if not len(source):
         return edge_flow, node_flow
+
     node_flow[source] += 1.0 / len(source)
     for node in range(sink):
         if node_flow[node] <= 0 or potential[node] <= EPS:

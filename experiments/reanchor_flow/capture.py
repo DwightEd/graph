@@ -1,4 +1,4 @@
-"""One-model capture for claim re-read, global flow, and path interventions."""
+"""One-model capture for re-read, global flow, and real path-cut validation."""
 
 from __future__ import annotations
 
@@ -16,7 +16,6 @@ from experiments.constraint_routing_rhythm.intervene import (
 
 from .claims import ClaimSpan, split_claims
 from .flow import claim_metrics, dominant_backbone
-from .routes import RouteAccumulator
 from .graph import (
     TokenDAG,
     build_token_dag,
@@ -26,6 +25,7 @@ from .graph import (
     role_inflow,
     token_edges_to_query_mask,
 )
+from .routes import RouteAccumulator
 
 
 @dataclass(frozen=True)
@@ -36,22 +36,44 @@ class SampleCapture:
     claims: tuple[ClaimSpan, ...]
 
 
-def metric_table(graph, claims, response_start, evidence_mask) -> dict[str, np.ndarray]:
-    names = None
-    rows = []
-    for claim in claims:
-        row = claim_metrics(
-            graph.transition,
+def stable_seed(text: str) -> int:
+    return int.from_bytes(hashlib.sha256(text.encode()).digest()[:8], "little")
+
+
+def full_evidence_mask(prompt_mask, token_count: int, response_start: int) -> np.ndarray:
+    prompt = np.asarray(prompt_mask, dtype=bool).reshape(-1)
+    if len(prompt) != response_start:
+        raise ValueError("evidence mask must align with the complete prompt")
+    evidence = np.zeros(token_count, dtype=bool)
+    evidence[:response_start] = prompt
+    return evidence
+
+
+def metric_table(
+    prefix: str,
+    dag: TokenDAG,
+    claims: tuple[ClaimSpan, ...],
+    response_start: int,
+    evidence: np.ndarray,
+    anchor_width: int,
+    reread_window: int,
+) -> dict[str, np.ndarray]:
+    rows = [
+        claim_metrics(
+            dag.transition,
             claim,
             response_start,
-            evidence_mask,
+            evidence,
+            anchor_width=anchor_width,
+            reread_window=reread_window,
         )
-        names = tuple(row)
-        rows.append([row[name] for name in names])
-    if names is None:
-        return {}
-    matrix = np.asarray(rows, dtype=np.float64)
-    return {name: matrix[:, index] for index, name in enumerate(names)}
+        for claim in claims
+    ]
+    names = rows[0].keys() if rows else ()
+    return {
+        f"{prefix}_{name}": np.asarray([row[name] for row in rows], dtype=np.float64)
+        for name in names
+    }
 
 
 def all_layer_gate(edge_mask: np.ndarray, layer_count: int) -> RelayGate:
@@ -68,76 +90,86 @@ def all_layer_gate(edge_mask: np.ndarray, layer_count: int) -> RelayGate:
     )
 
 
-def audit_delta(model, cache, edge_mask: np.ndarray, event: int) -> float:
+def path_cut_delta(model, cache, edge_mask: np.ndarray, event: int) -> float:
     if not np.asarray(edge_mask, dtype=bool).any():
         return float("nan")
     delta = rerun_gate(model, cache, all_layer_gate(edge_mask, cache.layer_count))
     return float(delta[event])
 
 
-def audit_paths(
+def path_audit(
     model,
     cache,
-    functional,
-    attention,
-    claims,
+    functional: TokenDAG,
+    attention: TokenDAG,
+    claims: tuple[ClaimSpan, ...],
     response_start: int,
-    evidence_mask,
+    evidence: np.ndarray,
     *,
     cover: float,
     max_edges: int,
 ) -> dict[str, object]:
-    evidence = np.flatnonzero(np.asarray(evidence_mask, dtype=bool)[:response_start])
+    """Cut one label-free strongest evidence-to-claim backbone and controls."""
+
+    sources = np.flatnonzero(evidence[:response_start])
     candidates = []
     for index, claim in enumerate(claims):
         value = claim_metrics(
-            functional.transition, claim, response_start, evidence_mask
+            functional.transition, claim, response_start, evidence
         )["evidence_reanchor_flow"]
         if np.isfinite(value) and value > 0:
             candidates.append((float(value), index, claim))
-    if not candidates:
+    if not candidates or not len(sources):
         return {"audit_claim_index": -1}
 
     _, index, claim = max(candidates, key=lambda item: (item[0], -item[1]))
-    functional_backbone, _ = dominant_backbone(
+    functional_edges, edge_flow = dominant_backbone(
         functional.transition,
-        claim.sink - 1,
-        evidence,
+        claim.sink,
+        sources,
         cover=cover,
         max_edges=max_edges,
     )
-    attention_backbone, _ = dominant_backbone(
+    attention_edges, _ = dominant_backbone(
         attention.transition,
-        claim.sink - 1,
-        evidence,
+        claim.sink,
+        sources,
         cover=cover,
         max_edges=max_edges,
     )
-    count = int(functional_backbone.sum())
-    bag = capacity_bag(functional.transition, claim.sink - 1, count)
-    matched = matched_endpoint_mask(
-        functional_backbone,
+    count = int(functional_edges.sum())
+    bag_edges = capacity_bag(functional.transition, claim.sink, count)
+    matched_edges = matched_endpoint_mask(
+        functional_edges,
         functional.transition,
         response_start,
-        evidence_mask,
+        evidence,
     )
-    event = claim.stop - response_start - 1
+    event = claim.sink - response_start
+    edge_source, edge_target = np.nonzero(functional_edges)
     return {
         "audit_claim_index": index,
         "audit_claim_start": claim.start,
         "audit_claim_stop": claim.stop,
-        "functional_backbone_edges": count,
-        "attention_backbone_edges": int(attention_backbone.sum()),
-        "bag_edges": int(bag.sum()),
-        "matched_edges": int(matched.sum()),
-        "functional_backbone_cut_delta": audit_delta(
-            model, cache, functional_backbone, event
+        "audit_functional_edge_count": count,
+        "audit_attention_edge_count": int(attention_edges.sum()),
+        "audit_bag_edge_count": int(bag_edges.sum()),
+        "audit_matched_edge_count": int(matched_edges.sum()),
+        "audit_functional_backbone_delta": path_cut_delta(
+            model, cache, functional_edges, event
         ),
-        "attention_backbone_cut_delta": audit_delta(
-            model, cache, attention_backbone, event
+        "audit_attention_backbone_delta": path_cut_delta(
+            model, cache, attention_edges, event
         ),
-        "capacity_bag_cut_delta": audit_delta(model, cache, bag, event),
-        "matched_endpoint_cut_delta": audit_delta(model, cache, matched, event),
+        "audit_capacity_bag_delta": path_cut_delta(
+            model, cache, bag_edges, event
+        ),
+        "audit_matched_endpoint_delta": path_cut_delta(
+            model, cache, matched_edges, event
+        ),
+        "audit_edge_source": edge_source.astype(np.int64),
+        "audit_edge_target": edge_target.astype(np.int64),
+        "audit_edge_flow": edge_flow[edge_source, edge_target],
     }
 
 
@@ -154,68 +186,53 @@ def capture_sample(
     model_id: str,
     audit: bool = False,
     query_chunk: int = 128,
-    layer_start: int | None = None,
-    layer_stop: int | None = None,
-    min_claim_tokens: int = 1,
+    min_claim_tokens: int = 2,
     max_claim_tokens: int = 96,
+    anchor_width: int = 3,
+    reread_window: int = 5,
     backbone_cover: float = 0.8,
     backbone_edges: int = 32,
 ) -> SampleCapture:
-    """Use one frozen model for route observation, global flow, and path cuts."""
+    """Build all graph views and interventions from one frozen observer model."""
 
     ids = torch.as_tensor(token_ids, dtype=torch.long).cpu()
-    source_count = len(ids) - 1
-    evidence = np.zeros(source_count, dtype=bool)
-    prompt_evidence = np.asarray(prompt_evidence_mask, dtype=bool)
-    if len(prompt_evidence) != response_start:
-        raise ValueError("evidence mask must cover the complete prompt")
-    evidence[:response_start] = prompt_evidence
-
-    accumulator = RouteAccumulator(
-        model,
-        response_start,
-        query_chunk=query_chunk,
-        layer_start=layer_start,
-        layer_stop=layer_stop,
-    )
+    evidence = full_evidence_mask(prompt_evidence_mask, len(ids), response_start)
+    accumulator = RouteAccumulator(model, response_start, query_chunk=query_chunk)
     cache = baseline_forward(
         model,
         ids,
         response_start,
         observer=accumulator.observe,
+        checkpoint_layers=(0,),
     )
     maps = accumulator.finish()
     claims = tuple(
         split_claims(
             tokenizer,
-            ids,
+            ids.numpy(),
             response_start,
             min_tokens=min_claim_tokens,
             max_tokens=max_claim_tokens,
         )
     )
+
+    # The all-layer endpoint graph matches the all-layer endpoint cuts below.
     functional = build_token_dag(maps.functional.numpy(), response_start)
     attention = build_token_dag(maps.attention.numpy(), response_start)
-    seed = int.from_bytes(hashlib.sha256(sample_id.encode()).digest()[:8], "big")
-    rewired_base = build_token_dag(maps.functional.numpy(), response_start)
+    middle = build_token_dag(maps.functional_middle.numpy(), response_start)
     rewired = TokenDAG(
-        capacity=rewired_base.capacity,
+        capacity=functional.capacity,
         transition=rewire_by_role_lag(
-            rewired_base.transition,
+            functional.transition,
             response_start,
             evidence,
-            seed=seed,
+            seed=stable_seed(sample_id),
         ),
-        response_start=rewired_base.response_start,
-        row_start=rewired_base.row_start,
+        response_start=response_start,
     )
 
-    functional_claim = metric_table(functional, claims, response_start, evidence)
-    attention_claim = metric_table(attention, claims, response_start, evidence)
-    rewired_claim = metric_table(rewired, claims, response_start, evidence)
     functional_inflow = role_inflow(functional.transition, response_start, evidence)
     attention_inflow = role_inflow(attention.transition, response_start, evidence)
-
     arrays: dict[str, object] = {
         "sample_id": sample_id,
         "source_id": source_id,
@@ -228,38 +245,59 @@ def capture_sample(
         "baseline_margin": cache.full_margin,
         "baseline_target_logprob": cache.baseline_target_logprob,
         "baseline_entropy": cache.baseline_entropy,
-        "flow_layer_start": maps.layer_start,
-        "flow_layer_stop": maps.layer_stop,
+        "middle_layer_start": maps.middle_start,
+        "middle_layer_stop": maps.middle_stop,
         "claim_start": np.asarray([claim.start for claim in claims], dtype=np.int64),
         "claim_stop": np.asarray([claim.stop for claim in claims], dtype=np.int64),
-        "claim_sink_query": np.asarray([claim.stop - 2 for claim in claims], dtype=np.int64),
+        "claim_sink": np.asarray([claim.sink for claim in claims], dtype=np.int64),
+        "audit_claim_index": -1,
+        "audit_functional_backbone_delta": float("nan"),
+        "audit_attention_backbone_delta": float("nan"),
+        "audit_capacity_bag_delta": float("nan"),
+        "audit_matched_endpoint_delta": float("nan"),
+        "audit_functional_edge_count": 0,
+        "audit_attention_edge_count": 0,
+        "audit_bag_edge_count": 0,
+        "audit_matched_edge_count": 0,
+        "audit_edge_source": np.empty(0, dtype=np.int64),
+        "audit_edge_target": np.empty(0, dtype=np.int64),
+        "audit_edge_flow": np.empty(0, dtype=np.float64),
     }
     for name, value in functional_inflow.items():
         arrays[f"functional_{name}_inflow"] = value
     for name, value in attention_inflow.items():
         arrays[f"attention_{name}_inflow"] = value
-    for prefix, table in (
-        ("functional", functional_claim),
-        ("attention", attention_claim),
-        ("rewired", rewired_claim),
+    for prefix, dag in (
+        ("functional", functional),
+        ("attention", attention),
+        ("middle", middle),
+        ("rewired", rewired),
     ):
-        for name, value in table.items():
-            arrays[f"{prefix}_{name}"] = value
-
-    audit_result = {"audit_claim_index": -1}
-    if audit:
-        audit_result = audit_paths(
-            model,
-            cache,
-            functional,
-            attention,
-            claims,
-            response_start,
-            evidence,
-            cover=backbone_cover,
-            max_edges=backbone_edges,
+        arrays.update(
+            metric_table(
+                prefix,
+                dag,
+                claims,
+                response_start,
+                evidence,
+                anchor_width,
+                reread_window,
+            )
         )
-    arrays.update(audit_result)
+    if audit:
+        arrays.update(
+            path_audit(
+                model,
+                cache,
+                functional,
+                attention,
+                claims,
+                response_start,
+                evidence,
+                cover=backbone_cover,
+                max_edges=backbone_edges,
+            )
+        )
     return SampleCapture(
         arrays=arrays,
         functional_transition=functional.transition,

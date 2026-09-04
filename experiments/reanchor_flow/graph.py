@@ -1,4 +1,4 @@
-"""Construction and structural controls for causal token-state DAGs."""
+"""Generation-token DAG construction and structure-preserving controls."""
 
 from __future__ import annotations
 
@@ -12,12 +12,11 @@ EPS = 1e-12
 
 @dataclass(frozen=True)
 class TokenDAG:
-    """Causal token-state graph with edges ``source -> predictor query``."""
+    """Causal graph with edges ``source token -> predicted response token``."""
 
     capacity: np.ndarray
     transition: np.ndarray
     response_start: int
-    row_start: int
 
     @property
     def token_count(self) -> int:
@@ -25,34 +24,40 @@ class TokenDAG:
 
 
 def build_token_dag(route_rows, response_start: int) -> TokenDAG:
-    """Lift response-query rows into a strict causal token-state DAG."""
+    """Lift predictor rows into an acyclic generation-dependency graph.
+
+    Route row ``t`` is observed at query ``response_start - 1 + t`` and predicts
+    token ``response_start + t``. Mapping it to the predicted token preserves
+    the immediate previous response token as a causal source and avoids a fake
+    self-loop at the query coordinate.
+    """
 
     rows = np.asarray(route_rows, dtype=np.float64)
     if rows.ndim != 2:
         raise ValueError("route_rows must have shape [response, source]")
     events, source_count = rows.shape
-    row_start = response_start - 1
-    if events > source_count - row_start:
-        raise ValueError("route rows exceed the available response queries")
+    token_count = source_count + 1
+    if events > token_count - response_start:
+        raise ValueError("route rows exceed the response token range")
 
-    capacity = np.zeros((source_count, source_count), dtype=np.float64)
+    capacity = np.zeros((token_count, token_count), dtype=np.float64)
     transition = np.zeros_like(capacity)
     for event in range(events):
-        target = row_start + event
+        target = response_start + event
         weight = np.clip(rows[event, :target], 0.0, None)
         capacity[:target, target] = weight
         total = float(weight.sum())
         if total > EPS:
             transition[:target, target] = weight / total
-    return TokenDAG(capacity, transition, response_start, row_start)
+    return TokenDAG(capacity, transition, response_start)
 
 
 def source_roles(token_count: int, response_start: int, evidence_mask) -> np.ndarray:
-    """0=evidence, 1=other prompt, 2=response."""
+    """Return 0=evidence, 1=other prompt, 2=response."""
 
     evidence = np.zeros(token_count, dtype=bool)
     supplied = np.asarray(evidence_mask, dtype=bool).reshape(-1)
-    evidence[: min(len(supplied), token_count)] = supplied[:token_count]
+    evidence[: min(token_count, len(supplied))] = supplied[:token_count]
     role = np.full(token_count, 2, dtype=np.int8)
     role[:response_start] = 1
     role[evidence] = 0
@@ -70,17 +75,18 @@ def rewire_by_role_lag(
     *,
     seed: int,
 ) -> np.ndarray:
-    """Permute source weights within target, role, and logarithmic lag bins."""
+    """Permute edge weights within target, source role, and lag bucket."""
 
     graph = np.asarray(transition, dtype=np.float64)
     rewired = graph.copy()
     role = source_roles(len(graph), response_start, evidence_mask)
     random = np.random.default_rng(seed)
-    for target in range(max(response_start - 1, 0), len(graph)):
+    for target in range(response_start, len(graph)):
         groups: dict[tuple[int, int], list[int]] = {}
         for source in range(target):
-            key = (int(role[source]), lag_bucket(target - source))
-            groups.setdefault(key, []).append(source)
+            groups.setdefault(
+                (int(role[source]), lag_bucket(target - source)), []
+            ).append(source)
         for sources in groups.values():
             if len(sources) < 2:
                 continue
@@ -97,27 +103,27 @@ def role_inflow(
 ) -> dict[str, np.ndarray]:
     graph = np.asarray(transition, dtype=np.float64)
     evidence = np.asarray(evidence_mask, dtype=bool)[:response_start]
-    row_start = response_start - 1
-    events = len(graph) - row_start
+    events = len(graph) - response_start
     result = {
         "evidence": np.zeros(events),
         "other_prompt": np.zeros(events),
         "history": np.zeros(events),
     }
-    for event, target in enumerate(range(row_start, len(graph))):
-        result["evidence"][event] = graph[:response_start, target][evidence].sum()
-        result["other_prompt"][event] = graph[:response_start, target][~evidence].sum()
+    for event, target in enumerate(range(response_start, len(graph))):
+        prompt = graph[:response_start, target]
+        result["evidence"][event] = prompt[evidence].sum()
+        result["other_prompt"][event] = prompt[~evidence].sum()
         result["history"][event] = graph[response_start:target, target].sum()
     return result
 
 
 def capacity_bag(transition: np.ndarray, sink: int, edge_count: int) -> np.ndarray:
-    """Top individual capacities, ignoring whether they form a global path."""
+    """Select top individual capacities without enforcing path connectivity."""
 
     graph = np.asarray(transition, dtype=np.float64)
     source, target = np.nonzero(np.triu(graph[: sink + 1, : sink + 1], 1) > 0)
     mask = np.zeros_like(graph, dtype=bool)
-    if not len(source) or edge_count <= 0:
+    if edge_count <= 0 or not len(source):
         return mask
     value = graph[source, target]
     for position in np.argsort(-value, kind="stable")[:edge_count]:
@@ -166,13 +172,15 @@ def matched_endpoint_mask(
 
 
 def token_edges_to_query_mask(edges: np.ndarray) -> np.ndarray:
-    """Transpose ``source -> query`` incidence into attention gate coordinates."""
+    """Map ``source -> predicted token`` edges to ``query, source`` gates."""
 
     selected = np.asarray(edges, dtype=bool)
     if selected.ndim != 2 or selected.shape[0] != selected.shape[1]:
         raise ValueError("edge mask must be square")
-    mask = np.zeros_like(selected)
-    for source, query in zip(*np.nonzero(selected), strict=True):
-        if 0 <= source < query < len(selected):
+    token_count = len(selected)
+    mask = np.zeros((token_count - 1, token_count - 1), dtype=bool)
+    for source, prediction in zip(*np.nonzero(selected), strict=True):
+        query = prediction - 1
+        if 0 <= source <= query < token_count - 1:
             mask[query, source] = True
     return mask

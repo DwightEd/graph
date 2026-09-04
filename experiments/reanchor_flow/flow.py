@@ -1,4 +1,4 @@
-"""Claim-level re-anchor path summaries and high-flow backbone selection."""
+"""Claim-level re-anchor flow summaries and backbone selection."""
 
 from __future__ import annotations
 
@@ -17,37 +17,49 @@ def claim_metrics(
     anchor_width: int = 3,
     reread_window: int = 5,
 ) -> dict[str, float]:
+    """Measure source-to-claim flow that passes the first claim tokens."""
+
     graph = np.asarray(transition, dtype=np.float64)
     evidence = np.flatnonzero(np.asarray(evidence_mask, dtype=bool)[:response_start])
-    boundary = claim.start - 1
-    sink = claim.stop - 2
-    response = np.arange(response_start, boundary, dtype=np.int64)
-    anchors = np.arange(claim.start, min(sink, claim.start + anchor_width))
-    global_valid = sink > claim.start and len(anchors) > 0
+    response = np.arange(response_start, claim.start, dtype=np.int64)
+    anchors = np.arange(claim.start, min(claim.stop, claim.start + anchor_width))
+    global_valid = claim.sink > claim.start and len(anchors) > 0
     missing = PathMass(float("nan"), float("nan"), float("nan"))
     evidence_path = (
-        first_hit_path_mass(graph, sink, evidence, anchors) if global_valid else missing
+        first_hit_path_mass(graph, claim.sink, evidence, anchors)
+        if global_valid
+        else missing
     )
     response_path = (
-        first_hit_path_mass(graph, sink, response, anchors) if global_valid else missing
+        first_hit_path_mass(graph, claim.sink, response, anchors)
+        if global_valid
+        else missing
     )
-    direct = float(graph[evidence, sink].sum()) if len(evidence) and sink >= 0 else 0.0
-    query_span = np.arange(boundary, sink + 1)
+
+    direct = (
+        float(graph[evidence, claim.sink].sum()) if len(evidence) else 0.0
+    )
+    targets = np.arange(claim.start, claim.stop)
     bag = (
-        float(graph[np.ix_(evidence, query_span)].sum(axis=0).mean())
-        if len(evidence) and len(query_span)
+        float(graph[np.ix_(evidence, targets)].sum(axis=0).mean())
+        if len(evidence) and len(targets)
         else 0.0
     )
-    boundary_inflow = (
-        float(graph[evidence, boundary].sum()) if len(evidence) and boundary >= 0 else 0.0
+    boundary = (
+        float(graph[evidence, claim.start].sum()) if len(evidence) else 0.0
     )
-    earlier = np.arange(max(response_start - 1, boundary - reread_window), boundary)
-    previous = [
-        float(graph[evidence, target].sum()) for target in earlier
-    ] if len(evidence) else []
+    previous_targets = np.arange(
+        max(response_start, claim.start - reread_window), claim.start
+    )
+    previous = (
+        [float(graph[evidence, target].sum()) for target in previous_targets]
+        if len(evidence)
+        else []
+    )
     baseline = float(np.median(previous)) if previous else 0.0
+
     if global_valid:
-        _, node_flow = conditioned_flow(graph, sink, evidence)
+        _, node_flow = conditioned_flow(graph, claim.sink, evidence)
         throughput = float(node_flow[anchors].max())
     else:
         throughput = float("nan")
@@ -60,8 +72,8 @@ def claim_metrics(
         "response_closure": response_path.closure,
         "direct_evidence_sink": direct,
         "bag_evidence_claim": bag,
-        "boundary_evidence_inflow": boundary_inflow,
-        "reread_pulse": boundary_inflow - baseline,
+        "boundary_evidence_inflow": boundary,
+        "reread_pulse": boundary - baseline,
         "anchor_throughput": throughput,
     }
 
@@ -74,6 +86,8 @@ def dominant_backbone(
     cover: float = 0.8,
     max_edges: int = 32,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Select high sink-conditioned edge flows for a real path-cut audit."""
+
     edge_flow, _ = conditioned_flow(transition, sink, sources)
     source, target = np.nonzero(edge_flow > 0)
     mask = np.zeros_like(edge_flow, dtype=bool)

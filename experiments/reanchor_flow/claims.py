@@ -12,30 +12,20 @@ _END = re.compile(r"(?:[.!?;。！？；]+[\"'”’\)\]]*\s*$|\n+\s*$)")
 
 @dataclass(frozen=True)
 class ClaimSpan:
-    """Half-open absolute token span inside the response."""
+    """Half-open absolute token span inside a response."""
 
     start: int
     stop: int
 
     @property
     def sink(self) -> int:
+        """Last generated token in the span."""
+
         return self.stop - 1
 
     @property
     def length(self) -> int:
         return self.stop - self.start
-
-
-def token_pieces(tokenizer, token_ids) -> list[str]:
-    ids = np.asarray(token_ids, dtype=np.int64).tolist()
-    return [
-        tokenizer.decode(
-            [int(token)],
-            skip_special_tokens=False,
-            clean_up_tokenization_spaces=False,
-        )
-        for token in ids
-    ]
 
 
 def split_claims(
@@ -48,25 +38,30 @@ def split_claims(
 ) -> list[ClaimSpan]:
     """Split a response into deterministic sentence-like claim proxies.
 
-    These spans are deliberately independent of attention and hallucination
-    labels. They are a pilot boundary proxy, not semantic claim annotation.
+    The boundaries use decoded punctuation only. They are independent of model
+    routes and hallucination labels, but they are not semantic claim labels.
     """
 
-    ids = np.asarray(token_ids, dtype=np.int64)
+    ids = np.asarray(token_ids, dtype=np.int64).reshape(-1)
     if not 0 <= response_start < len(ids):
         return []
-    pieces = token_pieces(tokenizer, ids[response_start:])
     if min_tokens < 1 or max_tokens < min_tokens:
         raise ValueError("claim length bounds are inconsistent")
 
+    pieces = [
+        tokenizer.decode(
+            [int(token)],
+            skip_special_tokens=False,
+            clean_up_tokenization_spaces=False,
+        )
+        for token in ids[response_start:]
+    ]
     spans: list[ClaimSpan] = []
     start = response_start
     for offset, piece in enumerate(pieces):
         position = response_start + offset
         length = position + 1 - start
-        boundary = bool(_END.search(piece))
-        forced = length >= max_tokens
-        if (boundary and length >= min_tokens) or forced:
+        if (length >= min_tokens and _END.search(piece)) or length >= max_tokens:
             spans.append(ClaimSpan(start, position + 1))
             start = position + 1
 
@@ -78,5 +73,4 @@ def split_claims(
         elif spans:
             previous = spans[-1]
             spans[-1] = ClaimSpan(previous.start, tail.stop)
-
     return spans
