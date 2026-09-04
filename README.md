@@ -82,13 +82,45 @@ nvidia-smi
 GroundedRoute、Information Flow、directed route hypergraph 等目录只作为既有基线或
 历史实验，不属于这套实现。
 
+## Claim re-anchor flow 发现实验
+
+`experiments/reanchor_flow/` 使用同一次冻结模型前向同时构造精确
+`A||W_OV||` 图与 attention-only 对照，将 query 行转换成
+`source token -> predicted token` 的因果 DAG，再用目标条件化全局路径势能研究：
+
+```text
+正常 prompt -> response-history 漂移
+             ↓
+claim 边界 evidence re-read
+             ↓
+evidence-seeded flow 是否经 boundary anchor 到达 claim sink
+```
+
+它还比较 direct、edge-bag、attention-only、middle-layer 与 role/lag-preserving
+rewire，并在 label-blind 小子集上真实删除 functional-flow backbone、attention
+backbone、capacity bag 和 matched endpoint 后重跑模型，以检验图连接是否比边属性
+本身更重要。这是现象发现和图必要性实验，不替代 `ConstraintDeficit` 的已有结果。
+
+运行：
+
+```bash
+bash experiments/reanchor_flow/run_all.sh --smoke
+
+bash experiments/reanchor_flow/run_all.sh \
+  --limit 20 --audit-limit 3 --plot-limit 3 \
+  --output experiments/reanchor_flow/outputs/pilot
+```
+
 ## 测试
 
 ```bash
 python -m pytest -q experiments/constraint_routing_rhythm/tests
-python -m ruff check experiments/constraint_routing_rhythm
 bash -n experiments/constraint_routing_rhythm/run_all.sh
+
+python -m pytest -q experiments/reanchor_flow/tests
+bash -n experiments/reanchor_flow/run_all.sh
 ```
 
-合成测试只验证实现闭合，不等于真实机制结论。当前尚未在这里记录正式 RAGTruth
-结果；主分数、功能节律和 U/D carrier 是否成立，必须由真实运行及预注册对照决定。
+合成测试只验证实现闭合，不等于真实机制结论。当前尚未记录正式 RAGTruth
+`ConstraintDeficit` 或 re-anchor-flow 结果；主分数、功能节律、全局闭合和路径删边
+必要性必须由真实运行及预注册对照决定。
