@@ -112,9 +112,7 @@ class CensoredCausalAttentionChannel:
         ).clamp_min(0)
         if bool(diagonal.any()):
             selected = query[diagonal]
-            result[selected, target[diagonal]] = self.values[
-                selected, target[diagonal]
-            ]
+            result[selected, target[diagonal]] = self.values[selected, target[diagonal]]
         return result
 
     def square_with_unavailable_pp(self):
@@ -320,9 +318,9 @@ class _ResearchSampleViews:
             if stop <= start:
                 continue
             columns = attention.response_column_indices[start:stop].long()
-            values[response_query, columns] = attention.response_values[
-                start:stop
-            ].to(dtype=dtype)
+            values[response_query, columns] = attention.response_values[start:stop].to(
+                dtype=dtype
+            )
             observed[response_query, columns] = True
 
         if include_diagonal:
@@ -422,9 +420,11 @@ class _ResearchSampleViews:
         if include_diagonal:
             query = torch.arange(attention.num_response_tokens, device=output.device)
             target = attention.response_idx + query
-            diagonal = attention.attention_diagonal[
-                :, :, attention.response_idx :
-            ].to(dtype=dtype).mean(dim=(0, 1))
+            diagonal = (
+                attention.attention_diagonal[:, :, attention.response_idx :]
+                .to(dtype=dtype)
+                .mean(dim=(0, 1))
+            )
             output[query, target] = diagonal
         return output
 
@@ -440,9 +440,7 @@ class ResearchDataset:
             self.root, device=device, verify_hashes=verify_hashes
         )
         self.manifest = self.attention_dataset.manifest
-        self.rows = {
-            str(row["sample_id"]): row for row in self.attention_dataset.rows
-        }
+        self.rows = {str(row["sample_id"]): row for row in self.attention_dataset.rows}
         self.source_to_ids: dict[str, list[str]] = {}
         for sample_id, row in self.rows.items():
             self.source_to_ids.setdefault(str(row["source_id"]), []).append(sample_id)
@@ -472,7 +470,9 @@ class ResearchDataset:
         return list(self.source_to_ids)
 
     def samples_from_source(self, source_id):
-        return [self[sample_id] for sample_id in self.source_to_ids.get(str(source_id), [])]
+        return [
+            self[sample_id] for sample_id in self.source_to_ids.get(str(source_id), [])
+        ]
 
     def filter(self, **metadata):
         return [
@@ -562,10 +562,9 @@ class ResearchSample(_ResearchSampleViews):
             attention_floor=self.dataset.attention_dataset.attention_floor,
             device=self.dataset.device,
         )
-        if (
-            sample.num_layers != int(self.dataset.manifest["num_layers"])
-            or sample.num_heads != int(self.dataset.manifest["num_heads"])
-        ):
+        if sample.num_layers != int(
+            self.dataset.manifest["num_layers"]
+        ) or sample.num_heads != int(self.dataset.manifest["num_heads"]):
             raise ValueError("attention geometry does not match split manifest")
         self._attention = sample
         return sample
@@ -596,13 +595,17 @@ class LabelStore:
         previous_end = 0
         normalized = []
         if response_count is None:
-            response_count = self.dataset[str(sample_id)].attention().num_response_tokens
+            response_count = (
+                self.dataset[str(sample_id)].attention().num_response_tokens
+            )
         for run in runs:
             if len(run) != 2:
                 raise ValueError("each positive run must contain [start, end)")
             start, end = map(int, run)
             if not 0 <= start < end <= response_count or start < previous_end:
-                raise ValueError("positive runs must be sorted valid response-relative spans")
+                raise ValueError(
+                    "positive runs must be sorted valid response-relative spans"
+                )
             normalized.append([start, end])
             previous_end = end
         return normalized
@@ -632,10 +635,16 @@ class FormalResearchDataset:
     No attention tensor is copied or re-serialized. The adapter normalizes the
     in-memory object to ``AttentionSample`` and keeps embedded labels sealed
     until ``labels()`` is explicitly requested after pattern discovery.
+    ``metadata()`` uses a restricted, memory-mapped scalar reader: co-located
+    attention and label tensor storages are not dereferenced by that path.
     """
 
     def __init__(
-        self, split_root, *, device="cpu", retain_labels=False,
+        self,
+        split_root,
+        *,
+        device="cpu",
+        retain_labels=False,
         verify_hashes=False,
     ):
         from formal_cache import read_formal_manifest
@@ -648,10 +657,9 @@ class FormalResearchDataset:
         self.spec = spec
         self.retain_labels = bool(retain_labels)
         self._label_cache = {}
+        self._metadata_cache = {}
         self.manifest = {
-            "schema": formal_manifest["attention_cache_spec"][
-                "attention_cache_schema"
-            ],
+            "schema": formal_manifest["attention_cache_spec"]["attention_cache_schema"],
             "split": split,
             "num_layers": int(spec["num_hidden_layers"]),
             "num_heads": int(spec["num_attention_heads"]),
@@ -665,7 +673,9 @@ class FormalResearchDataset:
             stem = path.stem
             sample_id = stem.removeprefix("attention_")
             if not sample_id or sample_id in self.rows:
-                raise ValueError("formal cache file names do not identify unique samples")
+                raise ValueError(
+                    "formal cache file names do not identify unique samples"
+                )
             self.rows[sample_id] = {
                 "sample_id": sample_id,
                 "path": path,
@@ -691,6 +701,54 @@ class FormalResearchDataset:
     @property
     def sample_ids(self):
         return list(self.rows)
+
+    def _normalize_metadata(self, sample_id, payload):
+        sample_id = str(sample_id)
+        response_id = str(payload["response_id"])
+        if response_id != sample_id:
+            raise ValueError(
+                "formal cache response_id does not match its attention file name"
+            )
+        metadata = {
+            "sample_id": sample_id,
+            "source_id": str(payload["source_id"]),
+            "split": self.split_name,
+            "task_type": payload.get("task_type", self.spec.get("task_type")),
+            "data_source": payload.get(
+                "data_source", payload.get("source", self.spec.get("data_source"))
+            ),
+            "generator_model": payload.get(
+                "generator_model", self.spec.get("generator_model")
+            ),
+            "observer_model": self.manifest.get("observer_model"),
+            "temperature": payload.get("temperature"),
+            "quality": payload.get("quality"),
+        }
+        previous = self._metadata_cache.get(sample_id)
+        if previous is not None and previous != metadata:
+            raise ValueError("formal cache metadata changed between reads")
+        self._metadata_cache[sample_id] = metadata
+        return metadata
+
+    def metadata(self, sample_id):
+        """Return allow-listed scalar metadata without reading tensor contents."""
+
+        sample_id = str(sample_id)
+        if sample_id not in self.rows:
+            raise KeyError(sample_id)
+        if sample_id not in self._metadata_cache:
+            from formal_cache import read_formal_sample_metadata
+
+            row = self.rows[sample_id]
+            payload = read_formal_sample_metadata(
+                row["path"],
+                row["sha256"],
+                split=self.split_name,
+                spec=self.spec,
+                verify_hash=self.verify_hashes,
+            )
+            self._normalize_metadata(sample_id, payload)
+        return dict(self._metadata_cache[sample_id])
 
     def prepare_evaluation_labels(self, sample_ids=None):
         """Finish embedded-label capture and return the evaluation label store."""
@@ -727,6 +785,18 @@ class FormalResearchSample(_ResearchSampleViews):
         self._attention = None
         self._metadata = None
 
+    def _read_metadata(self):
+        if self._metadata is None:
+            # Preserve the historical retain-labels behavior: metadata
+            # properties on a label-retaining sample also finish that sample's
+            # label capture. Callers that need metadata-only access can use the
+            # dataset-level ``metadata(sample_id)`` API explicitly.
+            if self.dataset.retain_labels:
+                self._load()
+            else:
+                self._metadata = self.dataset.metadata(self.sample_id)
+        return self._metadata
+
     def _load(self):
         if self._attention is not None:
             return
@@ -738,11 +808,9 @@ class FormalResearchSample(_ResearchSampleViews):
             split=self.dataset.split_name,
             spec=self.dataset.spec,
             verify_hash=self.dataset.verify_hashes,
+            retain_labels=self.dataset.retain_labels,
         )
-        if sample.sample_id != self.sample_id:
-            raise ValueError(
-                "formal cache response_id does not match its attention file name"
-            )
+        metadata = self.dataset._normalize_metadata(self.sample_id, payload)
         for name in (
             "token_ids",
             "attention_diagonal",
@@ -752,27 +820,17 @@ class FormalResearchSample(_ResearchSampleViews):
         ):
             setattr(sample, name, getattr(sample, name).to(self.dataset.device))
         self._attention = sample
-        self._metadata = {
-            "source_id": sample.source_id,
-            "task_type": payload.get("task_type", self.dataset.spec.get("task_type")),
-            "data_source": payload.get(
-                "data_source", payload.get("source", self.dataset.spec.get("data_source"))
-            ),
-            "generator_model": payload.get(
-                "generator_model", self.dataset.spec.get("generator_model")
-            ),
-            "temperature": payload.get("temperature"),
-            "quality": payload.get("quality"),
-        }
+        self._metadata = dict(metadata)
         if self.dataset.retain_labels:
-            self.dataset._label_cache[self.sample_id] = (
-                labels[sample.response_idx:].to(dtype=torch.long, device="cpu")
-            )
+            if labels is None:
+                raise RuntimeError("formal labels were retained but not loaded")
+            self.dataset._label_cache[self.sample_id] = labels[
+                sample.response_idx :
+            ].to(dtype=torch.long, device="cpu")
 
     @property
     def source_id(self):
-        self._load()
-        return str(self._metadata["source_id"])
+        return str(self._read_metadata()["source_id"])
 
     @property
     def split(self):
@@ -780,18 +838,15 @@ class FormalResearchSample(_ResearchSampleViews):
 
     @property
     def task_type(self):
-        self._load()
-        return self._metadata["task_type"]
+        return self._read_metadata()["task_type"]
 
     @property
     def data_source(self):
-        self._load()
-        return self._metadata["data_source"]
+        return self._read_metadata()["data_source"]
 
     @property
     def generator_model(self):
-        self._load()
-        return self._metadata["generator_model"]
+        return self._read_metadata()["generator_model"]
 
     @property
     def observer_model(self):
@@ -799,13 +854,11 @@ class FormalResearchSample(_ResearchSampleViews):
 
     @property
     def temperature(self):
-        self._load()
-        return self._metadata["temperature"]
+        return self._read_metadata()["temperature"]
 
     @property
     def quality(self):
-        self._load()
-        return self._metadata["quality"]
+        return self._read_metadata()["quality"]
 
     @property
     def metadata(self):

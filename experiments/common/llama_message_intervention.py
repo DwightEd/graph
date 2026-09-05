@@ -150,13 +150,13 @@ def deleted_edges(
             source_edges = targets & source_edges
         deleted |= source_edges
     if layer < gate.split_layer and gate.early_edges is not None:
-        deleted |= gate.early_edges[
-            query_begin:query_end, :sources
-        ].to(device=device, dtype=torch.bool)
+        deleted |= gate.early_edges[query_begin:query_end, :sources].to(
+            device=device, dtype=torch.bool
+        )
     if layer >= gate.split_layer and gate.late_edges is not None:
-        deleted |= gate.late_edges[
-            query_begin:query_end, :sources
-        ].to(device=device, dtype=torch.bool)
+        deleted |= gate.late_edges[query_begin:query_end, :sources].to(
+            device=device, dtype=torch.bool
+        )
     layer_edges = None if gate.layer_edges is None else gate.layer_edges.get(layer)
     if layer_edges is not None:
         layer_edges = layer_edges.to(device=device, dtype=torch.bool)
@@ -171,9 +171,7 @@ def deleted_edges(
                 "layer edge masks must be [query, source] or [head, query, source]"
             )
     sparse = (
-        None
-        if gate.sparse_layer_edges is None
-        else gate.sparse_layer_edges.get(layer)
+        None if gate.sparse_layer_edges is None else gate.sparse_layer_edges.get(layer)
     )
     if sparse is not None and sparse.numel():
         if heads is None:
@@ -204,9 +202,7 @@ def deleted_edges(
                     dtype=torch.bool,
                     device=device,
                 )
-            head_deleted[
-                sparse[:, 0], sparse[:, 1] - query_begin, sparse[:, 2]
-            ] = True
+            head_deleted[sparse[:, 0], sparse[:, 1] - query_begin, sparse[:, 2]] = True
     if head_deleted is not None:
         head_deleted |= deleted[None]
         return head_deleted if bool(head_deleted.any()) else None
@@ -239,13 +235,14 @@ def gated_attention(
     source_position = torch.arange(sources, device=query.device)
     for begin in range(0, queries, chunk):
         end = min(begin + chunk, queries)
-        probability = torch.matmul(
-            query[:, :, begin:end], key.transpose(2, 3)
-        ) * scaling
+        probability = (
+            torch.matmul(query[:, :, begin:end], key.transpose(2, 3)) * scaling
+        )
         if attention_mask is None:
-            future = source_position[None] > torch.arange(
-                begin, end, device=query.device
-            )[:, None]
+            future = (
+                source_position[None]
+                > torch.arange(begin, end, device=query.device)[:, None]
+            )
             probability = probability.masked_fill(
                 future[None, None], torch.finfo(probability.dtype).min
             )
@@ -348,15 +345,13 @@ def llama_attention(
     query_heads = module.q_proj.out_features // head_dim
     kv_heads = module.k_proj.out_features // head_dim
 
-    query = module.q_proj(hidden).view(
-        batch, tokens, query_heads, head_dim
-    ).transpose(1, 2)
-    key = module.k_proj(hidden).view(
-        batch, tokens, kv_heads, head_dim
-    ).transpose(1, 2)
-    value = module.v_proj(hidden).view(
-        batch, tokens, kv_heads, head_dim
-    ).transpose(1, 2)
+    query = (
+        module.q_proj(hidden).view(batch, tokens, query_heads, head_dim).transpose(1, 2)
+    )
+    key = module.k_proj(hidden).view(batch, tokens, kv_heads, head_dim).transpose(1, 2)
+    value = (
+        module.v_proj(hidden).view(batch, tokens, kv_heads, head_dim).transpose(1, 2)
+    )
     query, key = apply_rotary(query, key, *rotary)
     scaling = float(getattr(module, "scaling", head_dim**-0.5))
     output = gated_attention(
@@ -385,8 +380,21 @@ def forward_layers(
     save_attention: dict[int, Tensor] | None = None,
     save_mlp: dict[int, Tensor] | None = None,
     attention_query_chunk: int | None = None,
+    end_layer: int | None = None,
+    apply_final_norm: bool = True,
 ) -> Tensor:
-    """Run an exact full-sequence Llama decoder suffix."""
+    """Run an exact full-sequence Llama decoder layer range.
+
+    ``end_layer`` is exclusive.  The default preserves the historical suffix
+    behavior, including the model's final normalization.  Setting
+    ``apply_final_norm=False`` exposes the raw layer-range output for local
+    VJPs without retaining an autograd graph for the rest of the decoder.
+    """
+
+    layer_count = len(model.model.layers)
+    stop = layer_count if end_layer is None else int(end_layer)
+    if not 0 <= start_layer <= stop <= layer_count:
+        raise ValueError("decoder layer range is outside the model")
 
     mask = (
         None
@@ -395,7 +403,7 @@ def forward_layers(
     )
     rotary = position_embeddings(model, hidden)
     for layer_index, layer in enumerate(
-        model.model.layers[start_layer:],
+        model.model.layers[start_layer:stop],
         start=start_layer,
     ):
         replacements = (
@@ -445,12 +453,10 @@ def forward_layers(
         observe_mlp_write = getattr(observer, "observe_mlp_write", None)
         if callable(observe_mlp_write):
             observe_mlp_write(layer_index, mlp_output)
-        if save_mlp is not None and (
-            save_layers is None or layer_index in save_layers
-        ):
+        if save_mlp is not None and (save_layers is None or layer_index in save_layers):
             save_mlp[layer_index] = mlp_output[0].detach().cpu()
         hidden = hidden + mlp_output
-    return model.model.norm(hidden)
+    return model.model.norm(hidden) if apply_final_norm else hidden
 
 
 def validate_manual_forward(
@@ -540,8 +546,7 @@ def baseline_forward(
             float_logits = logits.float()
             log_normalizer = torch.logsumexp(float_logits, dim=1)
             logprob_parts.append(
-                float_logits.gather(1, chunk_target[:, None])[:, 0]
-                - log_normalizer
+                float_logits.gather(1, chunk_target[:, None])[:, 0] - log_normalizer
             )
             probability = float_logits.softmax(dim=1)
             entropy_parts.append(
@@ -559,8 +564,7 @@ def baseline_forward(
             readout_bias = model.lm_head.bias.index_select(0, target).float()
             readout_bias -= model.lm_head.bias.index_select(0, runner).float()
         margin = (
-            torch.einsum("td,td->t", response_hidden.float(), direction)
-            + readout_bias
+            torch.einsum("td,td->t", response_hidden.float(), direction) + readout_bias
         )
 
     return ForwardCache(
@@ -585,11 +589,7 @@ def first_changed_layer(gate: MessageGate, layer_count: int) -> int | None:
     starts: list[int] = []
     if gate.source_mask is not None and gate.source_mask.any():
         starts.append(0)
-    if (
-        gate.early_edges is not None
-        and gate.early_edges.any()
-        and gate.split_layer > 0
-    ):
+    if gate.early_edges is not None and gate.early_edges.any() and gate.split_layer > 0:
         starts.append(0)
     if (
         gate.late_edges is not None

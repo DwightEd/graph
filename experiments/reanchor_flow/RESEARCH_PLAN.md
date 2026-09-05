@@ -6,6 +6,11 @@
 target-specific path gradient、residual-aware throughput、root 双向 patch、carrier patch/block、
 corridor cut/patch/block 和 restoration positive control。
 
+真实数据的 native subset pilot 也已实现。它从 formal cache 自动选择 source-diverse cohort，
+固定 observed-token/native-runner target，用原生 attention 或真实 message norm 构图，再以
+source Value-message cut、corridor patch 和 carrier block 验证。它不要求手工 pair，也不承担
+correct-vs-false factual claim。
+
 schema-v8 detector 冻结为 baseline。最新 held-out 指标为：
 
 | Task | token AUROC | token AUPRC | onset AUROC | onset AUPRC |
@@ -17,6 +22,28 @@ schema-v8 detector 冻结为 baseline。最新 held-out 指标为：
 
 这些数值只说明旧的 role-share/peak 特征不能稳定识别 onset。它们不用于设置 ETCC
 edge coverage、root 数或因果阈值。
+
+## Phase 0：native subset 可行性
+
+先分别固定 message 与 attention 两个完全相同的 cohort，默认每任务 1 个样本、每样本 1 个
+target；随后扩到每任务 5 个样本、每样本 3 个 target。先使用 `carrier_scope=response`，只有
+恢复率和内存稳定后才运行 `all` 以寻找 prompt carrier。
+
+必须先满足：
+
+1. native 与 root-cut 两个 base world 的 corridor restoration validity 均为 100%；
+2. artifact 中 `a` 等于 observed token，`b` 在所有干预前冻结且永不重算；
+3. attention/message 只改变 transport ranking，functional `grad·message` 与干预算子相同；
+4. source root、corridor、carrier 的正结果分别报告，不能以其中一个代替完整链；
+5. label 只在全部 target 完成后由 `subset-evaluate` 加入。
+
+停止规则：出现任何 restoration invalid 时先检查 persistent root-cut base gate 与 edge code；
+不得通过放宽因果阈值掩盖。attention/message 的相同 coverage 不保证相同 edge count；主比较
+必须使用 matched cohort，并按实际 corridor edge count 分层或另做固定 edge-budget 对照。若
+message graph 在该对照下没有更高的 confirmed corridor/full-chain rate，则不能声称 message
+transport 提供增量。
+若 pilot 中 hallucinated target 太少，只增加预先固定的样本数/target 数，不能用 test label
+回头挑选 target。
 
 ## Phase 1：受控 pair 正确性
 
@@ -48,7 +75,7 @@ corridor 解释并修复 intervention operator。
 主比较不是 detector AUROC，而是：confirmed-root precision、corridor sufficiency、mediated
 sufficiency、carrier mediated rescue、coverage/edge-count trade-off 与 restoration validity。
 
-停止规则：如果 message backend 在 matched edge budget 下不优于 raw attention，不能声称
+停止规则：如果 message backend 在显式固定的 matched edge budget 下不优于 raw attention，不能声称
 真实消息或 target-specific sign 提供增量；如果 `all` 与 `response` 无差异，prompt carrier
 不是必要创新点。
 

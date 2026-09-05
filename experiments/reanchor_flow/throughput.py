@@ -36,12 +36,11 @@ def transition_probabilities(
 ) -> tuple[Tensor, Tensor]:
     """Turn either backend into one explicit residual-aware transition law.
 
-    Half of a represented destination row is assigned to residual continuity.
-    The other half is distributed over all heads and sources in proportion to
-    the selected backend magnitude.  Attention therefore reduces to
-    ``A/(2H)``; message flow uses ``abs(phi)`` without discarding head scale.
-    Coverage-pruned mass goes to an unobserved sink rather than being silently
-    renormalized onto retained edges.
+    Paired ETCC keeps its registered half-residual law. A native flow may
+    instead provide an explicit non-negative ``residual_weight`` for every
+    represented layer/row. In both cases coverage-pruned mass goes to an
+    unobserved sink rather than being silently renormalized onto retained
+    edges.
     """
 
     edges = flow.edges
@@ -53,22 +52,44 @@ def transition_probabilities(
         raise ValueError("an edge target is absent from the represented rows")
 
     row_total = flow.row_total.sum(dim=1)
-    denominator = row_total[
-        edges.layer.long(), target_slot
-    ]
+    selected_total = row_total[edges.layer.long(), target_slot]
     magnitude = edges.score.float().abs()
+    residual = torch.ones(layers, tokens)
+    residual_weight = getattr(flow, "residual_weight", None)
+    if residual_weight is None:
+        probability = torch.where(
+            selected_total > 0,
+            0.5 * magnitude / selected_total,
+            torch.zeros_like(magnitude),
+        )
+        represented_total = row_total > 0
+        for slot, position in enumerate(flow.row_position.tolist()):
+            residual[:, position] = torch.where(
+                represented_total[:, slot],
+                torch.full((layers,), 0.5),
+                torch.ones(layers),
+            )
+        return probability, residual
+
+    residual_weight = residual_weight.float()
+    if residual_weight.shape != row_total.shape:
+        raise ValueError("native residual weights do not match represented rows")
+    if not bool(torch.isfinite(residual_weight).all()) or bool(
+        (residual_weight < 0).any()
+    ):
+        raise ValueError("native residual weights must be finite and non-negative")
+    denominator = selected_total + residual_weight[edges.layer.long(), target_slot]
     probability = torch.where(
         denominator > 0,
-        0.5 * magnitude / denominator,
+        magnitude / denominator,
         torch.zeros_like(magnitude),
     )
-
-    residual = torch.ones(layers, tokens)
-    represented_total = row_total > 0
+    represented_denominator = row_total + residual_weight
     for slot, position in enumerate(flow.row_position.tolist()):
+        denominator_row = represented_denominator[:, slot]
         residual[:, position] = torch.where(
-            represented_total[:, slot],
-            torch.full((layers,), 0.5),
+            denominator_row > 0,
+            residual_weight[:, slot] / denominator_row,
             torch.ones(layers),
         )
     return probability, residual

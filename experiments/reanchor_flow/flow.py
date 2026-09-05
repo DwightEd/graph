@@ -127,6 +127,9 @@ class PairedFlow:
     stages: StageTrace | None
     clean_cache: ForwardCache
     corrupt_cache: ForwardCache
+    residual_weight: Tensor | None = None
+    clean_source_mask: Tensor | None = None
+    corrupt_source_mask: Tensor | None = None
 
     @property
     def pair_effect(self) -> float:
@@ -159,9 +162,11 @@ def attention_qkv(
     key = module.k_proj(hidden).view(1, tokens, kv_heads, head_dim).transpose(1, 2)
     value = module.v_proj(hidden).view(1, tokens, kv_heads, head_dim).transpose(1, 2)
     query, key = apply_rotary(query, key, *position_embeddings(model, hidden))
-    return query[0], repeat_kv(key, module.num_key_value_groups)[0], repeat_kv(
-        value, module.num_key_value_groups
-    )[0]
+    return (
+        query[0],
+        repeat_kv(key, module.num_key_value_groups)[0],
+        repeat_kv(value, module.num_key_value_groups)[0],
+    )
 
 
 def attention_rows(
@@ -170,9 +175,9 @@ def attention_rows(
     positions: Tensor,
     scaling: float,
 ) -> Tensor:
-    score = torch.matmul(
-        query.index_select(1, positions), key.transpose(1, 2)
-    ) * scaling
+    score = (
+        torch.matmul(query.index_select(1, positions), key.transpose(1, 2)) * scaling
+    )
     sources = torch.arange(key.shape[1], device=key.device)
     future = sources[None] > positions[:, None]
     score = score.masked_fill(future[None], torch.finfo(score.dtype).min)
@@ -259,9 +264,7 @@ def project_selected_messages(
     hidden = output_weight.shape[0]
     if output_weight.shape[1] != heads * head_dim:
         raise ValueError("selected message code does not match the W_O head blocks")
-    clean_norm = torch.empty(
-        count, device=clean_code.device, dtype=torch.float32
-    )
+    clean_norm = torch.empty(count, device=clean_code.device, dtype=torch.float32)
     corrupt_norm = torch.empty_like(clean_norm)
     delta_norm = torch.empty_like(clean_norm)
     width = hidden if materialize else 0
@@ -279,9 +282,7 @@ def project_selected_messages(
         corrupt_selected = corrupt_code.index_select(0, selected)
         delta_selected = clean_selected - corrupt_selected
         if materialize:
-            block = output_weight[
-                :, head * head_dim : (head + 1) * head_dim
-            ].float()
+            block = output_weight[:, head * head_dim : (head + 1) * head_dim].float()
             clean_vector = clean_selected @ block.T
             corrupt_vector = corrupt_selected @ block.T
             delta_vector = clean_vector - corrupt_vector
@@ -300,9 +301,7 @@ def project_selected_messages(
                 (corrupt_selected, corrupt_norm),
                 (delta_selected, delta_norm),
             ):
-                squared = torch.einsum(
-                    "nd,de,ne->n", code, current_gram, code
-                )
+                squared = torch.einsum("nd,de,ne->n", code, current_gram, code)
                 destination[selected] = squared.clamp_min(0).sqrt()
     return (
         clean_norm,
@@ -342,9 +341,7 @@ def net_row_message_norm(
         dtype=torch.float32,
     )
     for head in range(heads):
-        block = output_weight[
-            :, head * head_dim : (head + 1) * head_dim
-        ].float()
+        block = output_weight[:, head * head_dim : (head + 1) * head_dim].float()
         net += code_sum[:, head] @ block.T
     return net.norm(dim=-1)
 
@@ -451,11 +448,11 @@ def capture_edges(
                 gradient_slot = gradient_lookup.index_select(0, query_position)
                 if bool((gradient_slot < 0).any()):
                     raise ValueError("message rows lack target-gradient positions")
-                gradient = gradients.head_output[
-                    layer_index
-                ].index_select(
-                    1, gradient_slot.cpu()
-                ).to(device)
+                gradient = (
+                    gradients.head_output[layer_index]
+                    .index_select(1, gradient_slot.cpu())
+                    .to(device)
+                )
                 clean_value = torch.einsum("hsd,hqd->hqs", clean_v.float(), gradient)
                 corrupt_value = torch.einsum(
                     "hsd,hqd->hqs", corrupt_v.float(), gradient
@@ -476,9 +473,7 @@ def capture_edges(
             row_retained[layer_index, :, begin:end] = (
                 weight.masked_fill(~keep, 0).sum(-1).cpu()
             )
-            head_index, local_query, source = torch.nonzero(
-                keep, as_tuple=True
-            )
+            head_index, local_query, source = torch.nonzero(keep, as_tuple=True)
             if not len(head_index):
                 continue
             target = query_position.index_select(0, local_query)
@@ -518,15 +513,13 @@ def capture_edges(
             ).cpu()
             if signal is FlowSignal.MESSAGE:
                 assert selector is not None and content is not None
-                selected_score = primary[
-                    head_index, local_query, source
-                ].float().cpu()
-                selected_selector = selector[
-                    head_index, local_query, source
-                ].float().cpu()
-                selected_content = content[
-                    head_index, local_query, source
-                ].float().cpu()
+                selected_score = primary[head_index, local_query, source].float().cpu()
+                selected_selector = (
+                    selector[head_index, local_query, source].float().cpu()
+                )
+                selected_content = (
+                    content[head_index, local_query, source].float().cpu()
+                )
                 for values, destination in (
                     (selected_score, target_rows),
                     (selected_score.clamp_min(0), positive_rows),

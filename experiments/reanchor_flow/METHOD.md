@@ -248,15 +248,16 @@ attention-derived throughput 排序，不偷用 message gradient。随后两种 
 block 条件使用 difference-in-differences：同时运行 `corrupt + block` 和
 `corrupt + clean carrier + block`，`blocked_rescue` 是二者之差，不把删除原生 corrupt
 carrier messages 的主效应误算成 mediation。necessity、rescue 与
-`rescue - blocked_rescue` 同向、且 block 后不再残留超过 dtype tolerance 的 target-aligned
-rescue 时，才构成完整 carrier mediation。这里切断的是该 position 作为 Value source 的所有
+`rescue - blocked_rescue` 同向、且 `abs(blocked_rescue)` 不超过 dtype tolerance 时，
+才构成完整 carrier mediation。这里切断的是该 position 作为 Value source 的所有
 attention message，并在后续层重置 residual state；若 key/selector 交互仍产生功能作用，
 `blocked_rescue` 会保留该作用，carrier 不会被误报为完整 message carrier。单独的高
 throughput、gradient score 或 norm 均不足以命名 carrier。
 
 ## 8. Corridor 的精确确认
 
-对选中 root，`T(e|u,t)>0` 的边形成 connected corridor。所有 intervention 都在
+对选中 root，`T(e|u,t)>0` 的边与隐式 residual continuation 共同在 augmented graph 中
+形成 connected corridor；稀疏 message 边集合本身不必连通。所有 intervention 都在
 post-softmax、pre-Value-sum 位置删除精确 `(layer,head,query,source)` 边，并在同一 head
 的 pre-\(W_O\) output 原位加入 paired code：
 
@@ -301,3 +302,134 @@ coverage 小于 1 时，未选路径导致的残余效应必须报告，不能�
 | CLI | `run.py corridor` |
 
 完整字段定义见 [`SCHEMA.md`](SCHEMA.md)。
+
+## 11. Native RAGTruth subset：单世界机制验证
+
+受控 pair 仍是“正确事实候选被采用”的最高证据，但不应成为真实数据 pilot 的手工瓶颈。
+`run.py subset` 因此实现了一个独立的 native audit；它不伪造 clean/corrupt 文本，也不把
+hallucination label 当作 pair。
+
+### 11.1 冻结 cohort 与 target
+
+程序在 `retain_embedded_labels=False` 下按 task 和 `source_id` 做确定性抽样。对截取后的每个
+teacher-forced response，先运行未干预模型，并冻结
+
+\[
+F_t=z_q(a)-z_q(b),
+\]
+
+其中 `a` 是位置 `q+1` 的 observed token，`b` 是同一 native logits 中排除 `a` 后的最高
+runner。默认 `uncertain` 只按 native `|F_t|` 选择 target；也可使用 `evenly-spaced`、
+`low-margin` 或 `all`。任何 source cut 和 label 都发生在这之后，runner 在所有 rerun 中固定。
+
+这一定义测量 observed-token adoption，不把 observed token 预设为事实正确。
+
+### 11.2 Transport 与 functionality 是两个轴
+
+同一个 layer-unrolled DAG 提供两种互斥 transport backend：
+
+\[
+\tau^A_{l,h,s\to v}=A_{l,h,v,s},
+\]
+
+\[
+\tau^M_{l,h,s\to v}
+=\left\|W^O_{l,h}\left(A_{l,h,v,s}V_{l,g(h),s}\right)\right\|_2.
+\]
+
+`--flow-signal` 只在 `tau^A` 与 `tau^M` 之间切换。无论选哪一种 transport，每个保留边都
+另外计算相同的 target-specific 功能量：
+
+\[
+\phi_{l,h,s\to v}
+=\left\langle
+\nabla_{c_{l,h,v}}F_t,
+A_{l,h,v,s}V_{l,g(h),s}
+\right\rangle.
+\]
+
+因此 raw attention 不能绕过功能性检查，message norm 也不会被误写成 readout contribution。
+`phi>0` 表示局部一阶作用支持 observed token；`phi<0` 单独保留，表示支持 runner 或压低
+observed margin。所有最终结论仍以非线性 rerun 为准。
+
+native gradient 使用逐层 reverse VJP：每次只保留一个 decoder layer 的 autograd graph，
+避免同时保留整条深度计算图。这只是峰值显存的结构性削减，不承诺 24GB 可运行；长上下文下，
+单层 eager attention 仍可能需要 \(O(S^2)\) 显存，必须以实际序列长度和运行配置测量。
+
+### 11.3 Residual-aware path law
+
+attention backend 把每层所有 head 的单位 attention mass 与同权 identity continuation 比较，
+所以满覆盖时 residual share 为 `1/2`。message backend 不再使用固定 `1/2`，而是用 native
+layer-input norm 与所有真实 message norm budget 共同归一化：
+
+\[
+P(e)=\frac{\tau^M_e}
+{\lVert r_{l,v}\rVert_2+\sum_{h,s}\tau^M_{l,h,s\to v}},
+\qquad
+P(residual)=\frac{\lVert r_{l,v}\rVert_2}
+{\lVert r_{l,v}\rVert_2+\sum_{h,s}\tau^M_{l,h,s\to v}}.
+\]
+
+coverage 剪枝的质量仍流入 unobserved sink。`C(u→t)` 和 `T(v|u,t)` 是这个显式 screening
+law 下的路径量，不宣称 residual vector 本身是概率守恒流。
+
+### 11.4 Native source root
+
+source unit 仍为 QA passage、Summary sentence 或 Data2txt field。对候选 unit `u`，干预算子
+在所有层、所有 receiver 上删除从 `u` 的 token positions 发出的 post-softmax Value messages；
+Q/K 不被直接 mask，attention 也不重归一。但 source-to-self Value message 同样被删除，
+所以该 position 的后续 state 与 Q/K 会在 cut world 中自然演化，并不是冻结的 native
+selector。因此结果只精确命名为这一 Value-source cut 算子对 margin 的效应。
+
+\[
+N_u=F(native)-F(cut\ u),
+\]
+
+\[
+S_u=F(keep\ only\ u)-F(cut\ all\ evidence).
+\]
+
+先保存 raw transport `C_transport(u→t)` 作对照，再把 `phi<=0` 的边送入 sink，
+以正功能 support graph 上的 `C_support(u→t)` 排序候选。前
+`root_screen_limit` 个接受上述两个真实 rerun；`min(N_u,S_u)` 必须超过
+model dtype tolerance 才能成为 confirmed root。方向永远是提高
+observed-vs-frozen-runner margin，不乘 baseline margin 或任意 pair-effect 的符号。
+
+### 11.5 Corridor 与 carrier
+
+选中 root 后，程序构造 `root-cut` computation world，保存每层 layer input、attention write、
+MLP write，并在同一正功能 support graph 上重新计算 single-root-conditioned throughput。
+`T(e|u,t)>0` 的 attention/message 边在包含隐式 residual continuation 边的 augmented
+layer-unrolled graph 中各自位于一条 root-to-target path 上；单独列出 sparse message
+edges 不保证连通。随后执行：
+
+1. native corridor 换成 root-cut codes，测 necessity；
+2. root-cut world 原位补入 native codes，测 conditional rescue；
+3. 把进入 target 的 corridor edges 冻结为 root-cut codes，测 mediated rescue；
+4. 在 native 和 root-cut 两个 base gate 下分别 delete-and-restore，验证精确干预算子；
+5. 对高 throughput carrier 做 native/root-cut state patch，再删除其下游 Value messages并重置
+   residual carrier，使用 difference-in-differences 判断 mediation。
+
+root、corridor 与 carrier 的同向 necessity/rescue/mediated rescue 都必须超过 model
+dtype tolerance。完整 terminal mediation 还要求 corridor 或 carrier 被 block 后的残余
+rescue 绝对值不超过该 tolerance；大幅反向残差也不算完整 mediation。
+
+单个 carrier 的通过结果只保留为 `carrier_any_confirmed` 诊断。用于 evaluation 的
+`carrier_value_mediated` 与 `full_chain_confirmed` 还必须同时满足完整 corridor confirmation，
+不能把局部 carrier patch/block 结果报告成完整 root-to-target 链。
+
+root-cut 的 broad source mask 在每次 suffix rerun 中持续存在；不能只从它的 layer-0 hidden
+重新运行而忘记后续层的 source cut。测试要求两个 base world 都在 dtype tolerance 内恢复。
+
+### 11.6 保存与标签解封
+
+每个 target 的全量 pre-`W_O` codes 只在内存中用于精确干预。默认 artifact 保存完整
+root/carrier/stage 台账、row-level transport/aggregation、node throughput，以及 top-2048
+positive-functional corridor scalar edges；这个 top-K 只是截断导出，本身不宣称连通。不保存巨大的
+`[E,D_h]` payload。原先 q=60 约
+155MB 的单 target 文件因此不再线性复制到 cohort。
+
+manifest 冻结数据哈希、sample/source、target、backend 和全部超参数，并支持逐 target 恢复。
+capture artifact 永远写 `labels_used_for_capture=false`。只有 `subset-evaluate` 在
+`analysis_complete=true` 后打开 labels，比较 hallucinated 与 clean target 的机制通过率。
+这种富集子集不是总体 detector 评价，不能报告成全 token AUROC/AUPRC。

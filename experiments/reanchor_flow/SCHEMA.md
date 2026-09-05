@@ -141,8 +141,92 @@ Carrier table `[K]`:
 - `carrier_route_throughput`, `carrier_state_delta_norm`, `carrier_target_score`;
 - `carrier_necessity`, `carrier_rescue`, `carrier_block_effect`;
 - `carrier_blocked_rescue`, `carrier_mediated_rescue`, `carrier_block_tolerance`;
-- `carrier_confirmed` additionally requires no target-aligned rescue above tolerance
-  after the downstream Value/residual block.
+- `carrier_confirmed` additionally requires the absolute blocked rescue to stay within
+  tolerance after the downstream Value/residual block.
 
 No hallucination/correctness label is part of ETCC schema. Such labels may only be joined after a
 complete audit for external evaluation.
+
+## Native subset schemas
+
+真实 RAGTruth pilot 不写入 `PAIR_SCHEMA` 或 `ETCC_SCHEMA`，避免把 source-message cut 误解为
+clean/corrupt factual pair。它使用两个独立版本号：
+
+- `native_world_schema=1`：小型、模型无关、可恢复的 target contract；
+- `subset_audit_schema=1`：完成精确 rerun 后的紧凑机制结果。
+
+### Native world
+
+| Field | Shape | Meaning |
+|---|---:|---|
+| `sample_id`, `tokenizer_id` | scalar | safe artifact identity and tokenizer |
+| `token_ids` | `[N]` | native prompt plus teacher-forced response |
+| `response_start` | scalar | first response token position |
+| `token_unit_id` | `[N-1]` | source position to semantic unit |
+| `unit_name`, `unit_kind` | `[U]` | passage/sentence/field/response table |
+| `evidence_unit_id` | `[R]` | represented passage/sentence/field roots |
+| `query_position` | `[K]` | frozen predictor positions |
+| `positive_token_id` | `[K]` | observed token at `q+1` |
+| `negative_token_id` | `[K]` | frozen native runner excluding observed |
+| `contrast_origin` | `[K]` | label-free selection and contrast semantics |
+
+### Compact native audit
+
+Provenance and claim boundary:
+
+- `world_kind=native_source_value_message_cut`;
+- `claim_scope=observed-target dependence under a source Value-message cut`;
+- `factual_correctness_identified=0`, `labels_used_for_capture=0`;
+- `transport_score_semantics`, `functional_score_semantics`,
+  `root_cut_functional_score_semantics`,
+  `residual_transition_semantics`, `source_cut_semantics`.
+
+Native/root-cut quantities:
+
+- `native_margin`, `root_cut_margin`, `root_value_effect`;
+- `all_evidence_cut_margin`;
+- root table `root_route_mass`, `root_functional_score`, `root_value_necessity`,
+  `root_conditional_sufficiency`, `root_causal_score`, `root_evaluated`;
+- selected-root scalars, `causal_effect_tolerance`, and `selected_root_confirmed`.
+
+Transport and aggregation:
+
+- `row_total_transport`, `row_retained_transport` with shape `[L,H,P]`;
+- `row_residual_weight`, message budget/net norm/coherence with shape `[L,P]`;
+- positive, negative and signed functional score with shape `[L,P]`;
+- `transport_source_unit_route_mass` before functional filtering;
+- `source_unit_route_mass`, reverse-node and root-conditioned throughput after
+  `functional_score<=0` edges are sent to the sink.
+- `transport_token_root_mass` and `support_token_root_mass` retain layer-0 token
+  contributions before and after functionality filtering.
+
+Only the highest-throughput support edges are persisted. The full in-memory corridor is connected
+only in the augmented layer-unrolled graph that includes implicit residual edges; this truncated
+sparse-message export does not itself claim connectivity:
+
+- `edge_candidate_count`, `corridor_edge_count`, `edge_saved_count`;
+- `edge_saved_corridor_mass`, `edge_total_corridor_mass` and their fraction;
+- layer/head/source/target/unit coordinates;
+- native functional score and root-cut code projected onto the frozen native gradient
+  (`edge_root_cut_native_gradient_projection`), plus native/root-cut attention and message norm;
+- transition probability and root-conditioned throughput.
+
+`edge_payload_saved=0` means `[E,D_h]` codes were used for reruns and discarded before saving.
+Corridor fields use explicit native names: `corridor_necessity`,
+`corridor_conditional_rescue`, `corridor_blocked_rescue`, `corridor_mediated_rescue`, plus
+both-world restoration errors and validity. Carrier and stage tables retain the same coordinates as
+controlled ETCC but compare native against selected-root Value-cut states.
+`carrier_any_confirmed` is the local single-carrier diagnostic. `carrier_value_mediated` and
+`full_chain_confirmed` are identical evaluation outcomes and require both `corridor_confirmed` and at
+least one confirmed carrier; a carrier alone is not reported as a complete mediated chain.
+
+### Manifest and evaluation
+
+`run_manifest.json` records resolved data/model paths, dataset/source hashes, frozen selection,
+target policy, backend and all audit limits. Every completed audit points to one validated NPZ;
+re-running an identical configuration resumes it. A changed configuration is rejected and requires a
+new output directory.
+
+`mechanism_evaluation.json` is created separately. It records
+`labels_accessed_after_capture=true` and joins labels by
+`prediction_position-response_start`; labels are never copied back into native world or audit NPZs.

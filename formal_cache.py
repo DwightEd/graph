@@ -13,6 +13,38 @@ from cache import AttentionSample, sha256
 
 FORMAL_CACHE_SCHEMA = "ragtruth-all-layers-all-heads-sparse-response-csr-v1"
 
+FORMAL_TENSOR_FIELDS = {
+    "token_ids",
+    "attention_diagonal",
+    "response_row_ptr",
+    "response_column_indices",
+    "response_values",
+    "y_token",
+}
+FORMAL_REQUIRED_METADATA_FIELDS = {
+    "attention_cache_schema",
+    "attention_cache_fingerprint",
+    "response_id",
+    "source_id",
+    "split",
+    "cache_dtype",
+    "num_attention_layers",
+    "num_attention_heads",
+    "quality",
+    "was_truncated",
+    "attention_floor",
+}
+FORMAL_OPTIONAL_METADATA_FIELDS = {
+    "task_type",
+    "data_source",
+    "source",
+    "generator_model",
+    "temperature",
+}
+FORMAL_REQUIRED_FIELDS = (
+    FORMAL_REQUIRED_METADATA_FIELDS | FORMAL_TENSOR_FIELDS | {"response_idx"}
+)
+
 
 def formal_fingerprint(value):
     return hashlib.sha256(
@@ -74,48 +106,125 @@ def read_formal_manifest(split_root):
     return manifest, spec, files, split
 
 
-def load_formal_sample(path, expected_hash, *, split, spec, verify_hash=True):
+def _load_formal_payload(path, *, mmap):
+    """Use PyTorch's restricted loader and optionally leave storages memory-mapped."""
+
+    load_kwargs = {"map_location": "cpu", "weights_only": True}
+    if mmap:
+        # Keep the historical full-load path compatible with PyTorch releases
+        # that support ``weights_only`` but predate the ``mmap`` keyword.  The
+        # metadata firewall cannot safely fall back to eager tensor reads.
+        try:
+            payload = torch.load(Path(path), mmap=True, **load_kwargs)
+        except TypeError as error:
+            if "mmap" not in str(error):
+                raise
+            raise RuntimeError(
+                "formal metadata-only access requires torch.load(mmap=True) support"
+            ) from error
+    else:
+        payload = torch.load(Path(path), **load_kwargs)
+    if not isinstance(payload, dict):
+        raise ValueError("formal cache must contain a dictionary")
+    return payload
+
+
+def _scalar_metadata(payload, name, *, required):
+    if name not in payload:
+        if required:
+            raise ValueError(f"formal cache is missing metadata field: {name}")
+        return None
+    value = payload[name]
+    if isinstance(value, torch.Tensor):
+        if value.numel() != 1:
+            raise ValueError(f"formal cache metadata field {name} must be a scalar")
+        value = value.item()
+    if not isinstance(value, (str, int, float, bool, type(None))):
+        raise ValueError(f"formal cache metadata field {name} must be a scalar")
+    return value
+
+
+def _validated_formal_metadata(payload, *, split, spec):
+    """Copy only allow-listed scalar metadata; never dereference tensor fields."""
+
+    missing = FORMAL_REQUIRED_METADATA_FIELDS.difference(payload)
+    if missing:
+        raise ValueError("formal cache is missing required metadata fields")
+    metadata = {
+        name: _scalar_metadata(payload, name, required=True)
+        for name in FORMAL_REQUIRED_METADATA_FIELDS
+    }
+    for name in FORMAL_OPTIONAL_METADATA_FIELDS:
+        if name in payload:
+            metadata[name] = _scalar_metadata(payload, name, required=False)
+    if (
+        metadata["attention_cache_schema"] != FORMAL_CACHE_SCHEMA
+        or str(metadata["split"]).casefold() != split
+        or str(metadata["cache_dtype"]) != spec["cache_dtype"]
+        or str(metadata["quality"]).casefold() != "good"
+        or bool(metadata["was_truncated"])
+        or metadata["attention_cache_fingerprint"] != formal_fingerprint(spec)
+        or int(metadata["num_attention_layers"]) != int(spec["num_hidden_layers"])
+        or int(metadata["num_attention_heads"]) != int(spec["num_attention_heads"])
+        or float(metadata["attention_floor"]) != float(spec["attention_floor"])
+    ):
+        raise ValueError("formal cache metadata does not match its manifest")
+    return metadata
+
+
+def read_formal_sample_metadata(
+    path,
+    expected_hash,
+    *,
+    split,
+    spec,
+    verify_hash=True,
+):
+    """Read only allow-listed scalar metadata from a memory-mapped archive.
+
+    Tensor storages are mapped by :func:`torch.load`, but this function neither
+    indexes nor converts any attention, token, or ``y_token`` tensor. Hash
+    verification, when requested, still scans the archive's raw bytes.
+    """
+
     path = Path(path)
     if verify_hash and sha256(path) != expected_hash:
         raise ValueError(f"formal cache SHA256 mismatch: {path.name}")
-    payload = torch.load(path, map_location="cpu", weights_only=True)
-    if not isinstance(payload, dict):
-        raise ValueError("formal cache must contain a dictionary")
-    required = {
-        "attention_cache_schema",
-        "attention_cache_fingerprint",
-        "response_id",
-        "source_id",
-        "split",
-        "cache_dtype",
-        "num_attention_layers",
-        "num_attention_heads",
-        "quality",
-        "was_truncated",
-        "response_idx",
-        "token_ids",
-        "attention_diagonal",
-        "response_row_ptr",
-        "response_column_indices",
-        "response_values",
-        "attention_floor",
-        "y_token",
-    }
-    if required.difference(payload):
+    payload = _load_formal_payload(path, mmap=True)
+    if FORMAL_REQUIRED_FIELDS.difference(payload):
         raise ValueError("formal cache is missing required fields")
-    if (
-        payload["attention_cache_schema"] != FORMAL_CACHE_SCHEMA
-        or str(payload["split"]).casefold() != split
-        or str(payload["cache_dtype"]) != spec["cache_dtype"]
-        or str(payload["quality"]).casefold() != "good"
-        or bool(payload["was_truncated"])
-        or payload["attention_cache_fingerprint"] != formal_fingerprint(spec)
-    ):
-        raise ValueError("formal cache metadata does not match its manifest")
+    return _validated_formal_metadata(payload, split=split, spec=spec)
+
+
+def load_formal_sample(
+    path,
+    expected_hash,
+    *,
+    split,
+    spec,
+    verify_hash=True,
+    retain_labels=True,
+):
+    """Load one attention sample, optionally leaving embedded labels sealed.
+
+    The default preserves the original API and returns validated labels plus
+    the full payload. With ``retain_labels=False``, the archive is memory-mapped,
+    ``y_token`` is checked only for key presence, and the returned label is
+    ``None``; its values and shape are deliberately not read or validated.
+    """
+
+    path = Path(path)
+    if verify_hash and sha256(path) != expected_hash:
+        raise ValueError(f"formal cache SHA256 mismatch: {path.name}")
+    retain_labels = bool(retain_labels)
+    payload = _load_formal_payload(path, mmap=not retain_labels)
+    if FORMAL_REQUIRED_FIELDS.difference(payload):
+        raise ValueError("formal cache is missing required fields")
+    metadata = _validated_formal_metadata(payload, split=split, spec=spec)
 
     sample = AttentionSample(
-        str(payload["response_id"]),
-        str(payload["source_id"]),
+        str(metadata["response_id"]),
+        str(metadata["source_id"]),
         int(payload["response_idx"]),
         torch.as_tensor(payload["token_ids"]),
         torch.as_tensor(payload["attention_diagonal"]),
@@ -126,13 +235,16 @@ def load_formal_sample(path, expected_hash, *, split, spec, verify_hash=True):
     )
     sample.validate()
     if (
-        sample.num_layers != int(payload["num_attention_layers"])
-        or sample.num_heads != int(payload["num_attention_heads"])
+        sample.num_layers != int(metadata["num_attention_layers"])
+        or sample.num_heads != int(metadata["num_attention_heads"])
         or sample.num_layers != int(spec["num_hidden_layers"])
         or sample.num_heads != int(spec["num_attention_heads"])
         or sample.attention_floor != float(spec["attention_floor"])
     ):
         raise ValueError("formal sample attention geometry does not match manifest")
+
+    if not retain_labels:
+        return sample, None, metadata
 
     labels = torch.as_tensor(payload["y_token"]).flatten()
     if (

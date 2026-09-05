@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import torch
 from torch import Tensor
@@ -66,6 +66,37 @@ class RootEffect:
     evaluated: bool
 
 
+def intervention_tolerance(model) -> float:
+    """Return the numerical floor shared by exact intervention decisions."""
+
+    return {
+        torch.float32: 1e-5,
+        torch.float16: 2e-3,
+        torch.bfloat16: 2e-2,
+    }.get(model.dtype, 2e-2)
+
+
+def complete_mediation_confirmed(
+    necessity: float,
+    rescue: float,
+    blocked_rescue: float,
+    *,
+    direction: float,
+    tolerance: float,
+) -> bool:
+    """Require material bidirectional effects and no residual blocked effect."""
+
+    if direction not in {-1.0, 1.0}:
+        raise ValueError("effect direction must be -1 or 1")
+    mediated_rescue = rescue - blocked_rescue
+    return bool(
+        direction * necessity > tolerance
+        and direction * rescue > tolerance
+        and direction * mediated_rescue > tolerance
+        and abs(blocked_rescue) <= tolerance
+    )
+
+
 def replace_edges_gate(edges: FlowEdges, replacement: Tensor) -> MessageGate:
     """Delete named native edges and add their paired head codes in place."""
 
@@ -80,14 +111,13 @@ def replace_edges_gate(edges: FlowEdges, replacement: Tensor) -> MessageGate:
             torch.tensor([head, query, source], dtype=torch.long)
         )
         by_head = patches.setdefault(layer, {}).setdefault(query, {})
-        by_head[head] = by_head.get(
-            head, torch.zeros_like(replacement[index].float())
-        ) + replacement[index].float()
+        by_head[head] = (
+            by_head.get(head, torch.zeros_like(replacement[index].float()))
+            + replacement[index].float()
+        )
     return MessageGate(
         split_layer=0,
-        sparse_layer_edges={
-            layer: torch.stack(rows) for layer, rows in sparse.items()
-        },
+        sparse_layer_edges={layer: torch.stack(rows) for layer, rows in sparse.items()},
         head_output_patch=patches,
     )
 
@@ -114,8 +144,20 @@ def rerun_margin(
     cache: ForwardCache,
     gate: MessageGate,
     target: TargetContrast,
+    *,
+    base_source_mask: Tensor | None = None,
 ) -> float:
     """Rerun the changed suffix and read one fixed positive-negative margin."""
+
+    if base_source_mask is not None:
+        source_mask = base_source_mask.bool().clone()
+        if gate.source_mask is not None:
+            if gate.source_targets is not None:
+                raise ValueError(
+                    "cannot merge a global base cut with a target-limited cut"
+                )
+            source_mask |= gate.source_mask.bool()
+        gate = replace(gate, source_mask=source_mask)
 
     start = first_changed_layer(gate, cache.layer_count)
     direction, bias = contrast_direction(model, target)
@@ -148,24 +190,28 @@ def confirm_corridor(
         flow.clean_cache,
         replace_edges_gate(corridor, corridor.clean_code),
         target,
+        base_source_mask=flow.clean_source_mask,
     )
     corrupt_restoration = rerun_margin(
         model,
         flow.corrupt_cache,
         replace_edges_gate(corridor, corridor.corrupt_code),
         target,
+        base_source_mask=flow.corrupt_source_mask,
     )
     clean_with_corrupt = rerun_margin(
         model,
         flow.clean_cache,
         replace_edges_gate(corridor, corridor.corrupt_code),
         target,
+        base_source_mask=flow.clean_source_mask,
     )
     corrupt_with_clean = rerun_margin(
         model,
         flow.corrupt_cache,
         replace_edges_gate(corridor, corridor.clean_code),
         target,
+        base_source_mask=flow.corrupt_source_mask,
     )
     terminal = corridor.target == target.query_position
     blocked_code = corridor.clean_code.clone()
@@ -175,23 +221,18 @@ def confirm_corridor(
         flow.corrupt_cache,
         replace_edges_gate(corridor, blocked_code),
         target,
+        base_source_mask=flow.corrupt_source_mask,
     )
     necessity = flow.clean_margin - clean_with_corrupt
     sufficiency = corrupt_with_clean - flow.corrupt_margin
     blocked_sufficiency = blocked - flow.corrupt_margin
     clean_restoration_error = abs(restoration - flow.clean_margin)
-    corrupt_restoration_error = abs(
-        corrupt_restoration - flow.corrupt_margin
-    )
+    corrupt_restoration_error = abs(corrupt_restoration - flow.corrupt_margin)
     restoration_error = max(
         clean_restoration_error,
         corrupt_restoration_error,
     )
-    tolerance = {
-        torch.float32: 1e-5,
-        torch.float16: 2e-3,
-        torch.bfloat16: 2e-2,
-    }.get(model.dtype, 2e-2)
+    tolerance = intervention_tolerance(model)
     return CorridorEffect(
         corridor.count,
         flow.pair_effect,
@@ -235,10 +276,7 @@ def confirm_roots(
     for unit_id in candidates:
         positions = world.units.positions((unit_id,))
         gradient_score = (
-            sum(
-                gradient_by_position.get(int(position), 0.0)
-                for position in positions
-            )
+            sum(gradient_by_position.get(int(position), 0.0) for position in positions)
             if flow.stages is not None
             else float("nan")
         )
@@ -299,9 +337,7 @@ def select_root(effects: tuple[RootEffect, ...]) -> int:
     return max(
         pool,
         key=lambda effect: (
-            effect.causal_score
-            if math.isfinite(effect.causal_score)
-            else -math.inf,
+            effect.causal_score if math.isfinite(effect.causal_score) else -math.inf,
             effect.route_mass,
         ),
     ).unit_id
@@ -331,9 +367,7 @@ def carrier_gate(
                 (
                     grid_head.flatten(),
                     grid_query.flatten(),
-                    torch.full(
-                        (heads * len(query),), position, dtype=torch.long
-                    ),
+                    torch.full((heads * len(query),), position, dtype=torch.long),
                 ),
                 dim=1,
             )
@@ -355,12 +389,19 @@ def confirm_carriers(
     excluded_position: Tensor,
     *,
     limit: int = 3,
+    effect_direction: float | None = None,
 ) -> tuple[CarrierEffect, ...]:
     """Confirm routed carrier nodes with state patch and downstream Value cut."""
 
     if limit == 0:
         return ()
-    direction = 1.0 if flow.pair_effect >= 0 else -1.0
+    direction = (
+        (1.0 if flow.pair_effect >= 0 else -1.0)
+        if effect_direction is None
+        else float(effect_direction)
+    )
+    if direction not in {-1.0, 1.0}:
+        raise ValueError("effect_direction must be -1 or 1")
     excluded = {int(position) for position in excluded_position.tolist()}
     stage_slot = (
         {}
@@ -401,11 +442,7 @@ def confirm_carriers(
             )
     candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
     heads = int(model.config.num_attention_heads)
-    block_tolerance = {
-        torch.float32: 1e-5,
-        torch.float16: 2e-3,
-        torch.bfloat16: 2e-2,
-    }.get(model.dtype, 2e-2)
+    block_tolerance = intervention_tolerance(model)
     effects = []
     for _, route, delta_norm, target_score, current_layer, position in candidates[
         :limit
@@ -422,6 +459,7 @@ def confirm_carriers(
                 heads=heads,
             ),
             flow.target,
+            base_source_mask=flow.clean_source_mask,
         )
         patched = rerun_margin(
             model,
@@ -435,6 +473,7 @@ def confirm_carriers(
                 heads=heads,
             ),
             flow.target,
+            base_source_mask=flow.corrupt_source_mask,
         )
         block_control = rerun_margin(
             model,
@@ -448,6 +487,7 @@ def confirm_carriers(
                 heads=heads,
             ),
             flow.target,
+            base_source_mask=flow.corrupt_source_mask,
         )
         blocked = rerun_margin(
             model,
@@ -461,6 +501,7 @@ def confirm_carriers(
                 heads=heads,
             ),
             flow.target,
+            base_source_mask=flow.corrupt_source_mask,
         )
         rescue = patched - flow.corrupt_margin
         block_effect = block_control - flow.corrupt_margin
@@ -479,11 +520,12 @@ def confirm_carriers(
                 blocked_rescue,
                 rescue - blocked_rescue,
                 block_tolerance,
-                bool(
-                    direction * necessity > 0
-                    and direction * rescue > 0
-                    and direction * (rescue - blocked_rescue) > 0
-                    and direction * blocked_rescue <= block_tolerance
+                complete_mediation_confirmed(
+                    necessity,
+                    rescue,
+                    blocked_rescue,
+                    direction=direction,
+                    tolerance=block_tolerance,
                 ),
             )
         )

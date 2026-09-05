@@ -1,1 +1,1 @@
-"""Evidence-to-target causal corridor audit and frozen schema-v8 baseline."""
+"""Paired and native evidence-to-target corridor audits plus frozen baseline."""
