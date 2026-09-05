@@ -1,5 +1,9 @@
 # Registered mechanism audit
 
+The statistics in this file are discovery and mechanism tests. The deployable score, unlabelled
+train calibration, temporal scope, fixed composition and frozen test-label protocol are registered
+separately in [`DETECTOR.md`](DETECTOR.md).
+
 For response token `p`, the causal predictor is `q=p-1`. The native transported-message capacity is
 
 \[

@@ -4,7 +4,8 @@ The audit is token-aligned: response token `p` is analysed at its causal predict
 It now tests the complete registered chain instead of only drawing revisit peaks.
 
 The full interpretation, operator-graph definitions, falsifiable failure taxonomy and phased
-validation protocol are in [`RESEARCH_PLAN.md`](RESEARCH_PLAN.md).
+validation protocol are in [`RESEARCH_PLAN.md`](RESEARCH_PLAN.md). The frozen train-to-test
+detection method is specified in [`DETECTOR.md`](DETECTOR.md).
 
 ## What is measured
 
@@ -22,6 +23,9 @@ validation protocol are in [`RESEARCH_PLAN.md`](RESEARCH_PLAN.md).
 5. **Grouped mechanism subset.** Three additional cuts measure evidence/other-prompt interaction,
    response-history control, layerwise evidence-conditioned state presence, late control loss and
    final readout gain.
+6. **Unsupervised failure detection.** Task-specific source-balanced conditional CDFs are fitted on
+   unlabelled train captures. A causal-prefix transport/adoption score is frozen for test before
+   labels are opened; future reuse is reported only as a secondary offline score.
 
 Schema v8 saves raw attention role mass and capacity-aware transport traces for every layer and head
 as float16 arrays. Population means remain available for backward-compatible reports, but they are
@@ -45,13 +49,21 @@ bash experiments/reanchor_flow/run_all.sh --smoke --query-chunk 32
 ```
 
 All train and test samples receive the functional context pass. Thirty source-diverse samples per
-task and split additionally receive the grouped audit:
+task and split additionally receive the grouped audit. This one command also runs the frozen
+detector before the descriptive labelled reports:
 
 ```bash
 bash experiments/reanchor_flow/run_all.sh \
   --split all \
   --query-chunk 64 \
   --mechanism-limit 30 \
+  --output experiments/reanchor_flow/outputs/reanchor_v8_all
+```
+
+Run only the detector on an existing complete train/test capture:
+
+```bash
+python -m experiments.reanchor_flow.run detect \
   --output experiments/reanchor_flow/outputs/reanchor_v8_all
 ```
 
@@ -83,12 +95,14 @@ figures/sample_<task>_<sample>_mechanism.png
 reports/<task>/mechanism_report.json
 reports/<task>/rhythm_summary.png
 reports/<task>/mechanism_atlas.png
+detection/token_scores.npz
+detection/detection_report.json
 run_manifest.json
 ```
 
 With `--split all`, each layout is nested under `<output>/train/` or
 `<output>/test/`; a single-split run keeps the established layout directly under `<output>/`.
-Train and test are reported separately. The terminal includes onset route change, matching balance,
-all-sample functional effects and subset-only grouped effects. No classifier or AUROC is used at
-this discovery stage. Re-running the same command resumes completed samples inside each split;
-changing capture flags requires a new output directory.
+Train and test mechanism summaries are reported separately. The detector is calibrated only on
+unlabelled, source-disjoint train captures and reports held-out test token/onset AUROC and AUPRC.
+Re-running the same command resumes completed samples inside each split; changing capture flags
+requires a new output directory.

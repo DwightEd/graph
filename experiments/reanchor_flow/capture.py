@@ -9,13 +9,11 @@ import torch
 
 from experiments.common.llama_message_intervention import baseline_forward
 
+from .artifacts import CAPTURE_SCHEMA
 from .claims import sentence_boundaries
 from .mechanism import capture_mechanism
 from .rhythm import build_rhythm
 from .routes import RouteAccumulator
-
-CAPTURE_SCHEMA = 8
-
 
 @dataclass(frozen=True)
 class SampleCapture:

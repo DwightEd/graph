@@ -11,6 +11,9 @@
 4. evidence-conditioned state 是否进入、与 question/instruction group 联合控制、跨层保留，
    以及最终是否对 target-versus-runner readout 可见。
 
+完整 train/test 运行还会在不读取 train 标签的条件下校准 transport/adoption failure score，
+先冻结 test token score，再打开 test 标签报告 token 与 hallucination-onset AUROC/AUPRC。
+
 每个样本都执行一次 context cut，直接得到候选、采纳和分布影响；
 `--mechanism-limit N` 只控制额外三组 source cuts 与逐层机制图。标点只作为匹配变量，
 不用于定义内部事件。
@@ -27,4 +30,5 @@ conda run --no-capture-output -n research \
     --output experiments/reanchor_flow/outputs/reanchor_v8_all
 ```
 
-详见 `experiments/reanchor_flow/README.md` 和 `experiments/reanchor_flow/METHOD.md`。
+详见 `experiments/reanchor_flow/README.md`、`experiments/reanchor_flow/METHOD.md` 和
+`experiments/reanchor_flow/DETECTOR.md`。

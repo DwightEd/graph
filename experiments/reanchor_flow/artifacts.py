@@ -7,6 +7,9 @@ from pathlib import Path
 import numpy as np
 
 
+CAPTURE_SCHEMA = 8
+
+
 def as_array(value) -> np.ndarray:
     if hasattr(value, "detach"):
         value = value.detach().cpu().numpy()

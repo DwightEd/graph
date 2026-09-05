@@ -11,6 +11,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .analyze import analyze_split
+from .detection import run_detection
 from .evaluate import evaluate_results
 
 MODEL = Path(
@@ -36,8 +37,9 @@ DTYPE = {
 def output_root(args) -> Path:
     if args.output:
         return args.output
-    root = Path(__file__).resolve().parent / "outputs" / args.model.name / "mechanism_v8"
-    return root / "smoke" if args.smoke else root
+    model = getattr(args, "model", MODEL)
+    root = Path(__file__).resolve().parent / "outputs" / model.name / "mechanism_v8"
+    return root / "smoke" if getattr(args, "smoke", False) else root
 
 
 def selected_splits(args) -> tuple[str, ...]:
@@ -133,6 +135,29 @@ def evaluate(args) -> dict:
         for task, report in reports.items():
             print_report(task, report)
     return all_reports
+
+
+def detect(args) -> dict:
+    report = run_detection(
+        output_root(args),
+        args.cache,
+        bootstrap=args.bootstrap,
+        seed=args.seed,
+    )
+    print("\n=== FROZEN TRAIN→TEST DETECTION ===")
+    for task in ("QA", "Summary", "Data2txt", "ALL"):
+        task_report = report["tasks"][task]
+        token = task_report["token"]["scores"]["online_failure"]
+        onset = task_report["onset"]["scores"]["online_failure"]
+        print(
+            f"{task:9s} samples={task_report['samples']} "
+            f"tokens={token['tokens']} positives={token['positives']} "
+            f"token_AUROC={number(token['auroc'])} "
+            f"token_AUPRC={number(token['auprc'])} "
+            f"onset_AUROC={number(onset['auroc'])} "
+            f"onset_AUPRC={number(onset['auprc'])}"
+        )
+    return report
 
 
 def print_report(task: str, report: dict) -> None:
@@ -231,8 +256,17 @@ def print_report(task: str, report: dict) -> None:
 
 
 def run_all(args) -> dict:
-    analyze(args)
-    return evaluate(args)
+    captured = analyze(args)
+    detection = None
+    if (
+        args.split == "all"
+        and not args.smoke
+        and args.max_events is None
+        and args.plot_sample_id is None
+    ):
+        detection = detect(args)
+    mechanism = evaluate(args)
+    return {"captured": captured, "detection": detection, "mechanism": mechanism}
 
 
 def add_common(command) -> None:
@@ -270,6 +304,13 @@ def add_evaluation(command) -> None:
     command.add_argument("--curve-radius", type=int, default=6)
 
 
+def add_detection(command) -> None:
+    command.add_argument("--cache", type=Path, default=CACHE)
+    command.add_argument("--output", type=Path)
+    command.add_argument("--bootstrap", type=int, default=1000)
+    command.add_argument("--seed", type=int, default=2026)
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description="Complete re-anchor mechanism audit")
     commands = root.add_subparsers(dest="command", required=True)
@@ -280,6 +321,11 @@ def parser() -> argparse.ArgumentParser:
     add_common(evaluate_command)
     add_evaluation(evaluate_command)
     evaluate_command.set_defaults(handler=evaluate)
+    detect_command = commands.add_parser(
+        "detect", help="fit on unlabeled train and evaluate frozen test scores"
+    )
+    add_detection(detect_command)
+    detect_command.set_defaults(handler=detect)
     all_command = commands.add_parser("all")
     add_common(all_command)
     add_evaluation(all_command)
@@ -289,17 +335,19 @@ def parser() -> argparse.ArgumentParser:
 
 def validate_args(args) -> None:
     for name in ("query_chunk", "route_window", "future_horizon", "distance_scale", "max_lag"):
-        if getattr(args, name) < 1:
+        if hasattr(args, name) and getattr(args, name) < 1:
             raise ValueError(f"--{name.replace('_', '-')} must be positive")
     for name in ("limit", "max_events"):
+        if not hasattr(args, name):
+            continue
         value = getattr(args, name)
         if value is not None and value < 1:
             raise ValueError(f"--{name.replace('_', '-')} must be positive")
-    if args.mechanism_limit < -1:
+    if hasattr(args, "mechanism_limit") and args.mechanism_limit < -1:
         raise ValueError("--mechanism-limit must be -1 or non-negative")
-    if not 0 < args.peak_quantile < 1:
+    if hasattr(args, "peak_quantile") and not 0 < args.peak_quantile < 1:
         raise ValueError("--peak-quantile must lie in (0,1)")
-    if args.plot_limit < 0:
+    if hasattr(args, "plot_limit") and args.plot_limit < 0:
         raise ValueError("--plot-limit cannot be negative")
     if hasattr(args, "bootstrap") and args.bootstrap < 0:
         raise ValueError("--bootstrap cannot be negative")

@@ -28,6 +28,7 @@ Transformer 的 **layered operator graph**，而不是 layer/head 平均后的 t
 | `q=p-1` predictor reuse 与 source `p` emitted anchor 分离 | 已实现 | 必须重新 capture；旧 artifact 只有 emitted-token 量 |
 | 全样本 `[layer,head,event]` attention selection 与核心 transport trace | 已实现 | 分开保存 raw attention role mass 与 `A||W_OV||` 归一化预算；后者仍不是 signed semantic contribution |
 | 全样本 context-cut vocabulary candidate、JS、target gain/rank、adoption margin | schema v8 已实现，待运行 | 可回答整个 external context 改变了哪些候选；不能替代 exact support span |
+| 无标签 train→test transport/adoption detector | 已实现，待完整 held-out 运行 | 主分数只用 causal-prefix 信号；future reuse 只进入 offline score；详见 `DETECTOR.md` |
 | signed edge message、coalition coherence、top-k operator event | 待实现 | 完成前不能区分 transport cancellation |
 | event-targeted suffix cut 与逐层 attention/MLP state accounting | 待实现 | 完成前 predictor reuse 仍是观察量，不是未来因果效应 |
 | claim-specific support/distractor mask | 待数据/人工标注 | 完成前统一使用 `context`，禁止声称“准确事实已输送” |
