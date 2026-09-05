@@ -29,10 +29,15 @@ SCORE_FIELDS = {
     "context_opposition": "tail_context_opposition",
     "context_js": "tail_context_distribution_js",
     "route_demand": "tail_route_demand",
+    "evidence_entry_deficit": "tail_evidence_entry_deficit",
+    "evidence_reentry_strength": "tail_evidence_reentry_strength",
+    "history_dominance": "tail_history_dominance",
+    "adoption_deficit": "tail_adoption_deficit",
     "confidence_surprisal": "raw_confidence_surprisal",
     "relative_position": "raw_relative_position",
 }
-PRIMARY_SCORE = "online_failure"
+TOKEN_PRIMARY_SCORE = "online_failure"
+ONSET_PRIMARY_SCORE = "onset_trigger"
 DETECTION_THRESHOLD = 0.95
 
 
@@ -284,6 +289,7 @@ def _source_bootstrap(
     sources: np.ndarray,
     repeats: int,
     seed: int,
+    primary_score: str,
 ) -> dict:
     if repeats <= 0:
         return {"replicates_valid": 0}
@@ -314,9 +320,9 @@ def _source_bootstrap(
             "auroc_ci95": np.quantile(array[:, 0], [0.025, 0.975]).tolist(),
             "auprc_ci95": np.quantile(array[:, 1], [0.025, 0.975]).tolist(),
         }
-    primary = np.asarray(estimates[PRIMARY_SCORE], dtype=np.float64)
+    primary = np.asarray(estimates[primary_score], dtype=np.float64)
     for name in scores:
-        if name == PRIMARY_SCORE:
+        if name == primary_score:
             continue
         comparison = np.asarray(estimates[name], dtype=np.float64)
         delta = primary - comparison
@@ -334,6 +340,7 @@ def _scope_report(
     *,
     bootstrap: int,
     seed: int,
+    primary_score: str,
 ) -> dict:
     outcome = {}
     scores = {
@@ -343,14 +350,20 @@ def _scope_report(
     selected_label = label[selected]
     for name, score in scores.items():
         outcome[name] = _metric(selected_label, score)
-    outcome[PRIMARY_SCORE]["fixed_threshold"] = _threshold_metric(
-        selected_label, scores[PRIMARY_SCORE]
+    outcome[primary_score]["fixed_threshold"] = _threshold_metric(
+        selected_label, scores[primary_score]
     )
     bootstrap_scores = {
         name: scores[name]
-        for name in (PRIMARY_SCORE, "context_js", "confidence_surprisal")
+        for name in (
+            primary_score,
+            "adoption_deficit",
+            "context_js",
+            "confidence_surprisal",
+        )
     }
     return {
+        "primary_score": primary_score,
         "scores": outcome,
         "source_bootstrap": _source_bootstrap(
             selected_label,
@@ -358,6 +371,7 @@ def _scope_report(
             np.asarray(rows["source_id"])[selected],
             bootstrap,
             seed,
+            primary_score,
         ),
     }
 
@@ -387,6 +401,7 @@ def _evaluation_report(
                 selected,
                 bootstrap=bootstrap,
                 seed=seed + 100 * index,
+                primary_score=TOKEN_PRIMARY_SCORE,
             ),
             "onset": _scope_report(
                 rows,
@@ -394,6 +409,7 @@ def _evaluation_report(
                 selected,
                 bootstrap=bootstrap,
                 seed=seed + 100 * index + 1,
+                primary_score=ONSET_PRIMARY_SCORE,
             ),
         }
     return reports
@@ -441,17 +457,23 @@ def run_detection(
     )
     detector_spec = {
         "schema": DETECTOR_SCHEMA,
-        "name": "grounded_reanchor_failure",
+        "name": "grounded_reanchor_state",
         "calibration": "task_specific_source_balanced_conditional_ecdf",
         "nuisance": [
             "relative_position_8_bins",
             "baseline_entropy_4_train_quantile_bins",
             "baseline_target_logprob_4_train_quantile_bins",
         ],
-        "primary_score": PRIMARY_SCORE,
+        "primary_scores": {
+            "token": TOKEN_PRIMARY_SCORE,
+            "onset": ONSET_PRIMARY_SCORE,
+        },
         "threshold": DETECTION_THRESHOLD,
         "online_causal_score": True,
+        "state_reset": "evidence_reentry",
+        "context_distribution_js_role": "diagnostic_control",
         "offline_future_features": ["predictor_reuse", "emitted_token_anchor"],
+        "development_status": "test_informed_exploratory_v2",
     }
     rows.update(
         detector_schema=np.asarray(DETECTOR_SCHEMA, dtype=np.int16),
@@ -468,6 +490,9 @@ def run_detection(
         calibration_summary=np.asarray(json.dumps(calibration, sort_keys=True)),
         flag_online_95=np.asarray(
             rows["score_online_failure"] >= DETECTION_THRESHOLD, dtype=np.int8
+        ),
+        flag_onset_95=np.asarray(
+            rows["score_onset_trigger"] >= DETECTION_THRESHOLD, dtype=np.int8
         ),
     )
     detection_root = output / "detection"
@@ -487,8 +512,13 @@ def run_detection(
         "version": DETECTOR_SCHEMA,
         "labels_read": True,
         "labels_used_during": "posthoc_evaluation_only",
-        "primary_score": PRIMARY_SCORE,
+        "primary_scores": {
+            "token": TOKEN_PRIMARY_SCORE,
+            "onset": ONSET_PRIMARY_SCORE,
+        },
+        "development_status": "test_informed_exploratory_v2",
         "temporal_scope": {
+            "onset_trigger": "current_prediction_event",
             "online_failure": "causal_prefix",
             "offline_failure": "uses_later_prediction_rows",
         },

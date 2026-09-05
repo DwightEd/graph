@@ -13,10 +13,12 @@ from typing import Mapping, Sequence
 import numpy as np
 
 
-DETECTOR_SCHEMA = 1
+DETECTOR_SCHEMA = 2
 RAW_FEATURES = (
     "route_demand",
     "evidence_entry_deficit",
+    "evidence_reentry_strength",
+    "history_dominance",
     "context_opposition",
     "context_distribution_js",
     "adoption_deficit",
@@ -28,6 +30,8 @@ RAW_FEATURES = (
 SCORE_NAMES = (
     "entry_failure",
     "adoption_failure",
+    "onset_trigger",
+    "continuation_gate",
     "override_candidate",
     "online_failure",
     "offline_failure",
@@ -57,35 +61,52 @@ def _finite_extreme(arrays: Sequence[np.ndarray], operation: str) -> np.ndarray:
     return result
 
 
-def evidence_entry_deficit(
+def evidence_route_change(
     evidence_transport: np.ndarray,
     route_change: np.ndarray,
     window: int,
-) -> np.ndarray:
-    """Head-preserving evidence loss at route-changing prediction events."""
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return route-weighted evidence loss and re-entry at each event."""
 
     evidence = np.asarray(evidence_transport, dtype=np.float64)
     change = np.asarray(route_change, dtype=np.float64)
     if evidence.ndim != 3 or evidence.shape != change.shape:
         raise ValueError("head routing arrays must share [layer, head, event] shape")
-    result = np.full(evidence.shape[-1], np.nan, dtype=np.float64)
+    deficit_result = np.full(evidence.shape[-1], np.nan, dtype=np.float64)
+    reentry_result = np.full(evidence.shape[-1], np.nan, dtype=np.float64)
     for event in range(window, evidence.shape[-1]):
         history = evidence[..., event - window : event]
         finite_history = np.isfinite(history)
         count = finite_history.sum(axis=-1)
         ordered = np.where(finite_history, history, np.nan)
         reference = np.nanmedian(ordered, axis=-1)
-        deficit = np.maximum(reference - evidence[..., event], 0.0)
         weight = change[..., event]
-        valid = np.isfinite(deficit) & np.isfinite(weight) & (weight >= 0)
+        current = evidence[..., event]
+        valid = np.isfinite(reference) & np.isfinite(current)
+        valid &= np.isfinite(weight) & (weight >= 0)
         weight_sum = weight[valid].sum()
         if weight_sum > 0:
-            result[event] = np.sqrt(
-                np.sum(weight[valid] * deficit[valid] ** 2) / weight_sum
+            delta = current[valid] - reference[valid]
+            deficit_result[event] = np.sqrt(
+                np.sum(weight[valid] * np.maximum(-delta, 0.0) ** 2) / weight_sum
+            )
+            reentry_result[event] = np.sqrt(
+                np.sum(weight[valid] * np.maximum(delta, 0.0) ** 2) / weight_sum
             )
         elif np.any(valid) and np.any(count[valid] > 0):
-            result[event] = 0.0
-    return result
+            deficit_result[event] = 0.0
+            reentry_result[event] = 0.0
+    return deficit_result, reentry_result
+
+
+def evidence_entry_deficit(
+    evidence_transport: np.ndarray,
+    route_change: np.ndarray,
+    window: int,
+) -> np.ndarray:
+    """Backward-compatible view of the missed evidence-entry component."""
+
+    return evidence_route_change(evidence_transport, route_change, window)[0]
 
 
 def late_evidence_route_loss(evidence_transport: np.ndarray) -> np.ndarray:
@@ -109,6 +130,7 @@ def raw_features(
     """Extract high-means-failure features from one schema-v8 capture."""
 
     evidence = np.asarray(result["head_evidence_transport_share"], dtype=np.float64)
+    history = np.asarray(result["head_history_transport_share"], dtype=np.float64)
     change = np.asarray(result["head_route_change"], dtype=np.float64)
     predictor = np.asarray(result["head_predictor_reuse"], dtype=np.float64)
     emitted = np.asarray(result["head_emitted_token_anchor"], dtype=np.float64)
@@ -133,8 +155,13 @@ def raw_features(
     }
     if any(value.shape != (count,) for value in one_dimensional.values()):
         raise ValueError("detector fields are not aligned to prediction events")
-    if any(value.shape != evidence.shape for value in (change, predictor, emitted)):
+    if any(
+        value.shape != evidence.shape
+        for value in (history, change, predictor, emitted)
+    ):
         raise ValueError("head detector fields do not share one event geometry")
+
+    entry_deficit, reentry = evidence_route_change(evidence, change, route_window)
 
     return {
         "relative_position": (np.arange(count, dtype=np.float64) + 0.5) / count,
@@ -142,8 +169,10 @@ def raw_features(
         "baseline_target_logprob": one_dimensional["baseline_target_logprob"],
         "confidence_surprisal": -one_dimensional["baseline_target_logprob"],
         "route_demand": _finite_rms(change, axis=(0, 1)),
-        "evidence_entry_deficit": evidence_entry_deficit(
-            evidence, change, route_window
+        "evidence_entry_deficit": entry_deficit,
+        "evidence_reentry_strength": reentry,
+        "history_dominance": _finite_rms(
+            np.maximum(history - evidence, 0.0), axis=(0, 1)
         ),
         "context_opposition": -one_dimensional["context_target_logprob_gain"],
         "context_distribution_js": one_dimensional["context_distribution_js"],
@@ -299,20 +328,26 @@ class ConditionalECDF:
 
 
 def compose_scores(tail: Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
-    """Compose registered AND/OR failure modes without learned weights."""
+    """Compose onset, causal persistence and offline confirmation."""
 
     transport_gap = _finite_extreme(
         [tail["route_demand"], tail["evidence_entry_deficit"]], "min"
     )
-    entry = _finite_extreme(
-        [transport_gap, tail["context_opposition"]], "min"
+    entry = transport_gap
+    adoption = np.asarray(tail["adoption_deficit"], dtype=np.float64)
+    onset = _finite_extreme([entry, adoption], "max")
+    continuation = _finite_extreme(
+        [tail["history_dominance"], 1.0 - tail["evidence_reentry_strength"]],
+        "min",
     )
-    candidate_rejection = _finite_extreme(
-        [tail["adoption_deficit"], tail["context_target_log_rank"]], "max"
-    )
-    adoption = _finite_extreme(
-        [tail["context_distribution_js"], candidate_rejection], "min"
-    )
+    online = np.array(onset, copy=True)
+    for event in range(1, len(online)):
+        carried = _finite_extreme(
+            [online[event - 1 : event], continuation[event : event + 1]], "min"
+        )[0]
+        online[event] = _finite_extreme(
+            [onset[event : event + 1], np.asarray([carried])], "max"
+        )[0]
     self_anchor = _finite_extreme(
         [tail["predictor_reuse"], tail["emitted_token_anchor"]], "max"
     )
@@ -322,10 +357,11 @@ def compose_scores(tail: Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
     override = _finite_extreme(
         [tail["late_evidence_route_loss"], self_anchor, unsupported], "min"
     )
-    online = _finite_extreme([entry, adoption], "max")
     return {
         "entry_failure": entry,
         "adoption_failure": adoption,
+        "onset_trigger": onset,
+        "continuation_gate": continuation,
         "override_candidate": override,
         "online_failure": online,
         "offline_failure": _finite_extreme([online, override], "max"),

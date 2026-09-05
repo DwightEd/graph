@@ -28,6 +28,7 @@ def capture(evidence):
     shape = (layer, head, count)
     return {
         "head_evidence_transport_share": evidence,
+        "head_history_transport_share": np.full(shape, 0.1),
         "head_route_change": np.full(shape, 0.1),
         "head_predictor_reuse": np.full(shape, 0.1),
         "head_emitted_token_anchor": np.full(shape, 0.1),
@@ -69,6 +70,37 @@ def test_entry_deficit_preserves_head_local_route_change():
     feature = raw_features(result, route_window=2)
     assert feature["evidence_entry_deficit"][4] > 0.6
     assert feature["evidence_entry_deficit"][5] == 0.0
+
+
+def test_evidence_reentry_detects_route_recovery():
+    evidence = np.full((3, 2, 7), 0.8)
+    evidence[..., 4] = 0.1
+    result = capture(evidence)
+    result["head_route_change"][..., 4:6] = 1.0
+    feature = raw_features(result, route_window=2)
+    assert feature["evidence_entry_deficit"][4] > 0.6
+    assert feature["evidence_reentry_strength"][5] > 0.3
+
+
+def test_failure_state_persists_until_evidence_reentry():
+    tail = {name: np.full(5, 0.1) for name in RAW_FEATURES}
+    tail["adoption_deficit"] = np.array([0.1, 0.9, 0.1, 0.1, 0.1])
+    tail["history_dominance"] = np.array([0.1, 0.1, 0.9, 0.9, 0.9])
+    tail["evidence_reentry_strength"] = np.array([0.1, 0.1, 0.1, 0.95, 0.1])
+    score = compose_scores(tail)
+    assert score["onset_trigger"][1] == 0.9
+    assert score["online_failure"][2] == 0.9
+    assert score["online_failure"][3] == 0.1
+
+
+def test_context_js_is_a_control_not_a_failure_gate():
+    low = {name: np.full(3, 0.2) for name in RAW_FEATURES}
+    high = {name: value.copy() for name, value in low.items()}
+    high["context_distribution_js"][:] = 0.99
+    assert np.array_equal(
+        compose_scores(low)["online_failure"],
+        compose_scores(high)["online_failure"],
+    )
 
 
 def test_future_reuse_changes_only_the_offline_score():

@@ -148,7 +148,7 @@ def detect(args) -> dict:
     for task in ("QA", "Summary", "Data2txt", "ALL"):
         task_report = report["tasks"][task]
         token = task_report["token"]["scores"]["online_failure"]
-        onset = task_report["onset"]["scores"]["online_failure"]
+        onset = task_report["onset"]["scores"]["onset_trigger"]
         print(
             f"{task:9s} samples={task_report['samples']} "
             f"tokens={token['tokens']} positives={token['positives']} "

@@ -19,6 +19,9 @@ For prediction event `t`, the detector keeps layer/head identity until the final
 - `route_demand`: RMS head route-change JS;
 - `evidence_entry_deficit`: the positive loss from each head's rolling evidence-route median,
   weighted by that head's current route change;
+- `evidence_reentry_strength`: the corresponding positive recovery above the rolling
+  evidence-route median;
+- `history_dominance`: RMS positive excess of generated-history routing over evidence routing;
 - `context_opposition`: negative context-cut target log-probability gain;
 - `context_distribution_js`: full-vocabulary distribution change under the context cut;
 - `adoption_deficit`: negative target-versus-best-context-candidate margin;
@@ -26,7 +29,9 @@ For prediction event `t`, the detector keeps layer/head identity until the final
 - `late_evidence_route_loss`: middle/late evidence-route peak lost by the final layer;
 - `predictor_reuse` and `emitted_token_anchor`: later use of predictor `q=p-1` and token state `p`.
 
-Every raw signal is oriented so that a larger value means a stronger failure candidate.
+Failure features are oriented so that larger means a stronger candidate. Evidence re-entry is
+instead a recovery signal. `context_distribution_js` is retained as a diagnostic control: the v1
+audit showed that its direction changes by task, so it is not a necessary failure condition.
 
 ## 3. Unlabelled conditional calibration
 
@@ -45,23 +50,29 @@ source-balanced CDF. No labels, classifier weights or test statistics select the
 
 ## 4. Registered scores
 
-Let `q_X = Q(X)`. AND is represented by `min`, so every required signal must be anomalous; OR is
-represented by `max`, so either registered failure path may fire.
+Let `q_X = Q(X)`. The event-local entry and adoption triggers are:
 
 \[
-S_{entry}=\min(q_{demand},q_{entry\ deficit},q_{context\ opposition})
+S_{entry,t}=\min(q_{demand,t},q_{entry\ deficit,t})
 \]
 
 \[
-S_{adoption}=\min\left(q_{context\ JS},
-\max(q_{adoption\ deficit},q_{target\ log\ rank})\right)
+O_t=\max(S_{entry,t},q_{adoption\ deficit,t}).
 \]
 
-The primary score is available from the causal generation prefix:
+`O_t` is the primary onset score. To score the whole hallucinated span, the detector carries a
+failure state only while generated history dominates and no evidence re-entry occurs:
 
 \[
-S_{online}=\max(S_{entry},S_{adoption}).
+C_t=\min(q_{history\ dominance,t},1-q_{evidence\ reentry,t}),
 \]
+
+\[
+R_0=O_0,\qquad R_t=\max(O_t,\min(R_{t-1},C_t)).
+\]
+
+`R_t` is the primary token score. It is causal: it uses only the current event and its prefix.
+Evidence re-entry explicitly resets carried failure instead of relying on an arbitrary duration.
 
 The secondary score asks whether a failed token later becomes an internal anchor:
 
@@ -72,7 +83,7 @@ S_{override}=\min\left(q_{late\ route\ loss},
 \]
 
 \[
-S_{offline}=\max(S_{online},S_{override}).
+S_{offline,t}=\max(R_t,S_{override,t}).
 \]
 
 `S_offline` is an after-the-fact diagnosis, not an online detector. The fixed alert threshold is
@@ -89,9 +100,8 @@ The command performs the following order:
 5. only then open test labels and write `detection/detection_report.json`.
 
 The report contains token and span-onset AUROC/AUPRC, the fixed-threshold result, source-cluster
-bootstrap intervals, all three failure modes, the offline score, and controls for context JS,
-context opposition, route demand, model surprisal and position. The main innovation is supported
-only if `online_failure` improves over the single-signal controls on held-out test sources.
+bootstrap intervals, the state components, the offline score, and single-signal controls. Token
+evaluation uses `online_failure`; onset evaluation uses `onset_trigger`.
 
 ## 6. Commands
 
@@ -106,6 +116,10 @@ The complete `run_all.sh --split all ...` pipeline now captures both splits, fre
 the detector, then produces the descriptive mechanism reports.
 
 ## 7. Boundary of the claim
+
+Version 2 was designed after inspecting the first held-out test result, so its result on that same
+test set is explicitly **test-informed exploratory**, not a confirmatory estimate. A paper claim
+requires freezing v2 and evaluating it on an untouched generator, model, dataset, or source split.
 
 The current score establishes a transport/adoption detector over the full external-context mask.
 It cannot yet say which exact supporting fact travelled through which source edge. A later capture
