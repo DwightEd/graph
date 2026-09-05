@@ -36,8 +36,17 @@ DTYPE = {
 def output_root(args) -> Path:
     if args.output:
         return args.output
-    root = Path(__file__).resolve().parent / "outputs" / args.model.name / "mechanism_v7"
+    root = Path(__file__).resolve().parent / "outputs" / args.model.name / "mechanism_v8"
     return root / "smoke" if args.smoke else root
+
+
+def selected_splits(args) -> tuple[str, ...]:
+    return ("train", "test") if args.split == "all" else (args.split,)
+
+
+def split_output(args, split: str) -> Path:
+    root = output_root(args)
+    return root / split if args.split == "all" else root
 
 
 def load_model(path: Path, device: str, dtype: str):
@@ -55,34 +64,42 @@ def analyze(args) -> dict:
     model, tokenizer = load_model(args.model, args.device, args.dtype)
     limit = 1 if args.smoke and args.limit is None else args.limit
     max_events = 96 if args.smoke and args.max_events is None else args.max_events
-    mechanism_limit = 1 if args.smoke and args.mechanism_limit == 0 else args.mechanism_limit
-    counts = analyze_split(
-        model,
-        tokenizer,
-        args.cache / "test",
-        args.source_info,
-        output_root(args),
-        model_path=str(args.model),
-        model_id=args.model.name,
-        dtype=args.dtype,
-        limit=limit,
-        max_events=max_events,
-        query_chunk=args.query_chunk,
-        route_window=args.route_window,
-        future_horizon=args.future_horizon,
-        distance_scale=args.distance_scale,
-        peak_quantile=args.peak_quantile,
-        max_lag=args.max_lag,
-        plot_limit=args.plot_limit,
-        plot_sample_id=args.plot_sample_id,
-        mechanism_limit=mechanism_limit,
+    mechanism_limit = (
+        1 if args.smoke and args.mechanism_limit == 0 else args.mechanism_limit
     )
+    captured = {}
+    for split in selected_splits(args):
+        counts = analyze_split(
+            model,
+            tokenizer,
+            args.cache / split,
+            args.source_info,
+            split_output(args, split),
+            model_path=str(args.model),
+            model_id=args.model.name,
+            dtype=args.dtype,
+            limit=limit,
+            max_events=max_events,
+            query_chunk=args.query_chunk,
+            route_window=args.route_window,
+            future_horizon=args.future_horizon,
+            distance_scale=args.distance_scale,
+            peak_quantile=args.peak_quantile,
+            max_lag=args.max_lag,
+            plot_limit=args.plot_limit,
+            plot_sample_id=args.plot_sample_id,
+            mechanism_limit=mechanism_limit,
+        )
+        captured[split] = counts
+        print(
+            f"captured {split} "
+            + " ".join(f"{task}={count}" for task, count in counts.items())
+        )
     del model, tokenizer
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    print("captured " + " ".join(f"{task}={count}" for task, count in counts.items()))
-    return counts
+    return captured
 
 
 def number(value) -> str:
@@ -101,100 +118,116 @@ def effect(name: str, summary: dict) -> str:
 
 
 def evaluate(args) -> dict:
-    reports = evaluate_results(
-        output_root(args),
-        args.cache / "test",
-        bootstrap=args.bootstrap,
-        seed=args.seed,
-        curve_radius=args.curve_radius,
+    all_reports = {}
+    seed_offset = {"test": 0, "train": 1000}
+    for split in selected_splits(args):
+        reports = evaluate_results(
+            split_output(args, split),
+            args.cache / split,
+            bootstrap=args.bootstrap,
+            seed=args.seed + seed_offset[split],
+            curve_radius=args.curve_radius,
+        )
+        all_reports[split] = reports
+        print(f"\n=== {split.upper()} ===")
+        for task, report in reports.items():
+            print_report(task, report)
+    return all_reports
+
+
+def print_report(task: str, report: dict) -> None:
+    normal = report["normal"]
+    shift = normal["direct_route_shift"]
+    transition = normal["internal_transition"]
+    onset = report["onset_minus_matched_clean"]
+    functional = report["functional"]
+    mechanism = report["mechanism"]
+    print(
+        f"{task:9s} samples={report['samples']} tokens={report['tokens']} "
+        f"positives={report['positive_tokens']} prevalence={number(report['prevalence'])} "
+        f"functional_pairs={functional['onset_pairs']} "
+        f"functional_pair_sources={functional['onset_pair_sources']} "
+        f"grouped_samples={mechanism['samples']} "
+        f"grouped_sources={mechanism['sources']} "
+        f"grouped_pairs={mechanism['onset_pairs']} "
+        f"grouped_pair_sources={mechanism['onset_pair_sources']}"
     )
-    for task, report in reports.items():
-        normal = report["normal"]
-        shift = normal["direct_route_shift"]
-        transition = normal["internal_transition"]
-        onset = report["onset_minus_matched_clean"]
-        mechanism = report["mechanism"]
+    print(
+        "  H0 direct drift: "
+        + effect("prompt_slope", shift["prompt_lift_slope"])
+        + "  "
+        + effect("history_slope", shift["history_lift_slope"])
+        + "  "
+        + effect(
+            "prompt_vs_history",
+            shift["conditional_prompt_history_log_odds_slope"],
+        )
+    )
+    print(
+        "  H1 transition: "
+        + effect("prompt", transition["prompt_delta"])
+        + "  "
+        + effect("evidence", transition["evidence_delta"])
+        + "  "
+        + effect("predictor_reuse", transition["predictor_reuse"])
+        + "  "
+        + effect("emitted_anchor", transition["emitted_token_anchor"])
+    )
+    print(
+        "  H2 onset-clean: "
+        + effect("route_change", onset["route_change"])
+        + "  "
+        + effect("prompt", onset["prompt_delta"])
+        + "  "
+        + effect("evidence", onset["evidence_delta"])
+        + "  "
+        + effect("predictor_reuse", onset["predictor_reuse"])
+        + "  "
+        + effect("emitted_token_anchor", onset["emitted_token_anchor"])
+    )
+    if functional["samples"]:
+        deep = functional["onset_minus_clean"]
         print(
-            f"{task:9s} samples={report['samples']} tokens={report['tokens']} "
-            f"positives={report['positive_tokens']} prevalence={number(report['prevalence'])} "
-            f"mechanism_samples={mechanism['samples']} "
-            f"mechanism_sources={mechanism['sources']} "
-            f"pairs={mechanism['onset_pairs']} "
-            f"pair_sources={mechanism['onset_pair_sources']}"
+            "  H3 functional context: "
+            + effect("entry", deep["evidence_entry"])
+            + "  "
+            + effect("target_effect", deep["evidence_effect"])
+            + "  "
+            + effect("distribution_js", deep["context_distribution_js"])
         )
         print(
-            "  H0 direct drift: "
-            + effect("prompt_slope", shift["prompt_lift_slope"])
+            "  H3 adoption: "
+            + effect("target_logprob_gain", deep["context_target_logprob_gain"])
             + "  "
-            + effect("history_slope", shift["history_lift_slope"])
+            + effect("adoption_margin", deep["context_adoption_margin"])
             + "  "
-            + effect(
-                "prompt_vs_history",
-                shift["conditional_prompt_history_log_odds_slope"],
-            )
+            + effect("target_log_rank", deep["context_target_log_rank"])
         )
+    if mechanism["samples"]:
+        deep = mechanism["onset_minus_clean"]
         print(
-            "  H1 transition: "
-            + effect("prompt", transition["prompt_delta"])
+            "  H4 grouped/state: "
+            + effect("integration", deep["evidence_prompt_interaction"])
             + "  "
-            + effect("evidence", transition["evidence_delta"])
+            + effect("history_effect", deep["history_effect"])
             + "  "
-            + effect("predictor_reuse", transition["predictor_reuse"])
+            + effect("late_control_loss", deep["evidence_late_control_loss"])
             + "  "
-            + effect("emitted_anchor", transition["emitted_token_anchor"])
+            + effect("readout_gain", deep["evidence_readout_gain"])
         )
-        print(
-            "  H2 onset-clean: "
-            + effect("evidence_entry", onset["evidence_delta"])
-            + "  "
-            + effect("predictor_reuse", onset["predictor_reuse"])
-            + "  "
-            + effect("emitted_token_anchor", onset["emitted_token_anchor"])
-        )
-        if mechanism["samples"]:
-            deep = mechanism["onset_minus_clean"]
-            print(
-                "  H3 mechanism: "
-                + effect("entry", deep["evidence_entry"])
-                + "  "
-                + effect("evidence_effect", deep["evidence_effect"])
-                + "  "
-                + effect("integration", deep["evidence_prompt_interaction"])
-            )
-            print(
-                "  H4 persistence/readout: "
-                + effect("history_effect", deep["history_effect"])
-                + "  "
-                + effect("late_control_loss", deep["evidence_late_control_loss"])
-                + "  "
-                + effect("readout_gain", deep["evidence_readout_gain"])
-            )
-            if deep["context_adoption_margin"]["events"]:
-                print(
-                    "  functional context: "
-                    + effect(
-                        "distribution_js", deep["context_distribution_js"]
-                    )
-                    + "  "
-                    + effect(
-                        "target_logprob_gain",
-                        deep["context_target_logprob_gain"],
-                    )
-                    + "  "
-                    + effect(
-                        "adoption_margin", deep["context_adoption_margin"]
-                    )
-                    + "  "
-                    + effect(
-                        "target_log_rank", deep["context_target_log_rank"]
-                    )
-                )
-        decisions = report["registered_decisions"]
-        print(
-            "  decisions: "
-            + " ".join(f"{name}={status}" for name, status in decisions.items())
-        )
-    return reports
+    balance = report["matching_balance"]
+    print(
+        "  onset matching: "
+        f"pairs={balance['pairs']} sources={balance['sources']} "
+        f"position_gap={number(balance['mean_absolute_relative_position_gap']['mean'])} "
+        f"boundary_match={number(balance['boundary_match_fraction']['mean'])} "
+        f"token_match={number(balance['token_match_fraction']['mean'])}"
+    )
+    decisions = report["registered_decisions"]
+    print(
+        "  decisions: "
+        + " ".join(f"{name}={status}" for name, status in decisions.items())
+    )
 
 
 def run_all(args) -> dict:
@@ -207,6 +240,9 @@ def add_common(command) -> None:
     command.add_argument("--cache", type=Path, default=CACHE)
     command.add_argument("--source-info", type=Path, default=SOURCE_INFO)
     command.add_argument("--output", type=Path)
+    command.add_argument(
+        "--split", choices=("train", "test", "all"), default="test"
+    )
     command.add_argument("--device", default="cuda:0")
     command.add_argument("--dtype", choices=tuple(DTYPE), default="bfloat16")
     command.add_argument("--limit", type=int)

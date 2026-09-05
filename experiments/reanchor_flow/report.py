@@ -15,6 +15,13 @@ BROAD_SIGNALS = (
     "predictor_reuse",
     "emitted_token_anchor",
 )
+FUNCTIONAL_SIGNALS = (
+    "evidence_effect",
+    "context_distribution_js",
+    "context_target_logprob_gain",
+    "context_adoption_margin",
+    "context_target_log_rank",
+)
 MECHANISM_SIGNALS = (
     "evidence_effect",
     "other_prompt_effect",
@@ -22,10 +29,6 @@ MECHANISM_SIGNALS = (
     "history_effect",
     "evidence_readout_gain",
     "evidence_late_control_loss",
-    "context_distribution_js",
-    "context_target_logprob_gain",
-    "context_adoption_margin",
-    "context_target_log_rank",
 )
 
 
@@ -312,6 +315,46 @@ def normal_summary(rows: list[dict], *, bootstrap: int, seed: int) -> dict:
     }
 
 
+def functional_summary(rows: list[dict], *, bootstrap: int, seed: int) -> dict:
+    rows = [row for row in rows if row.get("functional")]
+    effects = {name: [] for name in ("evidence_entry", *FUNCTIONAL_SIGNALS)}
+    sources = {name: [] for name in effects}
+    pairs = 0
+    pair_sources: set[str] = set()
+    for row in rows:
+        source = row["source_id"]
+        entry = np.nanmean(
+            np.asarray(row["evidence_share_layer"], dtype=float), axis=0
+        )
+        values = {
+            "evidence_entry": entry,
+            **{
+                name: np.asarray(row[name], dtype=float)
+                for name in FUNCTIONAL_SIGNALS
+            },
+        }
+        for onset, clean in matched_onsets(row):
+            pairs += 1
+            pair_sources.add(source)
+            for name, series in values.items():
+                difference = series[onset] - series[clean]
+                if np.isfinite(difference):
+                    effects[name].append(float(difference))
+                    sources[name].append(source)
+    return {
+        "samples": len(rows),
+        "sources": len({row["source_id"] for row in rows}),
+        "onset_pairs": pairs,
+        "onset_pair_sources": len(pair_sources),
+        "onset_minus_clean": {
+            name: mean_ci(
+                effects[name], sources[name], repeats=bootstrap, seed=seed + index
+            )
+            for index, name in enumerate(effects)
+        },
+    }
+
+
 def mechanism_summary(rows: list[dict], *, bootstrap: int, seed: int) -> dict:
     rows = [row for row in rows if row.get("mechanism")]
     effects = {name: [] for name in ("evidence_entry", *MECHANISM_SIGNALS)}
@@ -459,8 +502,12 @@ def task_summary(rows: list[dict], *, bootstrap: int, seed: int, radius: int) ->
         "prevalence": positives / tokens if tokens else None,
         "onset_pairs": onset_pairs,
         "normal": normal,
-        "prompt_to_anchor": coupling_population(rows, "prompt", bootstrap=bootstrap, seed=seed + 50),
-        "nonlocal_to_anchor": coupling_population(rows, "review", bootstrap=bootstrap, seed=seed + 51),
+        "prompt_to_anchor": coupling_population(
+            rows, "prompt", bootstrap=bootstrap, seed=seed + 50
+        ),
+        "nonlocal_to_anchor": coupling_population(
+            rows, "review", bootstrap=bootstrap, seed=seed + 51
+        ),
         "onset_minus_matched_clean": onset_summary,
         "matching_balance": matching_balance(
             rows, bootstrap=bootstrap, seed=seed + 70
@@ -481,5 +528,6 @@ def task_summary(rows: list[dict], *, bootstrap: int, seed: int, radius: int) ->
                 clean_curves, curve_sources, repeats=bootstrap, seed=seed + 81
             ),
         },
+        "functional": functional_summary(rows, bootstrap=bootstrap, seed=seed + 90),
         "mechanism": mechanism_summary(rows, bootstrap=bootstrap, seed=seed + 100),
     }

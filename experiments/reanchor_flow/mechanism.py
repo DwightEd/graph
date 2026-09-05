@@ -1,8 +1,8 @@
-"""Layerwise evidence-entry, integration, persistence and readout audit.
+"""Functional context cut plus optional grouped mechanism audit.
 
-The broad rhythm capture is single-pass.  This module is the optional deep
-validation pass: one baseline plus four grouped message cuts per sample.  It
-never deletes individual edges and stores only layer/token scalars.
+Every sample receives one context-path cut.  The source-diverse deep subset
+adds three grouped cuts and a layerwise state trace.  Interventions remove
+source messages only on response-query rows; no individual edge search is run.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ class CutTrace:
     margin_change: Tensor
 
 
-VOCAB_CHUNK = 4096
+VOCAB_EVENT_CHUNK = 16
 EVIDENCE_CANDIDATES = 5
 
 
@@ -74,7 +74,13 @@ def _fixed_margin(model, cache: ForwardCache, hidden: Tensor) -> Tensor:
     return margin + cache.readout_bias.to(device)
 
 
-def _run_trace(model, cache: ForwardCache, gate: MessageGate) -> CutTrace:
+def _run_trace(
+    model,
+    cache: ForwardCache,
+    gate: MessageGate,
+    *,
+    layerwise: bool,
+) -> CutTrace:
     device = model.get_input_embeddings().weight.device
     saved: dict[int, Tensor] = {}
     with torch.inference_mode():
@@ -83,56 +89,12 @@ def _run_trace(model, cache: ForwardCache, gate: MessageGate) -> CutTrace:
             cache.layer_input[0].to(device)[None],
             0,
             gate=gate_to(gate, device),
-            save_inputs=saved,
-            save_layers=set(range(cache.layer_count)),
+            save_inputs=saved if layerwise else None,
+            save_layers=set(range(cache.layer_count)) if layerwise else None,
             attention_query_chunk=cache.attention_query_chunk,
         )[0]
         change = _fixed_margin(model, cache, final).cpu() - cache.full_margin
     return CutTrace(saved, final.detach().cpu(), change)
-
-
-def _baseline_final(model, cache: ForwardCache) -> Tensor:
-    """Recover the baseline final state with only the last decoder layer."""
-
-    last = cache.layer_count - 1
-    device = model.get_input_embeddings().weight.device
-    with torch.inference_mode():
-        return forward_layers(
-            model,
-            cache.layer_input[last].to(device)[None],
-            last,
-            attention_query_chunk=cache.attention_query_chunk,
-        )[0].detach().cpu()
-
-
-def _vocabulary_summary(
-    model,
-    hidden: Tensor,
-    target: Tensor,
-    chunk: int,
-) -> tuple[Tensor, Tensor]:
-    """Compute logsumexp and target logits through the same vocabulary scan."""
-
-    weight = model.lm_head.weight
-    bias = getattr(model.lm_head, "bias", None)
-    projected = hidden.to(dtype=weight.dtype)
-    normalizer = torch.full(
-        (len(hidden),),
-        -torch.inf,
-        dtype=torch.float32,
-        device=hidden.device,
-    )
-    target_logit = torch.empty_like(normalizer)
-    for begin in range(0, len(weight), chunk):
-        end = min(begin + chunk, len(weight))
-        current_bias = None if bias is None else bias[begin:end]
-        logits = F.linear(projected, weight[begin:end], current_bias).float()
-        normalizer = torch.logaddexp(normalizer, torch.logsumexp(logits, dim=1))
-        inside = (target >= begin) & (target < end)
-        if bool(inside.any()):
-            rows = torch.nonzero(inside, as_tuple=True)[0]
-            target_logit[rows] = logits[rows, target[rows] - begin]
-    return normalizer, target_logit
 
 
 def vocabulary_effect(
@@ -142,7 +104,7 @@ def vocabulary_effect(
     cut_final: Tensor,
     *,
     top_k: int = EVIDENCE_CANDIDATES,
-    chunk: int = VOCAB_CHUNK,
+    chunk: int = VOCAB_EVENT_CHUNK,
 ) -> dict[str, np.ndarray]:
     """Map a context-path cut to supported vocabulary candidates and adoption.
 
@@ -151,89 +113,66 @@ def vocabulary_effect(
     """
 
     device = model.get_input_embeddings().weight.device
-    query = cache.query.to(device)
+    query = cache.query.long()
     target = cache.target.to(device)
-    baseline_model = baseline_final.to(device).index_select(0, query)
-    cut_model = cut_final.to(device).index_select(0, query)
+    baseline_model = baseline_final.index_select(0, query).to(device)
+    cut_model = cut_final.index_select(0, query).to(device)
     weight = model.lm_head.weight
     bias = getattr(model.lm_head, "bias", None)
     top_k = min(int(top_k), len(weight))
-
+    result = {
+        "context_distribution_js": [],
+        "context_target_logprob_gain": [],
+        "context_candidate_id": [],
+        "context_candidate_logprob_gain": [],
+        "context_target_rank": [],
+        "context_adoption_margin": [],
+    }
     with torch.inference_mode():
-        baseline_log_z, baseline_target_logit = _vocabulary_summary(
-            model, baseline_model, target, chunk
-        )
-        cut_log_z, cut_target_logit = _vocabulary_summary(
-            model, cut_model, target, chunk
-        )
-        baseline_target_logprob = baseline_target_logit - baseline_log_z
-        cut_target_logprob = cut_target_logit - cut_log_z
-        target_logprob_gain = baseline_target_logprob - cut_target_logprob
-        normalizer_gain = baseline_log_z - cut_log_z
-        target_logit_gain = baseline_target_logit - cut_target_logit
-
-        candidate_gain = torch.empty(
-            (len(target), 0), dtype=torch.float32, device=device
-        )
-        candidate_id = torch.empty(
-            (len(target), 0), dtype=torch.long, device=device
-        )
-        target_rank = torch.ones(len(target), dtype=torch.long, device=device)
-        best_other = torch.full_like(target_logit_gain, -torch.inf)
-        distribution_js = torch.zeros_like(target_logit_gain)
-
-        for begin in range(0, len(weight), chunk):
-            end = min(begin + chunk, len(weight))
-            current_bias = None if bias is None else bias[begin:end]
+        for begin in range(0, len(target), chunk):
+            end = min(begin + chunk, len(target))
+            current_target = target[begin:end]
+            rows = torch.arange(end - begin, device=device)
             baseline_logits = F.linear(
-                baseline_model, weight[begin:end], current_bias
+                baseline_model[begin:end].to(weight.dtype), weight, bias
             ).float()
             cut_logits = F.linear(
-                cut_model, weight[begin:end], current_bias
+                cut_model[begin:end].to(weight.dtype), weight, bias
             ).float()
-            log_p = baseline_logits - baseline_log_z[:, None]
-            log_q = cut_logits - cut_log_z[:, None]
+            log_p = baseline_logits.log_softmax(dim=1)
+            log_q = cut_logits.log_softmax(dim=1)
+            del baseline_logits, cut_logits
             log_middle = torch.logaddexp(log_p, log_q) - np.log(2.0)
             p = log_p.exp()
             q = log_q.exp()
-            distribution_js += 0.5 * (
-                torch.where(p > 0, p * (log_p - log_middle), 0).sum(1)
-                + torch.where(q > 0, q * (log_q - log_middle), 0).sum(1)
+            distribution_js = 0.5 * (
+                (p * (log_p - log_middle)).sum(1)
+                + (q * (log_q - log_middle)).sum(1)
+            )
+            del log_middle, p, q
+
+            gain = log_p - log_q
+            target_logprob_gain = gain[rows, current_target]
+            target_rank = 1 + (gain > target_logprob_gain[:, None]).sum(1)
+            gain[rows, current_target] = -torch.inf
+            candidate_gain, candidate_id = torch.topk(gain, k=top_k, dim=1)
+
+            result["context_distribution_js"].append(distribution_js.cpu())
+            result["context_target_logprob_gain"].append(target_logprob_gain.cpu())
+            result["context_candidate_id"].append(candidate_id.to(torch.int32).cpu())
+            result["context_candidate_logprob_gain"].append(
+                candidate_gain.cpu()
+            )
+            result["context_target_rank"].append(target_rank.to(torch.int32).cpu())
+            result["context_adoption_margin"].append(
+                (target_logprob_gain - candidate_gain[:, 0]).cpu()
             )
 
-            gain = baseline_logits - cut_logits
-            target_rank += (gain > target_logit_gain[:, None]).sum(1)
-            target_inside = (target >= begin) & (target < end)
-            if bool(target_inside.any()):
-                rows = torch.nonzero(target_inside, as_tuple=True)[0]
-                gain[rows, target[rows] - begin] = -torch.inf
-            best_other = torch.maximum(best_other, gain.max(1).values)
-
-            current_k = min(top_k, end - begin)
-            values, indices = torch.topk(
-                baseline_logits - cut_logits,
-                k=current_k,
-                dim=1,
-            )
-            indices += begin
-            values = values - normalizer_gain[:, None]
-            combined_gain = torch.cat((candidate_gain, values), dim=1)
-            combined_id = torch.cat((candidate_id, indices), dim=1)
-            keep = min(top_k, combined_gain.shape[1])
-            candidate_gain, order = torch.topk(combined_gain, k=keep, dim=1)
-            candidate_id = torch.gather(combined_id, 1, order)
-
-    return {
-        "context_distribution_js": distribution_js.cpu().numpy(),
-        "context_target_logprob_gain": target_logprob_gain.cpu().numpy(),
-        "context_candidate_id": candidate_id.to(torch.int32).cpu().numpy(),
-        "context_candidate_logprob_gain": candidate_gain.cpu().numpy(),
-        "context_target_rank": target_rank.to(torch.int32).cpu().numpy(),
-        "context_target_log_rank": target_rank.float().log().cpu().numpy(),
-        "context_adoption_margin": (
-            target_logit_gain - best_other
-        ).cpu().numpy(),
-    }
+    arrays = {name: torch.cat(values).numpy() for name, values in result.items()}
+    arrays["context_target_log_rank"] = np.log(
+        arrays["context_target_rank"].astype(np.float32)
+    )
+    return arrays
 
 
 def _logit_lens(model, state: Tensor, direction: Tensor, final: bool) -> Tensor:
@@ -293,8 +232,10 @@ def capture_mechanism(
     cache: ForwardCache,
     response_start: int,
     evidence_mask,
+    *,
+    grouped: bool = True,
 ) -> dict[str, object]:
-    """Measure the four registered failure stages for every response token.
+    """Measure context adoption, plus grouped state cuts when requested.
 
     Evidence and other-prompt cuts affect only response-query rows.  Prompt
     encoding therefore remains fixed; the estimand is direct re-entry into the
@@ -307,39 +248,18 @@ def capture_mechanism(
         sources, response_start, evidence_mask
     )
 
-    evidence_trace = _run_trace(model, cache, _gate(evidence, targets))
-    baseline_final = _baseline_final(model, cache)
-    presence, control, readout_gain = _state_trace(
-        model, cache, evidence_trace, baseline_final
+    evidence_trace = _run_trace(
+        model,
+        cache,
+        _gate(evidence, targets),
+        layerwise=grouped,
     )
-
-    other_change = rerun_gate(model, cache, _gate(other, targets))
-    prompt_change = rerun_gate(model, cache, _gate(prompt, targets))
-    history_change = rerun_gate(model, cache, _gate(history, targets))
-
+    baseline_final = cache.final_hidden
     evidence_effect = -evidence_trace.margin_change.numpy()
-    other_effect = -other_change.numpy()
-    prompt_effect = -prompt_change.numpy()
-    history_effect = -history_change.numpy()
-    interaction = -evidence_trace.margin_change.numpy() - other_change.numpy()
-    interaction += prompt_change.numpy()
-
-    middle = max(1, cache.layer_count // 3)
-    peak_control = np.nanmax(np.abs(control[middle:]), axis=0)
-    final_control = control[-1]
     result = {
-        "mechanism": 1,
-        "mechanism_layer": np.arange(cache.layer_count + 1, dtype=np.int16),
-        "evidence_state_presence": presence,
-        "evidence_state_control": control,
-        "evidence_readout_gain": readout_gain,
+        "functional": 1,
+        "mechanism": int(grouped),
         "evidence_effect": evidence_effect,
-        "other_prompt_effect": other_effect,
-        "prompt_effect": prompt_effect,
-        "evidence_prompt_interaction": interaction,
-        "history_effect": history_effect,
-        "evidence_peak_control": peak_control,
-        "evidence_late_control_loss": peak_control - np.abs(final_control),
     }
     result.update(
         vocabulary_effect(
@@ -349,4 +269,27 @@ def capture_mechanism(
             evidence_trace.final_hidden,
         )
     )
+    if grouped:
+        presence, control, readout_gain = _state_trace(
+            model, cache, evidence_trace, baseline_final
+        )
+        other_change = rerun_gate(model, cache, _gate(other, targets))
+        prompt_change = rerun_gate(model, cache, _gate(prompt, targets))
+        history_change = rerun_gate(model, cache, _gate(history, targets))
+        middle = max(1, cache.layer_count // 3)
+        peak_control = np.nanmax(np.abs(control[middle:]), axis=0)
+        result.update(
+            mechanism_layer=np.arange(cache.layer_count + 1, dtype=np.int16),
+            evidence_state_presence=presence,
+            evidence_state_control=control,
+            evidence_readout_gain=readout_gain,
+            other_prompt_effect=-other_change.numpy(),
+            prompt_effect=-prompt_change.numpy(),
+            evidence_prompt_interaction=(
+                evidence_effect - other_change.numpy() + prompt_change.numpy()
+            ),
+            history_effect=-history_change.numpy(),
+            evidence_peak_control=peak_control,
+            evidence_late_control_loss=peak_control - np.abs(control[-1]),
+        )
     return result

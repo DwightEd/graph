@@ -17,12 +17,13 @@ validation protocol are in [`RESEARCH_PLAN.md`](RESEARCH_PLAN.md).
 3. **Hallucination onset.** The first token of every hallucinated span is matched to a nearby clean
    token with the same pre-outcome matching protocol. Predictor-state reuse (`q`) and later use of
    the emitted-token state (`p`) are measured separately.
-4. **Deep mechanism pass.** A baseline and four grouped message cuts measure direct evidence entry,
-   evidence/other-prompt interaction, response-history control, layerwise evidence-conditioned
-   state presence, layerwise fixed-readout control, late control loss, final readout gain, the
+4. **Functional context pass for every sample.** One context cut measures target effect, the
    context-induced vocabulary candidates, distribution JS and actual-token adoption margin.
+5. **Grouped mechanism subset.** Three additional cuts measure evidence/other-prompt interaction,
+   response-history control, layerwise evidence-conditioned state presence, late control loss and
+   final readout gain.
 
-Schema v7 saves raw attention role mass and capacity-aware transport traces for every layer and head
+Schema v8 saves raw attention role mass and capacity-aware transport traces for every layer and head
 as float16 arrays. Population means remain available for backward-compatible reports, but they are
 not a substitute for local event discovery. The legacy `future_influence` array is retained as an alias for
 `emitted_token_anchor`; it is not `predictor_reuse`.
@@ -37,19 +38,21 @@ source before filling any remainder. Dataset order therefore no longer determine
 
 ## Run
 
-Smoke, including one deep sample per task:
+Smoke on the test split, including one grouped sample per task:
 
 ```bash
 bash experiments/reanchor_flow/run_all.sh --smoke --query-chunk 32
 ```
 
-All samples with a 30-sample-per-task deep audit:
+All train and test samples receive the functional context pass. Thirty source-diverse samples per
+task and split additionally receive the grouped audit:
 
 ```bash
 bash experiments/reanchor_flow/run_all.sh \
+  --split all \
   --query-chunk 64 \
   --mechanism-limit 30 \
-  --output experiments/reanchor_flow/outputs/mechanism_v7_30
+  --output experiments/reanchor_flow/outputs/reanchor_v8_all
 ```
 
 Deep audit every selected sample:
@@ -58,7 +61,7 @@ Deep audit every selected sample:
 bash experiments/reanchor_flow/run_all.sh \
   --query-chunk 64 \
   --mechanism-limit -1 \
-  --output experiments/reanchor_flow/outputs/mechanism_v7_full
+  --output experiments/reanchor_flow/outputs/reanchor_v8_full
 ```
 
 One selected sample automatically receives both a route figure and a layerwise mechanism figure:
@@ -68,7 +71,7 @@ bash experiments/reanchor_flow/run_all.sh \
   --plot-sample-id 12471 \
   --plot-limit 0 \
   --query-chunk 32 \
-  --output experiments/reanchor_flow/outputs/sample_12471_v7
+  --output experiments/reanchor_flow/outputs/sample_12471_v8
 ```
 
 ## Outputs
@@ -83,5 +86,9 @@ reports/<task>/mechanism_atlas.png
 run_manifest.json
 ```
 
-The terminal prints only H0 direct drift, H1 transition/re-entry, H2 onset differences, and the H3/H4
-mechanism effects. No classifier or AUROC is used at this discovery stage.
+With `--split all`, each layout is nested under `<output>/train/` or
+`<output>/test/`; a single-split run keeps the established layout directly under `<output>/`.
+Train and test are reported separately. The terminal includes onset route change, matching balance,
+all-sample functional effects and subset-only grouped effects. No classifier or AUROC is used at
+this discovery stage. Re-running the same command resumes completed samples inside each split;
+changing capture flags requires a new output directory.

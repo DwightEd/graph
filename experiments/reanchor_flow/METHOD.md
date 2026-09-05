@@ -8,7 +8,7 @@ c_{l,h,p,s}=A_{l,h,q,s}\lVert W_{O,l,h}V_{l,g(h),s}\rVert_2,
 P_{l,h,p}(s)=c_{l,h,p,s}/\sum_u c_{l,h,p,u}.
 \]
 
-Schema v7 preserves the core `P`-derived traces at `[layer, head, event]`; layer/head means are only
+Schema v8 preserves the core `P`-derived traces at `[layer, head, event]`; layer/head means are only
 descriptive summaries. Capacity is not yet the signed message vector, so it is called transport
 budget/share rather than semantic contribution. The operator-graph extension is specified in
 `RESEARCH_PLAN.md`.
@@ -54,9 +54,17 @@ both future quantities after the token is generated. Emitted-token anchoring mea
 an error, not its cause; predictor reuse tests a distinct hidden-state coordinate. Teacher forcing
 does not create a hidden-state edge from predictor `q` to emitted-token position `p`.
 
-## H3: grouped functional integration
+## H3: all-sample functional context and adoption
 
-The optional deep pass performs four post-softmax, pre-Value-sum cuts on response-query rows:
+Every selected sample receives one context cut. The cut is evaluated against the complete
+vocabulary in small event batches, producing distribution JS, context-supported alternatives,
+actual-target gain/rank and adoption margin. This is the primary full-data test of whether routed
+context changes the candidate distribution and is adopted by the emitted token.
+
+## H4: grouped functional integration and state persistence
+
+The source-diverse subset adds three cuts to the context cut already run for every sample, giving
+four post-softmax, pre-Value-sum cuts on response-query rows:
 
 - RAG evidence sources;
 - other prompt sources (question/instruction operational group);
@@ -90,7 +98,7 @@ A_t^C=d_t^C(y_t)-\max_{v\ne y_t}d_t^C(v).
 Because the present mask covers the whole external context rather than a claim-specific support
 span, these fields deliberately use the prefix `context`, not `evidence` or `fact`.
 
-## H4: persistence, override and readout silence
+### Persistence, override and readout silence
 
 The evidence cut is rerun while storing every decoder-layer input. For depth `l`,
 

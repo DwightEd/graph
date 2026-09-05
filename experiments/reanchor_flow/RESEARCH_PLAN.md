@@ -19,7 +19,7 @@ attention、future attention 任一单项称为 re-anchor。核心研究对象�
 Transformer 的 **layered operator graph**，而不是 layer/head 平均后的 token attention 图，也不是需要标签
 训练的 GNN。
 
-### 当前代码落地状态（schema v7）
+### 当前代码落地状态（schema v8）
 
 | 项目 | 状态 | 当前可检验的结论边界 |
 |---|---|---|
@@ -27,13 +27,16 @@ Transformer 的 **layered operator graph**，而不是 layer/head 平均后的 t
 | onset/transition 的 position、entropy、log-prob、boundary 匹配 | 已实现 | 取代 H1 的 circular-shift 主 null；循环平移只保留为敏感性分析 |
 | `q=p-1` predictor reuse 与 source `p` emitted anchor 分离 | 已实现 | 必须重新 capture；旧 artifact 只有 emitted-token 量 |
 | 全样本 `[layer,head,event]` attention selection 与核心 transport trace | 已实现 | 分开保存 raw attention role mass 与 `A||W_OV||` 归一化预算；后者仍不是 signed semantic contribution |
-| context-cut vocabulary candidate、JS、target gain/rank、adoption margin | 已实现 | 可回答整个 external context 改变了哪些候选；不能替代 exact support span |
+| 全样本 context-cut vocabulary candidate、JS、target gain/rank、adoption margin | schema v8 已实现，待运行 | 可回答整个 external context 改变了哪些候选；不能替代 exact support span |
 | signed edge message、coalition coherence、top-k operator event | 待实现 | 完成前不能区分 transport cancellation |
 | event-targeted suffix cut 与逐层 attention/MLP state accounting | 待实现 | 完成前 predictor reuse 仍是观察量，不是未来因果效应 |
 | claim-specific support/distractor mask | 待数据/人工标注 | 完成前统一使用 `context`，禁止声称“准确事实已输送” |
 
 当前代码升级的作用是先堵住会直接改变结论的坐标、聚合和统计漏洞，并为下一次 capture 生成足够的
 head-resolved 与 vocabulary-functional artifact；它不是把后续 Phase 3–4 宣称为已经完成。
+
+本文件第 1 节的数值来自 schema v7 的 test pilot：全量 broad capture，但 functional/grouped cut 仍仅为
+每任务 30 条。schema v8 必须先完成独立 train/test recapture，才能据此冻结检测表示与阈值。
 
 ---
 
@@ -572,9 +575,9 @@ QA、Summary、Data2txt 允许具有不同 mode mixture，但每个已命名 mod
 
 停止规则：如果 corrected H1/H2 只由 position/boundary mismatch 解释，不进入下一阶段的 detector 设计。
 
-### Phase 1：全样本 head-preserving recapture
+### Phase 1（已实现）：全样本 head-preserving recapture
 
-所有 449 个 test samples 都保存核心 `[layer, head, event]` trace，不再只给 plot sample 保存 head 数据：
+train/test 的每个 selected sample 都保存核心 `[layer, head, event]` trace，不再只给 plot sample 保存 head 数据：
 
 ```text
 attention prompt/context/history mass
@@ -590,10 +593,11 @@ source 维不保存 dense tensor；top-k 之外保存 exact remainder mass。art
 
 停止规则：若 head-preserving transition 不优于 head-mean control，停止 event graph 扩展。
 
-### Phase 2：全样本最低成本 functional pass
+### Phase 2（schema v8 已实现，待全量运行）：全样本最低成本 functional pass
 
 每个 sample 只做 baseline + context-path-family cut，流式计算 evidence candidate/adoption，不保存 vocab 矩阵。
-这一步比当前四种 grouped cuts更优先，因为它直接回答“evidence 支持什么、实际 token 是否采用”。
+其余三种 grouped cuts 只在 source-diverse 子集运行，因为这一步更直接回答“context 支持什么、实际 token
+是否采用”。
 
 停止规则：若 onset 的 candidate/adoption 与 matched controls 无差异，不能把 missed re-anchor 写成主机制。
 
@@ -655,7 +659,7 @@ run.py          单一 CLI
 迁移完成后，`rhythm.py`、`message_norm.py`、`events.py` 中仍被使用的函数并回上述核心文件；旧模块只在 schema
 迁移期保留，不长期维护两套定义。
 
-### Artifact schema v7（计划）
+### Artifact schema v8（当前实现）
 
 每个 sample 的 NPZ 至少包含：
 
@@ -664,34 +668,34 @@ coordinates:
   prediction_position[T], predictor_position[T], emitted_position[T]
 
 head trace:
-  attention_role_mass[L,H,T,R]
-  message_role_budget[L,H,T,R]
-  route_change[L,H,T,S]
-  predictor_reuse[L,H,T]
-  emitted_anchor[L,H,T]
-
-operator events:
-  event_ptr, event_time, event_layer, event_head, event_scale
-  top_source_index, top_attention, top_message_norm
+  head_attention_{prompt,evidence,history}_mass[L,H,T]
+  head_{prompt,evidence,history}_transport_share[L,H,T]
+  head_route_change[L,H,T]
+  head_predictor_reuse[L,H,T]
+  head_emitted_token_anchor[L,H,T]
 
 functional:
+  evidence_effect[T]
   context_distribution_js[T]
   context_target_logprob_gain[T]
   context_candidate_id[T,K]
-  context_candidate_gain[T,K]
+  context_candidate_logprob_gain[T,K]
   context_target_rank[T]
+  context_target_log_rank[T]
   context_adoption_margin[T]
 
-state accounting (deep subset):
-  state_presence[L+1,T]
-  state_control[L+1,T]
-  attention_write_delta[L,T]
-  mlp_write_delta[L,T]
-  accounting_error[L,T]
+grouped subset:
+  evidence_state_presence[L+1,T]
+  evidence_state_control[L+1,T]
+  evidence_readout_gain[T]
+  {other_prompt,prompt,history}_effect[T]
+  evidence_prompt_interaction[T]
+  evidence_late_control_loss[T]
 ```
 
-所有 large tensors 写明 dtype、shape、model hash、token alignment 和 source-role mask hash。任何
-`accounting_error`、manual-forward error 或 message reconstruction error 超过阈值即 hard fail。
+top-source operator event、signed residual write 与 attention/MLP accounting 仍属于后续 schema；v8 不宣称
+已经实现这些字段。v8 manifest 固定 model、dtype、数据根目录、token alignment 和 capture 参数，并使用新
+output 目录隔离不同配置。
 
 ---
 

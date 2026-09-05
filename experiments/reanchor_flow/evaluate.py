@@ -54,6 +54,16 @@ OPTIONAL_BASE_FIELDS = (
     "predictor_reuse",
     "emitted_token_anchor",
 )
+FUNCTIONAL_FIELDS = (
+    "evidence_effect",
+    "context_distribution_js",
+    "context_target_logprob_gain",
+    "context_candidate_id",
+    "context_candidate_logprob_gain",
+    "context_target_rank",
+    "context_target_log_rank",
+    "context_adoption_margin",
+)
 MECHANISM_FIELDS = (
     "evidence_state_presence",
     "evidence_state_control",
@@ -65,15 +75,6 @@ MECHANISM_FIELDS = (
     "history_effect",
     "evidence_peak_control",
     "evidence_late_control_loss",
-)
-OPTIONAL_MECHANISM_FIELDS = (
-    "context_distribution_js",
-    "context_target_logprob_gain",
-    "context_candidate_id",
-    "context_candidate_logprob_gain",
-    "context_target_rank",
-    "context_target_log_rank",
-    "context_adoption_margin",
 )
 
 
@@ -93,7 +94,7 @@ def json_ready(value):
 
 def validate_result(result: dict, token_ids, response_start: int) -> int:
     schema = int(np.asarray(result["capture_schema"]).item())
-    if schema not in (6, CAPTURE_SCHEMA):
+    if schema not in (6, 7, CAPTURE_SCHEMA):
         raise ValueError("stale re-anchor artifact")
     prediction = np.asarray(result["prediction_position"], dtype=np.int64)
     query = np.asarray(result["query_position"], dtype=np.int64)
@@ -113,7 +114,7 @@ def validate_result(result: dict, token_ids, response_start: int) -> int:
     if not np.array_equal(target, np.asarray(token_ids)[prediction]):
         raise ValueError("target token ids changed")
     count = len(prediction)
-    if schema == CAPTURE_SCHEMA:
+    if schema >= 7:
         required = (
             "predictor_position",
             "emitted_position",
@@ -132,7 +133,7 @@ def validate_result(result: dict, token_ids, response_start: int) -> int:
         )
         missing = [name for name in required if name not in result]
         if missing:
-            raise ValueError(f"incomplete schema v7 artifact: {missing}")
+            raise ValueError(f"incomplete schema v{schema} artifact: {missing}")
         for name in ("predictor_reuse", "emitted_token_anchor"):
             if np.asarray(result[name]).shape != (count,):
                 raise ValueError(f"{name} is not aligned to prediction events")
@@ -146,12 +147,18 @@ def validate_result(result: dict, token_ids, response_start: int) -> int:
             equal_nan=True,
         ):
             raise ValueError("legacy future alias differs from emitted-token anchor")
-        if bool(int(np.asarray(result.get("mechanism", 0)).item())):
+        if schema == CAPTURE_SCHEMA:
             missing = [
-                name for name in OPTIONAL_MECHANISM_FIELDS if name not in result
+                name
+                for name in ("functional", *FUNCTIONAL_FIELDS)
+                if name not in result
             ]
             if missing:
-                raise ValueError(f"incomplete schema v7 mechanism artifact: {missing}")
+                raise ValueError(f"incomplete schema v8 functional artifact: {missing}")
+        if bool(int(np.asarray(result.get("mechanism", 0)).item())):
+            missing = [name for name in MECHANISM_FIELDS if name not in result]
+            if missing:
+                raise ValueError(f"incomplete grouped mechanism artifact: {missing}")
     return count
 
 
@@ -167,7 +174,11 @@ def evaluate_results(
     manifest = json.loads((output / "run_manifest.json").read_text(encoding="utf-8"))
     if not manifest.get("analysis_complete"):
         raise ValueError("analysis is incomplete")
-    if manifest.get("config", {}).get("capture_schema") not in (6, CAPTURE_SCHEMA):
+    if manifest.get("config", {}).get("capture_schema") not in (
+        6,
+        7,
+        CAPTURE_SCHEMA,
+    ):
         raise ValueError("output belongs to another capture schema")
 
     dataset = open_research_dataset(dataset_root, device="cpu", retain_embedded_labels=True)
@@ -181,13 +192,26 @@ def evaluate_results(
         token_ids = cached.token_ids.detach().cpu().numpy()
         count = validate_result(result, token_ids, response_start)
         label = np.asarray(labels.response_labels(sample), dtype=bool)[:count]
+        del cached
         sample.release_attention()
         task = canonical_task_type(sample.task_type)
+        mechanism = bool(int(np.asarray(result.get("mechanism", 0)).item()))
+        functional = bool(
+            int(
+                np.asarray(
+                    result.get(
+                        "functional",
+                        int(all(name in result for name in FUNCTIONAL_FIELDS)),
+                    )
+                ).item()
+            )
+        )
         row = {
             "source_id": str(entry["source_id"]),
             "label": label,
             "target_token_id": np.asarray(result["target_token_id"], dtype=np.int64),
-            "mechanism": bool(int(np.asarray(result.get("mechanism", 0)).item())),
+            "functional": functional,
+            "mechanism": mechanism,
             **{name: np.asarray(result[name]) for name in BASE_FIELDS},
         }
         row.update(
@@ -203,15 +227,10 @@ def evaluate_results(
             row["emitted_token_anchor"] = np.asarray(
                 result["future_influence"], dtype=np.float64
             )
+        if row["functional"]:
+            row.update({name: np.asarray(result[name]) for name in FUNCTIONAL_FIELDS})
         if row["mechanism"]:
             row.update({name: np.asarray(result[name]) for name in MECHANISM_FIELDS})
-            row.update(
-                {
-                    name: np.asarray(result[name])
-                    for name in OPTIONAL_MECHANISM_FIELDS
-                    if name in result
-                }
-            )
         by_task[task].append(row)
 
         if int(np.asarray(result.get("detail", 0)).item()):

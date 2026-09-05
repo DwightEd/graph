@@ -1,13 +1,10 @@
-"""Stream one-pass rhythm and optional deep mechanism captures to disk."""
+"""Stream routing, functional context and optional grouped captures to disk."""
 
 from __future__ import annotations
 
-import gc
 import hashlib
 import json
 from pathlib import Path
-
-import torch
 
 from research_dataset import open_research_dataset
 from experiments.common.ragtruth_alignment import (
@@ -145,6 +142,7 @@ def analyze_split(
         "max_lag": max_lag,
         "plot_limit": plot_limit,
         "plot_sample_id": plot_sample_id,
+        "functional_pass": "all_selected",
         "mechanism_limit_per_task": mechanism_limit,
         "mechanism_sampling": "source_hash_v1",
     }
@@ -197,6 +195,7 @@ def analyze_split(
         cached_observer = cache_model or str(
             getattr(sample, "observer_model", "") or ""
         )
+        del cached
         sample.release_attention()
         if max_events is not None:
             token_ids = token_ids[: response_start + max_events]
@@ -247,6 +246,7 @@ def analyze_split(
                 "task_type": task,
                 "result": result_path.relative_to(output).as_posix(),
                 "detail": detail,
+                "functional": True,
                 "mechanism": mechanism,
             }
         )
@@ -255,9 +255,6 @@ def analyze_split(
         detailed += int(detail)
         mechanism_counts[task] += int(mechanism)
         del captured, evidence_mask, token_ids, sample
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
         if plot_sample_id is not None:
             break
 
@@ -265,6 +262,7 @@ def analyze_split(
         raise ValueError(f"sample id not found: {plot_sample_id}")
     manifest["analysis_complete"] = True
     manifest["selected_samples"] = counts
+    manifest["functional_samples"] = counts
     manifest["mechanism_samples"] = mechanism_counts
     save_json(output / MANIFEST, manifest)
     return counts

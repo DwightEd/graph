@@ -11,8 +11,8 @@
 4. evidence-conditioned state 是否进入、与 question/instruction group 联合控制、跨层保留，
    以及最终是否对 target-versus-runner readout 可见。
 
-浅层现象只需一次前向。`--mechanism-limit N` 对每个任务前 N 条样本追加四组
-post-softmax、pre-Value-sum source cuts，并生成逐层机制图。标点只作为可视化参考，
+每个样本都执行一次 context cut，直接得到候选、采纳和分布影响；
+`--mechanism-limit N` 只控制额外三组 source cuts 与逐层机制图。标点只作为匹配变量，
 不用于定义内部事件。
 
 ```bash
@@ -21,9 +21,10 @@ git pull --ff-only origin main
 
 conda run --no-capture-output -n research \
   bash experiments/reanchor_flow/run_all.sh \
+    --split all \
     --query-chunk 64 \
     --mechanism-limit 30 \
-    --output experiments/reanchor_flow/outputs/mechanism_v6_30
+    --output experiments/reanchor_flow/outputs/reanchor_v8_all
 ```
 
 详见 `experiments/reanchor_flow/README.md` 和 `experiments/reanchor_flow/METHOD.md`。

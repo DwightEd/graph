@@ -14,7 +14,7 @@ from .mechanism import capture_mechanism
 from .rhythm import build_rhythm
 from .routes import RouteAccumulator
 
-CAPTURE_SCHEMA = 7
+CAPTURE_SCHEMA = 8
 
 
 @dataclass(frozen=True)
@@ -150,17 +150,18 @@ def capture_sample(
             tokenizer, ids.numpy(), response_start
         ),
         "detail": int(detail),
+        "functional": 0,
         "mechanism": 0,
     }
-    if mechanism:
-        arrays.update(
-            capture_mechanism(
-                model,
-                cache,
-                response_start,
-                prompt_evidence_mask,
-            )
+    arrays.update(
+        capture_mechanism(
+            model,
+            cache,
+            response_start,
+            prompt_evidence_mask,
+            grouped=mechanism,
         )
+    )
     if detail and trace.detail is not None:
         arrays.update(
             detail_edge_map=trace.detail["edge_map"],

@@ -25,6 +25,7 @@ class ForwardCache:
     """CPU state and fixed readout needed by exact suffix reruns."""
 
     layer_input: dict[int, Tensor]
+    final_hidden: Tensor
     layer_count: int
     query: Tensor
     target: Tensor
@@ -427,6 +428,7 @@ def baseline_forward(
 
     return ForwardCache(
         layer_input=layer_input,
+        final_hidden=hidden[0].detach().cpu(),
         layer_count=len(model.model.layers),
         query=query,
         target=target.cpu(),
