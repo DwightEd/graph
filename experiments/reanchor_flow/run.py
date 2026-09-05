@@ -11,8 +11,11 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from .analyze import analyze_split
+from .audit import audit_target, save_audit
 from .detection import run_detection
 from .evaluate import evaluate_results
+from .flow import FlowSignal
+from .worlds import load_world
 
 MODEL = Path(
     "/share/home/tm902089733300000/a903202310/lys/models/"
@@ -160,6 +163,94 @@ def detect(args) -> dict:
     return report
 
 
+def corridor(args) -> dict:
+    """Run the paired evidence-to-target causal corridor audit."""
+
+    world = load_world(args.pair)
+    model, tokenizer = load_model(args.model, args.device, args.dtype)
+    if Path(world.tokenizer_id).name != Path(tokenizer.name_or_path).name:
+        raise ValueError(
+            "paired-world tokenizer does not match the loaded model tokenizer"
+        )
+    output = args.output or args.pair.parent / "etcc_outputs"
+    output.mkdir(parents=True, exist_ok=True)
+    signal = FlowSignal(args.flow_signal)
+    reports = {}
+    for target in world.targets:
+        result = audit_target(
+            model,
+            world,
+            target,
+            signal,
+            carrier_scope=args.carrier_scope,
+            coverage=args.edge_coverage,
+            gradient_steps=args.gradient_steps,
+            query_chunk=args.query_chunk,
+            root_screen_limit=args.root_screen_limit,
+            carrier_limit=args.carrier_limit,
+            materialize_messages=args.materialize_messages,
+        )
+        destination = output / (
+            f"{world.sample_id}_q{target.query_position}"
+            f"_a{target.positive_token_id}_b{target.negative_token_id}"
+            f"_{signal.value}.npz"
+        )
+        save_audit(
+            destination,
+            world,
+            result,
+            model_id=str(args.model),
+            model_dtype=args.dtype,
+            coverage=args.edge_coverage,
+            gradient_steps=args.gradient_steps,
+            carrier_scope=args.carrier_scope,
+            query_chunk=args.query_chunk,
+            root_screen_limit=args.root_screen_limit,
+            carrier_limit=args.carrier_limit,
+            materialize_messages=args.materialize_messages,
+        )
+        effect = result.effect
+        report_key = (
+            f"q{target.query_position}"
+            f"_a{target.positive_token_id}_b{target.negative_token_id}"
+        )
+        reports[report_key] = {
+            "output": destination,
+            "pair_effect": effect.pair_effect,
+            "selected_root_unit_id": result.selected_root_unit_id,
+            "selected_root_confirmed": result.selected_root_confirmed,
+            "edges": result.flow.edges.count,
+            "corridor_edges": effect.edge_count,
+            "corridor_confirmed": result.corridor_confirmed,
+            "necessity": effect.necessity,
+            "sufficiency": effect.sufficiency,
+            "mediated_sufficiency": effect.mediated_sufficiency,
+            "restoration_error": effect.restoration_error,
+            "restoration_valid": effect.restoration_valid,
+        }
+        print(
+            f"q={target.query_position} signal={signal.value} "
+            f"pair={number(effect.pair_effect)} "
+            f"root_unit={result.selected_root_unit_id} "
+            f"root_confirmed={result.selected_root_confirmed} "
+            f"edges={result.flow.edges.count} "
+            f"corridor={effect.edge_count} necessity={number(effect.necessity)} "
+            f"corridor_confirmed={result.corridor_confirmed} "
+            f"sufficiency={number(effect.sufficiency)} "
+            f"mediated={number(effect.mediated_sufficiency)} "
+            f"restore_error={number(effect.restoration_error)} "
+            f"restore_valid={effect.restoration_valid}"
+        )
+        del result
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    del model, tokenizer
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return reports
+
+
 def print_report(task: str, report: dict) -> None:
     normal = report["normal"]
     shift = normal["direct_route_shift"]
@@ -169,7 +260,8 @@ def print_report(task: str, report: dict) -> None:
     mechanism = report["mechanism"]
     print(
         f"{task:9s} samples={report['samples']} tokens={report['tokens']} "
-        f"positives={report['positive_tokens']} prevalence={number(report['prevalence'])} "
+        f"positives={report['positive_tokens']} "
+        f"prevalence={number(report['prevalence'])} "
         f"functional_pairs={functional['onset_pairs']} "
         f"functional_pair_sources={functional['onset_pair_sources']} "
         f"grouped_samples={mechanism['samples']} "
@@ -244,7 +336,8 @@ def print_report(task: str, report: dict) -> None:
     print(
         "  onset matching: "
         f"pairs={balance['pairs']} sources={balance['sources']} "
-        f"position_gap={number(balance['mean_absolute_relative_position_gap']['mean'])} "
+        "position_gap="
+        f"{number(balance['mean_absolute_relative_position_gap']['mean'])} "
         f"boundary_match={number(balance['boundary_match_fraction']['mean'])} "
         f"token_match={number(balance['token_match_fraction']['mean'])}"
     )
@@ -311,6 +404,36 @@ def add_detection(command) -> None:
     command.add_argument("--seed", type=int, default=2026)
 
 
+def add_corridor(command) -> None:
+    command.add_argument("--pair", type=Path, required=True)
+    command.add_argument("--model", type=Path, default=MODEL)
+    command.add_argument("--output", type=Path)
+    command.add_argument("--device", default="cuda:0")
+    command.add_argument("--dtype", choices=tuple(DTYPE), default="bfloat16")
+    command.add_argument(
+        "--flow-signal",
+        choices=tuple(signal.value for signal in FlowSignal),
+        default=FlowSignal.MESSAGE.value,
+        help="edge ranking: signed target effect of true messages or raw attention",
+    )
+    command.add_argument(
+        "--carrier-scope",
+        choices=("response", "all"),
+        default="all",
+    )
+    command.add_argument("--edge-coverage", type=float, default=0.95)
+    command.add_argument("--gradient-steps", type=int, default=1)
+    command.add_argument("--query-chunk", type=int, default=8)
+    command.add_argument(
+        "--root-screen-limit",
+        type=int,
+        default=8,
+        help="candidate roots receiving exact bidirectional patches; 0 means all",
+    )
+    command.add_argument("--carrier-limit", type=int, default=3)
+    command.add_argument("--materialize-messages", action="store_true")
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description="Complete re-anchor mechanism audit")
     commands = root.add_subparsers(dest="command", required=True)
@@ -326,6 +449,11 @@ def parser() -> argparse.ArgumentParser:
     )
     add_detection(detect_command)
     detect_command.set_defaults(handler=detect)
+    corridor_command = commands.add_parser(
+        "corridor", help="audit a matched clean/corrupt evidence pair"
+    )
+    add_corridor(corridor_command)
+    corridor_command.set_defaults(handler=corridor)
     all_command = commands.add_parser("all")
     add_common(all_command)
     add_evaluation(all_command)
@@ -334,7 +462,14 @@ def parser() -> argparse.ArgumentParser:
 
 
 def validate_args(args) -> None:
-    for name in ("query_chunk", "route_window", "future_horizon", "distance_scale", "max_lag"):
+    positive_names = (
+        "query_chunk",
+        "route_window",
+        "future_horizon",
+        "distance_scale",
+        "max_lag",
+    )
+    for name in positive_names:
         if hasattr(args, name) and getattr(args, name) < 1:
             raise ValueError(f"--{name.replace('_', '-')} must be positive")
     for name in ("limit", "max_events"):
@@ -353,6 +488,14 @@ def validate_args(args) -> None:
         raise ValueError("--bootstrap cannot be negative")
     if hasattr(args, "curve_radius") and args.curve_radius < 1:
         raise ValueError("--curve-radius must be positive")
+    if hasattr(args, "edge_coverage") and not 0 < args.edge_coverage <= 1:
+        raise ValueError("--edge-coverage must lie in (0,1]")
+    if hasattr(args, "gradient_steps") and args.gradient_steps < 1:
+        raise ValueError("--gradient-steps must be positive")
+    if hasattr(args, "carrier_limit") and args.carrier_limit < 0:
+        raise ValueError("--carrier-limit cannot be negative")
+    if hasattr(args, "root_screen_limit") and args.root_screen_limit < 0:
+        raise ValueError("--root-screen-limit cannot be negative")
 
 
 def main() -> None:

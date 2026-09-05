@@ -36,6 +36,8 @@ class ForwardCache:
     baseline_target_logprob: Tensor
     baseline_entropy: Tensor
     attention_query_chunk: int | None
+    attention_write: dict[int, Tensor]
+    mlp_write: dict[int, Tensor]
 
 
 @dataclass(frozen=True)
@@ -44,7 +46,10 @@ class MessageGate:
 
     ``early_edges`` applies below ``split_layer`` and ``late_edges`` at or above
     it. ``source_mask`` applies in every layer, optionally only to
-    ``source_targets``. Edge masks use model query/source coordinates.
+    ``source_targets``. ``layer_edges`` and ``sparse_layer_edges`` address exact
+    layer/head/query/source edges. ``head_output_patch`` adds pre-``W_O`` head
+    messages after deletion. ``residual_replace`` replaces named layer-input
+    token states. All coordinates are absolute model positions.
     """
 
     split_layer: int
@@ -52,6 +57,10 @@ class MessageGate:
     late_edges: Tensor | None = None
     source_mask: Tensor | None = None
     source_targets: Tensor | None = None
+    layer_edges: dict[int, Tensor] | None = None
+    sparse_layer_edges: dict[int, Tensor] | None = None
+    head_output_patch: dict[int, dict[int, dict[int, Tensor]]] | None = None
+    residual_replace: dict[int, dict[int, Tensor]] | None = None
 
 
 AttentionObserver = Callable[[int, Tensor, Tensor, Tensor], None]
@@ -117,6 +126,7 @@ def deleted_edges(
     query_end: int,
     sources: int,
     device: torch.device,
+    heads: int | None = None,
 ) -> Tensor | None:
     if gate is None:
         return None
@@ -126,6 +136,7 @@ def deleted_edges(
         dtype=torch.bool,
         device=device,
     )
+    head_deleted: Tensor | None = None
     if gate.source_mask is not None:
         source_edges = gate.source_mask[:sources].to(
             device=device,
@@ -146,6 +157,59 @@ def deleted_edges(
         deleted |= gate.late_edges[
             query_begin:query_end, :sources
         ].to(device=device, dtype=torch.bool)
+    layer_edges = None if gate.layer_edges is None else gate.layer_edges.get(layer)
+    if layer_edges is not None:
+        layer_edges = layer_edges.to(device=device, dtype=torch.bool)
+        if layer_edges.ndim == 2:
+            deleted |= layer_edges[query_begin:query_end, :sources]
+        elif layer_edges.ndim == 3:
+            if heads is not None and layer_edges.shape[0] != heads:
+                raise ValueError("head-specific edge mask has the wrong head count")
+            head_deleted = layer_edges[:, query_begin:query_end, :sources].clone()
+        else:
+            raise ValueError(
+                "layer edge masks must be [query, source] or [head, query, source]"
+            )
+    sparse = (
+        None
+        if gate.sparse_layer_edges is None
+        else gate.sparse_layer_edges.get(layer)
+    )
+    if sparse is not None and sparse.numel():
+        if heads is None:
+            raise ValueError("head count is required for sparse layer edges")
+        sparse = sparse.to(device=device, dtype=torch.long)
+        if sparse.ndim != 2 or sparse.shape[1] != 3:
+            raise ValueError(
+                "sparse layer edges must contain (head, query, source) rows"
+            )
+        valid = (
+            (sparse[:, 0] >= 0)
+            & (sparse[:, 0] < heads)
+            & (sparse[:, 1] >= 0)
+            & (sparse[:, 1] < sources)
+            & (sparse[:, 2] >= 0)
+            & (sparse[:, 2] < sources)
+        )
+        if not bool(valid.all()):
+            raise ValueError("sparse layer edge coordinate is outside the model axes")
+        keep = (sparse[:, 1] >= query_begin) & (sparse[:, 1] < query_end)
+        sparse = sparse[keep]
+        if len(sparse):
+            if head_deleted is None:
+                head_deleted = torch.zeros(
+                    heads,
+                    query_end - query_begin,
+                    sources,
+                    dtype=torch.bool,
+                    device=device,
+                )
+            head_deleted[
+                sparse[:, 0], sparse[:, 1] - query_begin, sparse[:, 2]
+            ] = True
+    if head_deleted is not None:
+        head_deleted |= deleted[None]
+        return head_deleted if bool(head_deleted.any()) else None
     return deleted if deleted.any() else None
 
 
@@ -208,9 +272,9 @@ def gated_attention(
                     value,
                     module.o_proj.weight,
                 )
-            elif begin == 0 and end == queries:
+            elif callable(observer) and begin == 0 and end == queries:
                 observer(module.layer_idx, probability, value, module.o_proj.weight)
-            else:
+            elif not callable(getattr(observer, "observe_head_output", None)):
                 raise TypeError(
                     "chunked attention requires an observer with observe_chunk()"
                 )
@@ -222,12 +286,43 @@ def gated_attention(
             end,
             sources,
             query.device,
+            probability.shape[1],
         )
         if deleted is not None:
-            probability = probability.masked_fill(
-                deleted[None, None], 0
-            )
-        outputs.append(torch.matmul(probability, value))
+            if deleted.ndim == 2:
+                deleted = deleted[None, None]
+            elif deleted.ndim == 3:
+                if deleted.shape[0] != probability.shape[1]:
+                    raise ValueError("head-specific edge mask has the wrong head count")
+                deleted = deleted[None]
+            else:
+                raise ValueError("deleted edge mask has an invalid rank")
+            probability = probability.masked_fill(deleted, 0)
+        head_output = torch.matmul(probability, value)
+        patch_rows = (
+            None
+            if gate is None or gate.head_output_patch is None
+            else gate.head_output_patch.get(module.layer_idx)
+        )
+        if patch_rows is not None:
+            for absolute_query, head_patches in patch_rows.items():
+                if not begin <= absolute_query < end:
+                    continue
+                for head, addition in head_patches.items():
+                    if not 0 <= head < head_output.shape[1]:
+                        raise ValueError("head output patch names an invalid head")
+                    if addition.numel() != head_output.shape[-1]:
+                        raise ValueError(
+                            "head output patch has the wrong head dimension"
+                        )
+                    head_output[:, head, absolute_query - begin] += addition.to(
+                        device=head_output.device,
+                        dtype=head_output.dtype,
+                    )
+        observe_head_output = getattr(observer, "observe_head_output", None)
+        if callable(observe_head_output):
+            observe_head_output(module.layer_idx, begin, head_output)
+        outputs.append(head_output)
     return torch.cat(outputs, dim=2).transpose(1, 2).contiguous()
 
 
@@ -287,6 +382,8 @@ def forward_layers(
     observer: AttentionObserver | None = None,
     save_inputs: dict[int, Tensor] | None = None,
     save_layers: set[int] | None = None,
+    save_attention: dict[int, Tensor] | None = None,
+    save_mlp: dict[int, Tensor] | None = None,
     attention_query_chunk: int | None = None,
 ) -> Tensor:
     """Run an exact full-sequence Llama decoder suffix."""
@@ -301,6 +398,26 @@ def forward_layers(
         model.model.layers[start_layer:],
         start=start_layer,
     ):
+        replacements = (
+            None
+            if gate is None or gate.residual_replace is None
+            else gate.residual_replace.get(layer_index)
+        )
+        if replacements:
+            hidden = hidden.clone()
+            for position, state in replacements.items():
+                if not 0 <= position < hidden.shape[1]:
+                    raise ValueError("residual replacement names an invalid position")
+                if state.numel() != hidden.shape[-1]:
+                    raise ValueError("residual replacement has the wrong hidden size")
+                hidden[:, position] = state.to(
+                    device=hidden.device,
+                    dtype=hidden.dtype,
+                )
+
+        observe_layer_input = getattr(observer, "observe_layer_input", None)
+        if callable(observe_layer_input):
+            observe_layer_input(layer_index, hidden)
         if save_inputs is not None and (
             save_layers is None or layer_index in save_layers
         ):
@@ -316,8 +433,23 @@ def forward_layers(
             observer,
             attention_query_chunk,
         )
+        observe_attention_write = getattr(observer, "observe_attention_write", None)
+        if callable(observe_attention_write):
+            observe_attention_write(layer_index, attention_output)
+        if save_attention is not None and (
+            save_layers is None or layer_index in save_layers
+        ):
+            save_attention[layer_index] = attention_output[0].detach().cpu()
         hidden = residual + attention_output
-        hidden = hidden + layer.mlp(layer.post_attention_layernorm(hidden))
+        mlp_output = layer.mlp(layer.post_attention_layernorm(hidden))
+        observe_mlp_write = getattr(observer, "observe_mlp_write", None)
+        if callable(observe_mlp_write):
+            observe_mlp_write(layer_index, mlp_output)
+        if save_mlp is not None and (
+            save_layers is None or layer_index in save_layers
+        ):
+            save_mlp[layer_index] = mlp_output[0].detach().cpu()
+        hidden = hidden + mlp_output
     return model.model.norm(hidden)
 
 
@@ -363,6 +495,7 @@ def baseline_forward(
     response_start: int,
     observer: AttentionObserver | None = None,
     checkpoint_layers: Sequence[int] = (0,),
+    checkpoint_stages: bool = False,
     attention_query_chunk: int | None = None,
 ) -> ForwardCache:
     """Capture a baseline and fixed target-versus-runner readout."""
@@ -378,6 +511,8 @@ def baseline_forward(
 
     checkpoints = {0, *(int(layer) for layer in checkpoint_layers)}
     layer_input: dict[int, Tensor] = {}
+    attention_write: dict[int, Tensor] = {}
+    mlp_write: dict[int, Tensor] = {}
     with torch.inference_mode():
         hidden = forward_layers(
             model,
@@ -386,6 +521,8 @@ def baseline_forward(
             observer=observer,
             save_inputs=layer_input,
             save_layers=checkpoints,
+            save_attention=attention_write if checkpoint_stages else None,
+            save_mlp=mlp_write if checkpoint_stages else None,
             attention_query_chunk=attention_query_chunk,
         )
         response_hidden = hidden[0].index_select(0, query.to(device))
@@ -439,6 +576,8 @@ def baseline_forward(
         baseline_target_logprob=torch.cat(logprob_parts).cpu(),
         baseline_entropy=torch.cat(entropy_parts).cpu(),
         attention_query_chunk=attention_query_chunk,
+        attention_write=attention_write,
+        mlp_write=mlp_write,
     )
 
 
@@ -458,6 +597,35 @@ def first_changed_layer(gate: MessageGate, layer_count: int) -> int | None:
         and gate.split_layer < layer_count
     ):
         starts.append(max(gate.split_layer, 0))
+    if gate.layer_edges is not None:
+        starts.extend(
+            layer
+            for layer, edges in gate.layer_edges.items()
+            if 0 <= layer < layer_count and edges.any()
+        )
+    if gate.sparse_layer_edges is not None:
+        starts.extend(
+            layer
+            for layer, edges in gate.sparse_layer_edges.items()
+            if 0 <= layer < layer_count and edges.numel()
+        )
+    if gate.head_output_patch is not None:
+        starts.extend(
+            layer
+            for layer, query_patches in gate.head_output_patch.items()
+            if 0 <= layer < layer_count
+            and any(
+                value.numel() and bool(value.any())
+                for head_patches in query_patches.values()
+                for value in head_patches.values()
+            )
+        )
+    if gate.residual_replace is not None:
+        starts.extend(
+            layer
+            for layer, replacements in gate.residual_replace.items()
+            if 0 <= layer < layer_count and replacements
+        )
     return min(starts) if starts else None
 
 
@@ -465,12 +633,61 @@ def gate_to(gate: MessageGate, device: torch.device) -> MessageGate:
     def move(value: Tensor | None) -> Tensor | None:
         return None if value is None else value.to(device=device, dtype=torch.bool)
 
+    def move_map(
+        values: dict[int, Tensor] | None,
+        *,
+        boolean: bool,
+    ) -> dict[int, Tensor] | None:
+        if values is None:
+            return None
+        return {
+            int(layer): (
+                value.to(device=device, dtype=torch.bool)
+                if boolean
+                else value.to(device=device)
+            )
+            for layer, value in values.items()
+        }
+
+    def move_nested(
+        values: dict[int, dict[int, dict[int, Tensor]]] | None,
+    ) -> dict[int, dict[int, dict[int, Tensor]]] | None:
+        if values is None:
+            return None
+        return {
+            int(layer): {
+                int(position): {
+                    int(head): value.to(device=device)
+                    for head, value in by_head.items()
+                }
+                for position, by_head in by_position.items()
+            }
+            for layer, by_position in values.items()
+        }
+
+    def move_states(
+        values: dict[int, dict[int, Tensor]] | None,
+    ) -> dict[int, dict[int, Tensor]] | None:
+        if values is None:
+            return None
+        return {
+            int(layer): {
+                int(position): value.to(device=device)
+                for position, value in replacements.items()
+            }
+            for layer, replacements in values.items()
+        }
+
     return MessageGate(
         split_layer=gate.split_layer,
         early_edges=move(gate.early_edges),
         late_edges=move(gate.late_edges),
         source_mask=move(gate.source_mask),
         source_targets=move(gate.source_targets),
+        layer_edges=move_map(gate.layer_edges, boolean=True),
+        sparse_layer_edges=move_map(gate.sparse_layer_edges, boolean=False),
+        head_output_patch=move_nested(gate.head_output_patch),
+        residual_replace=move_states(gate.residual_replace),
     )
 
 

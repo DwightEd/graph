@@ -82,6 +82,62 @@ def test_source_target_mask_preserves_other_queries() -> None:
     torch.testing.assert_close(output[0, 0, 0], torch.tensor([2.0, 0.0]))
 
 
+def test_sparse_edge_delete_and_pre_output_patch_restore_one_head() -> None:
+    query = torch.zeros(1, 2, 2, 1)
+    key = torch.zeros_like(query)
+    value = torch.tensor([[[[2.0], [4.0]], [[3.0], [5.0]]]])
+    mask = intervention.causal_mask(2, query.dtype, query.device)
+    edge = torch.tensor([[1, 1, 0]])
+    baseline = gated_attention(TinyAttention(0), query, key, value, mask, 1.0)
+    deleted = gated_attention(
+        TinyAttention(0),
+        query,
+        key,
+        value,
+        mask,
+        1.0,
+        gate=MessageGate(split_layer=0, sparse_layer_edges={0: edge}),
+    )
+    torch.testing.assert_close(deleted[0, 1, 0], baseline[0, 1, 0])
+    assert deleted[0, 1, 1, 0] < baseline[0, 1, 1, 0]
+
+    restored = gated_attention(
+        TinyAttention(0),
+        query,
+        key,
+        value,
+        mask,
+        1.0,
+        gate=MessageGate(
+            split_layer=0,
+            sparse_layer_edges={0: edge},
+            head_output_patch={0: {1: {1: torch.tensor([1.5])}}},
+        ),
+    )
+    torch.testing.assert_close(restored, baseline)
+
+
+def test_head_output_patch_uses_absolute_query_and_head_coordinates() -> None:
+    query = torch.zeros(1, 2, 2, 1)
+    key = torch.zeros_like(query)
+    value = torch.zeros_like(query)
+    mask = intervention.causal_mask(2, query.dtype, query.device)
+    output = gated_attention(
+        TinyAttention(0),
+        query,
+        key,
+        value,
+        mask,
+        1.0,
+        gate=MessageGate(
+            split_layer=0,
+            head_output_patch={0: {1: {1: torch.tensor([4.0])}}},
+        ),
+        query_chunk=1,
+    )
+    torch.testing.assert_close(output[0, 1, :, 0], torch.tensor([0.0, 4.0]))
+
+
 def test_query_chunking_matches_full_attention_and_reports_absolute_rows() -> None:
     query, key, value, mask = attention_inputs()
 
@@ -180,6 +236,51 @@ def test_deleted_edges_only_materializes_requested_query_chunk() -> None:
     )
 
 
+def test_sparse_head_edges_only_materialize_the_current_chunk() -> None:
+    gate = MessageGate(
+        split_layer=0,
+        sparse_layer_edges={
+            0: torch.tensor([[0, 1, 0], [1, 4, 2], [0, 2, 1]])
+        },
+    )
+    deleted = intervention.deleted_edges(
+        gate,
+        layer=0,
+        query_begin=3,
+        query_end=6,
+        sources=6,
+        device=torch.device("cpu"),
+        heads=2,
+    )
+    assert deleted is not None
+    assert deleted.shape == (2, 3, 6)
+    assert int(deleted.sum()) == 1
+    assert bool(deleted[1, 1, 2])
+
+
+def test_dense_head_mask_and_sparse_edges_are_combined() -> None:
+    dense = torch.zeros(2, 4, 4, dtype=torch.bool)
+    dense[0, 2, 1] = True
+    gate = MessageGate(
+        split_layer=0,
+        layer_edges={0: dense},
+        sparse_layer_edges={0: torch.tensor([[1, 3, 0]])},
+    )
+    deleted = intervention.deleted_edges(
+        gate,
+        layer=0,
+        query_begin=2,
+        query_end=4,
+        sources=4,
+        device=torch.device("cpu"),
+        heads=2,
+    )
+    assert deleted is not None
+    assert int(deleted.sum()) == 2
+    assert bool(deleted[0, 0, 1])
+    assert bool(deleted[1, 1, 0])
+
+
 def test_early_and_late_edge_masks_respect_split() -> None:
     query, key, value, mask = attention_inputs()
     early = torch.zeros(2, 2, dtype=torch.bool)
@@ -245,6 +346,50 @@ def test_prediction_positions_use_the_previous_query() -> None:
     cache = baseline_forward(tiny_model(), tokens, response_start=4)
     torch.testing.assert_close(cache.query, torch.tensor([3, 4, 5]))
     torch.testing.assert_close(cache.target, tokens[cache.query + 1])
+
+
+def test_stage_checkpoints_and_residual_replace_use_layer_input_states() -> None:
+    model = tiny_model()
+    clean = baseline_forward(
+        model,
+        [1, 2, 3, 4, 5, 6, 7],
+        response_start=4,
+        checkpoint_layers=(0, 1, 2),
+        checkpoint_stages=True,
+    )
+    corrupt = baseline_forward(
+        model,
+        [1, 8, 3, 4, 5, 6, 7],
+        response_start=4,
+        checkpoint_layers=(0, 1, 2),
+        checkpoint_stages=True,
+    )
+    assert set(clean.attention_write) == {0, 1, 2}
+    assert set(clean.mlp_write) == {0, 1, 2}
+    for layer in range(3):
+        assert clean.attention_write[layer].shape == (6, 32)
+        assert clean.mlp_write[layer].shape == (6, 32)
+
+    patched = rerun_gate(
+        model,
+        corrupt,
+        MessageGate(
+            split_layer=0,
+            residual_replace={0: {1: clean.layer_input[0][1]}},
+        ),
+    )
+    clean_under_corrupt_readout = torch.einsum(
+        "td,td->t",
+        clean.final_hidden.index_select(0, corrupt.query).float(),
+        corrupt.readout_direction,
+    )
+    clean_under_corrupt_readout += corrupt.readout_bias
+    torch.testing.assert_close(
+        patched,
+        clean_under_corrupt_readout - corrupt.full_margin,
+        atol=1e-6,
+        rtol=1e-5,
+    )
 
 
 def test_chunked_manual_forward_matches_unchunked_forward() -> None:

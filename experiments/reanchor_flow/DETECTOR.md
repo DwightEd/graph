@@ -1,4 +1,10 @@
-# Grounded Re-Anchor Failure Detector
+# Frozen schema-v8 baseline (stopped)
+
+This detector remains reproducible, but it is no longer the primary method. Its held-out token
+AUROC is `0.5804/0.5915/0.6198` for QA/Summary/Data2txt and its onset AUPRC is
+`0.0068/0.0077/0.0111`. These results do not identify evidence roots, carriers, or target adoption.
+The formal mechanism audit is now [`METHOD.md`](METHOD.md); do not tune this detector from ETCC
+test outcomes.
 
 ## 1. Detection target
 
