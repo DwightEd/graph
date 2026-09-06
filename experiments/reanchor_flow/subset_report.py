@@ -9,22 +9,30 @@ from pathlib import Path
 
 import numpy as np
 from sklearn.metrics import average_precision_score, roc_auc_score
+from tqdm.auto import tqdm
 
 from research_dataset import open_research_dataset
 
+from .artifact_schema import AUDIT_SCHEMA
 from .artifacts import save_json
 from .route_model import EVIDENCE, RESPONSE
 from .subset import MANIFEST_NAME, MANIFEST_SCHEMA
-from .subset_artifacts import AUDIT_SCHEMA
 
 REPORT_NAME = "mechanism_evaluation.json"
 
 # These are fixed, untrained axes. Direction only converts each raw value to
 # hallucination risk for evaluation; it does not alter the stored mechanism.
 AXIS_DIRECTION = {
-    "native_source_mediated_observed_margin": -1.0,
-    "response_origin_supporting_action_candidate": 1.0,
+    "route_origin_competition": 1.0,
+    "evidence_adoption": -1.0,
 }
+NEUTRAL_AXES = ("temporal_switch_score",)
+RAW_AXIS_NAMES = (*AXIS_DIRECTION, *NEUTRAL_AXES)
+REANCHOR_SOURCE_KINDS = ("prompt_evidence", "other_prompt", "remote_response")
+EVALUATION_FIELDS = (
+    "selected_root_evaluated",
+    "corridor_evaluated",
+)
 CONFIRMATION_FIELDS = (
     "selected_root_confirmed",
     "corridor_confirmed",
@@ -40,6 +48,27 @@ EFFECT_FIELDS = (
     "corridor_conditional_rescue",
     "corridor_mediated_rescue",
 )
+ORIGIN_COMPONENT_FIELDS = (
+    "route_evidence_origin_action",
+    "route_evidence_origin_signed_sum",
+    "route_evidence_origin_absolute_budget",
+    "route_evidence_origin_head_agreement",
+    "route_response_origin_action",
+    "route_response_origin_signed_sum",
+    "route_response_origin_absolute_budget",
+    "route_response_origin_head_agreement",
+)
+QUERY_COVERAGE_FIELDS = (
+    "route_query_retained_fraction",
+    "route_query_unobserved_fraction",
+)
+CONFIRMATION_DENOMINATOR = {
+    "selected_root_confirmed": "selected_root_evaluated",
+    "corridor_confirmed": "corridor_evaluated",
+    "corridor_restoration_valid": "corridor_evaluated",
+    "carrier_any_confirmed": "carrier_evaluated",
+    "full_chain_confirmed": "full_chain_evaluated",
+}
 
 
 def _item(artifact: Mapping[str, object], name: str):
@@ -56,141 +85,224 @@ def _slot(position: object, target: int, *, name: str) -> int:
     return int(matches[0])
 
 
-def _agreement(action: np.ndarray) -> tuple[float, float, float]:
-    """Return signed sum, absolute budget, and cancellation agreement."""
+def _origin_action(action: np.ndarray) -> tuple[float, float, float, float]:
+    """Aggregate heads without averaging or erasing within-layer conflict."""
 
-    signed = float(action.sum())
-    budget = float(np.abs(action).sum())
-    agreement = abs(signed) / budget if budget > 0 else 0.0
-    return signed, budget, agreement
+    layer_signed = action.sum(axis=1)
+    layer_budget = np.abs(action).sum(axis=1)
+    layer_agreement = np.divide(
+        np.abs(layer_signed),
+        layer_budget,
+        out=np.zeros_like(layer_signed),
+        where=layer_budget > 0,
+    )
+    origin_action = float(np.sum(layer_signed * layer_agreement))
+    signed_sum = float(layer_signed.sum())
+    absolute_budget = float(layer_budget.sum())
+    head_agreement = (
+        float(np.sum(np.abs(layer_signed)) / absolute_budget)
+        if absolute_budget > 0
+        else 0.0
+    )
+    return origin_action, signed_sum, absolute_budget, head_agreement
 
 
-def _weighted(values: np.ndarray, weight: np.ndarray) -> float:
-    denominator = float(weight.sum())
-    return float(np.dot(values, weight) / denominator) if denominator > 0 else 0.0
+def _target_reanchor_axes(
+    artifact: Mapping[str, object],
+    query: int,
+    row_slot: int,
+    route_shape: tuple[int, int, int],
+) -> dict[str, float | bool | str]:
+    """Return selection-aware axes for this artifact's own query.
+
+    Candidate rows earlier than ``query`` can describe geometry on a route to
+    the audited target, but their downstream action is not an immediate
+    next-token effect.  They therefore cannot be joined to this target's
+    label.  Likewise, context rows around a selected event and no-event
+    fallbacks are not silently relabeled as event centers.
+    """
+
+    recorded = bool(_item(artifact, "target_reanchor_selection_recorded"))
+    has_event = bool(_item(artifact, "target_reanchor_has_event"))
+    is_center = bool(_item(artifact, "target_reanchor_is_center"))
+    fallback = bool(_item(artifact, "target_reanchor_fallback"))
+    center = int(_item(artifact, "target_reanchor_center_position"))
+    offset = int(_item(artifact, "target_reanchor_window_offset"))
+    layer = int(_item(artifact, "target_reanchor_layer"))
+    head = int(_item(artifact, "target_reanchor_head"))
+    source_kind = str(_item(artifact, "target_reanchor_source_kind"))
+    selection_score = float(_item(artifact, "target_reanchor_score"))
+    if has_event:
+        if (
+            not recorded
+            or fallback
+            or query - center != offset
+            or source_kind not in {"prompt_evidence", "other_prompt", "remote_response"}
+            or not 0 <= layer < route_shape[0]
+            or not 0 <= head < route_shape[1]
+            or not math.isfinite(selection_score)
+            or selection_score <= 0
+        ):
+            raise ValueError("target re-anchor event selection is inconsistent")
+        if is_center != (offset == 0):
+            raise ValueError("target re-anchor center flag disagrees with its offset")
+    elif is_center or fallback and not recorded:
+        raise ValueError("target re-anchor non-event selection is inconsistent")
+
+    temporal_score = float("nan")
+    temporal_evaluated = False
+    evidence_adoption = float("nan")
+    evidence_adoption_evaluated = False
+    if is_center:
+        if center != query:
+            raise ValueError("target re-anchor center names another query")
+        dense_score = np.asarray(artifact["reanchor_score"], dtype=np.float64)
+        if dense_score.shape != route_shape:
+            raise ValueError(
+                "re-anchor score must share the route [layer,head,row] axes"
+            )
+        current_score = float(dense_score[layer, head, row_slot])
+        if not math.isfinite(current_score) or current_score < 0:
+            raise ValueError("current-target structural switch score is invalid")
+        if not np.isclose(current_score, selection_score, rtol=1e-4, atol=1e-6):
+            raise ValueError("target selection and audited switch score disagree")
+        temporal_score = selection_score
+        temporal_evaluated = True
+
+        if source_kind == "prompt_evidence":
+            bucket_name = np.asarray(artifact["reanchor_bucket_name"]).astype(str)
+            bucket = np.flatnonzero(bucket_name == "prompt_evidence")
+            if len(bucket) != 1:
+                raise ValueError("re-anchor bucket table lacks prompt evidence")
+            bucket_action = np.asarray(
+                artifact["reanchor_bucket_downstream_action"], dtype=np.float64
+            )
+            expected = (*route_shape, len(bucket_name))
+            if bucket_action.shape != expected:
+                raise ValueError("re-anchor bucket action has the wrong shape")
+            evidence_adoption = float(
+                bucket_action[layer, head, row_slot, int(bucket[0])]
+            )
+            if not math.isfinite(evidence_adoption):
+                raise ValueError("prompt-evidence adoption action is not finite")
+            evidence_adoption_evaluated = True
+
+    # A bounded candidate table may contain earlier downstream-to-query events.
+    # Validate its marker, but never consume its downstream action here.
+    position = np.asarray(artifact["reanchor_candidate_position"], dtype=np.int64)
+    current = np.asarray(
+        artifact["reanchor_candidate_current_target_match"], dtype=bool
+    )
+    if position.ndim != 1 or current.shape != position.shape:
+        raise ValueError("re-anchor candidate fields must be aligned vectors")
+    if bool(np.any(current & (position != query))):
+        raise ValueError("current-target re-anchor candidate has another position")
+    return {
+        "temporal_switch_score": temporal_score,
+        "temporal_switch_evaluated": temporal_evaluated,
+        "target_reanchor_selection_recorded": recorded,
+        "target_reanchor_has_event": has_event,
+        "target_reanchor_is_center": is_center,
+        "target_reanchor_fallback": fallback,
+        "target_reanchor_window_offset": offset,
+        "temporal_switch_source_kind": source_kind,
+        "evidence_adoption": evidence_adoption,
+        "evidence_adoption_evaluated": evidence_adoption_evaluated,
+    }
 
 
-def mechanism_axes(artifact: Mapping[str, object]) -> dict[str, float | bool]:
-    """Compute two registered raw axes while retaining head-resolved inputs.
+def mechanism_axes(artifact: Mapping[str, object]) -> dict[str, float | bool | str]:
+    """Compute fixed raw query axes and one optional exact diagnostic.
 
-    Native-source support is an operator-specific logit-margin bottleneck. The
-    exact value is admitted only when the root-lineage route, source-cut
-    integration ledger, and exact intervention ladder agree on positive
-    support for the observed-token contrast. Response-origin supporting action
-    is a separate first-order candidate. It is not called lock-in because this
-    audit does not intervene on response history.
+    Route-origin competition remains the static baseline.  Temporal switch is
+    transport-only, while evidence adoption is signed target action at this
+    artifact's query.  They remain separate so evaluation cannot manufacture a
+    favorable composite after seeing labels.  Exact intervention values never
+    enter any raw axis and remain missing when not evaluated.
     """
 
     query = int(_item(artifact, "query_position"))
     row_slot = _slot(artifact["route_row_position"], query, name="route rows")
-    stage_slot = _slot(artifact["route_stage_position"], query, name="stage trace")
 
-    transport = np.asarray(artifact["route_head_transport"], dtype=np.float64)
     action = np.asarray(artifact["route_head_action"], dtype=np.float64)
-    integration = np.asarray(artifact["route_head_integration"], dtype=np.float64)
-    if transport.shape != action.shape or transport.ndim != 4:
-        raise ValueError("head transport/action tensors disagree")
-    if integration.shape[:3] != action.shape[:3] or integration.shape[-1] != 4:
-        raise ValueError("head integration tensor disagrees with route rows")
+    if action.ndim != 4:
+        raise ValueError("head action tensor must use [layer,head,row,origin]")
 
-    evidence_transport = float(transport[:, :, row_slot, EVIDENCE].sum())
+    row_total = np.asarray(artifact["route_row_total"], dtype=np.float64)
+    row_retained = np.asarray(artifact["route_row_retained"], dtype=np.float64)
+    if row_total.shape != action.shape[:3] or row_retained.shape != row_total.shape:
+        raise ValueError("row coverage tensors disagree with route rows")
+    query_total = float(row_total[:, :, row_slot].sum())
+    query_retained = float(row_retained[:, :, row_slot].sum())
+    query_unobserved = max(query_total - query_retained, 0.0)
+    query_retained_fraction = (
+        query_retained / query_total if query_total > 0 else float("nan")
+    )
+    query_unobserved_fraction = (
+        query_unobserved / query_total if query_total > 0 else float("nan")
+    )
+
     evidence_action = action[:, :, row_slot, EVIDENCE]
-    evidence_signed, evidence_budget, evidence_agreement = _agreement(evidence_action)
-    integration_action = integration[:, :, row_slot, 3]
-    integration_signed, integration_budget, integration_agreement = _agreement(
-        integration_action
-    )
-
-    exact_values = np.asarray(
-        [
-            float(_item(artifact, "selected_root_value_necessity")),
-            float(_item(artifact, "corridor_necessity")),
-            float(_item(artifact, "corridor_mediated_rescue")),
-        ],
-        dtype=np.float64,
-    )
-    exact_bottleneck = float(exact_values.min())
-    exact_confirmed = bool(
-        _item(artifact, "selected_root_confirmed")
-        and _item(artifact, "corridor_confirmed")
-        and _item(artifact, "corridor_restoration_valid")
-    )
-    lineage_present = evidence_transport > 0
-    evidence_supporting = evidence_signed > 0
-    integration_supporting = integration_signed > 0
-    source_support_gate = bool(
-        exact_confirmed
-        and lineage_present
-        and evidence_supporting
-        and integration_supporting
-        and exact_bottleneck > 0
-    )
-    source_support = exact_bottleneck if source_support_gate else 0.0
-
+    (
+        evidence_origin_action,
+        evidence_signed,
+        evidence_budget,
+        evidence_agreement,
+    ) = _origin_action(evidence_action)
+    reanchor_axes = _target_reanchor_axes(artifact, query, row_slot, action.shape[:3])
     response_action = action[:, :, row_slot, RESPONSE]
-    response_layer_signed = response_action.sum(axis=1)
-    response_layer_budget = np.abs(response_action).sum(axis=1)
-    response_layer_agreement = np.divide(
-        np.abs(response_layer_signed),
-        response_layer_budget,
-        out=np.zeros_like(response_layer_signed),
-        where=response_layer_budget > 0,
+    (
+        response_origin_action,
+        response_signed,
+        response_budget,
+        response_agreement,
+    ) = _origin_action(response_action)
+    combined_action_budget = response_budget + evidence_budget
+    route_origin_competition_evaluated = combined_action_budget > 0
+    route_origin_competition = (
+        (response_origin_action - evidence_origin_action)
+        / (combined_action_budget + np.finfo(np.float64).eps)
+        if route_origin_competition_evaluated
+        else float("nan")
     )
-    continuity = np.asarray(artifact["route_state_continuity"], dtype=np.float64)[
-        :, stage_slot
-    ]
-    positive_response = np.clip(response_layer_signed, 0.0, None)
-    response_support = float(np.sum(positive_response * response_layer_agreement))
-    response_signed, response_budget, response_agreement = _agreement(response_action)
 
-    module_agreement = np.asarray(
-        artifact["route_module_functional_agreement"], dtype=np.float64
-    )[:, stage_slot]
-    module_cosine = np.asarray(
-        artifact["route_module_vector_cosine"], dtype=np.float64
-    )[:, stage_slot]
-    cross_head_vector = np.asarray(
-        artifact["route_cross_head_vector_coherence"], dtype=np.float64
-    )[:, row_slot]
-    cross_head_function = np.asarray(
-        artifact["route_cross_head_functional_agreement"], dtype=np.float64
-    )[:, row_slot]
-    integration_layer_budget = np.abs(integration_action).sum(axis=1)
+    exact_evaluated = bool(
+        _item(artifact, "selected_root_evaluated")
+        and _item(artifact, "corridor_evaluated")
+    )
+    exact_bottleneck = float("nan")
+    if exact_evaluated:
+        exact_values = np.asarray(
+            [
+                float(_item(artifact, "selected_root_value_necessity")),
+                float(_item(artifact, "corridor_necessity")),
+                float(_item(artifact, "corridor_mediated_rescue")),
+            ],
+            dtype=np.float64,
+        )
+        if np.all(np.isfinite(exact_values)):
+            root_effect = float(_item(artifact, "root_value_effect"))
+            direction = 1.0 if root_effect >= 0 else -1.0
+            exact_bottleneck = float((direction * exact_values).min())
     return {
-        "native_source_mediated_observed_margin": source_support,
-        "native_source_exact_bottleneck_ungated": exact_bottleneck,
-        "native_source_support_gate": source_support_gate,
-        "selected_source_lineage_present": lineage_present,
-        "selected_source_action_supporting": evidence_supporting,
-        "selected_source_integration_supporting": integration_supporting,
-        "selected_source_transport_sum": evidence_transport,
-        "selected_source_action_signed_sum": evidence_signed,
-        "selected_source_action_absolute_budget": evidence_budget,
-        "selected_source_action_functional_agreement": evidence_agreement,
-        "selected_source_integration_action_signed_sum": integration_signed,
-        "selected_source_integration_action_absolute_budget": integration_budget,
-        "selected_source_integration_functional_agreement": integration_agreement,
-        "response_origin_supporting_action_candidate": response_support,
-        "response_origin_action_signed_sum": response_signed,
-        "response_origin_action_absolute_budget": response_budget,
-        "response_origin_functional_agreement": response_agreement,
-        "source_conditioned_state_continuity": _weighted(
-            continuity, integration_layer_budget
-        ),
-        # Module diagnostics remain separate because they are conditioned on
-        # the selected-root cut, not a response-origin intervention.
-        "source_conditioned_module_functional_agreement": _weighted(
-            module_agreement, integration_layer_budget
-        ),
-        "source_conditioned_module_vector_cosine": _weighted(
-            module_cosine, integration_layer_budget
-        ),
-        "source_conditioned_cross_head_vector_coherence": _weighted(
-            cross_head_vector, integration_layer_budget
-        ),
-        "source_conditioned_cross_head_functional_agreement": _weighted(
-            cross_head_function, integration_layer_budget
-        ),
+        "route_origin_competition": float(route_origin_competition),
+        "route_origin_competition_evaluated": route_origin_competition_evaluated,
+        **reanchor_axes,
+        "route_query_total_mass": query_total,
+        "route_query_retained_mass": query_retained,
+        "route_query_unobserved_mass": query_unobserved,
+        "route_query_retained_fraction": query_retained_fraction,
+        "route_query_unobserved_fraction": query_unobserved_fraction,
+        "route_evidence_origin_action": evidence_origin_action,
+        "route_evidence_origin_signed_sum": evidence_signed,
+        "route_evidence_origin_absolute_budget": evidence_budget,
+        "route_evidence_origin_head_agreement": evidence_agreement,
+        "route_response_origin_action": response_origin_action,
+        "route_response_origin_signed_sum": response_signed,
+        "route_response_origin_absolute_budget": response_budget,
+        "route_response_origin_head_agreement": response_agreement,
+        "selected_root_exact_bottleneck": exact_bottleneck,
+        "selected_root_exact_evaluated": exact_evaluated,
     }
 
 
@@ -207,21 +319,69 @@ def _rate(rows: list[dict], name: str) -> float | None:
     return float(np.mean([bool(row[name]) for row in rows])) if rows else None
 
 
+def _confirmation_rates(
+    rows: list[dict],
+) -> tuple[dict[str, float | None], dict[str, int]]:
+    rates = {}
+    evaluated_targets = {}
+    for name, denominator in CONFIRMATION_DENOMINATOR.items():
+        evaluated = [row for row in rows if bool(row[denominator])]
+        evaluated_targets[name] = len(evaluated)
+        rates[name] = (
+            float(np.mean([bool(row[name]) for row in evaluated]))
+            if evaluated
+            else None
+        )
+    return rates, evaluated_targets
+
+
 def summarize(rows: list[dict]) -> dict:
+    confirmation_rate, confirmation_evaluated_targets = _confirmation_rates(rows)
     return {
         "targets": len(rows),
         "samples": len({row["sample_id"] for row in rows}),
-        "confirmation_rate": {name: _rate(rows, name) for name in CONFIRMATION_FIELDS},
+        "evaluation_rate": {
+            **{name: _rate(rows, name) for name in EVALUATION_FIELDS},
+            "route_origin_competition_evaluated": _rate(
+                rows, "route_origin_competition_evaluated"
+            ),
+            "temporal_switch_evaluated": _rate(rows, "temporal_switch_evaluated"),
+            "evidence_adoption_evaluated": _rate(rows, "evidence_adoption_evaluated"),
+            "target_reanchor_selection_recorded": _rate(
+                rows, "target_reanchor_selection_recorded"
+            ),
+            "target_reanchor_has_event": _rate(rows, "target_reanchor_has_event"),
+            "target_reanchor_is_center": _rate(rows, "target_reanchor_is_center"),
+            "target_reanchor_fallback": _rate(rows, "target_reanchor_fallback"),
+            "carrier_evaluated": _rate(rows, "carrier_evaluated"),
+            "full_chain_evaluated": _rate(rows, "full_chain_evaluated"),
+        },
+        "confirmation_rate": confirmation_rate,
+        "confirmation_evaluated_targets": confirmation_evaluated_targets,
         "mean_exact_effect": {name: _mean(rows, name) for name in EFFECT_FIELDS},
-        "mean_raw_axis": {name: _mean(rows, name) for name in AXIS_DIRECTION},
+        "mean_raw_axis": {name: _mean(rows, name) for name in RAW_AXIS_NAMES},
+        "mean_origin_component": {
+            name: _mean(rows, name) for name in ORIGIN_COMPONENT_FIELDS
+        },
+        "mean_query_coverage": {
+            name: _mean(rows, name) for name in QUERY_COVERAGE_FIELDS
+        },
     }
 
 
 def raw_axis_evaluation(rows: list[dict]) -> dict[str, dict]:
-    """Evaluate the two fixed axes without fitting a classifier or threshold."""
+    """Evaluate separate raw axes without fitting a classifier.
+
+    A long-range structural switch has no universal hallucination direction:
+    prompt evidence, instructions, and remote response hubs can have different
+    roles.  Its main AUROC/AUPRC therefore use a transparent raw-higher
+    reporting convention and also report the negated orientation.  Directional
+    axes retain their independently registered risk direction.
+    """
 
     result = {}
-    for name, direction in AXIS_DIRECTION.items():
+    for name in RAW_AXIS_NAMES:
+        direction = AXIS_DIRECTION.get(name)
         finite = [
             row
             for row in rows
@@ -230,19 +390,49 @@ def raw_axis_evaluation(rows: list[dict]) -> dict[str, dict]:
         label = np.asarray(
             [row["hallucination_label"] for row in finite], dtype=np.int8
         )
-        risk = direction * np.asarray([row[name] for row in finite], dtype=np.float64)
+        raw = np.asarray([row[name] for row in finite], dtype=np.float64)
+        risk = raw if direction is None else direction * raw
         metric = {
+            "total_targets": len(rows),
+            "evaluated_targets": len(label),
             "targets": len(label),
             "positives": int(label.sum()),
             "prevalence": float(label.mean()) if len(label) else None,
-            "hallucination_direction": "lower" if direction < 0 else "higher",
+            "hallucination_direction": (
+                "neutral_raw_higher_reporting_convention"
+                if direction is None
+                else "lower"
+                if direction < 0
+                else "higher"
+            ),
             "auroc": None,
             "auprc": None,
         }
+        if direction is None:
+            metric["negated_auroc"] = None
+            metric["negated_auprc"] = None
         if len(np.unique(label)) == 2:
             metric["auroc"] = float(roc_auc_score(label, risk))
             metric["auprc"] = float(average_precision_score(label, risk))
+            if direction is None:
+                metric["negated_auroc"] = float(roc_auc_score(label, -raw))
+                metric["negated_auprc"] = float(average_precision_score(label, -raw))
         result[name] = metric
+    return result
+
+
+def temporal_switch_by_source_kind(rows: list[dict]) -> dict[str, dict]:
+    """Stratify event-center discrimination without assigning a shared meaning."""
+
+    result = {}
+    for source_kind in REANCHOR_SOURCE_KINDS:
+        source_rows = [
+            row
+            for row in rows
+            if bool(row["temporal_switch_evaluated"])
+            and row["temporal_switch_source_kind"] == source_kind
+        ]
+        result[source_kind] = raw_axis_evaluation(source_rows)["temporal_switch_score"]
     return result
 
 
@@ -250,7 +440,13 @@ def _capture_rows(output: Path, manifest: dict) -> list[dict]:
     """Load all label-free artifacts before the label store is opened."""
 
     rows = []
-    for entry in manifest["audits"].values():
+    entries = tuple(manifest["audits"].values())
+    for entry in tqdm(
+        entries,
+        desc=f"{output.name} evaluation artifacts",
+        unit="artifact",
+        dynamic_ncols=True,
+    ):
         with np.load(output / entry["result"], allow_pickle=False) as artifact:
             if int(_item(artifact, "subset_audit_schema")) != AUDIT_SCHEMA:
                 raise ValueError("unsupported subset audit schema")
@@ -261,6 +457,14 @@ def _capture_rows(output: Path, manifest: dict) -> list[dict]:
                 "prediction_position": int(_item(artifact, "prediction_position")),
                 "response_start": int(_item(artifact, "response_start")),
             }
+            row.update(
+                {name: bool(_item(artifact, name)) for name in EVALUATION_FIELDS}
+            )
+            row["carrier_evaluated_count"] = int(
+                _item(artifact, "carrier_evaluated_count")
+            )
+            row["carrier_evaluated"] = row["carrier_evaluated_count"] > 0
+            row["full_chain_evaluated"] = bool(_item(artifact, "full_chain_evaluated"))
             row.update(
                 {name: bool(_item(artifact, name)) for name in CONFIRMATION_FIELDS}
             )
@@ -279,7 +483,12 @@ def _join_labels(dataset_root: Path, rows: list[dict]) -> None:
     )
     labels = dataset.prepare_evaluation_labels(sample_ids)
     label_by_sample = {}
-    for sample_id in sample_ids:
+    for sample_id in tqdm(
+        sample_ids,
+        desc=f"{dataset_root.name} evaluation labels",
+        unit="sample",
+        dynamic_ncols=True,
+    ):
         sample = dataset[sample_id]
         try:
             label_by_sample[sample_id] = (
@@ -297,6 +506,23 @@ def _join_labels(dataset_root: Path, rows: list[dict]) -> None:
                 f"q={row['query_position']}"
             )
         row["hallucination_label"] = int(sample_label[relative])
+
+
+def _json_rows(rows: list[dict]) -> list[dict]:
+    """Represent unavailable numeric diagnostics as JSON null, never zero."""
+
+    return [
+        {
+            name: (
+                None
+                if isinstance(value, (float, np.floating))
+                and not math.isfinite(float(value))
+                else value
+            )
+            for name, value in row.items()
+        }
+        for row in rows
+    ]
 
 
 def evaluate_subset_split(
@@ -337,30 +563,83 @@ def evaluate_subset_split(
                 [row for row in task_rows if row["hallucination_label"] == 1]
             ),
             "raw_axis_evaluation": raw_axis_evaluation(task_rows),
+            "temporal_switch_by_source_kind": temporal_switch_by_source_kind(task_rows),
         }
 
     report = {
-        "subset_evaluation_schema": 3,
+        "subset_evaluation_schema": 5,
         "labels_accessed_after_capture": True,
         "selection_is_not_population_evaluation": True,
+        "hypothesis_status": (
+            "unvalidated raw axes: route-origin competition retains a fixed "
+            "higher-risk direction; prompt-evidence adoption retains a fixed "
+            "lower-risk direction; mixed-source temporal switches are "
+            "direction-neutral and reported in raw and negated orientations"
+        ),
         "claim_scope": (
-            "native source-operator support for an observed-token contrast "
-            "and response-origin supporting-action candidates; neither axis "
-            "identifies factual correctness"
+            "label-free event-center measurements for the teacher-forced "
+            "observed-token contrast; event-window context rows, no-event "
+            "fallbacks, and earlier route events are excluded from temporal and "
+            "adoption axes; no axis establishes factual accuracy or free-running "
+            "generation causality"
         ),
         "axis_definition": {
-            "native_source_mediated_observed_margin": (
-                "exact root/corridor/mediated-rescue bottleneck gated by "
-                "root-lineage transport, signed source action, and signed "
-                "source-cut integration for the observed-token margin"
+            "route_origin_competition": (
+                "(response-origin layer-consistent signed action minus "
+                "evidence-origin layer-consistent signed action) divided by "
+                "their combined absolute head-action budget; higher is the "
+                "fixed hallucination-risk direction"
             ),
-            "response_origin_supporting_action_candidate": (
-                "positive response-origin signed head action weighted by "
-                "head functional agreement; no response-history intervention"
+            "temporal_switch_score": (
+                "frozen transport-only local-to-long-range dominance-flip score "
+                "at the structurally selected layer and head, only when this "
+                "artifact's query is the selected event center; source kind is "
+                "preserved per target, context/fallback rows and earlier-event "
+                "actions are excluded, and both raw and negated AUROC/AUPRC are "
+                "reported overall and by source kind because mixed-source switches "
+                "have no universal direction"
+            ),
+            "evidence_adoption": (
+                "full-row prompt-evidence bucket signed grad-message action at "
+                "the structurally selected event layer, head, and current query; "
+                "defined only for prompt-evidence event centers, with higher "
+                "registered as lower hallucination risk; this is observed-token "
+                "support, not source-specific causal mediation or factual accuracy"
+            ),
+        },
+        "axis_role": {
+            "route_origin_competition": "static baseline",
+            "temporal_switch_score": (
+                "direction-neutral event-center structural hypothesis"
+            ),
+            "evidence_adoption": ("prompt-evidence event-center functional hypothesis"),
+        },
+        "evaluation_limitations": {
+            "label_firewall": (
+                "labels are joined only after label-free capture and cannot enter "
+                "event discovery, target selection, or raw-axis construction"
+            ),
+            "selection": (
+                "event-conditioned targets do not estimate population performance; "
+                "context and fallback rows are reported descriptively but do not "
+                "enter event-center AUROC/AUPRC"
+            ),
+            "teacher_forcing": (
+                "signed action explains the recorded next-token contrast under the "
+                "observed prefix; it does not measure counterfactual free-running "
+                "sequence behavior"
+            ),
+        },
+        "secondary_diagnostic_definition": {
+            "selected_root_exact_bottleneck": (
+                "minimum selected-root/corridor exact effect aligned to the "
+                "measured root-effect direction; null unless both intervention "
+                "stages were evaluated and never combined with the all-evidence "
+                "discovery score"
             ),
         },
         "groups": groups,
-        "targets": rows,
+        "targets": _json_rows(rows),
     }
     save_json(output / REPORT_NAME, report)
     return report

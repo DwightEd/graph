@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 import torch
@@ -64,6 +65,16 @@ class RootEffect:
     sufficiency: float
     causal_score: float
     evaluated: bool
+
+
+@dataclass(frozen=True)
+class PlannedCarrier:
+    """A graph-selected carrier frozen before an exact intervention."""
+
+    layer: int
+    position: int
+    route_throughput: float
+    target_score: float
 
 
 def intervention_tolerance(model) -> float:
@@ -185,6 +196,9 @@ def confirm_corridor(
     """Measure corridor necessity, rescue, final-path blocking, and restoration."""
 
     target = flow.target
+    terminal = corridor.target == target.query_position
+    if not bool(terminal.any()):
+        raise ValueError("corridor has no terminal message frontier")
     restoration = rerun_margin(
         model,
         flow.clean_cache,
@@ -213,7 +227,6 @@ def confirm_corridor(
         target,
         base_source_mask=flow.corrupt_source_mask,
     )
-    terminal = corridor.target == target.query_position
     blocked_code = corridor.clean_code.clone()
     blocked_code[terminal] = corridor.corrupt_code[terminal]
     blocked = rerun_margin(
@@ -441,12 +454,43 @@ def confirm_carriers(
                 (rank_score, route, delta_norm, target_score, layer, position)
             )
     candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    planned = tuple(
+        PlannedCarrier(layer, position, route, target_score)
+        for _, route, _, target_score, layer, position in candidates[:limit]
+    )
+    return confirm_planned_carriers(
+        model,
+        flow,
+        planned,
+        effect_direction=direction,
+    )
+
+
+def confirm_planned_carriers(
+    model,
+    flow: PairedFlow,
+    candidates: Sequence[PlannedCarrier],
+    *,
+    effect_direction: float = 1.0,
+) -> tuple[CarrierEffect, ...]:
+    """Confirm graph-selected carriers without re-ranking their identities."""
+
+    direction = float(effect_direction)
+    if direction not in {-1.0, 1.0}:
+        raise ValueError("effect_direction must be -1 or 1")
     heads = int(model.config.num_attention_heads)
     block_tolerance = intervention_tolerance(model)
     effects = []
-    for _, route, delta_norm, target_score, current_layer, position in candidates[
-        :limit
-    ]:
+    for candidate in candidates:
+        current_layer = int(candidate.layer)
+        position = int(candidate.position)
+        route = float(candidate.route_throughput)
+        target_score = float(candidate.target_score)
+        delta = (
+            flow.clean_cache.layer_input[current_layer][position].float()
+            - flow.corrupt_cache.layer_input[current_layer][position].float()
+        )
+        delta_norm = float(delta.norm())
         removed = rerun_margin(
             model,
             flow.clean_cache,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -14,7 +15,6 @@ from experiments.common.llama_message_intervention import (
 )
 from experiments.reanchor_flow import attribution as attribution_module
 from experiments.reanchor_flow import corridor as corridor_module
-from experiments.reanchor_flow import native as native_module
 from experiments.reanchor_flow import native_flow as native_flow_module
 from experiments.reanchor_flow.attribution import (
     GradientObserver,
@@ -33,11 +33,13 @@ from experiments.reanchor_flow.native_flow import (
 )
 from experiments.reanchor_flow.native_world import (
     NativeWorld,
+    TargetReanchorSelection,
     gated_forward_cache,
     load_native_world,
     save_native_world,
     source_gate,
 )
+from experiments.reanchor_flow.route_plan import RouteBudget
 from experiments.reanchor_flow.tests.etcc_helpers import paired_world, tiny_model
 from experiments.reanchor_flow.throughput import (
     compute_throughput,
@@ -112,6 +114,42 @@ def test_native_world_round_trip_and_observed_target_contract(tmp_path) -> None:
             targets=world.targets
             + (replace(world.targets[0], origin="another_selection_origin"),),
         ).check()
+
+
+def test_native_world_round_trips_reanchor_selection_and_prefix_context(
+    tmp_path,
+) -> None:
+    world = native_world()
+    target = world.targets[0]
+    selection = TargetReanchorSelection(
+        query_position=target.query_position,
+        policy="reanchor-window",
+        has_event=True,
+        fallback=False,
+        center_position=target.query_position + 1,
+        window_offset=-1,
+        layer=1,
+        head=2,
+        source_kind="prompt_evidence",
+        source_position=1,
+        source_unit_id=1,
+        score=0.75,
+        support=2,
+        previous_anchor_fraction=0.2,
+        anchor_fraction=0.8,
+        relative_anchor_rise=0.6,
+        relative_local_fall=0.7,
+    )
+    selected = replace(world, target_selection=(selection,)).check()
+    path = tmp_path / "reanchor-world.npz"
+
+    save_native_world(path, selected)
+    loaded = load_native_world(path)
+
+    assert loaded.target_selection == (selection,)
+    assert loaded.target_selection[0].has_event
+    assert not loaded.target_selection[0].is_center
+    assert loaded.prefix(target).target_selection == (selection,)
 
 
 def test_native_world_rejects_an_unfrozen_target_position() -> None:
@@ -444,6 +482,7 @@ def test_cut_recompute_obeys_query_chunk(monkeypatch) -> None:
         cut,
         gradients,
         gate.source_mask,
+        clean_cache=flow.clean_cache,
         query_chunk=len(flow.row_position),
     )
 
@@ -461,6 +500,7 @@ def test_cut_recompute_obeys_query_chunk(monkeypatch) -> None:
         cut,
         gradients,
         gate.source_mask,
+        clean_cache=flow.clean_cache,
         query_chunk=1,
     )
 
@@ -489,8 +529,14 @@ def test_native_corridor_restores_both_base_worlds(signal: str) -> None:
         carrier_scope="all",
         coverage=1.0,
         query_chunk=2,
-        root_screen_limit=0,
-        carrier_limit=1,
+        route_budget=RouteBudget(
+            edges_per_head=16,
+            max_rows=32,
+            root_candidates=2,
+            hub_candidates=1,
+            corridor_edges=64,
+            confirm=True,
+        ),
     )
     assert result.flow.corrupt_source_mask is not None
     assert result.effect.restoration_error <= 1e-6
@@ -499,21 +545,10 @@ def test_native_corridor_restores_both_base_worlds(signal: str) -> None:
     assert result.corridor.count > 0
 
 
-def test_native_roots_and_corridor_preserve_signed_functional_conflicts(
-    monkeypatch,
-) -> None:
+def test_native_plan_freezes_roots_before_optional_confirmation() -> None:
     model = tiny_model()
     world = native_world(model)
     target = world.targets[0]
-    actual_compute = native_module.compute_throughput
-    calls = []
-
-    def traced_compute(flow, token_unit_id, unit_count, root_unit_id):
-        result = actual_compute(flow, token_unit_id, unit_count, root_unit_id)
-        calls.append((flow.edges.score.clone(), tuple(root_unit_id), result))
-        return result
-
-    monkeypatch.setattr(native_module, "compute_throughput", traced_compute)
     result = audit_native_target(
         model,
         world,
@@ -522,20 +557,30 @@ def test_native_roots_and_corridor_preserve_signed_functional_conflicts(
         carrier_scope="all",
         coverage=1.0,
         query_chunk=2,
-        root_screen_limit=1,
-        carrier_limit=0,
+        route_budget=RouteBudget(
+            edges_per_head=2,
+            max_rows=32,
+            root_candidates=2,
+            hub_candidates=0,
+            corridor_edges=8,
+            confirm=False,
+        ),
     )
 
-    assert len(calls) == 2
-    raw_score, raw_roots, transport = calls[0]
-    selected_score, selected_roots, _ = calls[1]
-    assert raw_roots == world.evidence_unit_id
-    assert selected_roots == (result.selected_root_unit_id,)
-    assert torch.equal(selected_score, raw_score)
+    assert result.selected_root_unit_id == result.plan.selected_root_unit_id
+    assert not result.selected_root_effect.evaluated
+    assert math.isnan(result.selected_root_effect.necessity)
+    assert math.isnan(result.selected_root_effect.sufficiency)
+    assert math.isnan(result.selected_root_effect.causal_score)
+    assert not result.corridor_evaluated
+    assert len(torch.unique(result.plan.corridor_edge_index)) == len(
+        result.plan.corridor_edge_index
+    )
+    planned = {root.unit_id: root for root in result.plan.roots}
     for root in result.roots:
-        assert root.route_mass == pytest.approx(
-            float(transport.unit_mass[root.unit_id])
-        )
+        assert root.route_mass == pytest.approx(planned[root.unit_id].route_mass)
+        assert root.gradient_score == pytest.approx(planned[root.unit_id].signed_action)
+        assert not root.evaluated
 
 
 def test_target_policy_uses_only_clean_margin() -> None:

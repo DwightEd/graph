@@ -19,7 +19,83 @@ from experiments.common.llama_message_intervention import (
 from .artifacts import save_result
 from .worlds import SourceUnits, TargetContrast
 
-NATIVE_WORLD_SCHEMA = 1
+NATIVE_WORLD_SCHEMA = 2
+
+
+@dataclass(frozen=True)
+class TargetReanchorSelection:
+    """Structured provenance for one re-anchor-selected target row."""
+
+    query_position: int
+    policy: str
+    has_event: bool
+    fallback: bool
+    center_position: int
+    window_offset: int
+    layer: int
+    head: int
+    source_kind: str
+    source_position: int
+    source_unit_id: int
+    score: float
+    support: int
+    previous_anchor_fraction: float
+    anchor_fraction: float
+    relative_anchor_rise: float
+    relative_local_fall: float
+    scan_signal: str = "exact_full_row_message_transport"
+
+    @property
+    def is_center(self) -> bool:
+        return self.has_event and self.window_offset == 0
+
+    def check(self, target: TargetContrast) -> TargetReanchorSelection:
+        if self.query_position != target.query_position:
+            raise ValueError("target selection metadata names another query row")
+        if self.policy not in {"reanchor", "reanchor-window"}:
+            raise ValueError("target selection metadata has an invalid policy")
+        if self.scan_signal != "exact_full_row_message_transport":
+            raise ValueError("target selection metadata has an invalid scan signal")
+        if self.has_event:
+            if self.fallback:
+                raise ValueError("a re-anchor event cannot also be a fallback")
+            if (
+                self.center_position < 0
+                or self.query_position - self.center_position != self.window_offset
+                or self.window_offset not in {-1, 0, 1}
+                or (self.policy == "reanchor" and self.window_offset != 0)
+                or self.layer < 0
+                or self.head < 0
+                or self.source_kind
+                not in {"prompt_evidence", "other_prompt", "remote_response"}
+                or self.source_position < 0
+                or self.source_unit_id < 0
+                or not np.isfinite(self.score)
+                or self.score <= 0
+                or self.support < 1
+            ):
+                raise ValueError("re-anchor event metadata is invalid")
+        elif (
+            self.center_position != -1
+            or self.window_offset != 0
+            or self.layer != -1
+            or self.head != -1
+            or self.source_kind != "none"
+            or self.source_position != -1
+            or self.source_unit_id != -1
+            or self.score != 0
+            or self.support != 0
+        ):
+            raise ValueError("non-event target metadata must use sentinel values")
+        fractions = (
+            self.previous_anchor_fraction,
+            self.anchor_fraction,
+            self.relative_anchor_rise,
+            self.relative_local_fall,
+        )
+        if any(not np.isfinite(value) or not 0 <= value <= 1 for value in fractions):
+            raise ValueError("target selection fractions must lie in [0,1]")
+        return self
 
 
 @dataclass(frozen=True)
@@ -33,6 +109,7 @@ class NativeWorld:
     units: SourceUnits
     evidence_unit_id: tuple[int, ...]
     targets: tuple[TargetContrast, ...]
+    target_selection: tuple[TargetReanchorSelection, ...] = ()
 
     def check(self) -> NativeWorld:
         ids = self.token_ids
@@ -82,12 +159,37 @@ class NativeWorld:
                 raise ValueError("target candidates must differ")
             if not target.origin:
                 raise ValueError("target contrast origin is required")
+        if self.target_selection:
+            if len(self.target_selection) != len(self.targets):
+                raise ValueError("target selection metadata must align with targets")
+            for target, selection in zip(
+                self.targets, self.target_selection, strict=True
+            ):
+                selection.check(target)
+                if selection.has_event:
+                    # A ``-1`` window target ends with the event-center token;
+                    # its metadata legitimately refers to that final token even
+                    # though the center is not a predictor row in this prefix.
+                    if not self.response_start <= selection.center_position < len(ids):
+                        raise ValueError(
+                            "re-anchor center is outside response predictors"
+                        )
+                    if not 0 <= selection.source_position <= selection.center_position:
+                        raise ValueError("re-anchor source is outside its causal row")
+                    if selection.source_unit_id >= self.units.count:
+                        raise ValueError(
+                            "re-anchor source unit is outside the unit table"
+                        )
         return self
 
     def prefix(self, target: TargetContrast) -> NativeWorld:
         if target not in self.targets:
             raise ValueError("native audit target was not frozen in this world")
         stop = target.query_position + 2
+        target_index = self.targets.index(target)
+        selection = (
+            () if not self.target_selection else (self.target_selection[target_index],)
+        )
         return NativeWorld(
             self.sample_id,
             self.tokenizer_id,
@@ -100,11 +202,13 @@ class NativeWorld:
             ),
             self.evidence_unit_id,
             (target,),
+            selection,
         ).check()
 
 
 def save_native_world(path: str | Path, world: NativeWorld) -> None:
     world.check()
+    selection = world.target_selection
     save_result(
         path,
         {
@@ -130,13 +234,69 @@ def save_native_world(path: str | Path, world: NativeWorld) -> None:
                 dtype=np.int32,
             ),
             "contrast_origin": np.asarray([target.origin for target in world.targets]),
+            "target_reanchor_query_position": np.asarray(
+                [item.query_position for item in selection], dtype=np.int32
+            ),
+            "target_reanchor_policy": np.asarray(
+                [item.policy for item in selection], dtype=np.str_
+            ),
+            "target_reanchor_has_event": np.asarray(
+                [item.has_event for item in selection], dtype=np.bool_
+            ),
+            "target_reanchor_fallback": np.asarray(
+                [item.fallback for item in selection], dtype=np.bool_
+            ),
+            "target_reanchor_center_position": np.asarray(
+                [item.center_position for item in selection], dtype=np.int32
+            ),
+            "target_reanchor_window_offset": np.asarray(
+                [item.window_offset for item in selection], dtype=np.int8
+            ),
+            "target_reanchor_layer": np.asarray(
+                [item.layer for item in selection], dtype=np.int16
+            ),
+            "target_reanchor_head": np.asarray(
+                [item.head for item in selection], dtype=np.int16
+            ),
+            "target_reanchor_source_kind": np.asarray(
+                [item.source_kind for item in selection], dtype=np.str_
+            ),
+            "target_reanchor_source_position": np.asarray(
+                [item.source_position for item in selection], dtype=np.int32
+            ),
+            "target_reanchor_source_unit_id": np.asarray(
+                [item.source_unit_id for item in selection], dtype=np.int32
+            ),
+            "target_reanchor_score": np.asarray(
+                [item.score for item in selection], dtype=np.float64
+            ),
+            "target_reanchor_support": np.asarray(
+                [item.support for item in selection], dtype=np.int32
+            ),
+            "target_reanchor_previous_anchor_fraction": np.asarray(
+                [item.previous_anchor_fraction for item in selection],
+                dtype=np.float64,
+            ),
+            "target_reanchor_anchor_fraction": np.asarray(
+                [item.anchor_fraction for item in selection], dtype=np.float64
+            ),
+            "target_reanchor_relative_anchor_rise": np.asarray(
+                [item.relative_anchor_rise for item in selection], dtype=np.float64
+            ),
+            "target_reanchor_relative_local_fall": np.asarray(
+                [item.relative_local_fall for item in selection], dtype=np.float64
+            ),
+            "target_reanchor_scan_signal": np.asarray(
+                [item.scan_signal for item in selection], dtype=np.str_
+            ),
         },
     )
 
 
 def load_native_world(path: str | Path) -> NativeWorld:
     with np.load(Path(path), allow_pickle=False) as stored:
-        if int(stored["native_world_schema"]) != NATIVE_WORLD_SCHEMA:
+        schema = int(stored["native_world_schema"])
+        if schema not in {1, NATIVE_WORLD_SCHEMA}:
             raise ValueError("unsupported native-world schema")
         targets = tuple(
             TargetContrast(int(query), int(positive), int(negative), str(origin))
@@ -148,6 +308,70 @@ def load_native_world(path: str | Path) -> NativeWorld:
                 strict=True,
             )
         )
+        selection = ()
+        if schema >= 2:
+            selection = tuple(
+                TargetReanchorSelection(
+                    int(query),
+                    str(policy),
+                    bool(has_event),
+                    bool(fallback),
+                    int(center),
+                    int(offset),
+                    int(layer),
+                    int(head),
+                    str(source_kind),
+                    int(source_position),
+                    int(source_unit),
+                    float(score),
+                    int(support),
+                    float(previous_fraction),
+                    float(anchor_fraction),
+                    float(anchor_rise),
+                    float(local_fall),
+                    str(scan_signal),
+                )
+                for (
+                    query,
+                    policy,
+                    has_event,
+                    fallback,
+                    center,
+                    offset,
+                    layer,
+                    head,
+                    source_kind,
+                    source_position,
+                    source_unit,
+                    score,
+                    support,
+                    previous_fraction,
+                    anchor_fraction,
+                    anchor_rise,
+                    local_fall,
+                    scan_signal,
+                ) in zip(
+                    stored["target_reanchor_query_position"],
+                    stored["target_reanchor_policy"].astype(str),
+                    stored["target_reanchor_has_event"],
+                    stored["target_reanchor_fallback"],
+                    stored["target_reanchor_center_position"],
+                    stored["target_reanchor_window_offset"],
+                    stored["target_reanchor_layer"],
+                    stored["target_reanchor_head"],
+                    stored["target_reanchor_source_kind"].astype(str),
+                    stored["target_reanchor_source_position"],
+                    stored["target_reanchor_source_unit_id"],
+                    stored["target_reanchor_score"],
+                    stored["target_reanchor_support"],
+                    stored["target_reanchor_previous_anchor_fraction"],
+                    stored["target_reanchor_anchor_fraction"],
+                    stored["target_reanchor_relative_anchor_rise"],
+                    stored["target_reanchor_relative_local_fall"],
+                    stored["target_reanchor_scan_signal"].astype(str),
+                    strict=True,
+                )
+            )
         world = NativeWorld(
             str(stored["sample_id"].item()),
             str(stored["tokenizer_id"].item()),
@@ -160,6 +384,7 @@ def load_native_world(path: str | Path) -> NativeWorld:
             ),
             tuple(stored["evidence_unit_id"].astype(np.int64).tolist()),
             targets,
+            selection,
         )
     return world.check()
 

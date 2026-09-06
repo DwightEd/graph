@@ -5,7 +5,9 @@ from dataclasses import replace
 import pytest
 import torch
 from torch import Tensor
+from torch.utils._python_dispatch import TorchDispatchMode
 
+from experiments.reanchor_flow import route_model
 from experiments.reanchor_flow.native import audit_native_target
 from experiments.reanchor_flow.route_model import (
     CHANNEL_NAMES,
@@ -14,6 +16,7 @@ from experiments.reanchor_flow.route_model import (
     UNOBSERVED,
     HeadResolvedRouteModel,
 )
+from experiments.reanchor_flow.route_plan import RouteBudget
 from experiments.reanchor_flow.tests.test_native import native_world
 from experiments.reanchor_flow.throughput import transition_probabilities
 
@@ -31,8 +34,13 @@ def _audit(coverage: float = 1.0):
         carrier_scope="all",
         coverage=coverage,
         query_chunk=2,
-        root_screen_limit=0,
-        carrier_limit=1,
+        route_budget=RouteBudget(
+            edges_per_head=2,
+            max_rows=32,
+            root_candidates=2,
+            hub_candidates=1,
+            corridor_edges=8,
+        ),
     )
     dynamics = HeadResolvedRouteModel(local_window=2).analyze(
         model,
@@ -160,13 +168,10 @@ def test_route_model_keeps_layer_and_head_axes_and_conserves_registers() -> None
     assert dynamics.head_transport.shape == (layers, heads, rows, 4)
     assert dynamics.head_gradient_action.shape == (layers, heads, rows, 4)
     assert dynamics.head_direct_evidence.shape == (layers, heads, rows, 2)
-    assert dynamics.head_local_response.shape == (layers, heads, rows, 2)
     assert dynamics.head_integration.shape == (layers, heads, rows, 4)
     assert dynamics.cross_head_vector_coherence.shape == (layers, rows)
     assert dynamics.cross_head_functional_agreement.shape == (layers, rows)
     assert dynamics.layer_integration.shape == (layers, rows, 4)
-    assert dynamics.head_backward_distance.shape == (layers, heads, rows)
-    assert dynamics.head_span.shape == (layers, heads)
     assert dynamics.evidence_source_reuse.shape == (layers, heads, tokens, 2)
     assert dynamics.response_source_reuse.shape == (layers, heads, tokens, 2)
     assert dynamics.stage_displacement.shape == (
@@ -207,7 +212,7 @@ def test_route_model_keeps_layer_and_head_axes_and_conserves_registers() -> None
     )
 
 
-def test_route_channels_distinguish_direct_evidence_from_local_response() -> None:
+def test_route_channels_distinguish_direct_evidence_from_response_provenance() -> None:
     _, audit, dynamics = _audit()
     initial = dynamics.node_register[0]
     evidence_positions = audit.world.units.positions((audit.selected_root_unit_id,))
@@ -219,16 +224,16 @@ def test_route_channels_distinguish_direct_evidence_from_local_response() -> Non
     )
     if other_evidence:
         other_position = audit.world.units.positions(other_evidence)
-        assert bool((initial[other_position, EVIDENCE] == 0).all())
+        assert bool((initial[other_position, EVIDENCE] == 1).all())
     response_position = torch.arange(
         audit.world.response_start, len(audit.world.units.token_unit_id)
     )
     assert bool((initial[response_position, RESPONSE] == 1).all())
 
     direct = dynamics.head_direct_evidence[..., 0]
-    local = dynamics.head_local_response[..., 0]
+    response = dynamics.head_transport[..., RESPONSE]
     assert float(direct.sum()) > 0
-    assert float(local.sum()) > 0
+    assert float(response.sum()) > 0
 
 
 def test_pruned_transport_is_explicitly_unobserved_not_renormalized() -> None:
@@ -287,19 +292,50 @@ def test_message_aggregation_detects_cancellation_inside_one_head() -> None:
     assert float(coherence) < 1e-6
 
 
-def test_reanchor_candidates_are_exact_head_nodes_not_head_means() -> None:
-    model, _, dynamics = _audit()
-    analyzer = HeadResolvedRouteModel(local_window=2)
-    events = analyzer.reanchor_events(dynamics, limit=8)
-    assert events
-    assert len(events) <= 8
-    for event in events:
-        assert 0 <= event.layer < model.config.num_hidden_layers
-        assert 0 <= event.head < model.config.num_attention_heads
-        assert event.position in dynamics.row_position.tolist()
-        assert event.score == abs(event.evidence_gradient_action)
-        assert event.evidence_transport > 0
-        assert 0 <= event.direct_fraction <= 1
+def test_head_integration_materializes_code_deltas_in_bounded_chunks(
+    monkeypatch,
+) -> None:
+    model, audit, _ = _audit()
+    count = 5
+    root = int(audit.world.units.positions((audit.selected_root_unit_id,))[0])
+    target = audit.flow.target.query_position
+    head_dim = audit.flow.edges.clean_code.shape[1]
+    code = torch.arange(count * head_dim, dtype=torch.float32).view(count, head_dim)
+    flow = _synthetic_flow(
+        audit,
+        layer=torch.zeros(count, dtype=torch.long),
+        head=torch.arange(count) % model.config.num_attention_heads,
+        source=torch.full((count,), root),
+        target=torch.full((count,), target),
+        code=code,
+        action=torch.ones(count),
+    )
+    analyzer = HeadResolvedRouteModel()
+    _, edge_slot = analyzer._slots(flow, len(audit.world.units.token_unit_id))
+    code_subtractions: list[torch.Size] = []
+
+    class RecordCodeSubtractions(TorchDispatchMode):
+        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+            if func == torch.ops.aten.sub.Tensor and args[0].ndim == 2:
+                code_subtractions.append(args[0].shape)
+            return func(*args, **(kwargs or {}))
+
+    monkeypatch.setattr(route_model, "EDGE_CHUNK", 2)
+    with RecordCodeSubtractions():
+        analyzer._head_integration(
+            model,
+            flow,
+            edge_slot,
+            model.config.num_hidden_layers,
+            model.config.num_attention_heads,
+        )
+
+    assert code_subtractions == [
+        torch.Size((2, head_dim)),
+        torch.Size((2, head_dim)),
+        torch.Size((1, head_dim)),
+    ]
+
 
 def test_selected_root_must_match_the_root_cut_estimand() -> None:
     model, audit, _ = _audit()
@@ -317,7 +353,7 @@ def test_selected_root_must_match_the_root_cut_estimand() -> None:
         )
 
 
-def test_reduced_scope_marks_unmodeled_prompt_updates_unobserved() -> None:
+def test_reduced_scope_preserves_prompt_evidence_on_residual_path() -> None:
     model = tiny_model()
     world = native_world(model)
     audit = audit_native_target(
@@ -328,8 +364,13 @@ def test_reduced_scope_marks_unmodeled_prompt_updates_unobserved() -> None:
         carrier_scope="response",
         coverage=1.0,
         query_chunk=2,
-        root_screen_limit=0,
-        carrier_limit=0,
+        route_budget=RouteBudget(
+            edges_per_head=2,
+            max_rows=32,
+            root_candidates=2,
+            hub_candidates=0,
+            corridor_edges=8,
+        ),
     )
     root_position = audit.world.units.positions((audit.selected_root_unit_id,))
     represented = set(audit.flow.row_position.tolist())
@@ -339,8 +380,65 @@ def test_reduced_scope_marks_unmodeled_prompt_updates_unobserved() -> None:
     assert len(omitted)
     dynamics = audit.dynamics
     assert bool((dynamics.node_register[0, omitted, EVIDENCE] == 1).all())
-    assert bool((dynamics.node_register[1:, omitted, EVIDENCE] == 0).all())
-    assert bool((dynamics.node_register[1:, omitted, UNOBSERVED] == 1).all())
+    assert bool((dynamics.node_register[1:, omitted, EVIDENCE] == 1).all())
+    assert bool((dynamics.node_register[:, omitted, UNOBSERVED] == 0).all())
+    _, residual = transition_probabilities(
+        audit.flow, len(audit.world.units.token_unit_id)
+    )
+    assert bool((residual[:, omitted] == 1).all())
+
+
+def test_late_head_read_from_any_prompt_evidence_keeps_evidence_lineage() -> None:
+    model = tiny_model()
+    world = native_world(model)
+    audit = audit_native_target(
+        model,
+        world,
+        world.targets[0],
+        "message",
+        carrier_scope="response",
+        coverage=1.0,
+        query_chunk=2,
+        route_budget=RouteBudget(
+            edges_per_head=2,
+            max_rows=32,
+            root_candidates=2,
+            hub_candidates=0,
+            corridor_edges=8,
+        ),
+    )
+    other_unit = next(
+        unit_id
+        for unit_id in audit.world.evidence_unit_id
+        if unit_id != audit.selected_root_unit_id
+    )
+    evidence_position = int(audit.world.units.positions((other_unit,))[0])
+    target = audit.flow.target.query_position
+    layer = model.config.num_hidden_layers - 1
+    head = model.config.num_attention_heads - 1
+    code = torch.ones(1, audit.flow.edges.clean_code.shape[1])
+    flow = _synthetic_flow(
+        audit,
+        layer=torch.tensor([layer]),
+        head=torch.tensor([head]),
+        source=torch.tensor([evidence_position]),
+        target=torch.tensor([target]),
+        code=code,
+        action=torch.tensor([2.0]),
+    )
+
+    dynamics = HeadResolvedRouteModel(local_window=2).analyze(
+        model,
+        flow,
+        audit.world,
+        root_unit_id=audit.selected_root_unit_id,
+    )
+
+    slot = int(torch.nonzero(dynamics.row_position == target)[0])
+    assert float(dynamics.node_register[layer, evidence_position, EVIDENCE]) == 1
+    assert float(dynamics.head_transport[layer, head, slot, EVIDENCE]) == 1
+    assert float(dynamics.head_gradient_action[layer, head, slot, EVIDENCE]) == 2
+    assert float(dynamics.head_direct_evidence[layer, head, slot, 0]) == 0
 
 
 def test_response_hub_preserves_evidence_lineage_for_reanchor_and_reuse() -> None:
@@ -369,17 +467,8 @@ def test_response_hub_preserves_evidence_lineage_for_reanchor_and_reuse() -> Non
     target_slot = int(torch.nonzero(dynamics.row_position == target)[0])
     assert float(dynamics.head_transport[1, 1, target_slot, EVIDENCE]) == 1
     assert float(dynamics.head_direct_evidence[1, 1, target_slot, 0]) == 0
-    assert float(dynamics.head_local_response[1, 1, target_slot, 0]) == 0
     assert float(dynamics.evidence_source_reuse[1, 1, hub, 0]) == 1
     assert float(dynamics.response_source_reuse[1, 1, hub, 0]) == 0
-
-    event = next(
-        item
-        for item in HeadResolvedRouteModel.reanchor_events(dynamics)
-        if item.layer == 1 and item.head == 1 and item.position == target
-    )
-    assert event.evidence_gradient_action == 2
-    assert event.direct_fraction == 0
 
 
 def test_cross_head_vector_coherence_and_functional_agreement_keep_heads() -> None:
@@ -473,4 +562,28 @@ def test_module_conflict_and_state_continuity_are_stability_not_grounding() -> N
     torch.testing.assert_close(
         aligned.attention_mlp_functional_agreement,
         torch.ones_like(aligned.attention_mlp_functional_agreement),
+    )
+
+
+def test_stage_dynamics_never_stacks_full_hidden_vectors(monkeypatch) -> None:
+    _, audit, _ = _audit()
+    flow = _stage_flow(audit, -1.0)
+    hidden_size = flow.clean_cache.final_hidden.shape[-1]
+    original_stack = torch.stack
+    stacked_inputs: list[tuple[int, ...]] = []
+
+    def record_stack(values, *args, **kwargs):
+        values = tuple(values)
+        if values:
+            stacked_inputs.append(tuple(values[0].shape))
+        return original_stack(values, *args, **kwargs)
+
+    monkeypatch.setattr(route_model.torch, "stack", record_stack)
+    HeadResolvedRouteModel._stage_dynamics(
+        flow,
+        flow.clean_cache.layer_count,
+    )
+
+    assert not any(
+        len(shape) == 2 and shape[-1] == hidden_size for shape in stacked_inputs
     )

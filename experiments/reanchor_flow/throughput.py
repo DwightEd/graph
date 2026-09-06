@@ -30,6 +30,100 @@ class FlowThroughput:
     edge: Tensor
 
 
+def _edges_by_layer(flow: PairedFlow) -> tuple[Tensor, ...]:
+    """Index every sparse edge once instead of rescanning E for every layer."""
+
+    layers = flow.clean_cache.layer_count
+    edge_layer = flow.edges.layer.long()
+    if bool(((edge_layer < 0) | (edge_layer >= layers)).any()):
+        raise ValueError("route edge layer is outside the decoder")
+    edge_index = torch.arange(flow.edges.count)
+    if len(edge_layer) > 1 and not bool((edge_layer[1:] >= edge_layer[:-1]).all()):
+        edge_index = torch.argsort(edge_layer, stable=True)
+        edge_layer = edge_layer.index_select(0, edge_index)
+    count = torch.bincount(edge_layer, minlength=layers).tolist()
+    return tuple(torch.split(edge_index, count))
+
+
+@dataclass(frozen=True)
+class FlowKernel:
+    """Root-independent reverse graph state reused across source candidates."""
+
+    edge_probability: Tensor
+    residual_probability: Tensor
+    reverse_visit: Tensor
+    unit_mass: Tensor
+    edges_by_layer: tuple[Tensor, ...]
+
+    @classmethod
+    def from_flow(
+        cls,
+        flow: PairedFlow,
+        token_unit_id: Tensor,
+        unit_count: int,
+    ) -> FlowKernel:
+        tokens = len(token_unit_id)
+        layer_edges = _edges_by_layer(flow)
+        probability, residual = transition_probabilities(flow, tokens)
+        visit = reverse_visitation(
+            flow,
+            probability,
+            residual,
+            tokens,
+            layer_edges=layer_edges,
+        )
+        return cls(
+            probability,
+            residual,
+            visit,
+            source_unit_mass(visit, token_unit_id, unit_count),
+            layer_edges,
+        )
+
+    def condition(
+        self,
+        flow: PairedFlow,
+        token_unit_id: Tensor,
+        root_unit_id: tuple[int, ...],
+    ) -> FlowThroughput:
+        """Intersect the shared target reverse pass with one source reach pass."""
+
+        tokens = len(token_unit_id)
+        root_position = torch.zeros(tokens, dtype=torch.bool)
+        for unit_id in root_unit_id:
+            root_position |= token_unit_id == unit_id
+        position = torch.nonzero(root_position, as_tuple=False).flatten()
+        reach = root_reachability(
+            flow,
+            self.edge_probability,
+            self.residual_probability,
+            position,
+            tokens,
+            layer_edges=self.edges_by_layer,
+        )
+        root_mass = float(reach[-1, flow.target.query_position])
+        if root_mass <= 0:
+            node = torch.zeros_like(self.reverse_visit)
+            edge = torch.zeros(flow.edges.count)
+        else:
+            node = self.reverse_visit * reach / root_mass
+            layers = flow.edges.layer.long()
+            source = flow.edges.source.long()
+            target = flow.edges.target.long()
+            edge = self.reverse_visit[layers + 1, target] * self.edge_probability
+            edge *= reach[layers, source] / root_mass
+        return FlowThroughput(
+            self.edge_probability,
+            self.residual_probability,
+            self.reverse_visit,
+            self.unit_mass,
+            root_unit_id,
+            root_mass,
+            node,
+            edge,
+        )
+
+
 def transition_probabilities(
     flow: PairedFlow,
     tokens: int,
@@ -100,6 +194,8 @@ def reverse_visitation(
     edge_probability: Tensor,
     residual_probability: Tensor,
     tokens: int,
+    *,
+    layer_edges: tuple[Tensor, ...] | None = None,
 ) -> Tensor:
     """Propagate one unit of target mass backwards through the sparse DAG."""
 
@@ -107,9 +203,11 @@ def reverse_visitation(
     visit = torch.zeros(layers + 1, tokens)
     visit[layers, flow.target.query_position] = 1.0
     edges = flow.edges
+    if layer_edges is None:
+        layer_edges = _edges_by_layer(flow)
     for layer in range(layers - 1, -1, -1):
         visit[layer] += visit[layer + 1] * residual_probability[layer]
-        selected = torch.nonzero(edges.layer == layer, as_tuple=False).flatten()
+        selected = layer_edges[layer]
         if not len(selected):
             continue
         source = edges.source.index_select(0, selected).long()
@@ -136,6 +234,8 @@ def root_reachability(
     residual_probability: Tensor,
     root_position: Tensor,
     tokens: int,
+    *,
+    layer_edges: tuple[Tensor, ...] | None = None,
 ) -> Tensor:
     """Probability that a reverse route from each node terminates at the root."""
 
@@ -143,9 +243,11 @@ def root_reachability(
     reach = torch.zeros(layers + 1, tokens)
     reach[0, root_position.long()] = 1.0
     edges = flow.edges
+    if layer_edges is None:
+        layer_edges = _edges_by_layer(flow)
     for layer in range(layers):
         reach[layer + 1] = reach[layer] * residual_probability[layer]
-        selected = torch.nonzero(edges.layer == layer, as_tuple=False).flatten()
+        selected = layer_edges[layer]
         if not len(selected):
             continue
         source = edges.source.index_select(0, selected).long()
@@ -164,34 +266,8 @@ def compute_throughput(
 ) -> FlowThroughput:
     """Compute ``C(u→t)`` and ``T(v|u,t)`` for one selected root group."""
 
-    tokens = len(token_unit_id)
-    probability, residual = transition_probabilities(flow, tokens)
-    visit = reverse_visitation(flow, probability, residual, tokens)
-    unit_mass = source_unit_mass(visit, token_unit_id, unit_count)
-    root_position = torch.zeros(tokens, dtype=torch.bool)
-    for unit_id in root_unit_id:
-        root_position |= token_unit_id == unit_id
-    position = torch.nonzero(root_position, as_tuple=False).flatten()
-    reach = root_reachability(flow, probability, residual, position, tokens)
-    root_mass = float(reach[-1, flow.target.query_position])
-
-    if root_mass <= 0:
-        node = torch.zeros_like(visit)
-        edge = torch.zeros(flow.edges.count)
-    else:
-        node = visit * reach / root_mass
-        layers = flow.edges.layer.long()
-        source = flow.edges.source.long()
-        target = flow.edges.target.long()
-        edge = visit[layers + 1, target] * probability
-        edge *= reach[layers, source] / root_mass
-    return FlowThroughput(
-        probability,
-        residual,
-        visit,
-        unit_mass,
+    return FlowKernel.from_flow(flow, token_unit_id, unit_count).condition(
+        flow,
+        token_unit_id,
         root_unit_id,
-        root_mass,
-        node,
-        edge,
     )

@@ -30,21 +30,7 @@ OTHER_PROMPT = 1
 RESPONSE = 2
 UNOBSERVED = 3
 CHANNEL_NAMES = ("evidence", "other_prompt", "response", "unobserved")
-
-
-@dataclass(frozen=True)
-class RouteEvent:
-    """One head-specific node proposed for exact intervention."""
-
-    layer: int
-    head: int
-    position: int
-    score: float
-    evidence_transport: float
-    evidence_gradient_action: float
-    direct_fraction: float
-    local_response_transport: float
-    local_response_gradient_action: float
+EDGE_CHUNK = 4096
 
 
 @dataclass(frozen=True)
@@ -65,14 +51,12 @@ class RouteDynamics:
     # Native edge gradient action allocated by the transport provenance model;
     # this is not an exact semantic decomposition of a nonlinear hidden state.
     head_gradient_action: Tensor  # [L, H, P, 4]
+    # Direct contribution from the selected explanatory root only.
     head_direct_evidence: Tensor  # [L, H, P, 2]: transport, action
-    head_local_response: Tensor  # [L, H, P, 2]: transport, action
     head_integration: Tensor  # [L, H, P, 4]: budget, net, coherence, action
     cross_head_vector_coherence: Tensor  # [L, P]
     cross_head_functional_agreement: Tensor  # [L, P]
     layer_integration: Tensor  # [L, P, 4]: budget, net, coherence, action
-    head_backward_distance: Tensor  # [L, H, P]
-    head_span: Tensor  # [L, H]
     evidence_source_reuse: Tensor  # [L, H, N, 2]: future transport, action
     response_source_reuse: Tensor  # [L, H, N, 2]: future transport, action
     stage_position: Tensor  # [A]
@@ -132,12 +116,14 @@ class HeadResolvedRouteModel:
     @staticmethod
     def _initial_register(
         token_unit_id: Tensor,
-        root_unit_id: int,
+        evidence_unit_id: tuple[int, ...],
         response_start: int,
     ) -> Tensor:
         tokens = len(token_unit_id)
         position = torch.arange(tokens)
-        evidence = token_unit_id.long() == root_unit_id
+        evidence = torch.zeros(tokens, dtype=torch.bool)
+        for unit_id in evidence_unit_id:
+            evidence |= token_unit_id.long() == unit_id
         evidence &= position < response_start
         response = position >= response_start
         other_prompt = ~(evidence | response)
@@ -182,7 +168,6 @@ class HeadResolvedRouteModel:
         self,
         flow: PairedFlow,
         world: NativeWorld,
-        root_unit_id: int,
         edge_probability: Tensor,
         residual_probability: Tensor,
     ) -> tuple[Tensor, Tensor]:
@@ -191,12 +176,9 @@ class HeadResolvedRouteModel:
         node = torch.zeros(layers + 1, tokens, len(CHANNEL_NAMES))
         node[0] = self._initial_register(
             world.units.token_unit_id,
-            root_unit_id,
+            world.evidence_unit_id,
             world.response_start,
         )
-        represented = torch.zeros(tokens, dtype=torch.bool)
-        represented[flow.row_position.long()] = True
-        unrepresented = ~represented
         edge_register = torch.zeros(flow.edges.count, len(CHANNEL_NAMES))
         for layer in range(layers):
             node[layer + 1] = node[layer] * residual_probability[layer, :, None]
@@ -217,11 +199,9 @@ class HeadResolvedRouteModel:
             if bool((accounted > 1.0 + 2e-5).any()):
                 raise FloatingPointError("route provenance is not conservative")
             node[layer + 1, :, UNOBSERVED] += (1 - accounted).clamp_min(0)
-            # When a reduced carrier scope omits a destination row, its
-            # within-prompt attention update is unknown.  Do not silently
-            # propagate the token's initial provenance through later layers.
-            node[layer + 1, unrepresented] = 0
-            node[layer + 1, unrepresented, UNOBSERVED] = 1
+            # Unrepresented destinations have residual probability one in the
+            # transport law.  Preserve that identity so a later-layer edge can
+            # still read an evidence-bearing prompt state.
         return node, edge_register
 
     @staticmethod
@@ -248,18 +228,21 @@ class HeadResolvedRouteModel:
         )
         net = torch.zeros_like(budget)
         cross_head_vector = torch.zeros(layers, rows)
-        delta_code = edges.clean_code.float() - edges.corrupt_code.float()
-        head_dim = delta_code.shape[1]
+        head_dim = edges.clean_code.shape[1]
         gram_cache = model_gram_cache(model)
         for layer, module in enumerate(model.model.layers):
             selected = torch.nonzero(edges.layer == layer, as_tuple=False).flatten()
             if not len(selected):
                 continue
             code_sum = torch.zeros(heads * rows, head_dim)
-            local_head = edges.head.index_select(0, selected).long()
-            local_slot = edge_slot.index_select(0, selected)
-            index = local_head * rows + local_slot
-            code_sum.index_add_(0, index, delta_code.index_select(0, selected))
+            for begin in range(0, len(selected), EDGE_CHUNK):
+                current = selected[begin : begin + EDGE_CHUNK]
+                local_head = edges.head.index_select(0, current).long()
+                local_slot = edge_slot.index_select(0, current)
+                index = local_head * rows + local_slot
+                clean_code = edges.clean_code.index_select(0, current).float()
+                corrupt_code = edges.corrupt_code.index_select(0, current).float()
+                code_sum.index_add_(0, index, clean_code - corrupt_code)
             code_sum = code_sum.view(heads, rows, head_dim)
             gram = gram_cache.get(layer)
             if gram is None:
@@ -323,7 +306,7 @@ class HeadResolvedRouteModel:
                 empty_metric.clone(),
             )
         position = stages.position.long()
-        attention_delta, mlp_delta, continuity = [], [], []
+        module_cosine, continuity = [], []
         for layer in range(layers):
             clean_attention = flow.clean_cache.attention_write[layer].index_select(
                 0, position
@@ -333,8 +316,9 @@ class HeadResolvedRouteModel:
             )
             clean_mlp = flow.clean_cache.mlp_write[layer].index_select(0, position)
             cut_mlp = flow.corrupt_cache.mlp_write[layer].index_select(0, position)
-            attention_delta.append(clean_attention.float() - cut_attention.float())
-            mlp_delta.append(clean_mlp.float() - cut_mlp.float())
+            attention_delta = clean_attention.float() - cut_attention.float()
+            mlp_delta = clean_mlp.float() - cut_mlp.float()
+            module_cosine.append(cls._cosine(attention_delta, mlp_delta))
 
             clean_state = flow.clean_cache.layer_input[layer].index_select(0, position)
             cut_state = flow.corrupt_cache.layer_input[layer].index_select(0, position)
@@ -349,8 +333,6 @@ class HeadResolvedRouteModel:
             next_delta -= cut_next.index_select(0, position).float()
             continuity.append(cls._cosine(state_delta, next_delta))
 
-        attention_vector = torch.stack(attention_delta)
-        mlp_vector = torch.stack(mlp_delta)
         displacement = torch.stack(
             (
                 stages.state_delta_norm,
@@ -374,7 +356,7 @@ class HeadResolvedRouteModel:
             position.clone(),
             displacement,
             action,
-            cls._cosine(attention_vector, mlp_vector),
+            torch.stack(module_cosine),
             functional_agreement,
             torch.stack(continuity),
         )
@@ -404,7 +386,7 @@ class HeadResolvedRouteModel:
         _, edge_slot = self._slots(flow, tokens)
         edge_probability, residual_probability = transition_probabilities(flow, tokens)
         node, edge_register = self._provenance(
-            flow, world, root_unit_id, edge_probability, residual_probability
+            flow, world, edge_probability, residual_probability
         )
         head_transport = self._scatter_head(
             flow, edge_slot, edge_register, layers, heads
@@ -428,36 +410,6 @@ class HeadResolvedRouteModel:
         head_direct = self._scatter_head(flow, edge_slot, direct_values, layers, heads)
 
         distance = flow.edges.target.long() - flow.edges.source.long()
-        response_origin = source_register[:, RESPONSE]
-        local = (
-            (flow.edges.source.long() >= world.response_start)
-            & (distance > 0)
-            & (distance <= self.local_window)
-        )
-        local_values = torch.stack(
-            (edge_probability * response_origin, native_action * response_origin),
-            dim=-1,
-        )
-        local_values *= local[:, None]
-        head_local = self._scatter_head(flow, edge_slot, local_values, layers, heads)
-
-        distance_weight = edge_probability * distance.clamp_min(0).float()
-        distance_sum = self._scatter_head(
-            flow, edge_slot, distance_weight, layers, heads
-        )
-        incoming = self._scatter_head(flow, edge_slot, edge_probability, layers, heads)
-        backward_distance = torch.where(
-            incoming > 0, distance_sum / incoming, torch.zeros_like(incoming)
-        )
-        response_row = flow.row_position >= world.response_start - 1
-        response_incoming = incoming[:, :, response_row]
-        span_denominator = response_incoming.sum(-1)
-        span = torch.where(
-            span_denominator > 0,
-            distance_sum[:, :, response_row].sum(-1) / span_denominator,
-            torch.zeros_like(span_denominator),
-        )
-
         reuse = torch.zeros(layers * heads * tokens, 2, 2)
         future = distance > 0
         reuse_index = (
@@ -504,13 +456,10 @@ class HeadResolvedRouteModel:
             head_transport=head_transport,
             head_gradient_action=head_action,
             head_direct_evidence=head_direct,
-            head_local_response=head_local,
             head_integration=integration,
             cross_head_vector_coherence=cross_head_vector,
             cross_head_functional_agreement=cross_head_function,
             layer_integration=layer_integration,
-            head_backward_distance=backward_distance,
-            head_span=span,
             evidence_source_reuse=reuse[..., 0, :],
             response_source_reuse=reuse[..., 1, :],
             stage_position=stage_position,
@@ -520,56 +469,3 @@ class HeadResolvedRouteModel:
             attention_mlp_functional_agreement=module_agreement,
             state_continuity=state_continuity,
         )
-
-    @staticmethod
-    def reanchor_events(
-        dynamics: RouteDynamics,
-        limit: int = 16,
-    ) -> tuple[RouteEvent, ...]:
-        """Rank internal evidence rereads; no sentence boundary is supplied.
-
-        A candidate is a local peak of selected-root action, including action
-        carried through response hubs.  ``direct_fraction`` records how much
-        of that lineage arrived directly from the root token.
-        """
-
-        if limit < 0:
-            raise ValueError("event limit must be non-negative")
-        if limit == 0:
-            return ()
-        action = dynamics.head_gradient_action[..., EVIDENCE]
-        score = action.abs()
-        left = torch.zeros_like(score)
-        right = torch.zeros_like(score)
-        left[..., 1:] = score[..., :-1]
-        right[..., :-1] = score[..., 1:]
-        peak = (score > 0) & (score >= left) & (score >= right)
-        candidate = torch.nonzero(peak, as_tuple=False)
-        if not len(candidate):
-            return ()
-        value = score[peak]
-        order = torch.topk(value, min(limit, len(value)), sorted=True).indices
-        events = []
-        for layer, head, slot in candidate.index_select(0, order).tolist():
-            evidence = dynamics.head_transport[layer, head, slot, EVIDENCE]
-            direct = dynamics.head_direct_evidence[layer, head, slot]
-            local = dynamics.head_local_response[layer, head, slot]
-            if direct[0] > evidence + 2e-5:
-                raise FloatingPointError("direct evidence exceeds evidence lineage")
-            direct_fraction = (
-                float((direct[0] / evidence).clamp(0, 1)) if evidence > 0 else 0.0
-            )
-            events.append(
-                RouteEvent(
-                    layer,
-                    head,
-                    int(dynamics.row_position[slot]),
-                    float(abs(action[layer, head, slot])),
-                    float(evidence),
-                    float(action[layer, head, slot]),
-                    direct_fraction,
-                    float(local[0]),
-                    float(local[1]),
-                )
-            )
-        return tuple(events)

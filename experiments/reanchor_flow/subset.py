@@ -9,19 +9,19 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from tqdm.auto import tqdm
 
 from experiments.common.ragtruth_alignment import load_source_info
 from research_dataset import open_research_dataset
 
+from .artifact_payload import save_native_audit
+from .artifact_schema import METHOD_VERSION, NativeAuditMetadata
+from .artifact_validation import validate_native_audit
 from .artifacts import save_json
 from .flow import FlowSignal
 from .native import audit_native_target
 from .native_world import load_native_world, save_native_world
-from .subset_artifacts import (
-    NativeAuditMetadata,
-    save_native_audit,
-    validate_native_audit,
-)
+from .route_plan import RouteBudget
 from .subset_data import (
     SampleRecord,
     inspect_records,
@@ -32,8 +32,7 @@ from .subset_data import (
 from .worlds import TargetContrast
 
 MANIFEST_NAME = "run_manifest.json"
-MANIFEST_SCHEMA = 2
-METHOD_VERSION = "head_resolved_route_audit_v2"
+MANIFEST_SCHEMA = 3
 
 
 @dataclass(frozen=True)
@@ -57,8 +56,7 @@ class SubsetRunConfig:
     carrier_scope: str
     coverage: float
     query_chunk: int
-    root_screen_limit: int
-    carrier_limit: int
+    route_budget: RouteBudget
     local_window: int
     saved_edges: int = 2048
 
@@ -84,8 +82,7 @@ class SubsetRunConfig:
             "carrier_scope": self.carrier_scope,
             "edge_coverage": self.coverage,
             "query_chunk": self.query_chunk,
-            "root_screen_limit": self.root_screen_limit,
-            "carrier_limit": self.carrier_limit,
+            "route_budget": asdict(self.route_budget),
             "local_window": self.local_window,
             "saved_edges": self.saved_edges,
         }
@@ -128,6 +125,13 @@ def _target_key(target: TargetContrast, signal: FlowSignal) -> str:
         f"q{target.query_position}_a{target.positive_token_id}"
         f"_b{target.negative_token_id}_{signal.value}"
     )
+
+
+def _target_selection_manifest(world, target_rank: int) -> dict | None:
+    if not world.target_selection:
+        return None
+    selection = world.target_selection[target_rank]
+    return {**asdict(selection), "is_center": selection.is_center}
 
 
 def _model_matches(dataset, model_path: str | Path) -> bool:
@@ -193,7 +197,14 @@ def run_subset_split(
     save_json(manifest_path, manifest)
 
     counts = {"samples": 0, "targets": 0, "resumed": 0, "confirmed": 0}
-    for record in selected:
+    samples = tqdm(
+        selected,
+        desc=f"{config.split} samples",
+        unit="sample",
+        dynamic_ncols=True,
+    )
+    for record in samples:
+        samples.set_postfix_str(f"{record.task_type}/{record.sample_id}", refresh=False)
         sample_key = safe_sample_key(record.sample_id)
         world_path = output / "worlds" / record.task_type / f"{sample_key}.npz"
         frozen_sample = manifest["samples"].get(record.sample_id)
@@ -216,6 +227,7 @@ def run_subset_split(
                 targets_per_sample=config.targets_per_sample,
                 target_policy=config.target_policy,
                 query_chunk=config.query_chunk,
+                local_window=config.local_window,
             )
             save_native_world(world_path, world)
 
@@ -229,8 +241,9 @@ def run_subset_split(
                     "positive_token_id": target.positive_token_id,
                     "negative_token_id": target.negative_token_id,
                     "contrast_origin": target.origin,
+                    "reanchor_selection": _target_selection_manifest(world, rank),
                 }
-                for target in world.targets
+                for rank, target in enumerate(world.targets)
             ],
         }
         if frozen_sample is not None and frozen_sample != sample_entry:
@@ -277,6 +290,7 @@ def _audit_identity(
         "positive_token_id": target.positive_token_id,
         "negative_token_id": target.negative_token_id,
         "contrast_origin": target.origin,
+        "reanchor_selection": _target_selection_manifest(world, target_rank),
         "flow_signal": config.signal.value,
         "target_rank": target_rank,
     }
@@ -293,7 +307,15 @@ def _run_world_targets(
     config: SubsetRunConfig,
 ) -> None:
     sample_key = safe_sample_key(record.sample_id)
-    for target_rank, target in enumerate(world.targets):
+    targets = tqdm(
+        enumerate(world.targets),
+        total=len(world.targets),
+        desc=f"{config.split}/{record.task_type}/{record.sample_id} targets",
+        unit="target",
+        leave=False,
+        dynamic_ncols=True,
+    )
+    for target_rank, target in targets:
         target_key = _target_key(target, config.signal)
         key = f"{record.sample_id}:{target_key}"
         destination = (
@@ -325,8 +347,7 @@ def _run_world_targets(
             coverage=config.coverage,
             carrier_scope=config.carrier_scope,
             query_chunk=config.query_chunk,
-            root_screen_limit=config.root_screen_limit,
-            carrier_limit=config.carrier_limit,
+            route_budget=config.route_budget,
             local_window=config.local_window,
             saved_edges=config.saved_edges,
         )
@@ -340,6 +361,7 @@ def _run_world_targets(
             )
             counts["targets"] += 1
             counts["resumed"] += 1
+            targets.set_postfix_str("resumed", refresh=False)
             with np.load(destination, allow_pickle=False) as stored:
                 counts["confirmed"] += int(stored["corridor_confirmed"])
         else:
@@ -351,9 +373,9 @@ def _run_world_targets(
                 carrier_scope=config.carrier_scope,
                 coverage=config.coverage,
                 query_chunk=config.query_chunk,
-                root_screen_limit=config.root_screen_limit,
-                carrier_limit=config.carrier_limit,
+                route_budget=config.route_budget,
                 local_window=config.local_window,
+                on_phase=lambda phase: targets.set_postfix_str(phase, refresh=True),
             )
             save_native_audit(
                 destination,
@@ -370,14 +392,24 @@ def _run_world_targets(
             )
             counts["targets"] += 1
             counts["confirmed"] += int(result.corridor_confirmed)
-            print(
+            targets.set_postfix_str("computed", refresh=False)
+            prefix = (
                 f"{config.split}/{record.task_type}/{record.sample_id} "
                 f"q={target.query_position} signal={config.signal.value} "
-                f"root={result.selected_root_unit_id} "
-                f"root_ok={result.selected_root_confirmed} "
-                f"corridor_ok={result.corridor_confirmed} "
-                f"restore={result.effect.restoration_error:.4g}"
+                f"root={result.selected_root_unit_id}"
             )
+            if config.route_budget.confirm:
+                detail = (
+                    f"root_ok={result.selected_root_confirmed} "
+                    f"corridor_ok={result.corridor_confirmed} "
+                    f"restore={result.effect.restoration_error:.4g}"
+                )
+            else:
+                detail = (
+                    f"corridor_edges={result.corridor.count} "
+                    f"hubs={len(result.plan.hubs)} exact=not-run"
+                )
+            tqdm.write(f"{prefix} {detail}")
             del result
             gc.collect()
             if torch.cuda.is_available():

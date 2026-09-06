@@ -1,41 +1,41 @@
-"""Causal orchestration for one native evidence-to-target corridor."""
+"""Plan one native evidence route, then optionally confirm the frozen plan."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from .corridor import (
     CarrierEffect,
     CorridorEffect,
+    PlannedCarrier,
     RootEffect,
     complete_mediation_confirmed,
-    confirm_carriers,
     confirm_corridor,
+    confirm_planned_carriers,
     intervention_tolerance,
     rerun_margin,
-    select_root,
 )
 from .flow import FlowEdges, FlowSignal, PairedFlow, margin, stage_trace
 from .native_flow import attach_cut_edge_codes, native_flow_screen
-from .native_world import (
-    NativeWorld,
-    gated_forward_cache,
-    source_gate,
-)
+from .native_world import NativeWorld, gated_forward_cache, source_gate
 from .route_model import HeadResolvedRouteModel, RouteDynamics
-from .throughput import FlowThroughput, compute_throughput
+from .route_plan import AuditPlan, RouteBudget, plan_audit
+from .throughput import FlowThroughput
 from .worlds import TargetContrast
 
 
 @dataclass(frozen=True)
 class NativeTargetAudit:
-    """Native transport screen followed by source-cut causal confirmation."""
+    """A graph-selected route and its explicitly separated exact checks."""
 
     world: NativeWorld
     flow: PairedFlow
+    plan: AuditPlan
     throughput: FlowThroughput
     corridor: FlowEdges
     effect: CorridorEffect
+    corridor_evaluated: bool
     corridor_confirmed: bool
     roots: tuple[RootEffect, ...]
     all_evidence_cut_margin: float
@@ -43,78 +43,125 @@ class NativeTargetAudit:
     selected_root_effect: RootEffect
     selected_root_confirmed: bool
     carriers: tuple[CarrierEffect, ...]
+    carrier_evaluated_count: int
     dynamics: RouteDynamics
 
 
-def confirm_native_roots(
+def _phase(callback: Callable[[str], None] | None, name: str) -> None:
+    if callback is not None:
+        callback(name)
+
+
+def _unevaluated_corridor(
+    flow: PairedFlow,
+    corridor: FlowEdges,
+    tolerance: float,
+) -> CorridorEffect:
+    missing = float("nan")
+    return CorridorEffect(
+        corridor.count,
+        flow.pair_effect,
+        missing,
+        missing,
+        missing,
+        missing,
+        missing,
+        missing,
+        missing,
+        tolerance,
+        False,
+    )
+
+
+def _planned_carriers(
+    flow: PairedFlow,
+    plan: AuditPlan,
+    tolerance: float,
+) -> tuple[CarrierEffect, ...]:
+    missing = float("nan")
+    carriers = []
+    for hub in plan.hubs:
+        state_delta = (
+            flow.clean_cache.layer_input[hub.layer][hub.position].float()
+            - flow.corrupt_cache.layer_input[hub.layer][hub.position].float()
+        )
+        carriers.append(
+            CarrierEffect(
+                hub.layer,
+                hub.position,
+                hub.route_mass,
+                float(state_delta.norm()),
+                hub.signed_action,
+                missing,
+                missing,
+                missing,
+                missing,
+                missing,
+                tolerance,
+                False,
+            )
+        )
+    return tuple(carriers)
+
+
+def _root_effects(
     model,
     flow: PairedFlow,
     world: NativeWorld,
-    throughput: FlowThroughput,
+    plan: AuditPlan,
     *,
-    limit: int,
+    confirm: bool,
 ) -> tuple[tuple[RootEffect, ...], float]:
-    """Test source Value-message-cut necessity and single-unit sufficiency."""
+    """Attach exact values to the selected root without re-ranking it."""
 
-    candidates = list(world.evidence_unit_id)
-    candidates.sort(
-        key=lambda unit_id: float(throughput.unit_mass[unit_id]),
-        reverse=True,
-    )
-    evaluated = set(candidates if limit == 0 else candidates[:limit])
-    all_cut = rerun_margin(
-        model,
-        flow.clean_cache,
-        source_gate(world, world.evidence_unit_id),
-        flow.target,
-    )
-    effects = []
-    for unit_id in candidates:
-        route_mass = float(throughput.unit_mass[unit_id])
-        selected_edge = flow.edges.source_unit == unit_id
-        functional_score = float(flow.edges.clean_target_score[selected_edge].sum())
-        if unit_id not in evaluated:
-            effects.append(
-                RootEffect(
-                    unit_id,
-                    route_mass,
-                    functional_score,
-                    float("nan"),
-                    float("nan"),
-                    float("nan"),
-                    False,
-                )
+    selected = plan.selected_root_unit_id
+    missing = float("nan")
+    necessity = flow.pair_effect if confirm else missing
+    all_cut_margin = missing
+    sufficiency = missing
+    causal_score = missing
+    effect_direction = 1.0 if flow.pair_effect >= 0 else -1.0
+    if confirm:
+        if tuple(world.evidence_unit_id) == (selected,):
+            all_cut_margin = flow.corrupt_margin
+            only_selected_margin = flow.clean_margin
+        else:
+            all_cut_margin = rerun_margin(
+                model,
+                flow.clean_cache,
+                source_gate(world, world.evidence_unit_id),
+                flow.target,
             )
-            continue
-        cut_margin = rerun_margin(
-            model,
-            flow.clean_cache,
-            source_gate(world, (unit_id,)),
-            flow.target,
+            other = tuple(
+                unit_id for unit_id in world.evidence_unit_id if unit_id != selected
+            )
+            only_selected_margin = rerun_margin(
+                model,
+                flow.clean_cache,
+                source_gate(world, other),
+                flow.target,
+            )
+        sufficiency = only_selected_margin - all_cut_margin
+        causal_score = min(
+            effect_direction * necessity,
+            effect_direction * sufficiency,
         )
-        other_units = tuple(
-            candidate for candidate in world.evidence_unit_id if candidate != unit_id
-        )
-        only_unit = rerun_margin(
-            model,
-            flow.clean_cache,
-            source_gate(world, other_units),
-            flow.target,
-        )
-        necessity = flow.clean_margin - cut_margin
-        sufficiency = only_unit - all_cut
+
+    effects = []
+    for score in plan.roots:
+        is_selected = score.unit_id == selected
         effects.append(
             RootEffect(
-                unit_id,
-                route_mass,
-                functional_score,
-                necessity,
-                sufficiency,
-                min(necessity, sufficiency),
-                True,
+                score.unit_id,
+                score.route_mass,
+                score.signed_action,
+                necessity if is_selected else missing,
+                sufficiency if is_selected else missing,
+                causal_score if is_selected else missing,
+                bool(confirm and is_selected),
             )
         )
-    return tuple(effects), all_cut
+    return tuple(effects), all_cut_margin
 
 
 def audit_native_target(
@@ -123,17 +170,25 @@ def audit_native_target(
     target: TargetContrast,
     signal: FlowSignal | str,
     *,
-    carrier_scope: str = "all",
+    carrier_scope: str = "response",
     coverage: float = 0.9,
     query_chunk: int = 8,
-    root_screen_limit: int = 4,
-    carrier_limit: int = 2,
+    route_budget: RouteBudget | None = None,
     local_window: int = 10,
+    on_phase: Callable[[str], None] | None = None,
 ) -> NativeTargetAudit:
-    """Run native roots, carrier mediation, and exact corridor tests."""
+    """Discover a bounded graph, then validate only its frozen plan.
+
+    Root, hub, and corridor identities depend only on the native message graph
+    and the fixed target-margin gradient. Exact interventions are optional
+    measurements and can never change those identities.
+    """
 
     signal = FlowSignal(signal)
     prefix = world.prefix(target)
+    budget = route_budget or RouteBudget()
+
+    _phase(on_phase, "capture")
     screen, gradients = native_flow_screen(
         model,
         prefix,
@@ -142,31 +197,17 @@ def audit_native_target(
         carrier_scope=carrier_scope,
         coverage=coverage,
         query_chunk=query_chunk,
+        max_rows=budget.max_rows,
+        max_edges_per_head_row=budget.edges_per_head,
+        local_window=local_window,
     )
-    screen_throughput = compute_throughput(
-        screen,
-        prefix.units.token_unit_id,
-        prefix.units.count,
-        prefix.evidence_unit_id,
-    )
-    roots, all_cut_margin = confirm_native_roots(
-        model,
-        screen,
-        prefix,
-        screen_throughput,
-        limit=root_screen_limit,
-    )
-    selected_root = select_root(roots)
-    selected_effect = next(
-        effect for effect in roots if effect.unit_id == selected_root
-    )
-    tolerance = intervention_tolerance(model)
-    selected_root_confirmed = bool(
-        selected_effect.evaluated
-        and selected_effect.route_mass > 0
-        and selected_effect.causal_score > tolerance
-    )
+    _phase(on_phase, "plan")
+    plan = plan_audit(screen, prefix, budget)
+    selected_root = plan.selected_root_unit_id
 
+    # This single selected-root run creates the paired state needed to measure
+    # integration. It happens only after the graph plan has been frozen.
+    _phase(on_phase, "root-cut")
     root_gate = source_gate(prefix, (selected_root,))
     root_cut = gated_forward_cache(model, screen.clean_cache, root_gate)
     edges = attach_cut_edge_codes(
@@ -175,6 +216,8 @@ def audit_native_target(
         root_cut,
         gradients,
         root_gate.source_mask,
+        clean_cache=screen.clean_cache,
+        query_chunk=query_chunk,
     )
     flow = replace(
         screen,
@@ -184,46 +227,82 @@ def audit_native_target(
         corrupt_cache=root_cut,
         corrupt_source_mask=root_gate.source_mask,
     )
-
-    throughput = compute_throughput(
+    tolerance = intervention_tolerance(model)
+    roots, all_cut_margin = _root_effects(
+        model,
         flow,
-        prefix.units.token_unit_id,
-        prefix.units.count,
-        (selected_root,),
+        prefix,
+        plan,
+        confirm=budget.confirm,
     )
-    corridor = flow.edges.select(throughput.edge > 0)
-    effect = confirm_corridor(model, flow, corridor)
+    selected_effect = next(
+        effect for effect in roots if effect.unit_id == selected_root
+    )
+    effect_direction = 1.0 if flow.pair_effect >= 0 else -1.0
+    selected_root_confirmed = bool(
+        selected_effect.evaluated
+        and selected_effect.route_mass > 0
+        and selected_effect.causal_score > tolerance
+    )
+
+    corridor = flow.edges.select(plan.corridor_edge_index)
+    effect = _unevaluated_corridor(flow, corridor, tolerance)
+    corridor_evaluated = False
+    carriers = _planned_carriers(flow, plan, tolerance)
+    carrier_evaluated_count = 0
+    if budget.confirm and corridor.count:
+        _phase(on_phase, "confirm-corridor")
+        effect = confirm_corridor(model, flow, corridor)
+        corridor_evaluated = True
     corridor_confirmed = bool(
-        selected_root_confirmed
+        corridor_evaluated
+        and selected_root_confirmed
         and effect.restoration_valid
         and complete_mediation_confirmed(
             effect.necessity,
             effect.sufficiency,
             effect.blocked_sufficiency,
-            direction=1.0,
+            direction=effect_direction,
             tolerance=tolerance,
         )
     )
-    carriers = confirm_carriers(
-        model,
-        flow,
-        throughput,
-        prefix.units.positions((selected_root,)),
-        limit=carrier_limit,
-        effect_direction=1.0,
-    )
+    if budget.confirm and plan.hubs:
+        _phase(on_phase, "confirm-hub")
+        chosen = plan.hubs[0]
+        carriers = (
+            confirm_planned_carriers(
+                model,
+                flow,
+                (
+                    PlannedCarrier(
+                        chosen.layer,
+                        chosen.position,
+                        chosen.route_mass,
+                        chosen.signed_action,
+                    ),
+                ),
+                effect_direction=effect_direction,
+            )
+            + carriers[1:]
+        )
+        carrier_evaluated_count = 1
+
+    _phase(on_phase, "analyze")
     dynamics = HeadResolvedRouteModel(local_window).analyze(
         model,
         flow,
         prefix,
         root_unit_id=selected_root,
     )
+    _phase(on_phase, "complete")
     return NativeTargetAudit(
         world=prefix,
         flow=flow,
-        throughput=throughput,
+        plan=plan,
+        throughput=plan.throughput,
         corridor=corridor,
         effect=effect,
+        corridor_evaluated=corridor_evaluated,
         corridor_confirmed=corridor_confirmed,
         roots=roots,
         all_evidence_cut_margin=all_cut_margin,
@@ -231,5 +310,6 @@ def audit_native_target(
         selected_root_effect=selected_effect,
         selected_root_confirmed=selected_root_confirmed,
         carriers=carriers,
+        carrier_evaluated_count=carrier_evaluated_count,
         dynamics=dynamics,
     )

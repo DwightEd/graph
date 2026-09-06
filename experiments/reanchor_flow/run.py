@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from experiments.common.ragtruth_alignment import TASK_TYPES
@@ -18,13 +19,14 @@ from experiments.common.ragtruth_alignment import TASK_TYPES
 from .audit import audit_target, save_audit
 from .flow import FlowSignal
 from .mechanism_plot import save_mechanism_figure
+from .route_plan import RouteBudget
 from .subset import SubsetRunConfig, run_subset_split
+from .subset_data import REANCHOR_POLICIES
 from .subset_report import evaluate_subset_split
 from .worlds import load_world
 
 MODEL = Path(
-    "/share/home/tm902089733300000/a903202310/lys/models/"
-    "Meta-Llama-3.1-8B-Instruct"
+    "/share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct"
 )
 CACHE = Path(
     "/share/home/tm902089733300000/a903202310/lys/research/"
@@ -53,7 +55,7 @@ def subset_output_root(args: argparse.Namespace) -> Path:
         Path(__file__).resolve().parent
         / "outputs"
         / args.model.name
-        / "native_mechanism_v2"
+        / "native_mechanism_v3"
     )
 
 
@@ -86,6 +88,10 @@ def number(value: object) -> str:
     if value is None or not math.isfinite(float(value)):
         return "NA"
     return f"{float(value):.4f}"
+
+
+def confirmation_rate(value: object) -> str:
+    return "not-run" if value is None else number(value)
 
 
 def corridor(args: argparse.Namespace) -> dict:
@@ -181,7 +187,7 @@ def render_artifact(
     output_path: Path | None = None,
     token_labels: Sequence[str] | None = None,
 ) -> Path:
-    """Render one label-free four-panel figure from a native schema-2 NPZ."""
+    """Render one label-free mechanism figure from a native audit NPZ."""
 
     destination = output_path or artifact_path.with_suffix(".mechanism.png")
     with np.load(artifact_path, allow_pickle=False) as stored:
@@ -199,10 +205,24 @@ def mechanism_plot(args: argparse.Namespace) -> Path:
     return destination
 
 
-def _render_subset(output: Path) -> int:
+def _artifact_token_labels(artifact: Path, tokenizer) -> list[str]:
+    with np.load(artifact, allow_pickle=False) as stored:
+        token_ids = stored["token_ids"].astype(np.int64).tolist()
+    return [str(token) for token in tokenizer.convert_ids_to_tokens(token_ids)]
+
+
+def _render_subset(output: Path, tokenizer) -> int:
     artifacts = sorted((output / "audits").glob("**/*.npz"))
-    for artifact in artifacts:
-        render_artifact(artifact)
+    for artifact in tqdm(
+        artifacts,
+        desc=f"{output.name} plots",
+        unit="figure",
+        dynamic_ncols=True,
+    ):
+        render_artifact(
+            artifact,
+            token_labels=_artifact_token_labels(artifact, tokenizer),
+        )
     return len(artifacts)
 
 
@@ -233,15 +253,37 @@ def subset_config_from_args(
         carrier_scope=args.carrier_scope,
         coverage=args.edge_coverage,
         query_chunk=args.query_chunk,
-        root_screen_limit=args.root_screen_limit,
-        carrier_limit=args.carrier_limit,
+        route_budget=RouteBudget(
+            edges_per_head=args.edges_per_head,
+            max_rows=args.max_route_rows,
+            root_candidates=args.root_candidates,
+            hub_candidates=args.hub_candidates,
+            corridor_edges=args.corridor_edges,
+            confirm=args.confirm,
+        ),
         local_window=args.local_window,
+    )
+
+
+def route_plan_summary(args: argparse.Namespace) -> str:
+    """Return the visible execution plan for one subset invocation."""
+
+    mode = "candidate-discovery+confirmation" if args.confirm else "candidate-discovery"
+    return (
+        f"route plan: mode={mode} target_policy={args.target_policy} "
+        f"target_rows={args.targets_per_sample} carrier_scope={args.carrier_scope} "
+        f"edges_per_head={args.edges_per_head} "
+        f"max_route_rows={args.max_route_rows} "
+        f"root_candidates={args.root_candidates} "
+        f"hub_candidates={args.hub_candidates} "
+        f"corridor_edges={args.corridor_edges}"
     )
 
 
 def audit_subset(args: argparse.Namespace) -> dict:
     """Run the label-free native audit, optionally rendering every target."""
 
+    print(route_plan_summary(args), flush=True)
     model, tokenizer = load_model(args.model, args.device, args.dtype)
     reports = {}
     for split in selected_splits(args):
@@ -254,13 +296,18 @@ def audit_subset(args: argparse.Namespace) -> dict:
             config,
         )
         reports[split] = counts
+        confirmation = (
+            f"corridors_confirmed={counts['confirmed']}"
+            if config.route_budget.confirm
+            else "exact_confirmation=not-requested"
+        )
         print(
             f"subset {split}: samples={counts['samples']} "
             f"targets={counts['targets']} resumed={counts['resumed']} "
-            f"corridors_confirmed={counts['confirmed']}"
+            f"{confirmation}"
         )
         if args.plot:
-            print(f"mechanism figures: {_render_subset(output)}")
+            print(f"mechanism figures: {_render_subset(output, tokenizer)}")
     del model, tokenizer
     clear_memory()
     return reports
@@ -279,12 +326,25 @@ def evaluate_subset(args: argparse.Namespace) -> dict:
         print(f"\n=== NATIVE SUBSET {split.upper()} ===")
         for task, groups in report["groups"].items():
             confirmation = groups["all"]["confirmation_rate"]
+            metrics = groups["raw_axis_evaluation"]
+            route = metrics["route_origin_competition"]
+            switch = metrics["temporal_switch_score"]
+            adoption = metrics["evidence_adoption"]
             print(
                 f"{task:9s} clean={groups['clean']['targets']} "
                 f"hallucinated={groups['hallucinated']['targets']} "
-                f"root_ok={number(confirmation['selected_root_confirmed'])} "
-                f"corridor_ok={number(confirmation['corridor_confirmed'])} "
-                f"chain_ok={number(confirmation['full_chain_confirmed'])}"
+                f"route_auc={number(route['auroc'])} "
+                f"switch_auc(raw/neg)={number(switch['auroc'])}/"
+                f"{number(switch['negated_auroc'])} "
+                f"adoption_auc={number(adoption['auroc'])} "
+                f"n(route/switch/adopt)={route['evaluated_targets']}/"
+                f"{switch['evaluated_targets']}/{adoption['evaluated_targets']} "
+                "root_ok="
+                f"{confirmation_rate(confirmation['selected_root_confirmed'])} "
+                "corridor_ok="
+                f"{confirmation_rate(confirmation['corridor_confirmed'])} "
+                "chain_ok="
+                f"{confirmation_rate(confirmation['full_chain_confirmed'])}"
             )
     return reports
 
@@ -330,8 +390,20 @@ def add_subset(command: argparse.ArgumentParser, *, evaluation: bool = False) ->
     command.add_argument("--targets-per-sample", type=int, default=1)
     command.add_argument(
         "--target-policy",
-        choices=("uncertain", "low-margin", "evenly-spaced", "all"),
-        default="uncertain",
+        choices=(
+            "uncertain",
+            "low-margin",
+            "evenly-spaced",
+            "all",
+            *REANCHOR_POLICIES,
+        ),
+        default="reanchor",
+        help=(
+            "reanchor freezes strongest per-head exact W_O(A V) local-to-prompt/"
+            "remote-response flips; reanchor-window spends the target-row budget "
+            "on event centers and +/-1 context; no-event runs fall back to "
+            "evenly-spaced rows"
+        ),
     )
     command.add_argument(
         "--max-response-tokens",
@@ -348,12 +420,43 @@ def add_subset(command: argparse.ArgumentParser, *, evaluation: bool = False) ->
         help="transport screen: exact message norm or raw attention",
     )
     command.add_argument(
-        "--carrier-scope", choices=("response", "all"), default="all"
+        "--carrier-scope", choices=("response", "all"), default="response"
     )
     command.add_argument("--edge-coverage", type=float, default=0.9)
     command.add_argument("--query-chunk", type=int, default=8)
-    command.add_argument("--root-screen-limit", type=int, default=4)
-    command.add_argument("--carrier-limit", type=int, default=2)
+    command.add_argument(
+        "--edges-per-head",
+        type=int,
+        default=2,
+        help=(
+            "per head-row top-k for each capture branch and cap in the frozen "
+            "corridor; capture union is at most 2k"
+        ),
+    )
+    command.add_argument(
+        "--max-route-rows",
+        type=int,
+        default=256,
+        help="hard limit on represented destination token rows",
+    )
+    command.add_argument(
+        "--root-candidates",
+        dest="root_candidates",
+        type=int,
+        default=4,
+    )
+    command.add_argument(
+        "--hub-candidates",
+        dest="hub_candidates",
+        type=int,
+        default=8,
+    )
+    command.add_argument("--corridor-edges", type=int, default=64)
+    command.add_argument(
+        "--confirm",
+        action="store_true",
+        help="run exact interventions only for the frozen candidate budget",
+    )
     command.add_argument("--local-window", type=int, default=10)
     command.add_argument(
         "--plot",
@@ -388,7 +491,7 @@ def parser() -> argparse.ArgumentParser:
 
     plot_command = commands.add_parser(
         "mechanism-plot",
-        help="render one native schema-2 audit without reading labels",
+        help="render one native schema-3 audit without reading labels",
     )
     plot_command.add_argument("--artifact", type=Path, required=True)
     plot_command.add_argument("--output", type=Path)
@@ -403,6 +506,16 @@ def validate_args(args: argparse.Namespace) -> None:
     for name in ("query_chunk", "gradient_steps", "local_window"):
         if hasattr(args, name) and getattr(args, name) < 1:
             raise ValueError(f"--{name.replace('_', '-')} must be positive")
+    for name in (
+        "edges_per_head",
+        "max_route_rows",
+        "root_candidates",
+        "corridor_edges",
+    ):
+        if hasattr(args, name) and getattr(args, name) < 1:
+            raise ValueError(f"--{name.replace('_', '-')} must be positive")
+    if hasattr(args, "hub_candidates") and args.hub_candidates < 0:
+        raise ValueError("--hub-candidates cannot be negative")
     for name in ("root_screen_limit", "carrier_limit"):
         if hasattr(args, name) and getattr(args, name) < 0:
             raise ValueError(f"--{name.replace('_', '-')} cannot be negative")

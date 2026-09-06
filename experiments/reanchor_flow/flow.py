@@ -113,6 +113,38 @@ class RowAggregation:
     content_score: Tensor
 
 
+SOURCE_LOCATION_BUCKET_NAMES = (
+    "prompt_evidence",
+    "other_prompt",
+    "remote_response",
+    "recent_local",
+)
+
+
+@dataclass(frozen=True)
+class SourceLocationBuckets:
+    """Full-row, head-resolved source-location totals before edge pruning.
+
+    The final axis follows :data:`SOURCE_LOCATION_BUCKET_NAMES`.  The four
+    source sets are mutually exclusive over every causal row: prompt evidence,
+    other prompt, remote response, and the recent-local response band (including
+    the diagonal).  ``transport`` is always the true ``W_O(A V)`` message norm,
+    independent of the sparse graph's configured ranking signal.  The source
+    tensors identify the strongest full-row source by that transport within
+    each bucket.
+    """
+
+    local_window: int
+    attention: Tensor
+    transport: Tensor
+    downstream_action: Tensor | None
+    source_position: Tensor
+    source_unit_id: Tensor
+    source_attention: Tensor
+    source_transport: Tensor
+    source_downstream_action: Tensor | None
+
+
 @dataclass(frozen=True)
 class PairedFlow:
     signal: FlowSignal
@@ -130,6 +162,7 @@ class PairedFlow:
     residual_weight: Tensor | None = None
     clean_source_mask: Tensor | None = None
     corrupt_source_mask: Tensor | None = None
+    source_location: SourceLocationBuckets | None = None
 
     @property
     def pair_effect(self) -> float:

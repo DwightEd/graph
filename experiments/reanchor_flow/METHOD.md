@@ -1,214 +1,448 @@
-# Hub-aware evidence mechanism audit
+# v3：逐 head 时间轴重锚定与预算化接纳审计
 
-## 1. 目标：定位信息转换，而不是 attention 峰
+## 1. 方法要回答什么
 
-对 predictor 位置 (q)，所有 screen 和 rerun 使用同一个冻结目标：
+本方法先回答一个时间问题，再回答一个功能问题：
+
+1. 在 response predictor \(q\) 上，某个 head 是否从最近少数 response token 转而读取原始 prompt
+   或更早的 response relay？
+2. 这个冻结的结构事件读到了哪个 source；该信息是否实际写入 residual、被后续计算接纳，并对
+   \(q+1\) 或一个明确的晚期 target 有帮助？
+
+第一问是**不依赖 target gradient 的全时间轴结构发现**；第二问才是固定 target 的 route/action/
+integration 审计。它们不能用同一个分数互相替代。本方法也不把 response token 对先前 response 的
+正常依赖自动解释成幻觉自我强化。
+
+对 predictor 位置 \(q\)，先冻结 target contrast：
 
 \[
 F_t=z_q(a)-z_q(b).
 \]
 
-native audit 中，(a) 是 teacher-forced observed token，(b) 是未干预 native run 中排除
-(a) 后的 top runner。受控 pair 中，(a,b) 必须在实验前注册为 factual candidates。两种
-estimand 不混报。
+- native audit 中，\(a\) 是 teacher-forced observed token，\(b\) 是未干预 native run 的 frozen
+  runner；这测量 observed-token support，不测量 factual correctness。
+- controlled pair 中，\(a,b\) 是运行前注册的 grounded/counterfactual candidates；native 与 pair
+  estimand 不混报。
 
-审计分成四个问题：
+root/hub/corridor 与 adoption diagnostics 是 **target-conditioned** 的：改变 target、runner、source
+units、destination scope 或预算就得到另一个 AuditPlan。时间轴 structural switch 本身只依赖当前
+模型的 clean full-row message transport，不读取 runner、gradient、label 或 intervention outcome。
 
-1. selected-source operator 的影响从哪里进入，是否经过 prompt/response hub；
-2. 该影响是否改变 residual write，并推动固定 target；
-3. attention、MLP 和后续层是保留、增强、抵消还是覆盖它；
-4. 删除、恢复、阻断真实 message 后，target margin 是否按预测改变。
+## 2. 先冻结结构事件，再冻结 AuditPlan
 
-这一定义允许 `source → hub → target`。target 缺少 direct prompt attention 不足以否定间接路径；
-只有 selected-source intervention 改变 hub state，且 hub→target patch/block 闭合 mediation，才称
-该 operator 下的 causal relay。`grounded route` 还要求 matched factual contrast。
+v3 按以下顺序把时间事件、target-conditioned 候选与因果确认隔离：
 
-## 2. 真实消息与逐 head 图
+1. 在不读取 label 的 clean model 上扫描 response full rows，用 transport-only 规则冻结重锚定事件；
+2. 按 `reanchor` 或 `reanchor-window` 策略冻结有限的 target rows，再冻结 observed token 与 native
+   runner contrast；
+3. 对每个 target 做一次 head-resolved capture，计算 route mass 与 signed target action；
+4. 在固定预算内选择 roots、hubs 和一条 connected corridor，并冻结为 AuditPlan；
+5. 计划冻结后，固定做恰好一次 selected-root cut，构造 native/root-cut paired state 与
+   attention/MLP integration ledger；
+6. 默认到此结束；只有显式传入 `--confirm` 才把冻结 root/hub/corridor 送入额外的
+   necessity/sufficiency/restore/block validation ladder。
 
-attention (A) 只是 QK gate。实际写入 residual 的逐 head message 是
+第 5 步不是搜索：它只针对已选 root，不能改变 plan score、rank、hub 或 corridor，也不因 margin
+变化大就把候选标为 confirmed。--confirm 不参与第 1–3 步。确认结果不得重排 root、替换失败的 hub、
+补选 corridor edge 或扩大预算。候选被 exact intervention 否定时，正确结果是“预注册候选未通过”，
+不是用 intervention
+effect 重新挑一个更好看的候选。结构事件的坐标也不得由 action、integration 或 exact effect 回写。
+
+这避免了以每条 route 的 exact cut 作为搜索算法。候选发现的成本由流式 full-row 扫描、每个 target
+一次 capture/backward、一次冻结后的 selected-root paired run 和固定大小的稀疏图控制；不会为每条
+候选 route 各跑一次剪除。额外 exact forward rerun 只在 --confirm 下花在冻结的少量候选上。
+
+`reanchor` 把 `targets_per_sample=N` 解释为最多 \(N\) 个经时间 NMS 的事件中心；
+`reanchor-window` 把 \(N\) 解释为 target-row 硬总预算，先保留最多 \(\lceil N/3\rceil\) 个中心，再按
+rank 补 \(-1,+1\) 邻居。\(N=3\) 就是最强事件的三行窗口。完全没有结构事件时才回退到
+evenly-spaced rows，且 `contrast_origin` 必须记录 fallback。
+
+## 3. 图的原子是实际 residual message
+
+attention weight \(A\) 只是 QK gate。layer \(l\)、query head \(h\) 从 source \(j\) 写到
+destination \(i\) 的实际 message 是
 
 \[
 m^{l,h}_{j\to i}
-=W_O^{l,h}\left(A^{l,h}_{i,j}V^{l,g(h)}_j\right).
+=W_O^{l,h}\left(
+A^{l,h}_{i,j}\,W_V^{l,g(h)}\operatorname{LN}(r_{l,j})
+\right),
 \]
 
-因此图节点是 `(layer boundary, token position)`，显式边保存
-`(layer, head, source, target)`。residual continuation 和 MLP 是同位置的层内转换。GQA head
-映射在 message capture 时处理，不在分析后补近似。
+其中 \(g(h)\) 是 GQA query-head 到 KV-head 的映射，\(W_O^{l,h}\) 是该 query head 对应的
+o_proj slice。实现可以在 pre-\(W_O\) code 上借助 \(W_O^TW_O\) 计算 message norm，但语义仍是
+post-\(W_O\) residual write，而不是 attention × V 的未投影近似。
 
-不同 head 可能做 global retrieval、local copying 或相反方向的 write。向量合成遵循 Transformer
-真实的 residual addition；诊断统计允许计算 signed sum/coherence，但数据契约始终保留
-(L\times H\times P) 轴，不保存“平均 head”。
+每条显式边必须保留 (layer, head, source, destination)。不同 heads 可以分别做 global retrieval、
+local copy、抑制或补偿；不能先对 head 求平均。允许在完整逐-head值之上计算 signed sum、absolute
+budget 和 agreement，但这些汇总不能替代原始 head 轴。
 
-## 3. 四账分析模型
+## 4. 全时间轴的结构重锚定发现
 
-`HeadResolvedRouteModel` 接收一次 native capture 和已经选定的 `root_unit_id`。它不重新计算
-attention，也不充当 detector。
+令 `local_window=w`。对每个 response destination \(q\)，其完整 causal source row 在 sparse top-k
+之前被分为四个互斥且穷尽的集合：
 
-### 3.1 Provenance / routing ledger
+| source bucket | 定义 |
+|---|---|
+| `prompt_evidence` | \(s<\text{response_start}\)，且 source unit 属于预注册 evidence units |
+| `other_prompt` | \(s<\text{response_start}\)，但不属于 evidence units |
+| `remote_response` | \(s\ge\text{response_start}\) 且 \(q-s>w\) |
+| `recent_local` | \(s\ge\text{response_start}\) 且 \(0\le q-s\le w\)，包含对角线 |
 
-每个节点维护四通道来源：
-
-```text
-selected evidence root | other prompt | response origin | unobserved
-```
-
-对一个 destination row，以 residual norm 和逐边真实 message norm 构造候选 transport law：
+对 bucket \(b\) 保存 attention mass 与真实 message-transport magnitude：
 
 \[
-p_e=\frac{\lVert m_e\rVert_2}
-{\lVert r_{l,i}\rVert_2+\sum_{h,j}\lVert m^{l,h}_{j\to i}\rVert_2},
-\qquad
-p_r=\frac{\lVert r_{l,i}\rVert_2}
-{\lVert r_{l,i}\rVert_2+\sum_{h,j}\lVert m^{l,h}_{j\to i}\rVert_2}.
+T_{l,h,q,b}=\sum_{s\in b}\left\|m^{l,h}_{s\to q}\right\|_2.
 \]
 
-未捕获/裁剪质量进入 `unobserved`，不重新分配给保留边。`carrier_scope` 默认是 `all`；若 reduced
-scope 没有表示某个 prompt destination，它在下一层的来源也转为 `unobserved`，不会把初始 source
-身份跨层硬拷贝。
-节点 provenance 递推为
+还保存每桶 transport 最大的 source position/unit、该 source 的 attention 和 transport。完整
+`[head, query_chunk, causal_source]` row 只在 chunk 内存在；常驻结果是
+\([L,H,P,4]\) 的桶总量与 winner。因此这里确实读取裁剪前 full rows，却不宣称保存了完整
+\(L\times H\times T^2\) triangle。
+
+将前三个 long-range 桶合为 \(R_q\)，`recent_local` 记为 \(L_q\)，并定义
 
 \[
-Z_{l+1,i}=p_rZ_{l,i}+\sum_{h,j}p^{l,h}_{j\to i}Z_{l,j}
-+p_{sink}e_{unobserved}.
+p_q=\frac{R_q}{R_q+L_q}.
 \]
 
-`edge_register` 和 `head_transport[L,H,P,4]` 因而能区分 direct evidence、经 response hub
-中继的 evidence、other prompt 以及原生 response history。它只是 norm-based routing model，
-不是向量信息的概率守恒或因果分解。
+一个 `(layer, head, q)` 只有同时满足以下条件才是结构候选：
 
-### 3.2 Target-action ledger
+- \(q-1\) 为 local-dominant，\(p_{q-1}<0.5\)；
+- \(q\) 为 long-range-dominant，\(p_q\ge0.5\)；
+- raw long-range transport 上升，且 raw recent-local transport 下降。
 
-每条 native message 对冻结 margin 的一阶作用为
+相邻位置的归一化变化为
 
 \[
-\phi_e=\left\langle\nabla_{c_e}F_t,c_e\right\rangle .
+r_q=\frac{\max(R_q-R_{q-1},0)}{R_q+R_{q-1}},\qquad
+f_q=\frac{\max(L_{q-1}-L_q,0)}{L_q+L_{q-1}},
 \]
 
-`head_gradient_action[L,H,P,4]` 按 source-node provenance 记录有符号 action。正值支持当前
-target contrast，负值反对。它回答“这条可用路径在当前点能否推动 target”，但仍是局部一阶
-screen，不能替代 rerun。
+结构分数注册为 \(S_q=\sqrt{r_qf_q}\)，非候选处为零。每个 head 独立找 temporal peak；同一时间
+跨 head/layer 的平均值不参与发现。时间 NMS 后用最强单 head 分数排序，同时保存该时间的 head
+support 作为诊断，而不是平均分。
 
-`reanchor_events` 在每个 head 的 selected-root action 轨迹上找局部峰。峰可以由 hub-carried
-lineage 产生；`direct_fraction` 是 direct-root norm transport / total root-lineage norm transport，
-不是语义内容比例或因果效应比例。local response
-复用和 evidence-origin 复用分别保存，避免把带有 evidence lineage 的 response hub 错分成纯粹
-self-history。
+这里的 anchor 只表示 long-range source location。winner 是 `prompt_evidence`、`other_prompt` 或
+`remote_response` 中 transport 最大的桶；`remote_response` 只有在随后测得 evidence-lineage fraction
+大于零时才能称 evidence-bearing relay candidate。该 fraction 来自 coverage-pruned sparse route
+provenance；预算外质量仍是 unknown/unobserved，不重归一，所以它不是 full-row exact lineage 或语义
+真值。bucket kind 是输入 source position/unit 的身份，不代表当前 layer 的 node state provenance 是
+纯的；prompt-evidence、other-prompt 或 response winner 经更新后都可能混合 lineage。attention bucket
+只作辅助图，不能替代上述 message transport selector。
 
-### 3.3 Source-cut integration ledger
+结构候选冻结后才附加两类功能注释：
 
-native world 与 selected-root Value-message-cut world 使用同样的 token 坐标。对 residual input、
-attention write 和 MLP write 分别保存
+- bucket/source 的 signed `gradient · message`。只有 event 的 \(q\) 等于 artifact 的
+  `query_position` 时，才是该 event 对紧随 \(q+1\) token 的 immediate action；prefix 更早事件只能
+  解释为对当前晚期 target 的 downstream action。
+- selected-root cut 的 integration。只有 winner 为 `prompt_evidence` 且其 unit 正好等于 selected root
+  时，该 source 的 selected-root integration 才适用；其余事件必须记为 not applicable，不能泛称已
+  接纳该 source。
+
+因此 attention/transport triangle 用于**找切换位置**，action/integration 用于**检查接纳**，exact
+intervention 用于**验证冻结 operator**。三者是有顺序的证据层级。
+
+## 5. 固定 target route graph 的三个候选量
+
+### 5.1 Route mass
+
+message norm 与隐式 residual continuation 构造一个仅用于 topology screening 的 transition law。
+从冻结 target 反向传播单位 route mass，再与给定 source root 的正向 reachability 相交，得到
+root-conditioned node/edge throughput \(M\)。
+
+这只是 norm-based routing model。它不表示语义信息的概率，也不是 causal effect。
+
+全局 provenance ledger 与 root-conditioned throughput 必须分开：EVIDENCE channel 在输入层包含
+world 注册的 **全部 evidence units**，因此主 route-origin competition 比较 all-evidence lineage 与
+response lineage。selected root 只用于解释性的 root-conditioned throughput/backbone、direct-root
+fraction，以及计划冻结后的 root-cut integration；它不能把其他 evidence units 降为 other_prompt。
+
+### 5.2 Signed grad-message
+
+一条 native message 对固定 contrast 的局部作用为
 
 \[
-P_k=\lVert u_k^{native}-u_k^{cut}\rVert_2,
-\qquad
-C_k=\left\langle\nabla_{u_k}F_t,
-u_k^{native}-u_k^{cut}\right\rangle .
+a_e=\left\langle\nabla_{m_e}F_t,m_e\right\rangle.
 \]
 
-(P_k) 只是 source-cut state displacement；(C_k) 是当前 target 下的 first-order action screen。
-它们都不证明存在可分离的事实表征或该改变对 target 有因果作用。相同 token 与位置能抵消许多
-共享的词法/语法结构，但 source cut 仍会改变后续非线性交互。
+正值局部支持 \(a\) 相对 \(b\)，负值局部反对，绝对值表示候选作用强度。该量必须保留符号；只看
+message norm 无法区分支持与抑制。
 
-逐 head integration 保存 message-delta budget、合成后 net norm、vector coherence 和 signed
-action。逐层 stage ledger 同时保存 residual/attention/MLP displacement 与 action。
+### 5.3 Head agreement
 
-### 3.4 Exact causal ledger
-
-最终结论来自真实 forward rerun，而不是前三账：
-
-- root necessity：删掉 selected source 的 Value messages；
-- root conditional sufficiency：只保留 selected source；
-- corridor rescue/block：恢复或删除选中的 pre-`W_O` messages；
-- carrier patch/block：恢复 hub state 后，再切断 hub 到 target 的 downstream path；
-- restoration check：原位删掉 message 后补回，必须重建相应世界的 margin。
-
-只有 root、corridor、carrier 的方向和 restoration check 一致，才命名为 confirmed native causal
-chain；matched factual pair 中才可进一步命名 confirmed factual corridor。attention、message norm、
-gradient、throughput 都只是候选选择。
-
-## 4. 一致性与“稳定状态”的严格命名
-
-多个 heads 指向相似来源并不表示其 residual writes 一致。代码同时计算：
+对候选 group \(G\)，先在每个 head 内聚合 routed signed action \(a_{G,h}\)，再计算
 
 \[
-\text{vector coherence}
-=\frac{\left\lVert\sum_h\Delta m_h\right\rVert_2}
-{\sum_h\lVert\Delta m_h\rVert_2+\epsilon},
+A_G=
+\frac{\left|\sum_h a_{G,h}\right|}
+{\sum_h|a_{G,h}|+\epsilon}.
 \]
+
+\(A_G\) 是 cancellation penalty，不是 head 平均，也不要求 global/local heads 关注相同 token。
+所有 \(a_{G,h}\) 仍写入 artifact。低 agreement 说明不同 heads 的 target action 抵消；高 agreement
+只说明当前 target contrast 下的 functional alignment。
+
+## 6. root、hub 与 corridor 如何发现
+
+对候选 group (G)，定义 route-weighted signed action 与 absolute budget：
 
 \[
-\text{functional agreement}
-=\frac{\left|\sum_h\phi_h\right|}
-{\sum_h|\phi_h|+\epsilon}.
+s_G=\sum_h a_{G,h},\qquad
+B_G=\sum_h|a_{G,h}|.
 \]
 
-attention/MLP 另存 vector cosine 与 functional agreement；相邻 residual state 的
-source-cut delta cosine 作为 `state_continuity`。这些量保留时间/位置和 head 结构。
-
-这些量只有在对应 displacement/action budget 非零且跨连续层成立时才有意义。高 coherence、高
-agreement、高 continuity 只表示当前 target contrast 下的 `functional alignment`；它可能保留
-source-conditioned 影响，也可能与 response-origin action 同时出现。
-稳定性不是 correctness，也不能直接叫“推理谷底”或 attractor。真正的 attractor 主张需要
-free-running 多次生成和双向扰动恢复实验；当前 teacher-forced DAG 不识别它。
-
-用于 hallucination 的预注册机制对照是两个轴：
+冻结的 selection magnitude 是
 
 \[
-G_t=\text{native source-mediated observed margin},\qquad
-R_t=\text{response-origin supporting-action candidate}.
+S_G^{mag}=M_G\,B_G\,A_G.
 \]
 
-(R_t) 高是正常生成也会出现的现象；(G_t) 低、(R_t) 高只能称 response-reliance candidate。
-真正的生成自我强化主张需要独立的 response-history cut/patch。捕获冻结后才加入 labels。
+其中 \(M_G\) 是与 target 连通的 route mass，\(A_G=|s_G|/(B_G+\epsilon)\)。忽略数值稳定项时，
+它等价于按 \(M_G|s_G|\) 排序；agreement 已通过 absolute budget 到净 action 的收缩进入分数，不能再
+对 \(s_G\) 重复乘一次。\(S_G^{mag}\) 非负，signed_action \(s_G\) 单独保存方向；后续“支持
+evidence”的命名还要求 \(s_G>0\)。不能用 exact cut effect 替换这里任何一项。
 
-## 5. Verbal-confidence cache → retrieve 的启发
+### Root
 
-[*How do LLMs Compute Verbal Confidence?*](https://arxiv.org/html/2603.17839v3) 用 steering、
-corrupt-restore patching、swap、probe 和 attention blocking 得到一个可迁移的实验模板：与
-confidence 相关的 answer state 先汇入 post-answer newline cache，后续 confidence cue 再取回；
-更长模板中的多跳中继是论文对 direct block null result 的可能解释，而非已经定位的固定路径。
+root group 是一个预注册 source unit。每个 unit 都由其 target-connected messages 计算上述量；
+在 root_candidates 预算内保存排名，首项成为 selected root。若 functional score 全为零，只允许按
+预注册的 route-mass fallback 和稳定 tie-break 选择，并明确记录 fallback，不能调用 rerun 决胜。
 
-本方法迁移的是以下逻辑：先定位 cache candidate，再分别验证 state displacement、target action、
-必要性和 downstream mediation。不能迁移的是语义结论：verbal-confidence 论文没有
-操纵外部 supporting evidence，也没有证明 cache 表示 grounded truth。这里必须始终把
-evidence lineage、response-history/commit state 和最终 correctness 分开。
+### Hub/cache candidate
 
-## 6. 两类实验与可识别边界
+hub 是内部 (layer boundary, position)。它必须同时拥有 selected-root 的 inbound flow 与通向
+target 的 outbound flow；取两侧 absolute action budget 的 bottleneck，再乘 route mass 与两侧
+agreement 的 bottleneck。signed action 仍单独保留。相邻层、同一
+position 的重复候选用预注册 NMS 规则合并。高分 hub 只表示“可能缓存并中继 target-relevant
+source effect”，不是已验证 cache，也不是 grounded representation。
 
-### Native RAGTruth source cut
+### Corridor
 
-native 流程可声称：在 label-free teacher-forced 单世界中，observed-token vs frozen-runner margin
-对指定 source Value-message-cut operator 的依赖，以及通过精确 rerun 门槛的 native causal chain。
+corridor 首先在 layer-unrolled DAG 中保留一条 selected-root 到 target 的 connected backbone；
+缺少显式 message 的层可由 residual continuation 跨越。随后仅在 represented rows 内按 \(S_e^{mag}\)
+补充边，受每 (layer, head, destination) cap 与全局 corridor_edges cap 约束。它是候选 mediation
+subgraph，不是通过逐 route deletion 得到的“最小因果电路”。
 
-该 cut 不直接 mask Q/K，也不重归一 attention；source self-message 删除后，source state 和后续
-Q/K 会在 cut world 中自然演化。它不能证明 observed token 正确，不能排除词法/语法贡献，也不能
-把 source-conditioned residual delta 称作独立“证据语义向量”。
+## 7. 默认 destination 与硬预算
 
-### Controlled clean/counterfactual pair
+长上下文的完整 \(L\times H\times T^2\) 图既不必要也无法保证显存。时间轴扫描按
+`query_chunk` 临时生成 full rows，在 edge pruning 前聚合四桶后立即释放；常驻开销为
+\(O(LHP\cdot4)\)，不是持久化完整 triangle。v3 默认：
 
-grounded factual-effect 结论需要预先构造 matched worlds：
+- target_policy=reanchor、targets_per_sample=1；完整事件窗口审计建议显式使用
+  `reanchor-window` 与 3 个 target rows。
+- max_response_tokens=128：限制 clean 时间轴 pilot 的 response horizon。
+- query_chunk=8：限制一次临时生成的 query rows；遇到 OS/cgroup OOM 可降低它。
+- local_window=10：response source 距离不超过 10（含对角线）属于 `recent_local`。
+- carrier_scope=response：只展开 response-side destination rows；所有 causal prompt positions
+  仍可作为这些 rows 的 sources，因此这不等于忽略 prompt evidence。
+- max_route_rows=256：represented destination rows 的硬上限；超过时失败并要求显式缩短 horizon、
+  保持 response scope 或提高预算，不静默抽样。
+- edges_per_head=2：capture 分别保留 transport top-k 与 \(|\text{functional}|\) top-k 的并集，
+  因而每个 head-row 最坏保存 \(2k\) 条候选边；冻结 corridor 再对同一 head-row 硬限制为 \(k\)。
+- corridor_edges=64：一个 AuditPlan 中显式 corridor messages 的硬上限。
+- root_candidates=4、hub_candidates=8：候选数上限。
 
-- 相同 tokenizer、token 长度、position coordinates 和 teacher-forced response；
-- 只改变注册的 factual value/entity/relation unit；
-- 固定 grounded/counterfactual candidates (a,b)；
-- 两个方向都做 patch/block，并加入 grammar/template、随机同位置 span、other-prompt controls；
-- 无法 token-align 的 corruption 不进入原位 patching 主分析。
+edge_coverage 只控制 transport top-k 分支在预算内尽量达到的覆盖目标；functional top-k 分支独立
+保留高 absolute action 边。coverage 不得突破 capture 的 \(2k\) 并集上限或 corridor 的 \(k\) 上限。
+每个 represented head-row 的完整 transport mass 在裁剪前计算；该 row 中未被保留的 edge mass 及
+其他无法追踪的质量进入 unobserved sink，绝不重新归一到保留边。因此对 represented row：
 
-这让共享结构最大程度抵消，但仍不声称获得“纯语义”。
+\[
+M_{retained}+M_{residual}+M_{unobserved}=M_{row}.
+\]
 
-## 7. 可视化判读
+若 unobserved 很大，允许的结论只能是“在当前预算下发现了候选子图”；不能把稀疏图解释成完整
+信息流。response scope 外的 prompt destinations 没有 attention row；它们只沿 residual identity 保留
+已有 all-evidence/other-prompt provenance，使后层 represented row 仍可读取 prompt state。该近似没有
+建模 prompt 内部更新，不能用来定位 prompt hub。carrier_scope=all 是显式扩展实验，必须同时满足
+rows budget。
 
-四联图与四账一一对应：
+## 8. 为什么 residual difference 或 gradient 单独都不够
 
-| 面板 | 读法 | 限制 |
+对 clean/counterfactual 或 native/source-cut 两个 worlds，节点差分
+
+\[
+d_v=h_v^{clean}-h_v^{cf}
+\]
+
+只说明该 intervention 改变了状态。它可能混合事实、词法、语法、长度、实体类型及下游非线性
+效应；高 \(\|d_v\|\) 不说明 target 读取了该差异。
+
+梯度
+
+\[
+g_v=\nabla_{h_v}F_t
+\]
+
+只说明在当前基点附近，某个方向可以改变 target。高 \(\|g_v\|\) 不说明实际 activation 中存在
+source-specific 信息，并且局部线性化会受 softmax saturation、抵消和高阶交互影响。
+
+两者的内积
+
+\[
+\widehat{IE}_v=\langle g_v,d_v\rangle
+\]
+
+把“被 intervention 改变”与“沿 target-sensitive 方向改变”结合起来，是 AtP/EAP 类的一阶
+screen；它仍不是真实 intervention effect。高 displacement、低 \(|\widehat{IE}|\) 可注册为
+changed_but_not_used candidate；高正值可注册为 accepted/supporting candidate；这些名字都要在
+exact confirm 前保留 candidate。
+
+attention write 与 MLP write 分开保存 displacement 和 signed action，用于观察 source effect 被
+增强、抵消或覆盖。它们不能从 residual 中“纯化”出事实语义；纯语义主张还需要 token-aligned
+factual swaps、same-fact paraphrase 和 grammar controls。
+
+默认的一次 selected-root cut 只为上述差分与 integration ledger 提供 paired state。因为 root 是先由
+同一 native graph 选出的，这个差分是 post-selection diagnostic，不是独立的 root confirmation；它也
+不能用来重排候选。
+
+## 9. Hub 到底承载什么：2×2 factorial 审计
+
+这是下一阶段的 controlled experiment 预注册；当前 native subset CLI 不生成四格 worlds，也不会输出
+fact/confidence content label。
+
+native 单样本图只能区分 evidence-origin、other-prompt、response-origin 与 unobserved lineage，不能
+单独判断某个 hub 编码的是事实值、置信表达、二者交互，还是共享的词法/模板特征。要回答“承载什么
+信息”，需要另建 token-aligned 的 \(2\times2\) matched factorial worlds：
+
+| 因子 | 水平 0 | 水平 1 |
 |---|---|---|
-| route DAG | connected root→target backbone、root-lineage allocated action、head 和 hub | 候选 topology |
-| head map | evidence 与 response-origin action，不平均 head | first-order use |
-| integration | residual/attention/MLP displacement、action、一致性和 continuity | source-conditioned screen |
-| intervention ladder | root/corridor/carrier 的真实 margin effect | causal confirmation |
+| fact value \(F\) | factual value/entity A | matched factual value/entity B |
+| confidence condition \(C\) | low/uncertain cue | high/certain cue |
 
-判定 verified evidence hub 还要求 matched factual contrast：route 连通、state displacement 高于 controls、hub
-patch 能 rescue、hub block 能破坏、hub→target path mediation 成立且没有被下游反向覆盖。native
-source-cut 通过相同结构时只命名为 native carrier。
+令同一 node 的 activation 为 \(h_{fc}\)。分别注册跨 confidence 平均的 fact contrast、跨 fact 平均的
+confidence contrast，以及 interaction difference-of-differences：
+
+\[
+d_F=\tfrac12[(h_{10}-h_{00})+(h_{11}-h_{01})],
+\qquad
+d_C=\tfrac12[(h_{01}-h_{00})+(h_{11}-h_{10})],
+\]
+
+\[
+d_{F\times C}=(h_{11}-h_{10})-(h_{01}-h_{00}).
+\]
+
+same-fact paraphrase、grammar/template swap 与 matched random-span difference 是 nuisance controls；
+候选方向只有在主 contrast 超过这些 control，并能跨模板、跨实体泛化时才获得内容标签。一个 hub
+可以多路复用，同时有 fact、confidence 与 interaction 成分，不能强制分配单一标签。
+
+最终需要 causal swap，而不只看 probe 或 cosine：把 fact component 从 B world patch 到 A world 应
+改变答案事实/对应 answer margin，同时尽量不只改变 verbal-confidence 表达；patch confidence
+component 应改变 confidence token/表达，同时尽量保持答案身份与 factual margin。双向 swap、matched
+cell controls 与 downstream block 都通过，才支持“该 hub 因果承载相应信息”。线性 contrast 只是
+操作性分解，不证明模型内部存在彼此正交、可完全分离的语义变量。
+
+## 10. --confirm：少量因果验证
+
+只有显式 --confirm 才对冻结计划执行额外验证：
+
+1. **root cut/keep**：测试 selected source 的 necessity 与 conditional sufficiency；
+2. **corridor restore/block**：恢复或删除计划中的真实 pre-\(W_O\) message endpoints；
+3. **hub restore**：在 source-corrupt world 中恢复 frozen hub state；
+4. **hub→target block**：恢复 hub 后阻断预注册 downstream corridor，检验 mediation；
+5. **restoration check**：cut 后原位恢复必须在 dtype tolerance 内重建相应 world。
+
+确认对象始终来自同一 AuditPlan。single-node null 可能来自冗余、自修复或信息已在更早层转移；
+它否定当前 intervention 下的必要性，不证明模型从未使用该信息。positive result 也只支持该
+operator、target 与数据分布下的因果作用。
+
+默认 selected-root cut 已保存 root_value_effect = native_margin − root_cut_margin，但它只是
+post-selection diagnostic。未传 --confirm 时 selected_root_evaluated=false，
+selected_root_value_necessity、selected_root_conditional_sufficiency 与 selected_root_causal_score 都是
+NaN；不能把 root_value_effect 改名为 necessity。
+
+## 11. 两类可迁移的发现/验证模板
+
+[*Attention Illuminates LLM Reasoning: The Preplan-and-Anchor Rhythm Enables Fine-Grained Policy
+Optimization*](https://arxiv.org/html/2510.13554v2) 的发现流程是：按 attention-weighted mean
+backward distance 将 heads 分成 local/global 组，**组内平均 attention**后发现 sawtooth/anchor 图样，再定义
+WAAD/FAI，用时序 coupling、随机基线、高/低 FAI 位置扰动及跨 layer/task/model 复现逐级增强证据。
+可迁移的是“图样发现→冻结指标→null 比较→定向扰动→复现”的阶梯，不是其 head 分组或平均法。
+论文本身也将 WAAD/FAI 限定为结构位置信号，而非完整因果分解或局部正确性判定。
+
+[*How do LLMs Compute Verbal Confidence?*](https://arxiv.org/abs/2603.17839) 提供 cache→retrieve 的验证顺序：
+steering、corrupt-restore patching、noising、matched swap 和 attention blocking。长模板中 direct block 的 null
+result 还提醒多跳中继会隐藏单条直连路径。
+
+本项目结合两个模板：先逐 head 找可复现事件，再对冻结的 source/hub/retrieval 做特异性验证。不能迁移论文的固定
+head/PANL/CC/层号或语义结论；两篇论文都没有证明本项目的 RAG hub 表示 grounded truth。
+
+## 12. 四阶段主机制与当前实现边界
+
+本文将待验证机制定义为 **candidate competition→constraint reread→adoption/commit→reuse**，
+并按事件阶段而非绝对 token/layer/head 对齐样本：
+
+| 阶段 | 当前已有测量 | 尚缺的关键验证 |
+|---|---|---|
+| C：候选竞争 | 裁剪前逐 head 四桶 transport totals/winners | source-unit 级多候选、top-2 margin/entropy 的冻结 phase 判定；桶 entropy 不等于事实候选数 |
+| R：限定条件回读 | 同 head local↓/long-range↑/dominance flip，source token/unit | prompt-role 标注、distractor 对照与“读对条件”判定 |
+| A：接纳/承诺 | query-matched `grad·message`、selected-root attention/MLP/residual ledger | event-source-specific matched factual patch/cut；当前仅是 observed-token/post-selection screen |
+| U：后续复用 | sparse evidence lineage、hub/corridor 与 downstream-action candidate | 事件新写入 state→后续 target 的 restore/block 闭合与 free-running 轨迹 |
+
+多个 head 聚焦同一 source 只是 coordination candidate；高 agreement 只说明当前 contrast 下作用低抵消。只有
+post-\(W_O\) 写入、signed action、source-specific intervention 和 downstream reuse 都一致，才能声称完整功能链。
+
+因此五种失败模式也要按阶段定义：`miss`=应回读时无 R；`misread`=R 指向 distractor/错误条件；
+`reject`=正确 message 到达但 A 为零/负或 patch 无选择性效果；`overwrite`=A 曾成立但在 target 前被
+attention/MLP 抵消或丢失 lineage；`false-basin`=低冲突的 response-history 轨迹对正确证据扰动不更新或回到原错误轨迹。
+现有代码不能确认这五类：前四类至多有部分 candidate measurement，`false-basin` 必须加入 free-running 双向扰动；
+单次 teacher-forced 的高 agreement 同样可能是 grounded basin。
+
+native RAGTruth audit 不能把 observed-token support 命名成 correctness 或 grounding。root/hub/corridor 在默认模式下仍是冻结
+候选；只有 `--confirm` 能给出注册 operator 下的 exact effect，matched factual pair 加选择性 restore/block 才能称
+verified factual mediator。
+
+## 13. 审计与检测严格分阶段
+
+阶段 A 是 label-free mechanism audit：冻结 structural events、targets、AuditPlan、预算和 raw
+mechanism axes，生成图；固定的一次 selected-root cut 只增加 integration diagnostic，可选
+`--confirm` 再增加验证字段。阶段 B 才读取 hallucination labels，并对三个互不混合的、未训练 raw
+axes 分别计算 AUROC/AUPRC：
+
+| axis | 定义 | hallucination-risk 方向 |
+|---|---|---|
+| `route_origin_competition` | response-origin action 相对 all-evidence-origin action | 越高风险越高 |
+| `temporal_switch_score` | 只在 event-center artifact 上，冻结 layer/head/query 的 structural score | 中性；预先同时报告 raw-higher 与 negated |
+| `evidence_adoption` | 只在 prompt-evidence event center 上，同一 layer/head/query 的 full-row prompt-evidence bucket signed action | 越低风险越高 |
+
+下一阶段还将不做差值地分别注册 `GE` (Grounded-Evidence-origin adoption) 与 `GH`
+(Generated-History-origin reliance)。两轴必须分开报告：高 GE/高 GH 可能是证据经 hub 正常复用，低 GE/高
+GH 才是 unsupported-self-reliance candidate。当前 artifact **尚未输出**这两轴或 lineage-resolved GH，所以它们不进入现有
+AUROC/AUPRC，也不能从 `route_origin_competition` 的差值反推。
+
+route baseline 可使用所有冻结 target rows；temporal/adoption 只把 artifact 自己的 \(q+1\) label 接到
+结构 selector 明确记录的 event center。窗口上下文与 no-event fallback 的 temporal/adoption axis 为
+缺失；`other_prompt` 或 `remote_response` center 也不进入 `evidence_adoption`。任何 position 小于
+query 的 event，其 action 都是通往晚期 target 的
+downstream action，不能继承 query 的 label。评价阶段不得回写 artifact、重选
+target/event/root/hub/corridor，或根据 test AUROC 选择 temporal 方向、阈值或组合权重。
+
+每个 axis 的 AUROC/AUPRC 只能说明预注册机制量与 hallucination label 有预测关联；它不能反向证明
+cache/retrieve、grounding 或 self-reinforcement 的因果解释。每任务一个样本只适合 smoke test，若
+label 只有一个类别，AUROC/AUPRC 必须为 null。由于 reanchor target policy 按结构事件抽样，这些
+结果还是 event-conditioned association，不是所有自然 response tokens 的 population performance；
+population detector 需要预注册非事件对照/覆盖抽样，报告必须保留
+`selection_is_not_population_evaluation=true`。中性 temporal axis 还要按预定义的
+`prompt_evidence/other_prompt/remote_response` 分层报告同一双向指标，不能看完 labels 后挑 source
+kind。
+
+跨样本机制检验以 source/question 而非 token/head 为独立单位：用同 head/layer 内的时间 circular shift 和
+匹配非事件位置作 event null，用 distractor/同长度 other-prompt span 作 source null，在同 prompt/source 内匹配 grounded
+与 hallucinated trajectory。报告聚类 bootstrap CI 或预注册 mixed-effects model；逐 head/layer 探索用
+sample-level permutation 的 max-statistic 或 FDR；所有 event threshold、GE/GH 方向和 detector 都在
+train/calibration 冻结，test 只评估并分别报告 event coverage 与 event-conditioned 效果。
+
+## 14. 主要方法来源
+
+- [AtP*: scalable component localization](https://arxiv.org/abs/2403.00745)：一阶筛选的效率、
+  saturation/cancellation false negatives 与 top-candidate verification。
+- [Edge Attribution Patching](https://arxiv.org/abs/2310.10348)：两次 forward、一次 backward 的边筛选，
+  以及一阶分数不能替代 activation patching。
+- [Activation patching 的解释边界](https://arxiv.org/abs/2404.15255)：exploratory 与 confirmatory
+  模式、necessity/sufficiency 和 corruption dependence。
+- [Path patching](https://arxiv.org/abs/2304.05969)：用冻结路径假设检验 mediation，而不是穷举路径
+  生成假设。
+- [Causal tracing](https://arxiv.org/abs/2202.05262)：corrupt-restore 的节点定位逻辑。

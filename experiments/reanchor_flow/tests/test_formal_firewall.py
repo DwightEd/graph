@@ -302,8 +302,7 @@ def test_subset_capture_rejects_a_mismatched_dataset_split(
         carrier_scope="all",
         coverage=0.9,
         query_chunk=8,
-        root_screen_limit=4,
-        carrier_limit=2,
+        route_budget=subset.RouteBudget(),
         local_window=10,
     )
     with pytest.raises(ValueError, match="differs from requested split"):
