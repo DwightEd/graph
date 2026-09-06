@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Mapping
 
 import torch
 
@@ -30,14 +30,6 @@ class SampleRecord:
 def _hash_rank(seed: int, *parts: str) -> bytes:
     value = "\x1f".join((str(seed), *parts)).encode("utf-8")
     return hashlib.sha256(value).digest()
-
-
-def file_sha256(path: str | Path) -> str:
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def safe_sample_key(sample_id: str) -> str:

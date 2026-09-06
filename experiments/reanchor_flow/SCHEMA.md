@@ -1,254 +1,181 @@
-# ETCC data contract and saved arrays
+# Mechanism-audit data contract
 
-## Dimensions
+## 1. Coordinates
 
-| Symbol | Meaning |
+所有数组使用绝对 token position。对一个 predictor (q)，prediction position 是 (q+1)，
+causal prefix 长度为 (N=q+1)。
+
+| 轴 | 含义 |
 |---|---|
-| `N` | full teacher-forced token count |
-| `S=q+1` | causal source positions used by one target |
 | `L` | decoder layers |
-| `H` | query heads |
-| `D_h` | head dimension |
-| `D` | hidden dimension |
-| `P` | destination positions selected by `carrier_scope` |
-| `E` | coverage-retained exact attention edges |
+| `H` | query heads；始终保留，不平均 |
+| `N` | 当前 target 的 causal source positions |
+| `P` | capture 中表示的 destination rows |
+| `E` | artifact 中保存的高 root-throughput message edges |
+| `A` | source-cut stage positions |
 | `U` | source units |
-| `R` | candidate source roots |
-| `K` | causally tested carriers |
+| `R` | root candidates |
+| `K` | 被精确测试的 carriers |
+| `4` | `evidence / other_prompt / response / unobserved` provenance |
 
-## Input pair (`pair_schema=1`)
+NPZ 使用 `allow_pickle=False` 可读取的标量、字符串和数值数组。hallucination/correctness label 不进入
+world 或 audit artifact。
 
-| Field | Shape/type | Meaning |
-|---|---|---|
-| `sample_id` | string | stable example identity |
-| `tokenizer_id` | string | tokenizer/model vocabulary used for every ID |
-| `corruption` | string | predeclared clean/corrupt construction |
-| `clean_token_ids` | `[N] int64` | clean prompt plus forced response |
-| `corrupt_token_ids` | `[N] int64` | aligned corrupt prompt plus identical response |
-| `response_start` | scalar int | first response token position |
-| `token_unit_id` | `[N-1] int64` | source-unit assignment for every causal source token |
-| `unit_name`, `unit_kind` | `[U] string` | semantic source-unit table |
-| `candidate_unit_id` | `[R] int32` | units allowed to differ and requiring root screening |
-| `query_position` | `[T] int32` | predictor `q`; prediction token is `q+1` |
-| `positive_token_id` | `[T] int32` | candidate `a` in `z(a)-z(b)` |
-| `negative_token_id` | `[T] int32` | candidate `b` |
-| `contrast_origin` | `[T] string` | how `a,b` were fixed; exposes label use |
+## 2. Native world
 
-Load-time validation rejects unequal lengths, response differences, unnamed prompt changes, unchanged
-candidate units, invalid predictor rows and equal target candidates.
+`native_world_schema=1` 是 label-free target contract：
 
-## Output provenance (`etcc_schema=1`)
+| 字段 | 形状 | 含义 |
+|---|---:|---|
+| `sample_id`, `tokenizer_id` | scalar | 安全样本 ID 与 tokenizer |
+| `token_ids` | `[N_full]` | prompt 与 teacher-forced response |
+| `response_start` | scalar | 第一个 response token |
+| `token_unit_id` | `[N_full-1]` | 每个 source position 的 unit |
+| `unit_name`, `unit_kind` | `[U]` | passage/sentence/field/response 表 |
+| `evidence_unit_id` | `[R]` | 可作为 source root 的 units |
+| `query_position` | `[T]` | 冻结 predictors |
+| `positive_token_id` | `[T]` | observed token |
+| `negative_token_id` | `[T]` | native run 中冻结的 runner |
+| `contrast_origin` | `[T]` | target 选择与 contrast 语义 |
 
-Each contrast produces one NPZ named `<sample>_q<q>_a<a>_b<b>_<signal>.npz`.
+## 3. Native mechanism artifact
 
-| Field | Meaning |
+`subset_audit_schema=2`、`method_version=head-resolved-native-route/2`。每个 target 一个 NPZ。
+
+### 3.1 Identity and claim coordinates
+
+- dataset/sample/source/split/task/model/tokenizer identity；
+- `response_start`, `query_position`, `prediction_position`；
+- `positive_token_id`, `negative_token_id`, `target_token_ids`, `contrast_origin`；
+- `flow_signal`, `edge_coverage`, `carrier_scope`, `query_chunk`, `local_window`；
+- `token_ids`, `token_unit_id`, `unit_name`, `unit_kind`, `evidence_unit_id`。
+
+这里的语义是 observed target 对 selected source Value-message cut 的依赖；schema 2 不新增 factual
+correctness 声明。`carrier_scope` 默认是 `all`；缩减 scope 时，未表示的 prompt destination 在
+下一层归入 `unobserved` provenance，不能把其初始 source 身份解释为跨层延续。
+
+### 3.2 Root and exact intervention outcomes
+
+| 字段 | 形状 | 含义 |
+|---|---:|---|
+| `root_unit_id` | `[R]` | candidate unit IDs |
+| `root_route_mass`, `root_functional_score` | `[R]` | route 与一阶功能 screen |
+| `root_value_necessity` | `[R]` | 删除该 unit Value messages 的 margin effect |
+| `root_conditional_sufficiency` | `[R]` | 只保留该 unit 的 conditional rescue |
+| `root_causal_score`, `root_evaluated` | `[R]` | 双向门槛和是否执行 rerun |
+| `selected_root_unit_id`, `selected_root_confirmed` | scalar | 最终 selected root |
+| `native_margin`, `root_cut_margin`, `root_value_effect` | scalar | native/source-cut 对照 |
+| `corridor_*` | scalar | necessity、conditional/blocked/mediated rescue、restoration error/validity |
+| `corridor_confirmed` | scalar bool | root、方向、mediation、restoration 共同通过 |
+
+`carrier_*[K]` 保留 layer、position、unit、route throughput、state delta、target score、necessity、
+rescue、block、mediated rescue、tolerance 和 `carrier_confirmed`。`full_chain_confirmed` 要求 corridor
+与至少一个 carrier 同时通过；单个 carrier 正结果不是完整 source→target chain。
+
+### 3.3 Sparse route edges
+
+下列字段第一维均为 `E`，行序一一对应：
+
+| 字段 | 含义 |
 |---|---|
-| `model_id`, `tokenizer_id`, `model_dtype` | model/token coordinate provenance |
-| `layer_count`, `head_count`, `head_dim`, `hidden_size` | saved model axes |
-| `flow_signal` | exactly `attention` or `message` |
-| `edge_score_semantics` | explicit interpretation of `edge_score` |
-| `edge_payload_semantics` | exact pre-`W_O` message payload definition |
-| `edge_coverage`, `gradient_steps`, `carrier_scope`, `query_chunk` | capture settings |
-| `root_screen_limit` | candidates receiving exact bidirectional patches; `0=all` |
-| `carrier_limit`, `message_vector_materialized` | intervention/export settings |
-| `query_position`, `prediction_position` | causal coordinate pair `q,p=q+1` |
-| `causal_source_count` | `q+1`; proves no future token was computed |
-| `positive_token_id`, `negative_token_id`, `contrast_origin` | fixed target function |
+| `edge_layer`, `edge_head`, `edge_source`, `edge_target` | 精确 message 坐标 |
+| `edge_source_unit` | source position 所属 unit |
+| `edge_attention_native/root_cut` | 两个 world 中的 native gate |
+| `edge_native_functional_score` | native gradient 与 native true message 的有符号内积 |
+| `edge_root_cut_functional_score` | 冻结 native gradient 对 root-cut message 的投影 |
+| `edge_native/root_cut/delta_message_norm` | matching head `W_O` 后的 message norms |
+| `edge_root_throughput` | selected-root-conditioned candidate throughput |
+| `edge_source_root_lineage_fraction` | source node 在 norm-based ledger 中的 selected-root lineage share |
+| `edge_root_lineage_action` | 上述 share × native signed functional score；仅为一阶 route screen |
+| `edge_on_backbone` | 该 message edge 是否属于保存的 connected backbone |
+| `route_edge_origin` | `[E,4]`，每条边携带的 provenance |
 
-The output repeats the pair tokens and source-unit table so every edge can be interpreted without
-joining an external file. `screen_corrupt_token_ids` is the original multi-candidate corruption;
-`corrupt_token_ids` is the automatically isolated selected-root world actually used by the saved
-flow. `screen_pair_effect` and `pair_effect` keep the corresponding margins separate.
+artifact 保存 top root-throughput edges 供图使用；完整 head/position ledgers 单独保存，不能把 sparse
+edge 表中未显示的边解释为不存在。保存预算先容纳 backbone 的 message edges，再以 throughput
+补充 marginal edges。
 
-## Sparse edge table
+### 3.4 Connected route backbone
 
-All fields below have first dimension `E` and the same row order.
+backbone 是 unrolled graph 中从 selected-root prompt position 到 `(layer_count, query_position)` 的
+一条 widest candidate path；逐层在 message edge 与隐式 residual continuation 之间选择，使路径
+最小 throughput 最大。它保证图中路径连通，但仍是 norm-based routing candidate，不是 exact
+causal chain。
 
-| Field | Shape | Meaning |
+| 字段 | 形状 | 含义 |
 |---|---:|---|
-| `edge_layer`, `edge_head` | `[E]` | exact decoder layer and query head |
-| `edge_source`, `edge_target` | `[E]` | exact absolute token positions `s→q` |
-| `edge_source_unit` | `[E]` | semantic source unit of `s` |
-| `edge_attention_clean/corrupt` | `[E]` | native softmax gates `A+`, `A-` |
-| `edge_score` | `[E]` | raw `A+` in attention mode; signed target message score in message mode |
-| `edge_clean_target_score`, `edge_corrupt_target_score` | `[E]` | path-gradient action of each native message; NaN in attention mode |
-| `edge_selector_score` | `[E]` | symmetric contribution from changing `A`; NaN for attention mode |
-| `edge_content_score` | `[E]` | symmetric contribution from changing `V`; NaN for attention mode |
-| `edge_clean_code/corrupt_code` | `[E,D_h] float32` | pre-`W_O` `AV` used for reconstruction and patching |
-| `edge_clean_message_norm`, `edge_corrupt_message_norm`, `edge_delta_message_norm` | `[E]` | norms after the matching head `W_O` block |
-| `edge_clean_message_vector`, `edge_corrupt_message_vector`, `edge_delta_message_vector` | `[E,D]` or `[E,0]` | optional post-`W_O` vectors |
-| `edge_transition_probability` | `[E]` | residual-aware candidate route probability |
-| `edge_root_throughput` | `[E]` | `T(e|selected root,target)` |
+| `layer_count` | scalar | audited decoder layer 数；target node 位于此 layer boundary |
+| `backbone_node_layer`, `backbone_node_position` | `[L+1]` | backbone 的逐层 node 坐标 |
+| `backbone_node_throughput` | `[L+1]` | 对应 node 的 selected-root throughput |
+| `backbone_node_origin` | `[L+1,4]` | 对应 node 的 provenance ledger |
+| `backbone_step_throughput` | `[L]` | 每个 message/residual step 的 throughput |
+| `backbone_step_is_residual` | `[L]` | 该 step 是否为隐式 residual continuation |
+| `route_node_throughput` | `[L+1,N]` | 全部 node 的 selected-root throughput，供 backbone/carrier 显示 |
 
-Even in attention mode the pre-`W_O` codes are retained because causal confirmation must patch real
-messages. They are intervention payload, not the edge-ranking signal. This separation is recorded by
-`flow_signal` and `edge_score_semantics`.
+### 3.5 Full route ledgers
 
-## Coverage and throughput
-
-| Field | Shape | Meaning |
+| 字段 | 形状 | 含义 |
 |---|---:|---|
-| `row_position` | `[P]` | represented destination positions |
-| `row_total`, `row_retained` | `[L,H,P]` | full backend magnitude and retained magnitude |
-| `row_message_budget` | `[L,P]` | sum of retained `||m+ - m-||` before aggregation |
-| `row_net_message_norm` | `[L,P]` | norm after summing retained source/head messages |
-| `row_message_coherence` | `[L,P]` | net norm divided by message budget; low means cancellation |
-| `row_signed_target_score`, `row_positive_target_score`, `row_negative_target_score` | `[L,P]` | retained target-aligned decomposition; NaN in attention mode |
-| `row_selector_score`, `row_content_score` | `[L,P]` | retained `A`/`V` score decomposition; NaN in attention mode |
-| `source_unit_route_mass` | `[U]` | `C(u→t)` for every unit |
-| `residual_transition_probability` | `[L,S]` | vertical residual probability |
-| `reverse_node_visit` | `[L+1,S]` | target-originating retained path mass |
-| `root_conditioned_node_throughput` | `[L+1,S]` | `T(v|u,t)` |
-| `selected_root_route_mass` | scalar | retained path mass ending in selected root |
+| `route_origin_name` | `[4]` | provenance 通道顺序 |
+| `route_node_origin` | `[L+1,N,4]` | 每层边界的 node provenance |
+| `route_row_position` | `[P]` | destination slot 到绝对 position |
+| `route_head_transport` | `[L,H,P,4]` | 每 head 的来源 transport |
+| `route_head_action` | `[L,H,P,4]` | 每 head 的 provenance-conditioned signed action |
+| `route_head_direct_evidence` | `[L,H,P,2]` | direct-root transport/action |
+| `route_head_local_response` | `[L,H,P,2]` | local response-origin transport/action |
+| `route_head_integration` | `[L,H,P,4]` | delta-message budget、net norm、coherence、action |
+| `route_layer_integration` | `[L,P,4]` | residual addition 后的 layer budget/net/coherence/action |
+| `route_cross_head_vector_coherence` | `[L,P]` | 合成向量一致性 |
+| `route_cross_head_functional_agreement` | `[L,P]` | 有符号 target action 一致性 |
+| `route_head_backward_distance` | `[L,H,P]` | transport-weighted source distance |
+| `route_head_span` | `[L,H]` | response rows 上的 head span；仅用于逐 head 分组 |
+| `route_evidence_source_reuse` | `[L,H,N,2]` | evidence-origin future transport/action |
+| `route_response_source_reuse` | `[L,H,N,2]` | response-origin future transport/action |
 
-At full coverage, source-unit route mass sums to one. At lower coverage that unconditioned mass may
-sum below one because pruned routes terminate in the sink. Whenever selected-root mass is nonzero,
-the root-conditioned node throughput still sums to one at every depth.
-`reverse_node_visit[0,s]` is the token-level root mass; `source_unit_route_mass` is its exact unit sum.
+`route_event_*[J]` 是 hub-aware selected-root action 的逐 head 局部峰：layer/head/position、score、
+evidence transport/action、`direct_fraction` 与 local-response transport/action。event 是 intervention
+candidate，不是因果结论。
 
-## Integration ledger
+### 3.6 Residual / attention / MLP integration
 
-Message mode saves `[L,A]` matrices over `stage_position[A]`:
-
-- `state_delta_norm`, `state_target_score`;
-- `attention_write_delta_norm`, `attention_write_target_score`;
-- `mlp_write_delta_norm`, `mlp_write_target_score`.
-
-Attention mode saves correctly shaped empty arrays rather than populating them with attention proxies.
-
-## Exact causal results
-
-Root table `[R]`:
-
-- `root_unit_id`, `root_route_mass`, `root_gradient_score`;
-- `root_necessity`, `root_sufficiency`, `root_causal_score`;
-- `root_evaluated`, plus `selected_root_unit_id` and `selected_root_confirmed`.
-- `selected_root_necessity`, `selected_root_sufficiency` and
-  `selected_root_causal_score` are recomputed in the isolated world.
-
-Corridor scalars:
-
-- `clean_margin`, `corrupt_margin`, `pair_effect`;
-- `corridor_edge_count`, `corridor_necessity`, `corridor_sufficiency`;
-- `corridor_blocked_sufficiency`, `corridor_mediated_sufficiency`;
-- `corridor_clean_restoration_error`, `corridor_corrupt_restoration_error`;
-- `corridor_restoration_error`, `corridor_restoration_tolerance`,
-  `corridor_restoration_valid`, `corridor_confirmed`.
-
-Carrier table `[K]`:
-
-- `carrier_layer`, `carrier_position`, `carrier_source_unit`;
-- `carrier_route_throughput`, `carrier_state_delta_norm`, `carrier_target_score`;
-- `carrier_necessity`, `carrier_rescue`, `carrier_block_effect`;
-- `carrier_blocked_rescue`, `carrier_mediated_rescue`, `carrier_block_tolerance`;
-- `carrier_confirmed` additionally requires the absolute blocked rescue to stay within
-  tolerance after the downstream Value/residual block.
-
-No hallucination/correctness label is part of ETCC schema. Such labels may only be joined after a
-complete audit for external evaluation.
-
-## Native subset schemas
-
-真实 RAGTruth pilot 不写入 `PAIR_SCHEMA` 或 `ETCC_SCHEMA`，避免把 source-message cut 误解为
-clean/corrupt factual pair。它使用两个独立版本号：
-
-- `native_world_schema=1`：小型、模型无关、可恢复的 target contract；
-- `subset_audit_schema=1`：完成精确 rerun 后的紧凑机制结果。
-
-### Native world
-
-| Field | Shape | Meaning |
+| 字段 | 形状 | 含义 |
 |---|---:|---|
-| `sample_id`, `tokenizer_id` | scalar | safe artifact identity and tokenizer |
-| `token_ids` | `[N]` | native prompt plus teacher-forced response |
-| `response_start` | scalar | first response token position |
-| `token_unit_id` | `[N-1]` | source position to semantic unit |
-| `unit_name`, `unit_kind` | `[U]` | passage/sentence/field/response table |
-| `evidence_unit_id` | `[R]` | represented passage/sentence/field roots |
-| `query_position` | `[K]` | frozen predictor positions |
-| `positive_token_id` | `[K]` | observed token at `q+1` |
-| `negative_token_id` | `[K]` | frozen native runner excluding observed |
-| `contrast_origin` | `[K]` | label-free selection and contrast semantics |
+| `route_stage_position` | `[A]` | 被比较的位置 |
+| `route_stage_displacement` | `[L,A,3]` | residual input、attention write、MLP write 的 `||native-cut||` |
+| `route_stage_action` | `[L,A,3]` | 对应 gradient-dot-delta |
+| `route_module_vector_cosine` | `[L,A]` | attention 与 MLP delta 的方向关系 |
+| `route_module_functional_agreement` | `[L,A]` | attention/MLP signed action 的一致程度 |
+| `route_state_continuity` | `[L,A]` | 相邻层 source-cut residual delta cosine |
 
-### Compact native audit
+displacement 只说明 selected source cut 改变了状态；action 是对固定 target margin 的局部一阶
+作用；只有 exact rerun fields 是当前 operator 下的因果确认。两者都不证明存在可分离的事实表征。
 
-Provenance and claim boundary:
+## 4. Visualization contract
 
-- `world_kind=native_source_value_message_cut`;
-- `claim_scope=observed-target dependence under a source Value-message cut`;
-- `factual_correctness_identified=0`, `labels_used_for_capture=0`;
-- `transport_score_semantics`, `functional_score_semantics`,
-  `root_cut_functional_score_semantics`,
-  `residual_transition_semantics`, `source_cut_semantics`.
+`mechanism_plot.save_mechanism_figure` 只读取 schema-2 mechanism fields 和可选 display tokens，不接受
+labels。四个面板至少依赖：
 
-Native/root-cut quantities:
+- route：`edge_*`, `edge_root_throughput`, `edge_root_lineage_action`, `edge_on_backbone`,
+  `backbone_*`, `route_edge_origin`, `route_node_throughput`；
+- heads：`route_head_transport`, `route_head_action`, `route_row_position`；
+- integration：`route_head/layer_integration`, `route_stage_*`, module/continuity fields；
+- intervention：root/corridor/carrier exact effects。
 
-- `native_margin`, `root_cut_margin`, `root_value_effect`;
-- `all_evidence_cut_margin`;
-- root table `root_route_mass`, `root_functional_score`, `root_value_necessity`,
-  `root_conditional_sufficiency`, `root_causal_score`, `root_evaluated`;
-- selected-root scalars, `causal_effect_tolerance`, and `selected_root_confirmed`.
+## 5. Controlled pair and ETCC output
 
-Transport and aggregation:
+`pair_schema=1` 需要 aligned `clean_token_ids/corrupt_token_ids`、相同 response、source-unit table、
+`candidate_unit_id`，以及固定的 query/positive/negative/origin。load-time validation 拒绝 future
+positions、response 差异和未注册的 prompt 改动。
 
-- `row_total_transport`, `row_retained_transport` with shape `[L,H,P]`;
-- `row_residual_weight`, message budget/net norm/coherence with shape `[L,P]`;
-- positive, negative and signed functional score with shape `[L,P]`;
-- `transport_source_unit_route_mass` before functional filtering;
-- `source_unit_route_mass`, reverse-node and root-conditioned throughput after
-  `functional_score<=0` edges are sent to the sink.
-- `transport_token_root_mass` and `support_token_root_mass` retain layer-0 token
-  contributions before and after functionality filtering.
+`etcc_schema=1` 保存完整 clean/corrupt sparse edge table，包括 pre-`W_O` clean/corrupt `AV`
+codes、可选 post-`W_O` vectors、selector/content decomposition、residual transition、reverse/root
+throughput、stage deltas，以及 root/corridor/carrier exact effects。它与 native schema 2 是不同
+estimand；不得仅因字段名称相似而合并统计。
 
-Only the highest-throughput support edges are persisted. The full in-memory corridor is connected
-only in the augmented layer-unrolled graph that includes implicit residual edges; this truncated
-sparse-message export does not itself claim connectivity:
+## 6. Manifest and label firewall
 
-- `edge_candidate_count`, `corridor_edge_count`, `edge_saved_count`;
-- `edge_saved_corridor_mass`, `edge_total_corridor_mass` and their fraction;
-- layer/head/source/target/unit coordinates;
-- native functional score and root-cut code projected onto the frozen native gradient
-  (`edge_root_cut_native_gradient_projection`), plus native/root-cut attention and message norm;
-- transition probability and root-conditioned throughput.
+`run_manifest.json` 只记录可恢复的 config、冻结 selection、world/audit 相对路径和完成状态。同一
+output 只恢复完全相同的 scientific config；改变 source、model、target policy、coverage、window
+或 intervention limits 应使用新 output。
 
-`edge_payload_saved=0` means `[E,D_h]` codes were used for reruns and discarded before saving.
-Corridor fields use explicit native names: `corridor_necessity`,
-`corridor_conditional_rescue`, `corridor_blocked_rescue`, `corridor_mediated_rescue`, plus
-both-world restoration errors and validity. Carrier and stage tables retain the same coordinates as
-controlled ETCC but compare native against selected-root Value-cut states.
-`carrier_any_confirmed` is the local single-carrier diagnostic. `carrier_value_mediated` and
-`full_chain_confirmed` are identical evaluation outcomes and require both `corridor_confirmed` and at
-least one confirmed carrier; a carrier alone is not reported as a complete mediated chain.
-
-Head-resolved route-model summaries are compact views of the full in-memory ledgers:
-
-- `route_head_span[L,H]`, `route_local_head[L,H]`, and `route_global_head[L,H]` preserve the
-  head coordinate; no all-head mean is saved;
-- `reanchor_event_*` stores local peaks of direct-evidence gradient action with exact
-  layer/head/position, transport mass, and signed action;
-- `local_event_*` stores target-supporting local response-origin routes;
-- `silent_event_*` stores large per-head gaps between evidence read share and functional-use share;
-- `reuse_event_*` stores response source positions repeatedly used by later rows in each head;
-- `reanchor_support_peak`, `reanchor_opposition_peak`, `read_without_use_peak`,
-  `local_reinforcement_peak`, and `response_reuse_peak` are max reductions for later label-frozen
-  evaluation, not averages or causal conclusions.
-
-The full `RouteDynamics` object additionally retains `[L+1,N,4]` node provenance,
-`[E,4]` edge provenance, `[L,H,P,4]` transport/function ledgers, per-head message integration,
-and residual/attention/MLP presence-versus-gradient ledgers. They remain in memory for mechanism
-plots; the compact subset artifact stores only decisive coordinates.
-
-### Manifest and evaluation
-
-`run_manifest.json` records resolved data/model paths, dataset/source hashes, frozen selection,
-target policy, backend and all audit limits. Every completed audit points to one validated NPZ;
-re-running an identical configuration resumes it. A changed configuration is rejected and requires a
-new output directory.
-
-`mechanism_evaluation.json` is created separately. It records
-`labels_accessed_after_capture=true` and joins labels by
-`prediction_position-response_start`; labels are never copied back into native world or audit NPZs.
-For each raw route quantity it reports AUROC/AUPRC separately. Lower re-anchor support is oriented
-toward hallucination; evidence opposition, read-without-use, local reinforcement, and the generic
-response-reuse control are oriented upward. No learned or hand-weighted composite score is introduced
-before these individual hypotheses pass the QA pilot.
+`subset-evaluate` 要求 capture 完成后才加载 labels，并生成独立 report。它不会修改 native world、
+mechanism NPZ 或机制图。

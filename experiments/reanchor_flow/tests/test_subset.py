@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from experiments.reanchor_flow.run import parser, validate_args
 from experiments.reanchor_flow.subset_data import (
     SampleRecord,
     inspect_records,
@@ -108,37 +108,49 @@ def test_absolute_cache_model_identity_does_not_fall_back_to_basename(
     assert _model_matches(legacy, requested)
 
 
-@pytest.mark.parametrize("directory", ["worlds", "audits"])
-def test_new_manifest_rejects_orphan_mechanism_artifacts(
-    tmp_path, directory: str
-) -> None:
+def test_manifest_uses_schema_and_plain_identity_for_resume(tmp_path) -> None:
+    from experiments.reanchor_flow.artifacts import save_json
     from experiments.reanchor_flow.subset import open_manifest
 
-    output = tmp_path / "output"
-    orphan = output / directory / "nested" / "orphan.npz"
-    orphan.parent.mkdir(parents=True)
-    np.savez_compressed(orphan, value=1)
-    with pytest.raises(ValueError, match="no manifest"):
-        open_manifest(
-            output / "run_manifest.json",
-            {"configuration": "new"},
-            (records()[0],),
-        )
+    path = tmp_path / "output" / "run_manifest.json"
+    config = {"method": "head_resolved_route_audit_v2", "local_window": 7}
+    manifest = open_manifest(path, config, (records()[0],))
+    assert manifest["subset_manifest_schema"] == 2
+    assert manifest["config"] == config
+    assert not any("sha256" in key for key in manifest)
+    save_json(path, manifest)
+    assert open_manifest(path, config, (records()[0],))["samples"] == {}
+    with pytest.raises(ValueError, match="another subset configuration"):
+        open_manifest(path, {**config, "local_window": 8}, (records()[0],))
 
 
 def test_subset_cli_needs_no_pair_and_keeps_corridor_contract() -> None:
+    from experiments.reanchor_flow.run import parser, subset_config_from_args
+
     command_parser = parser()
     subset = command_parser.parse_args(["subset"])
     assert subset.flow_signal == "message"
     assert subset.samples_per_task == 1
     assert subset.targets_per_sample == 1
-    assert subset.carrier_scope == "response"
+    assert subset.carrier_scope == "all"
+    assert subset.local_window == 10
     assert not hasattr(subset, "pair")
+    config = subset_config_from_args(
+        subset,
+        SimpleNamespace(name_or_path="tiny-llama"),
+        "test",
+    )
+    assert config.tokenizer_id == "tiny-llama"
+    assert config.signal.value == "message"
+    assert config.carrier_scope == "all"
+    assert config.tasks == ("QA", "Summary", "Data2txt")
     with pytest.raises(SystemExit):
         command_parser.parse_args(["corridor"])
 
 
 def test_subset_argument_validation() -> None:
+    from experiments.reanchor_flow.run import parser, validate_args
+
     command_parser = parser()
     args = command_parser.parse_args(["subset", "--samples-per-task", "0"])
     with pytest.raises(ValueError, match="samples-per-task"):
@@ -148,7 +160,7 @@ def test_subset_argument_validation() -> None:
         validate_args(args)
 
 
-def test_subset_pipeline_resumes_valid_compact_target(tmp_path, monkeypatch) -> None:
+def test_subset_pipeline_resumes_valid_native_audit(tmp_path, monkeypatch) -> None:
     from experiments.reanchor_flow import subset, subset_data
 
     pair = paired_world()
@@ -161,11 +173,10 @@ def test_subset_pipeline_resumes_valid_compact_target(tmp_path, monkeypatch) -> 
             )
 
     class AuditDataset(FakeDataset):
-        spec = {}
-        manifest = {"split": "test"}
-
         def __init__(self):
             record = SampleRecord("q1", "source-a", "QA", "generator")
+            self.spec = {}
+            self.manifest = {"split": "test"}
             self.sample_ids = [record.sample_id]
             self.samples = {record.sample_id: AuditSample(record)}
 
@@ -200,25 +211,40 @@ def test_subset_pipeline_resumes_valid_compact_target(tmp_path, monkeypatch) -> 
     output = tmp_path / "output"
     model = tiny_model()
     tokenizer = SimpleNamespace(name_or_path="tiny-llama")
-    options = dict(
-        split="test",
-        model_path=tmp_path / "tiny-llama",
+    config = subset.SubsetRunConfig(
+        model_id=str((tmp_path / "tiny-llama").resolve()),
         model_dtype="float32",
+        tokenizer_id="tiny-llama",
+        dataset_root=str(cache.resolve()),
+        source_info=str(source.resolve()),
+        split="test",
         tasks=("QA",),
         samples_per_task=1,
+        explicit_sample_ids=(),
+        selection_seed=2026,
         targets_per_sample=1,
         target_policy="evenly-spaced",
         max_response_tokens=None,
-        signal="message",
+        signal=subset.FlowSignal.MESSAGE,
         carrier_scope="all",
         coverage=1.0,
         query_chunk=2,
         root_screen_limit=0,
         carrier_limit=1,
+        local_window=3,
         saved_edges=4,
     )
-    first = subset.run_subset_split(model, tokenizer, cache, source, output, **options)
+    real_audit = subset.audit_native_target
+    seen_audit_options = {}
+
+    def record_audit_options(*args, **kwargs):
+        seen_audit_options.update(kwargs)
+        return real_audit(*args, **kwargs)
+
+    monkeypatch.setattr(subset, "audit_native_target", record_audit_options)
+    first = subset.run_subset_split(model, tokenizer, output, config)
     assert dataset.verify_hashes is True
+    assert seen_audit_options["local_window"] == 3
     assert first == {
         "samples": 1,
         "targets": 1,
@@ -226,14 +252,18 @@ def test_subset_pipeline_resumes_valid_compact_target(tmp_path, monkeypatch) -> 
         "confirmed": first["confirmed"],
     }
     manifest = json.loads((output / "run_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["subset_manifest_schema"] == 2
     assert manifest["analysis_complete"]
     assert manifest["labels_used_for_capture"] is False
-    assert len(manifest["config_sha256"]) == 64
+    assert manifest["config"]["local_window"] == 3
+    assert "config_sha256" not in manifest
     audit_entry = next(iter(manifest["audits"].values()))
-    assert len(audit_entry["sha256"]) == 64
+    assert "sha256" not in audit_entry
     result_path = output / audit_entry["result"]
     with np.load(result_path, allow_pickle=False) as stored:
-        assert int(stored["edge_saved_count"]) <= 4
+        assert int(stored["subset_audit_schema"]) == 2
+        assert int(stored["local_window"]) == 3
+        assert len(stored["edge_layer"]) <= 4
 
     monkeypatch.setattr(
         subset,
@@ -242,31 +272,13 @@ def test_subset_pipeline_resumes_valid_compact_target(tmp_path, monkeypatch) -> 
             AssertionError("resume recomputed a completed audit")
         ),
     )
-    second = subset.run_subset_split(model, tokenizer, cache, source, output, **options)
+    second = subset.run_subset_split(model, tokenizer, output, config)
     assert second["targets"] == 1
     assert second["resumed"] == 1
-
-    original_artifact = result_path.read_bytes()
-    with np.load(result_path, allow_pickle=False) as stored:
-        changed_artifact = {
-            name: np.array(stored[name], copy=True) for name in stored.files
-        }
-    changed_artifact["corridor_confirmed"] = np.asarray(
-        not bool(changed_artifact["corridor_confirmed"])
-    )
-    np.savez_compressed(result_path, **changed_artifact)
-    with pytest.raises(ValueError, match="artifact hash mismatch"):
-        subset.run_subset_split(model, tokenizer, cache, source, output, **options)
-    result_path.write_bytes(original_artifact)
-    subset.run_subset_split(model, tokenizer, cache, source, output, **options)
-
-    manifest = json.loads((output / "run_manifest.json").read_text(encoding="utf-8"))
-    world_path = output / manifest["samples"]["q1"]["world"]
-    with np.load(world_path, allow_pickle=False) as stored:
-        changed_world = {
-            name: np.array(stored[name], copy=True) for name in stored.files
-        }
-    changed_world["token_ids"][0] += 1
-    np.savez_compressed(world_path, **changed_world)
-    with pytest.raises(ValueError, match="frozen sample"):
-        subset.run_subset_split(model, tokenizer, cache, source, output, **options)
+    with pytest.raises(ValueError, match="another subset configuration"):
+        subset.run_subset_split(
+            model,
+            tokenizer,
+            output,
+            replace(config, local_window=4),
+        )

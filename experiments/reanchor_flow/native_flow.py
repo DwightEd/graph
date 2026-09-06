@@ -257,9 +257,15 @@ def attach_cut_edge_codes(
     cut: ForwardCache,
     gradients: TargetGradients,
     cut_source_mask: Tensor,
+    *,
+    query_chunk: int | None = None,
 ) -> FlowEdges:
     """Evaluate root-cut attention/Value codes at native retained endpoints."""
 
+    if query_chunk is None:
+        query_chunk = cut.attention_query_chunk
+    if query_chunk is not None and query_chunk < 1:
+        raise ValueError("query chunk must be positive")
     count = edges.count
     cut_attention = torch.empty(count)
     cut_functional = torch.empty(count)
@@ -285,42 +291,56 @@ def attach_cut_edge_codes(
         unique_target, inverse = torch.unique(targets, sorted=True, return_inverse=True)
         head_dim = value.shape[-1]
         scaling = float(getattr(layer.self_attn, "scaling", head_dim**-0.5))
-        probability = attention_rows(query, key, unique_target.to(device), scaling)
-        head = edges.head.index_select(0, selected).long().to(device)
-        source = edges.source.index_select(0, selected).long().to(device)
-        local = inverse.to(device)
-        selected_attention = probability[head, local, source].float()
-        selected_code = selected_attention[:, None] * value[head, source].float()
-        deleted = cut_source_mask.index_select(0, source.cpu()).to(device)
-        selected_code[deleted] = 0
-        gradient_slot = torch.tensor(
-            [gradient_lookup[int(position)] for position in targets.tolist()],
-            dtype=torch.long,
-        )
-        gradient = gradients.head_output[layer_index][head.cpu(), gradient_slot].to(
-            device
-        )
-        functional = (selected_code * gradient.float()).sum(-1)
         output = layer.self_attn.o_proj.weight.detach()
         gram = gram_cache.get(layer_index)
         if gram is None:
             gram = output_gram(output, heads, head_dim)
             gram_cache[layer_index] = gram
-        _, current_norm, current_delta, _, _, _ = project_selected_messages(
-            output,
-            head,
-            edges.clean_code.index_select(0, selected).to(device),
-            selected_code,
-            heads,
-            materialize=False,
-            gram=gram.to(device),
-        )
-        cut_attention[selected] = selected_attention.cpu()
-        cut_functional[selected] = functional.cpu()
-        cut_norm[selected] = current_norm.cpu()
-        delta_norm[selected] = current_delta.cpu()
-        cut_code[selected] = selected_code.cpu()
-        del query, key, value, probability, output, gram
+        chunk = len(unique_target) if query_chunk is None else query_chunk
+        for begin in range(0, len(unique_target), chunk):
+            end = min(begin + chunk, len(unique_target))
+            probability = attention_rows(
+                query,
+                key,
+                unique_target[begin:end].to(device),
+                scaling,
+            )
+            local_edge = torch.nonzero(
+                (inverse >= begin) & (inverse < end), as_tuple=False
+            ).flatten()
+            edge_index = selected.index_select(0, local_edge)
+            head = edges.head.index_select(0, edge_index).long().to(device)
+            source = edges.source.index_select(0, edge_index).long().to(device)
+            local = inverse.index_select(0, local_edge).to(device) - begin
+            selected_attention = probability[head, local, source].float()
+            selected_code = selected_attention[:, None] * value[head, source].float()
+            deleted = cut_source_mask.index_select(0, source.cpu()).to(device)
+            selected_code[deleted] = 0
+            chunk_targets = targets.index_select(0, local_edge)
+            gradient_slot = torch.tensor(
+                [gradient_lookup[int(position)] for position in chunk_targets.tolist()],
+                dtype=torch.long,
+            )
+            gradient = gradients.head_output[layer_index][
+                head.cpu(), gradient_slot
+            ].to(device)
+            functional = (selected_code * gradient.float()).sum(-1)
+            _, current_norm, current_delta, _, _, _ = project_selected_messages(
+                output,
+                head,
+                edges.clean_code.index_select(0, edge_index).to(device),
+                selected_code,
+                heads,
+                materialize=False,
+                gram=gram.to(device),
+            )
+            cut_attention[edge_index] = selected_attention.cpu()
+            cut_functional[edge_index] = functional.cpu()
+            cut_norm[edge_index] = current_norm.cpu()
+            delta_norm[edge_index] = current_delta.cpu()
+            cut_code[edge_index] = selected_code.cpu()
+            del probability
+        del query, key, value, output, gram
 
     return replace(
         edges,

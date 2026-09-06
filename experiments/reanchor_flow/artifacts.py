@@ -1,13 +1,11 @@
-"""Compact NPZ persistence for frozen re-anchor flow results."""
+"""Atomic persistence for frozen mechanism-audit results."""
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
-
-
-CAPTURE_SCHEMA = 8
 
 
 def as_array(value) -> np.ndarray:
@@ -26,6 +24,14 @@ def save_result(path: str | Path, values: dict[str, object]) -> None:
     temporary.replace(destination)
 
 
-def load_result(path: str | Path) -> dict[str, np.ndarray]:
-    with np.load(Path(path), allow_pickle=False) as stored:
-        return {name: np.array(stored[name], copy=True) for name in stored.files}
+def save_json(path: str | Path, value: object) -> None:
+    """Atomically write strict, human-readable JSON."""
+
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.tmp")
+    temporary.write_text(
+        json.dumps(value, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(destination)

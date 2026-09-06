@@ -32,7 +32,7 @@ class SourceUnits:
             selected |= self.token_unit_id == unit_id
         return torch.nonzero(selected, as_tuple=False).flatten()
 
-    def check(self, source_count: int) -> "SourceUnits":
+    def check(self, source_count: int) -> SourceUnits:
         ids = self.token_unit_id
         if ids.shape != (source_count,) or ids.dtype != torch.long:
             raise ValueError(
@@ -76,7 +76,7 @@ class PairedWorld:
     candidate_unit_id: tuple[int, ...]
     targets: tuple[TargetContrast, ...]
 
-    def check(self) -> "PairedWorld":
+    def check(self) -> PairedWorld:
         clean = self.clean_token_ids
         corrupt = self.corrupt_token_ids
         if not self.sample_id or not self.tokenizer_id or not self.corruption:
@@ -143,7 +143,7 @@ class PairedWorld:
             raise ValueError("a paired world must contain a target contrast")
         return self
 
-    def prefix(self, target: TargetContrast) -> "PairedWorld":
+    def prefix(self, target: TargetContrast) -> PairedWorld:
         """Return the causal prefix ending immediately after the target token."""
 
         stop = target.query_position + 2
@@ -163,7 +163,7 @@ class PairedWorld:
             targets=(target,),
         ).check()
 
-    def isolate(self, unit_id: int) -> "PairedWorld":
+    def isolate(self, unit_id: int) -> PairedWorld:
         """Keep only one candidate corruption for root-conditioned capture."""
 
         if unit_id not in self.candidate_unit_id:

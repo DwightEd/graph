@@ -34,7 +34,7 @@ class NativeWorld:
     evidence_unit_id: tuple[int, ...]
     targets: tuple[TargetContrast, ...]
 
-    def check(self) -> "NativeWorld":
+    def check(self) -> NativeWorld:
         ids = self.token_ids
         if (
             not self.sample_id
@@ -84,7 +84,7 @@ class NativeWorld:
                 raise ValueError("target contrast origin is required")
         return self
 
-    def prefix(self, target: TargetContrast) -> "NativeWorld":
+    def prefix(self, target: TargetContrast) -> NativeWorld:
         if target not in self.targets:
             raise ValueError("native audit target was not frozen in this world")
         stop = target.query_position + 2

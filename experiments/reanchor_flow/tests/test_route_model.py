@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
 import torch
+from torch import Tensor
 
 from experiments.reanchor_flow.native import audit_native_target
 from experiments.reanchor_flow.route_model import (
@@ -33,9 +35,110 @@ def _audit(coverage: float = 1.0):
         carrier_limit=1,
     )
     dynamics = HeadResolvedRouteModel(local_window=2).analyze(
-        model, audit.flow, audit.world
+        model,
+        audit.flow,
+        audit.world,
+        root_unit_id=audit.selected_root_unit_id,
     )
     return model, audit, dynamics
+
+
+def _synthetic_flow(
+    audit,
+    *,
+    layer: Tensor,
+    head: Tensor,
+    source: Tensor,
+    target: Tensor,
+    code: Tensor,
+    action: Tensor,
+):
+    count = len(layer)
+    template = audit.flow.edges.select(torch.arange(count))
+    scalar = torch.ones(count)
+    zero = torch.zeros(count)
+    vector = torch.empty(count, 0)
+    edges = replace(
+        template,
+        layer=layer.to(torch.int16),
+        head=head.to(torch.int16),
+        source=source.to(torch.int32),
+        target=target.to(torch.int32),
+        source_unit=audit.world.units.token_unit_id.index_select(0, source.long()).to(
+            torch.int32
+        ),
+        attention_clean=scalar,
+        attention_corrupt=zero,
+        score=scalar,
+        clean_target_score=action.float(),
+        corrupt_target_score=zero,
+        selector_score=torch.full((count,), float("nan")),
+        content_score=torch.full((count,), float("nan")),
+        clean_message_norm=scalar,
+        corrupt_message_norm=zero,
+        delta_message_norm=scalar,
+        clean_code=code.float(),
+        corrupt_code=torch.zeros_like(code, dtype=torch.float32),
+        clean_message_vector=vector,
+        corrupt_message_vector=vector.clone(),
+        delta_message_vector=vector.clone(),
+    )
+    layers = audit.flow.clean_cache.layer_count
+    heads = audit.flow.row_total.shape[1]
+    row_position = torch.unique(target.long(), sorted=True)
+    lookup = {int(position): slot for slot, position in enumerate(row_position)}
+    row_total = torch.zeros(layers, heads, len(row_position))
+    for edge_layer, edge_head, edge_target in zip(
+        layer.tolist(), head.tolist(), target.tolist(), strict=True
+    ):
+        row_total[edge_layer, edge_head, lookup[edge_target]] += 1
+    return replace(
+        audit.flow,
+        edges=edges,
+        row_position=row_position,
+        row_total=row_total,
+        row_retained=row_total.clone(),
+        residual_weight=torch.zeros(layers, len(row_position)),
+        stages=None,
+    )
+
+
+def _stage_flow(audit, mlp_sign: float):
+    flow = audit.flow
+    assert flow.stages is not None
+    position = flow.stages.position.long()
+    layers = flow.clean_cache.layer_count
+
+    def stage_vector(value: float) -> Tensor:
+        result = torch.zeros_like(flow.clean_cache.final_hidden)
+        result[position, 0] = value
+        return result
+
+    clean = replace(
+        flow.clean_cache,
+        layer_input={layer: stage_vector(1.0) for layer in range(layers)},
+        final_hidden=stage_vector(1.0),
+        attention_write={layer: stage_vector(1.0) for layer in range(layers)},
+        mlp_write={layer: stage_vector(mlp_sign) for layer in range(layers)},
+    )
+    cut = replace(
+        flow.corrupt_cache,
+        layer_input={layer: stage_vector(0.0) for layer in range(layers)},
+        final_hidden=stage_vector(0.0),
+        attention_write={layer: stage_vector(0.0) for layer in range(layers)},
+        mlp_write={layer: stage_vector(0.0) for layer in range(layers)},
+    )
+    shape = (layers, len(position))
+    stages = replace(
+        flow.stages,
+        state_delta_norm=torch.ones(shape),
+        state_score=torch.ones(shape),
+        attention_delta_norm=torch.ones(shape),
+        attention_score=torch.ones(shape),
+        mlp_delta_norm=torch.ones(shape),
+        mlp_score=torch.full(shape, mlp_sign),
+    )
+    return replace(flow, clean_cache=clean, corrupt_cache=cut, stages=stages)
 
 
 def test_route_model_keeps_layer_and_head_axes_and_conserves_registers() -> None:
@@ -52,17 +155,38 @@ def test_route_model_keeps_layer_and_head_axes_and_conserves_registers() -> None
         "unobserved",
     )
     assert dynamics.node_register.shape == (layers + 1, tokens, 4)
+    assert dynamics.root_unit_id == audit.selected_root_unit_id
     assert dynamics.edge_register.shape == (audit.flow.edges.count, 4)
     assert dynamics.head_transport.shape == (layers, heads, rows, 4)
     assert dynamics.head_gradient_action.shape == (layers, heads, rows, 4)
     assert dynamics.head_direct_evidence.shape == (layers, heads, rows, 2)
     assert dynamics.head_local_response.shape == (layers, heads, rows, 2)
     assert dynamics.head_integration.shape == (layers, heads, rows, 4)
+    assert dynamics.cross_head_vector_coherence.shape == (layers, rows)
+    assert dynamics.cross_head_functional_agreement.shape == (layers, rows)
+    assert dynamics.layer_integration.shape == (layers, rows, 4)
     assert dynamics.head_backward_distance.shape == (layers, heads, rows)
     assert dynamics.head_span.shape == (layers, heads)
-    assert dynamics.source_reuse.shape == (layers, heads, tokens, 2)
-    assert dynamics.stage_presence.shape == (layers, len(dynamics.stage_position), 3)
-    assert dynamics.stage_gradient_action.shape == dynamics.stage_presence.shape
+    assert dynamics.evidence_source_reuse.shape == (layers, heads, tokens, 2)
+    assert dynamics.response_source_reuse.shape == (layers, heads, tokens, 2)
+    assert dynamics.stage_displacement.shape == (
+        layers,
+        len(dynamics.stage_position),
+        3,
+    )
+    assert dynamics.stage_gradient_action.shape == dynamics.stage_displacement.shape
+    assert dynamics.attention_mlp_vector_cosine.shape == (
+        layers,
+        len(dynamics.stage_position),
+    )
+    assert dynamics.attention_mlp_functional_agreement.shape == (
+        layers,
+        len(dynamics.stage_position),
+    )
+    assert dynamics.state_continuity.shape == (
+        layers,
+        len(dynamics.stage_position),
+    )
 
     torch.testing.assert_close(
         dynamics.node_register.sum(-1),
@@ -75,13 +199,27 @@ def test_route_model_keeps_layer_and_head_axes_and_conserves_registers() -> None
         dynamics.edge_register.sum(-1), probability, atol=2e-6, rtol=2e-6
     )
     assert bool((dynamics.head_integration[..., 2] <= 1 + 2e-5).all())
+    assert bool(
+        (
+            dynamics.head_direct_evidence[..., 0]
+            <= dynamics.head_transport[..., EVIDENCE] + 2e-5
+        ).all()
+    )
 
 
 def test_route_channels_distinguish_direct_evidence_from_local_response() -> None:
     _, audit, dynamics = _audit()
     initial = dynamics.node_register[0]
-    evidence_positions = audit.world.units.positions(audit.world.evidence_unit_id)
+    evidence_positions = audit.world.units.positions((audit.selected_root_unit_id,))
     assert bool((initial[evidence_positions, EVIDENCE] == 1).all())
+    other_evidence = tuple(
+        unit_id
+        for unit_id in audit.world.evidence_unit_id
+        if unit_id != audit.selected_root_unit_id
+    )
+    if other_evidence:
+        other_position = audit.world.units.positions(other_evidence)
+        assert bool((initial[other_position, EVIDENCE] == 0).all())
     response_position = torch.arange(
         audit.world.response_start, len(audit.world.units.token_unit_id)
     )
@@ -137,7 +275,10 @@ def test_message_aggregation_detects_cancellation_inside_one_head() -> None:
         ),
     )
     dynamics = HeadResolvedRouteModel(local_window=2).analyze(
-        model, modified, audit.world
+        model,
+        modified,
+        audit.world,
+        root_unit_id=audit.selected_root_unit_id,
     )
     slot = int(torch.nonzero(dynamics.row_position == position, as_tuple=False)[0])
     budget, net, coherence, _ = dynamics.head_integration[layer, head, slot]
@@ -147,7 +288,7 @@ def test_message_aggregation_detects_cancellation_inside_one_head() -> None:
 
 
 def test_reanchor_candidates_are_exact_head_nodes_not_head_means() -> None:
-    model, audit, dynamics = _audit()
+    model, _, dynamics = _audit()
     analyzer = HeadResolvedRouteModel(local_window=2)
     events = analyzer.reanchor_events(dynamics, limit=8)
     assert events
@@ -158,21 +299,178 @@ def test_reanchor_candidates_are_exact_head_nodes_not_head_means() -> None:
         assert event.position in dynamics.row_position.tolist()
         assert event.score == abs(event.evidence_gradient_action)
         assert event.evidence_transport > 0
+        assert 0 <= event.direct_fraction <= 1
 
-    local, global_ = analyzer.head_groups(dynamics)
-    assert local.shape == global_.shape == (
-        model.config.num_hidden_layers,
-        model.config.num_attention_heads,
+def test_selected_root_must_match_the_root_cut_estimand() -> None:
+    model, audit, _ = _audit()
+    other_root = next(
+        unit_id
+        for unit_id in audit.world.evidence_unit_id
+        if unit_id != audit.selected_root_unit_id
     )
-    assert bool(local.any())
-    assert bool(global_.any())
+    with pytest.raises(ValueError, match="root-cut cache"):
+        HeadResolvedRouteModel().analyze(
+            model,
+            audit.flow,
+            audit.world,
+            root_unit_id=other_root,
+        )
 
-    compact = analyzer.compact_arrays(
-        dynamics, response_start=audit.world.response_start, limit=8
+
+def test_reduced_scope_marks_unmodeled_prompt_updates_unobserved() -> None:
+    model = tiny_model()
+    world = native_world(model)
+    audit = audit_native_target(
+        model,
+        world,
+        world.targets[0],
+        "message",
+        carrier_scope="response",
+        coverage=1.0,
+        query_chunk=2,
+        root_screen_limit=0,
+        carrier_limit=0,
     )
-    assert int(compact["route_model_schema"]) == 1
-    assert compact["route_head_span"].shape == local.shape
-    assert len(compact["reanchor_event_head"]) == len(events)
-    assert len(compact["local_event_head"]) <= 8
-    assert len(compact["silent_event_head"]) <= 8
-    assert len(compact["reuse_event_head"]) <= 8
+    root_position = audit.world.units.positions((audit.selected_root_unit_id,))
+    represented = set(audit.flow.row_position.tolist())
+    omitted = torch.tensor(
+        [position for position in root_position.tolist() if position not in represented]
+    )
+    assert len(omitted)
+    dynamics = audit.dynamics
+    assert bool((dynamics.node_register[0, omitted, EVIDENCE] == 1).all())
+    assert bool((dynamics.node_register[1:, omitted, EVIDENCE] == 0).all())
+    assert bool((dynamics.node_register[1:, omitted, UNOBSERVED] == 1).all())
+
+
+def test_response_hub_preserves_evidence_lineage_for_reanchor_and_reuse() -> None:
+    model, audit, _ = _audit()
+    root = int(audit.world.units.positions((audit.selected_root_unit_id,))[0])
+    hub = audit.world.response_start
+    target = audit.flow.target.query_position
+    head_dim = audit.flow.edges.clean_code.shape[1]
+    code = torch.zeros(2, head_dim)
+    code[:, 0] = 1
+    flow = _synthetic_flow(
+        audit,
+        layer=torch.tensor([0, 1]),
+        head=torch.tensor([0, 1]),
+        source=torch.tensor([root, hub]),
+        target=torch.tensor([hub, target]),
+        code=code,
+        action=torch.tensor([1.0, 2.0]),
+    )
+    dynamics = HeadResolvedRouteModel(local_window=2).analyze(
+        model,
+        flow,
+        audit.world,
+        root_unit_id=audit.selected_root_unit_id,
+    )
+    target_slot = int(torch.nonzero(dynamics.row_position == target)[0])
+    assert float(dynamics.head_transport[1, 1, target_slot, EVIDENCE]) == 1
+    assert float(dynamics.head_direct_evidence[1, 1, target_slot, 0]) == 0
+    assert float(dynamics.head_local_response[1, 1, target_slot, 0]) == 0
+    assert float(dynamics.evidence_source_reuse[1, 1, hub, 0]) == 1
+    assert float(dynamics.response_source_reuse[1, 1, hub, 0]) == 0
+
+    event = next(
+        item
+        for item in HeadResolvedRouteModel.reanchor_events(dynamics)
+        if item.layer == 1 and item.head == 1 and item.position == target
+    )
+    assert event.evidence_gradient_action == 2
+    assert event.direct_fraction == 0
+
+
+def test_cross_head_vector_coherence_and_functional_agreement_keep_heads() -> None:
+    _, audit, _ = _audit()
+    model = tiny_model()
+    root = int(audit.world.units.positions((audit.selected_root_unit_id,))[0])
+    target = audit.flow.target.query_position
+    head_dim = audit.flow.edges.clean_code.shape[1]
+    code = torch.zeros(2, head_dim)
+    code[:, 0] = 1
+    base = _synthetic_flow(
+        audit,
+        layer=torch.tensor([0, 0]),
+        head=torch.tensor([0, 1]),
+        source=torch.tensor([root, root]),
+        target=torch.tensor([target, target]),
+        code=code,
+        action=torch.tensor([1.0, 1.0]),
+    )
+    output = model.model.layers[0].self_attn.o_proj.weight
+    with torch.no_grad():
+        output.zero_()
+        output[:head_dim, :head_dim] = torch.eye(head_dim)
+        output[:head_dim, head_dim : 2 * head_dim] = torch.eye(head_dim)
+    analyzer = HeadResolvedRouteModel()
+    aligned = analyzer.analyze(
+        model,
+        base,
+        audit.world,
+        root_unit_id=audit.selected_root_unit_id,
+    )
+    assert float(aligned.cross_head_vector_coherence[0, 0]) == 1
+    assert float(aligned.cross_head_functional_agreement[0, 0]) == 1
+    torch.testing.assert_close(aligned.head_integration[0, :2, 0, 3], torch.ones(2))
+
+    with torch.no_grad():
+        output[:head_dim, head_dim : 2 * head_dim] = -torch.eye(head_dim)
+    opposed = replace(
+        base,
+        edges=replace(
+            base.edges,
+            clean_target_score=torch.tensor([1.0, -1.0]),
+        ),
+    )
+    cancelled = analyzer.analyze(
+        model,
+        opposed,
+        audit.world,
+        root_unit_id=audit.selected_root_unit_id,
+    )
+    assert float(cancelled.cross_head_vector_coherence[0, 0]) < 1e-6
+    assert float(cancelled.cross_head_functional_agreement[0, 0]) == 0
+    torch.testing.assert_close(
+        cancelled.head_integration[0, :2, 0, 3],
+        torch.tensor([1.0, -1.0]),
+    )
+
+
+def test_module_conflict_and_state_continuity_are_stability_not_grounding() -> None:
+    model, audit, _ = _audit()
+    analyzer = HeadResolvedRouteModel()
+    conflict = analyzer.analyze(
+        model,
+        _stage_flow(audit, -1.0),
+        audit.world,
+        root_unit_id=audit.selected_root_unit_id,
+    )
+    torch.testing.assert_close(
+        conflict.attention_mlp_vector_cosine,
+        -torch.ones_like(conflict.attention_mlp_vector_cosine),
+    )
+    torch.testing.assert_close(
+        conflict.attention_mlp_functional_agreement,
+        torch.zeros_like(conflict.attention_mlp_functional_agreement),
+    )
+    torch.testing.assert_close(
+        conflict.state_continuity,
+        torch.ones_like(conflict.state_continuity),
+    )
+
+    aligned = analyzer.analyze(
+        model,
+        _stage_flow(audit, 1.0),
+        audit.world,
+        root_unit_id=audit.selected_root_unit_id,
+    )
+    torch.testing.assert_close(
+        aligned.attention_mlp_vector_cosine,
+        torch.ones_like(aligned.attention_mlp_vector_cosine),
+    )
+    torch.testing.assert_close(
+        aligned.attention_mlp_functional_agreement,
+        torch.ones_like(aligned.attention_mlp_functional_agreement),
+    )

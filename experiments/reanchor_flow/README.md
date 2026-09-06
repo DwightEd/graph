@@ -1,180 +1,116 @@
-# Evidence-to-Target Causal Corridor
+# Head-resolved mechanism audit
 
-本目录的主方法是 ETCC：先找 source-unit contribution 和多路由 carrier，再以固定
-target contrast 做真实 message 干预。旧 schema-v8 detector 保留为可复现实验基线，不再作为
-机制主方法扩展。
+这里审计的是一条可干预的 source-effect chain，而不是从 attention 热图直接推断“模型用了证据”：
 
-方法、结论门槛与旧假设偏差见 [`METHOD.md`](METHOD.md)；输入/输出字段见
-[`SCHEMA.md`](SCHEMA.md)；实验推进和停止规则见 [`RESEARCH_PLAN.md`](RESEARCH_PLAN.md)。
+```text
+selected source unit → prompt/response hub → target margin
+          route screen → source-cut integration → exact patch/block
+```
 
-## 真实 RAGTruth 子集：无需手工 pair
+分析保留每一个 `(layer, head, source, target)`。不同 head 可以承担 global retrieval、local
+copy 或相反方向的 residual write，因此代码从不先对 head 求平均。target 不必直接回看 prompt；
+只有 selected-source cut 确实改变 hub、且 hub patch/block 对 target 闭合 mediation，才称该
+operator 下的 causal-relay candidate；进一步称 grounded route 仍需 matched factual pair。
 
-先在三个任务各取一个 source-diverse 样本、每个样本审计一个无标签 target：
+方法定义和结论边界见 [METHOD.md](METHOD.md)，artifact 字段见 [SCHEMA.md](SCHEMA.md)，更完整的
+机制注册见 [MECHANISM_AUDIT.md](MECHANISM_AUDIT.md)。
+
+## 一条命令：真实子集审计并画图
+
+下面的纯 Python 命令会在 QA、Summary、Data2txt 各选一个无标签样本，冻结 observed token 与
+native runner 的 margin，完成 native graph、source-unit screening、head-resolved route ledger、
+root/carrier/corridor rerun，并为每个 target 生成四联机制图：
 
 ```bash
 cd /share/home/tm902089733300000/a903202310/lys/research/graph
-conda activate research
-
-bash experiments/reanchor_flow/run_subset.sh \
-  --split test \
-  --task all \
-  --samples-per-task 1 \
-  --targets-per-sample 1 \
-  --target-policy uncertain \
-  --flow-signal message \
-  --carrier-scope response \
-  --max-response-tokens 128 \
-  --edge-coverage 0.90 \
-  --query-chunk 8 \
-  --model /share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct \
-  --cache /share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876 \
-  --source-info /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/source_info.jsonl \
-  --output experiments/reanchor_flow/outputs/native_subset_message
+conda run --no-capture-output -n research \
+  python -m experiments.reanchor_flow.run subset \
+    --split test \
+    --task all \
+    --samples-per-task 1 \
+    --targets-per-sample 1 \
+    --target-policy uncertain \
+    --flow-signal message \
+    --carrier-scope all \
+    --max-response-tokens 128 \
+    --edge-coverage 0.90 \
+    --query-chunk 8 \
+    --local-window 10 \
+    --model /share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct \
+    --cache /share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876 \
+    --source-info /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/source_info.jsonl \
+    --output experiments/reanchor_flow/outputs/native_mechanism_v2 \
+    --plot
 ```
 
-命令会自动执行 source unit 对齐、target/runner 冻结、native graph、source Value cut、
-head-resolved route model、root/carrier/corridor 因果验证和紧凑保存。重跑完全相同的命令会验证并跳过已有 target。
-无需 `paired_world.npz`。
+结果位于 `.../native_mechanism_v2/test/`。重复同一命令会恢复已完成的 target。长上下文的 eager
+attention 仍有单层 (O(S^2)) 开销；`--query-chunk` 限制 source-cut query 重算批量，但不是固定
+显存承诺。`--carrier-scope` 默认是 `all`，以保留跨层 prompt-hub 候选；若显式缩减 scope，未表示
+的 prompt destination 在下一层记为 `unobserved`，不会把初始 selected-source 身份跨层硬拷贝。
 
-native target gradient 采用逐层 reverse VJP，每次只保留一层 autograd graph；这减少的是
-整网深度图的驻留，不构成“24GB 一定可跑”的承诺。长上下文的单层 eager attention 仍有
-\(O(S^2)\) 显存开销，正式 pilot 前应按实际长度做峰值显存检查。
+如果已有 audit，只画一个 target：
 
-capture 完成后才能打开 hallucination labels：
+```bash
+python -m experiments.reanchor_flow.run mechanism-plot \
+  --artifact /path/to/q123_a10_b20_message.npz \
+  --output /path/to/q123_mechanism.png
+```
+
+`--tokens-json /path/to/tokens.json` 可提供仅用于显示的 token 字符串数组。绘图接口不接收
+hallucination/correctness labels。
+
+## 图中四个面板
+
+| 面板 | 编码 | 能回答的问题 |
+|---|---|---|
+| A. layer-unrolled route | 保证一条 connected root→target widest backbone（含 residual steps），再补 throughput 最大的边；边宽为 throughput，颜色为 root-lineage allocated action | selected source 的候选 lineage 是否经 hub 到达 target？ |
+| B. head-resolved action | layer × head × position 的 evidence/response-origin action | global/local heads 是否支持、反对或抵消？ |
+| C. integration | residual、attention、MLP 的 source-cut displacement/action，加模块一致性 | source cut 在哪里改变状态，这些改变是否支持 target？ |
+| D. intervention ladder | root cut、corridor rescue/block、carrier mediation 的真实 margin effect | 候选路径是否通过精确干预？ |
+
+前三个面板提出或解释机制候选；因果命名以第四个面板的 exact rerun 为准。高跨-head/模块一致性
+只表示当前 target margin 下的 functional alignment，不表示正确，也不能单独称为 attractor。
+
+## 捕获后再看 hallucination labels
+
+机制 capture 完成后，才可单独执行：
 
 ```bash
 python -m experiments.reanchor_flow.run subset-evaluate \
   --split test \
   --model /share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct \
   --cache /share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876 \
-  --output experiments/reanchor_flow/outputs/native_subset_message
+  --output experiments/reanchor_flow/outputs/native_mechanism_v2
 ```
 
-要做 matched cohort 的 attention 对照，保持选择参数不变，只改变 signal 和输出目录：
+评价只检验 `native_source_mediated_observed_margin` 与
+`response_origin_supporting_action_candidate`，不会回写 label 到机制 artifact。第二项不是
+response-history intervention，也不支持生成自我强化的因果命名；“source-operator support 低、
+response-origin supporting action 高”目前只能注册为 response-reliance candidate。
+
+## 受控 factual pair
+
+RAGTruth native audit 的 source cut 只能识别“observed target 对该 Value-message cut 的依赖”，
+不能证明 observed token 是正确事实，也不能把残差差分称为纯语义。若要验证 grounded factual
+effect，使用预先对齐的 clean/counterfactual pair：
 
 ```bash
-bash experiments/reanchor_flow/run_subset.sh \
-  --split test --task all --samples-per-task 1 --targets-per-sample 1 \
-  --target-policy uncertain --flow-signal attention \
-  --carrier-scope response --max-response-tokens 128 \
-  --model /share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct \
-  --cache /share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876 \
-  --source-info /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/source_info.jsonl \
-  --output experiments/reanchor_flow/outputs/native_subset_attention
-```
-
-子集模式固定 `a=observed token`、`b=native run 中排除 a 后的 top runner`。
-`message` graph 的 transport 是真实 `||W_O(A V)||`；`attention` graph 的 transport 是
-raw softmax attention。两种 graph 都另外计算同一个
-`phi=<grad F, A V>`，再用真实 Value-message cut/patch/block 做因果确认。因此切换
-`--flow-signal` 只改变候选路由，不改变 target 功能量和干预算子。
-
-这个模式识别的是 observed target 对指定 Value-source cut 算子的依赖。cut 不直接
-mask Q/K，但删除 source self-message 后，后续 state 与 Q/K 会在 cut world 中自然演化，
-因此不声称冻结了 native selector。RAGTruth 又没有 corrected target 或精确
-supporting span，所以结果不能表述成“正确事实被采纳”。严格事实结论仍使用下面的受控 pair 模式。
-
-## 受控 clean/corrupt pair
-
-真实 message backend：
-
-```bash
-bash experiments/reanchor_flow/run_corridor.sh \
-  --pair data/etcc/example_pair.npz \
+python -m experiments.reanchor_flow.run corridor \
+  --pair /path/to/paired_world.npz \
   --flow-signal message \
-  --model /path/to/Meta-Llama-3.1-8B-Instruct \
-  --query-chunk 8
+  --carrier-scope all \
+  --query-chunk 8 \
+  --model /path/to/Meta-Llama-3.1-8B-Instruct
 ```
 
-纯 attention routing 对照：
-
-```bash
-bash experiments/reanchor_flow/run_corridor.sh \
-  --pair data/etcc/example_pair.npz \
-  --flow-signal attention \
-  --model /path/to/Meta-Llama-3.1-8B-Instruct \
-  --query-chunk 8
-```
-
-受控 pair 中 `--flow-signal` 决定选边和 throughput 使用的数据：
-
-- `attention`：`edge_score == clean softmax attention`；不计算 target gradient；
-- `message`：`edge_score` 是 clean-corrupt 真实 `AV` message 对固定 margin 的有符号作用。
-
-两种模式的因果确认都使用真实 pre-`W_O` message code，不用 attention mask 的变化冒充
-message patch。加 `--materialize-messages` 才会额外保存 clean/corrupt/delta 的完整 hidden-size
-post-`W_O` vector；默认只保存数值重建和原位干预所需的 float32 head code，以控制文件体积。
-
-默认 `--carrier-scope all`，会包含 prompt 与 response carrier。`response` 是明确的便宜消融，
-会漏掉 prompt 内中继。`--root-screen-limit 0` 对所有 candidate units 做精确双向 patch。
-
-## 构造 pair
-
-输入不是 hallucination label 文件，而是运行前冻结的受控 pair。最小 Python API：
-
-```python
-from experiments.reanchor_flow.worlds import (
-    PairedWorld,
-    SourceUnits,
-    TargetContrast,
-    save_world,
-)
-
-world = PairedWorld(
-    sample_id="sample-1",
-    tokenizer_id="Meta-Llama-3.1-8B-Instruct",
-    corruption="same-length supporting-fact replacement",
-    clean_token_ids=clean_ids,
-    corrupt_token_ids=corrupt_ids,
-    response_start=response_start,
-    units=SourceUnits(token_unit_id, unit_names, unit_kinds),
-    candidate_unit_id=(3, 4),
-    targets=(
-        TargetContrast(
-            query_position=q,
-            positive_token_id=correct_id,
-            negative_token_id=competing_id,
-            origin="controlled clean-vs-corrupt fact",
-        ),
-    ),
-).check()
-save_world("data/etcc/sample-1.npz", world)
-```
-
-`build_source_units` 可从 RAGTruth historical prompt 对齐 passage、sentence 或 Data2txt field，
-但准确 supporting span 和 matched corruption 仍需受控数据或独立标注。
-
-当 pair 同时列出多个 candidate units 时，它只用于 root screening；程序选中 root 后会把
-其他候选恢复为 clean token，并在 isolated world 中重新捕获最终 corridor。
-
-## 模块边界
-
-```text
-units/worlds/native world → attribution → flow → throughput
-                                      ↓           ↓
-                              route_model    corridor/audit
-                                      └──────┬─────┘
-                                      subset report
-```
-
-没有第二套 message intervention：精确 edge delete、pre-`W_O` patch 和 residual patch 都复用
-`experiments/common/llama_message_intervention.py`。
+pair 必须固定相同 token 坐标、相同 teacher-forced response、明确允许改变的 source units，以及
+运行前注册的 positive/negative target。`attention` backend 可作为 routing 对照；无论候选如何选，
+因果确认始终 patch/block 真实 pre-`W_O` message，而不是用 attention mask 代替。
 
 ## 测试
 
 ```bash
-pytest -q \
+python -m pytest -q \
   experiments/common/tests/test_llama_message_intervention.py \
   experiments/reanchor_flow/tests
 ```
-
-测试覆盖 native/manual forward 一致性、GQA、绝对坐标、双 transport 分离、独立 functional
-score、throughput 守恒、固定 runner、label firewall、断点恢复，以及 native/root-cut 两个世界的
-delete-and-restore 正控制；`route_model` 还验证 provenance 守恒、未观测 sink、逐 head 轴、
-真实 message 聚合和无句子边界的 re-anchor 节点定位。
-
-## 旧基线
-
-原 `analyze/evaluate/detect/all` 命令仍可复现 schema-v8 frozen detector。它的最新 held-out
-token AUROC 为约 `0.58–0.62`，onset AUPRC 约 `0.007–0.011`；这些结果是停止继续堆检测
-特征、转向机制 corridor 的依据，不是 ETCC 结果。

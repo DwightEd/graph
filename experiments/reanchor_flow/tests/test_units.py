@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from itertools import pairwise
+
 import torch
 
 from experiments.reanchor_flow.units import (
@@ -20,7 +22,7 @@ def test_passage_units_cover_the_complete_evidence_without_overlap() -> None:
     ]
     assert spans[0].start == 0
     assert spans[-1].stop == len(text)
-    assert all(left.stop == right.start for left, right in zip(spans, spans[1:]))
+    assert all(left.stop == right.start for left, right in pairwise(spans))
 
 
 def test_sentence_units_do_not_split_common_abbreviations() -> None:
@@ -41,7 +43,7 @@ def test_data2txt_units_follow_nested_leaf_fields_and_list_items() -> None:
     ]
     assert spans[0].start == 0
     assert spans[-1].stop == len(text)
-    assert all(left.stop == right.start for left, right in zip(spans, spans[1:]))
+    assert all(left.stop == right.start for left, right in pairwise(spans))
 
 
 def test_data2txt_units_use_absolute_offsets_in_multiline_unicode_input() -> None:

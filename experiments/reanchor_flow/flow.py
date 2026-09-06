@@ -61,7 +61,7 @@ class FlowEdges:
     def count(self) -> int:
         return len(self.layer)
 
-    def select(self, index) -> "FlowEdges":
+    def select(self, index) -> FlowEdges:
         return FlowEdges(
             self.layer[index],
             self.head[index],

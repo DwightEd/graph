@@ -1,9 +1,10 @@
-"""Post-hoc label join for a frozen native mechanism subset."""
+"""Post-hoc label join for a completed, label-free mechanism subset."""
 
 from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -11,25 +12,186 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 
 from research_dataset import open_research_dataset
 
-from .subset import MANIFEST_NAME
-from .subset_artifacts import (
-    MANIFEST_SCHEMA,
-    capture_config_sha256,
-    validate_compact_native_audit,
-)
-from .subset_data import file_sha256, safe_sample_key
-from .worlds import TargetContrast
+from .artifacts import save_json
+from .route_model import EVIDENCE, RESPONSE
+from .subset import MANIFEST_NAME, MANIFEST_SCHEMA
+from .subset_artifacts import AUDIT_SCHEMA
 
 REPORT_NAME = "mechanism_evaluation.json"
-ROUTE_SCORE_DIRECTION = {
-    # A supported reread is expected to decrease hallucination risk.
-    "reanchor_support_peak": -1.0,
-    "reanchor_opposition_peak": 1.0,
-    "read_without_use_peak": 1.0,
-    "local_reinforcement_peak": 1.0,
-    # Generic response reuse is retained as a drift/control quantity.
-    "response_reuse_peak": 1.0,
+
+# These are fixed, untrained axes. Direction only converts each raw value to
+# hallucination risk for evaluation; it does not alter the stored mechanism.
+AXIS_DIRECTION = {
+    "native_source_mediated_observed_margin": -1.0,
+    "response_origin_supporting_action_candidate": 1.0,
 }
+CONFIRMATION_FIELDS = (
+    "selected_root_confirmed",
+    "corridor_confirmed",
+    "corridor_restoration_valid",
+    "carrier_any_confirmed",
+    "full_chain_confirmed",
+)
+EFFECT_FIELDS = (
+    "root_value_effect",
+    "selected_root_value_necessity",
+    "selected_root_causal_score",
+    "corridor_necessity",
+    "corridor_conditional_rescue",
+    "corridor_mediated_rescue",
+)
+
+
+def _item(artifact: Mapping[str, object], name: str):
+    value = np.asarray(artifact[name])
+    if value.shape != ():
+        raise ValueError(f"mechanism artifact {name} must be scalar")
+    return value.item()
+
+
+def _slot(position: object, target: int, *, name: str) -> int:
+    matches = np.flatnonzero(np.asarray(position, dtype=np.int64) == target)
+    if len(matches) != 1:
+        raise ValueError(f"target position is absent from {name}")
+    return int(matches[0])
+
+
+def _agreement(action: np.ndarray) -> tuple[float, float, float]:
+    """Return signed sum, absolute budget, and cancellation agreement."""
+
+    signed = float(action.sum())
+    budget = float(np.abs(action).sum())
+    agreement = abs(signed) / budget if budget > 0 else 0.0
+    return signed, budget, agreement
+
+
+def _weighted(values: np.ndarray, weight: np.ndarray) -> float:
+    denominator = float(weight.sum())
+    return float(np.dot(values, weight) / denominator) if denominator > 0 else 0.0
+
+
+def mechanism_axes(artifact: Mapping[str, object]) -> dict[str, float | bool]:
+    """Compute two registered raw axes while retaining head-resolved inputs.
+
+    Native-source support is an operator-specific logit-margin bottleneck. The
+    exact value is admitted only when the root-lineage route, source-cut
+    integration ledger, and exact intervention ladder agree on positive
+    support for the observed-token contrast. Response-origin supporting action
+    is a separate first-order candidate. It is not called lock-in because this
+    audit does not intervene on response history.
+    """
+
+    query = int(_item(artifact, "query_position"))
+    row_slot = _slot(artifact["route_row_position"], query, name="route rows")
+    stage_slot = _slot(artifact["route_stage_position"], query, name="stage trace")
+
+    transport = np.asarray(artifact["route_head_transport"], dtype=np.float64)
+    action = np.asarray(artifact["route_head_action"], dtype=np.float64)
+    integration = np.asarray(artifact["route_head_integration"], dtype=np.float64)
+    if transport.shape != action.shape or transport.ndim != 4:
+        raise ValueError("head transport/action tensors disagree")
+    if integration.shape[:3] != action.shape[:3] or integration.shape[-1] != 4:
+        raise ValueError("head integration tensor disagrees with route rows")
+
+    evidence_transport = float(transport[:, :, row_slot, EVIDENCE].sum())
+    evidence_action = action[:, :, row_slot, EVIDENCE]
+    evidence_signed, evidence_budget, evidence_agreement = _agreement(evidence_action)
+    integration_action = integration[:, :, row_slot, 3]
+    integration_signed, integration_budget, integration_agreement = _agreement(
+        integration_action
+    )
+
+    exact_values = np.asarray(
+        [
+            float(_item(artifact, "selected_root_value_necessity")),
+            float(_item(artifact, "corridor_necessity")),
+            float(_item(artifact, "corridor_mediated_rescue")),
+        ],
+        dtype=np.float64,
+    )
+    exact_bottleneck = float(exact_values.min())
+    exact_confirmed = bool(
+        _item(artifact, "selected_root_confirmed")
+        and _item(artifact, "corridor_confirmed")
+        and _item(artifact, "corridor_restoration_valid")
+    )
+    lineage_present = evidence_transport > 0
+    evidence_supporting = evidence_signed > 0
+    integration_supporting = integration_signed > 0
+    source_support_gate = bool(
+        exact_confirmed
+        and lineage_present
+        and evidence_supporting
+        and integration_supporting
+        and exact_bottleneck > 0
+    )
+    source_support = exact_bottleneck if source_support_gate else 0.0
+
+    response_action = action[:, :, row_slot, RESPONSE]
+    response_layer_signed = response_action.sum(axis=1)
+    response_layer_budget = np.abs(response_action).sum(axis=1)
+    response_layer_agreement = np.divide(
+        np.abs(response_layer_signed),
+        response_layer_budget,
+        out=np.zeros_like(response_layer_signed),
+        where=response_layer_budget > 0,
+    )
+    continuity = np.asarray(artifact["route_state_continuity"], dtype=np.float64)[
+        :, stage_slot
+    ]
+    positive_response = np.clip(response_layer_signed, 0.0, None)
+    response_support = float(np.sum(positive_response * response_layer_agreement))
+    response_signed, response_budget, response_agreement = _agreement(response_action)
+
+    module_agreement = np.asarray(
+        artifact["route_module_functional_agreement"], dtype=np.float64
+    )[:, stage_slot]
+    module_cosine = np.asarray(
+        artifact["route_module_vector_cosine"], dtype=np.float64
+    )[:, stage_slot]
+    cross_head_vector = np.asarray(
+        artifact["route_cross_head_vector_coherence"], dtype=np.float64
+    )[:, row_slot]
+    cross_head_function = np.asarray(
+        artifact["route_cross_head_functional_agreement"], dtype=np.float64
+    )[:, row_slot]
+    integration_layer_budget = np.abs(integration_action).sum(axis=1)
+    return {
+        "native_source_mediated_observed_margin": source_support,
+        "native_source_exact_bottleneck_ungated": exact_bottleneck,
+        "native_source_support_gate": source_support_gate,
+        "selected_source_lineage_present": lineage_present,
+        "selected_source_action_supporting": evidence_supporting,
+        "selected_source_integration_supporting": integration_supporting,
+        "selected_source_transport_sum": evidence_transport,
+        "selected_source_action_signed_sum": evidence_signed,
+        "selected_source_action_absolute_budget": evidence_budget,
+        "selected_source_action_functional_agreement": evidence_agreement,
+        "selected_source_integration_action_signed_sum": integration_signed,
+        "selected_source_integration_action_absolute_budget": integration_budget,
+        "selected_source_integration_functional_agreement": integration_agreement,
+        "response_origin_supporting_action_candidate": response_support,
+        "response_origin_action_signed_sum": response_signed,
+        "response_origin_action_absolute_budget": response_budget,
+        "response_origin_functional_agreement": response_agreement,
+        "source_conditioned_state_continuity": _weighted(
+            continuity, integration_layer_budget
+        ),
+        # Module diagnostics remain separate because they are conditioned on
+        # the selected-root cut, not a response-origin intervention.
+        "source_conditioned_module_functional_agreement": _weighted(
+            module_agreement, integration_layer_budget
+        ),
+        "source_conditioned_module_vector_cosine": _weighted(
+            module_cosine, integration_layer_budget
+        ),
+        "source_conditioned_cross_head_vector_coherence": _weighted(
+            cross_head_vector, integration_layer_budget
+        ),
+        "source_conditioned_cross_head_functional_agreement": _weighted(
+            cross_head_function, integration_layer_budget
+        ),
+    }
 
 
 def _mean(rows: list[dict], name: str) -> float | None:
@@ -38,10 +200,7 @@ def _mean(rows: list[dict], name: str) -> float | None:
         for row in rows
         if row.get(name) is not None and math.isfinite(float(row[name]))
     ]
-    if not values:
-        return None
-    result = float(np.mean(values))
-    return result if math.isfinite(result) else None
+    return float(np.mean(values)) if values else None
 
 
 def _rate(rows: list[dict], name: str) -> float | None:
@@ -49,28 +208,20 @@ def _rate(rows: list[dict], name: str) -> float | None:
 
 
 def summarize(rows: list[dict]) -> dict:
-    result = {
+    return {
         "targets": len(rows),
         "samples": len({row["sample_id"] for row in rows}),
-        "root_confirmed_rate": _rate(rows, "root_confirmed"),
-        "corridor_confirmed_rate": _rate(rows, "corridor_confirmed"),
-        "carrier_confirmed_rate": _rate(rows, "carrier_confirmed"),
-        "restoration_valid_rate": _rate(rows, "restoration_valid"),
-        "mean_root_value_effect": _mean(rows, "root_value_effect"),
-        "mean_corridor_necessity": _mean(rows, "corridor_necessity"),
-        "mean_corridor_rescue": _mean(rows, "corridor_rescue"),
-        "mean_corridor_mediated_rescue": _mean(rows, "corridor_mediated_rescue"),
+        "confirmation_rate": {name: _rate(rows, name) for name in CONFIRMATION_FIELDS},
+        "mean_exact_effect": {name: _mean(rows, name) for name in EFFECT_FIELDS},
+        "mean_raw_axis": {name: _mean(rows, name) for name in AXIS_DIRECTION},
     }
-    for name in ROUTE_SCORE_DIRECTION:
-        result[f"mean_{name}"] = _mean(rows, name)
-    return result
 
 
-def route_detection(rows: list[dict]) -> dict[str, dict]:
-    """Evaluate frozen raw mechanisms after labels have been joined."""
+def raw_axis_evaluation(rows: list[dict]) -> dict[str, dict]:
+    """Evaluate the two fixed axes without fitting a classifier or threshold."""
 
     result = {}
-    for name, direction in ROUTE_SCORE_DIRECTION.items():
+    for name, direction in AXIS_DIRECTION.items():
         finite = [
             row
             for row in rows
@@ -79,322 +230,51 @@ def route_detection(rows: list[dict]) -> dict[str, dict]:
         label = np.asarray(
             [row["hallucination_label"] for row in finite], dtype=np.int8
         )
-        score = direction * np.asarray(
-            [row[name] for row in finite], dtype=np.float64
-        )
-        prevalence = float(label.mean()) if len(label) else None
+        risk = direction * np.asarray([row[name] for row in finite], dtype=np.float64)
         metric = {
             "targets": len(label),
             "positives": int(label.sum()),
-            "prevalence": prevalence,
+            "prevalence": float(label.mean()) if len(label) else None,
             "hallucination_direction": "lower" if direction < 0 else "higher",
             "auroc": None,
             "auprc": None,
         }
         if len(np.unique(label)) == 2:
-            metric["auroc"] = float(roc_auc_score(label, score))
-            metric["auprc"] = float(average_precision_score(label, score))
+            metric["auroc"] = float(roc_auc_score(label, risk))
+            metric["auprc"] = float(average_precision_score(label, risk))
         result[name] = metric
     return result
 
 
-def _save_json(path: Path, value: dict) -> None:
-    temporary = path.with_name(f".{path.name}.tmp")
-    temporary.write_text(
-        json.dumps(value, indent=2, allow_nan=False) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
+def _capture_rows(output: Path, manifest: dict) -> list[dict]:
+    """Load all label-free artifacts before the label store is opened."""
 
-
-def _validate_dataset_identity(dataset_root: Path, manifest: dict) -> dict:
-    config = manifest.get("config")
-    if not isinstance(config, dict):
-        raise ValueError("capture manifest has no dataset configuration")
-    captured_root = config.get("dataset_root")
-    if not isinstance(captured_root, str) or not captured_root:
-        raise ValueError("capture manifest has no dataset root")
-    if dataset_root.resolve() != Path(captured_root).resolve():
-        raise ValueError("evaluation dataset root differs from capture")
-    expected_hash = config.get("dataset_manifest_sha256")
-    if not isinstance(expected_hash, str) or not expected_hash:
-        raise ValueError("capture manifest has no dataset-manifest hash")
-    if file_sha256(dataset_root / "manifest.json") != expected_hash:
-        raise ValueError("evaluation dataset manifest differs from capture")
-    return config
-
-
-def _target_key(target: TargetContrast, signal: str) -> str:
-    return (
-        f"q{target.query_position}_a{target.positive_token_id}"
-        f"_b{target.negative_token_id}_{signal}"
-    )
-
-
-def _contained_file(root: Path, relative_value: object, *, kind: str) -> Path:
-    if not isinstance(relative_value, str) or not relative_value:
-        raise ValueError(f"subset manifest {kind} path is invalid")
-    relative = Path(relative_value)
-    if relative.is_absolute():
-        raise ValueError(f"subset manifest {kind} path must be relative")
-    resolved_root = root.resolve()
-    destination = (root / relative).resolve()
-    try:
-        destination.relative_to(resolved_root)
-    except ValueError as error:
-        raise ValueError(f"subset manifest {kind} path escapes output root") from error
-    if not destination.is_file():
-        raise ValueError(f"subset manifest {kind} file is missing: {relative_value}")
-    return destination
-
-
-def _target_from_manifest(value: object) -> TargetContrast:
-    if not isinstance(value, dict):
-        raise ValueError("subset manifest target is invalid")
-    try:
-        target = TargetContrast(
-            int(value["query_position"]),
-            int(value["positive_token_id"]),
-            int(value["negative_token_id"]),
-            str(value["contrast_origin"]),
-        )
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("subset manifest target is invalid") from error
-    if (
-        target.query_position < 0
-        or target.positive_token_id < 0
-        or target.negative_token_id < 0
-        or target.positive_token_id == target.negative_token_id
-        or not target.origin
-    ):
-        raise ValueError("subset manifest target is invalid")
-    return target
-
-
-def _artifact_scalar(stored, name: str):
-    value = stored[name]
-    if value.shape != ():
-        raise ValueError(f"subset artifact {name} must be scalar")
-    return value.item()
-
-
-def _preflight_audits(output: Path, manifest: dict, config: dict) -> list[dict]:
-    """Validate and load every label-free result before labels are accessible."""
-
-    selection = manifest.get("selection")
-    samples = manifest.get("samples")
-    audits = manifest.get("audits")
-    if not isinstance(selection, list) or not isinstance(samples, dict):
-        raise ValueError("subset manifest sample inventory is invalid")
-    if not isinstance(audits, dict):
-        raise ValueError("subset manifest audit inventory is invalid")
-    if manifest.get("config_sha256") != capture_config_sha256(config):
-        raise ValueError("subset manifest configuration fingerprint is invalid")
-
-    selected: dict[str, dict] = {}
-    for value in selection:
-        if not isinstance(value, dict):
-            raise ValueError("subset manifest selection is invalid")
-        try:
-            sample_id = str(value["sample_id"])
-            source_id = str(value["source_id"])
-            task_type = str(value["task_type"])
-            generator_model = str(value["generator_model"])
-        except KeyError as error:
-            raise ValueError("subset manifest selection is invalid") from error
-        if not sample_id or sample_id in selected or not source_id or not task_type:
-            raise ValueError("subset manifest selection is invalid")
-        selected[sample_id] = {
-            "source_id": source_id,
-            "task_type": task_type,
-            "generator_model": generator_model,
-        }
-    if set(samples) != set(selected):
-        raise ValueError("subset manifest samples differ from frozen selection")
-
-    try:
-        signal = str(config["flow_signal"])
-        split = str(config["split"])
-        tokenizer_id = str(config["tokenizer"])
-        model_id = str(config["model"])
-        model_dtype = str(config["model_dtype"])
-    except KeyError as error:
-        raise ValueError("capture manifest configuration is incomplete") from error
-
-    expected_keys: set[str] = set()
-    rows: list[dict] = []
-    for sample_id, identity in selected.items():
-        sample = samples[sample_id]
-        if not isinstance(sample, dict):
-            raise ValueError(f"subset manifest sample {sample_id} is invalid")
-        for name in ("source_id", "task_type"):
-            expected = identity[name]
-            if sample.get(name) != expected:
-                raise ValueError(
-                    f"subset manifest sample {sample_id} has inconsistent {name}"
-                )
-        targets = sample.get("targets")
-        if not isinstance(targets, list) or not targets:
-            raise ValueError(f"subset manifest sample {sample_id} has no targets")
-
-        sample_key = safe_sample_key(sample_id)
-        expected_world = (
-            Path("worlds") / identity["task_type"] / f"{sample_key}.npz"
-        ).as_posix()
-        if sample.get("world") != expected_world:
-            raise ValueError(
-                f"subset manifest sample {sample_id} has inconsistent world"
-            )
-        world_path = _contained_file(output, sample["world"], kind="world")
-        world_sha256 = sample.get("world_sha256")
-        if not isinstance(world_sha256, str) or not world_sha256:
-            raise ValueError(f"subset manifest sample {sample_id} has no world hash")
-        if file_sha256(world_path) != world_sha256:
-            raise ValueError(f"subset native-world hash mismatch for {sample_id}")
-        for target_rank, target_value in enumerate(targets):
-            target = _target_from_manifest(target_value)
-            target_key = _target_key(target, signal)
-            key = f"{sample_id}:{target_key}"
-            if key in expected_keys:
-                raise ValueError("subset manifest contains duplicate audit targets")
-            expected_keys.add(key)
-            entry = audits.get(key)
-            if not isinstance(entry, dict):
-                raise ValueError(f"subset manifest lacks expected audit {key}")
-            relative = (
-                Path("audits")
-                / identity["task_type"]
-                / sample_key
-                / f"{target_key}.npz"
-            ).as_posix()
-            expected_entry = {
-                "result": relative,
-                "complete": True,
-                "dataset_sample_id": sample_id,
-                "sample_id": sample_key,
-                "source_id": identity["source_id"],
-                "task_type": identity["task_type"],
-                "generator_model": identity["generator_model"],
-                "split": split,
-                "query_position": target.query_position,
-                "positive_token_id": target.positive_token_id,
-                "negative_token_id": target.negative_token_id,
-                "contrast_origin": target.origin,
-                "flow_signal": signal,
-                "target_rank": target_rank,
-                "world_sha256": world_sha256,
-                "config_sha256": manifest["config_sha256"],
+    rows = []
+    for entry in manifest["audits"].values():
+        with np.load(output / entry["result"], allow_pickle=False) as artifact:
+            if int(_item(artifact, "subset_audit_schema")) != AUDIT_SCHEMA:
+                raise ValueError("unsupported subset audit schema")
+            row = {
+                "sample_id": str(_item(artifact, "dataset_sample_id")),
+                "task_type": str(_item(artifact, "task_type")),
+                "query_position": int(_item(artifact, "query_position")),
+                "prediction_position": int(_item(artifact, "prediction_position")),
+                "response_start": int(_item(artifact, "response_start")),
             }
-            for name, expected in expected_entry.items():
-                if entry.get(name) != expected:
-                    raise ValueError(
-                        f"subset manifest audit {key} has inconsistent {name}"
-                    )
-            destination = _contained_file(output, entry["result"], kind="audit")
-            expected_sha256 = entry.get("sha256")
-            if not isinstance(expected_sha256, str) or not expected_sha256:
-                raise ValueError(f"subset manifest audit {key} has no artifact hash")
-            if file_sha256(destination) != expected_sha256:
-                raise ValueError(f"subset artifact hash mismatch for {key}")
-            validate_compact_native_audit(
-                destination,
-                dataset_sample_id=sample_id,
-                sample_id=sample_key,
-                source_id=identity["source_id"],
-                split=split,
-                task_type=identity["task_type"],
-                generator_model=identity["generator_model"],
-                tokenizer_id=tokenizer_id,
-                world_sha256=world_sha256,
-                target=target,
-                target_rank=target_rank,
-                signal=signal,
-                model_id=model_id,
-                model_dtype=model_dtype,
-                capture_config=config,
+            row.update(
+                {name: bool(_item(artifact, name)) for name in CONFIRMATION_FIELDS}
             )
-            with np.load(destination, allow_pickle=False) as stored:
-                row = {
-                    "sample_id": sample_id,
-                    "task_type": identity["task_type"],
-                    "query_position": int(_artifact_scalar(stored, "query_position")),
-                    "response_start": int(_artifact_scalar(stored, "response_start")),
-                    "prediction_position": int(
-                        _artifact_scalar(stored, "prediction_position")
-                    ),
-                    "root_confirmed": bool(
-                        _artifact_scalar(stored, "selected_root_confirmed")
-                    ),
-                    "corridor_confirmed": bool(
-                        _artifact_scalar(stored, "corridor_confirmed")
-                    ),
-                    "carrier_confirmed": bool(
-                        _artifact_scalar(stored, "carrier_value_mediated")
-                    ),
-                    "restoration_valid": bool(
-                        _artifact_scalar(stored, "corridor_restoration_valid")
-                    ),
-                    "root_value_effect": float(
-                        _artifact_scalar(stored, "root_value_effect")
-                    ),
-                    "corridor_necessity": float(
-                        _artifact_scalar(stored, "corridor_necessity")
-                    ),
-                    "corridor_rescue": float(
-                        _artifact_scalar(stored, "corridor_conditional_rescue")
-                    ),
-                    "corridor_mediated_rescue": float(
-                        _artifact_scalar(stored, "corridor_mediated_rescue")
-                    ),
-                }
-                for name in ROUTE_SCORE_DIRECTION:
-                    row[name] = (
-                        float(_artifact_scalar(stored, name))
-                        if name in stored.files
-                        else None
-                    )
-            metric_names = (
-                "root_value_effect",
-                "corridor_necessity",
-                "corridor_rescue",
-                "corridor_mediated_rescue",
-            )
-            if not all(math.isfinite(row[name]) for name in metric_names):
-                raise ValueError(f"subset artifact has non-finite metrics: {key}")
-            if not 0 < row["response_start"] <= row["prediction_position"]:
-                raise ValueError(
-                    f"subset artifact has invalid response positions: {key}"
-                )
+            row.update({name: float(_item(artifact, name)) for name in EFFECT_FIELDS})
+            row.update(mechanism_axes(artifact))
             rows.append(row)
-    if set(audits) != expected_keys:
-        raise ValueError("subset manifest audit inventory is inconsistent")
     return rows
 
 
-def evaluate_subset_split(
-    dataset_root: str | Path,
-    output_root: str | Path,
-) -> dict:
-    """Join labels only after capture completion and summarize mechanisms."""
-
-    dataset_root = Path(dataset_root)
-    output = Path(output_root)
-    manifest_path = output / MANIFEST_NAME
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("subset_manifest_schema") != MANIFEST_SCHEMA:
-        raise ValueError("unsupported subset manifest schema")
-    if not manifest.get("analysis_complete"):
-        raise ValueError("subset capture is incomplete")
-    if manifest.get("labels_used_for_capture") is not False:
-        raise ValueError("capture manifest violates the label firewall")
-    config = _validate_dataset_identity(dataset_root, manifest)
-    rows = _preflight_audits(output, manifest, config)
-
-    sample_ids = list(manifest["samples"])
+def _join_labels(dataset_root: Path, rows: list[dict]) -> None:
+    sample_ids = list(dict.fromkeys(row["sample_id"] for row in rows))
     dataset = open_research_dataset(
         dataset_root,
         device="cpu",
-        verify_hashes=True,
         retain_embedded_labels=True,
     )
     labels = dataset.prepare_evaluation_labels(sample_ids)
@@ -409,49 +289,78 @@ def evaluate_subset_split(
             sample.release_attention()
 
     for row in rows:
-        response_start = row.pop("response_start")
-        prediction = row.pop("prediction_position")
-        relative = prediction - response_start
-        sample_labels = label_by_sample[row["sample_id"]]
-        if not 0 <= relative < len(sample_labels):
+        relative = row.pop("prediction_position") - row.pop("response_start")
+        sample_label = label_by_sample[row["sample_id"]]
+        if not 0 <= relative < len(sample_label):
             raise ValueError(
                 f"audit target lies outside labels: {row['sample_id']} "
                 f"q={row['query_position']}"
             )
-        row["hallucination_label"] = int(sample_labels[relative])
+        row["hallucination_label"] = int(sample_label[relative])
 
-    groups = {"ALL": {}}
-    for task in ("QA", "Summary", "Data2txt"):
-        groups[task] = {}
-    for task in groups:
+
+def evaluate_subset_split(
+    dataset_root: str | Path,
+    output_root: str | Path,
+) -> dict:
+    """Join labels after capture, then summarize mechanisms and fixed axes."""
+
+    dataset_root = Path(dataset_root)
+    output = Path(output_root)
+    manifest_path = output / MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("subset_manifest_schema") != MANIFEST_SCHEMA:
+        raise ValueError("unsupported subset manifest schema")
+    if not manifest.get("analysis_complete"):
+        raise ValueError("subset capture is incomplete")
+    if manifest.get("labels_used_for_capture") is not False:
+        raise ValueError("capture manifest violates the label firewall")
+    captured_dataset_root = Path(manifest["config"]["dataset_root"]).resolve()
+    if captured_dataset_root != dataset_root.resolve():
+        raise ValueError("evaluation dataset_root differs from capture manifest")
+
+    rows = _capture_rows(output, manifest)
+    _join_labels(dataset_root, rows)
+
+    groups = {}
+    task_names = ["ALL", *sorted({row["task_type"] for row in rows})]
+    for task in task_names:
         task_rows = (
             rows if task == "ALL" else [row for row in rows if row["task_type"] == task]
         )
-        groups[task]["all"] = summarize(task_rows)
-        groups[task]["clean"] = summarize(
-            [row for row in task_rows if row["hallucination_label"] == 0]
-        )
-        groups[task]["hallucinated"] = summarize(
-            [row for row in task_rows if row["hallucination_label"] == 1]
-        )
-        groups[task]["route_detection"] = route_detection(task_rows)
+        groups[task] = {
+            "all": summarize(task_rows),
+            "clean": summarize(
+                [row for row in task_rows if row["hallucination_label"] == 0]
+            ),
+            "hallucinated": summarize(
+                [row for row in task_rows if row["hallucination_label"] == 1]
+            ),
+            "raw_axis_evaluation": raw_axis_evaluation(task_rows),
+        }
 
     report = {
-        "subset_evaluation_schema": 2,
-        "capture_manifest": str(manifest_path.resolve()),
+        "subset_evaluation_schema": 3,
         "labels_accessed_after_capture": True,
         "selection_is_not_population_evaluation": True,
         "claim_scope": (
-            "hallucinated-vs-clean observed-target dependence under a source "
-            "Value-message cut; "
-            "not factual correctness"
+            "native source-operator support for an observed-token contrast "
+            "and response-origin supporting-action candidates; neither axis "
+            "identifies factual correctness"
         ),
-        "route_score_direction": {
-            name: "lower" if direction < 0 else "higher"
-            for name, direction in ROUTE_SCORE_DIRECTION.items()
+        "axis_definition": {
+            "native_source_mediated_observed_margin": (
+                "exact root/corridor/mediated-rescue bottleneck gated by "
+                "root-lineage transport, signed source action, and signed "
+                "source-cut integration for the observed-token margin"
+            ),
+            "response_origin_supporting_action_candidate": (
+                "positive response-origin signed head action weighted by "
+                "head functional agreement; no response-history intervention"
+            ),
         },
         "groups": groups,
         "targets": rows,
     }
-    _save_json(output / REPORT_NAME, report)
+    save_json(output / REPORT_NAME, report)
     return report

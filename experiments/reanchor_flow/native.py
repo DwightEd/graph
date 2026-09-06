@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-import torch
-
 from .corridor import (
     CarrierEffect,
     CorridorEffect,
@@ -35,7 +33,6 @@ class NativeTargetAudit:
 
     world: NativeWorld
     flow: PairedFlow
-    transport_throughput: FlowThroughput
     throughput: FlowThroughput
     corridor: FlowEdges
     effect: CorridorEffect
@@ -126,7 +123,7 @@ def audit_native_target(
     target: TargetContrast,
     signal: FlowSignal | str,
     *,
-    carrier_scope: str = "response",
+    carrier_scope: str = "all",
     coverage: float = 0.9,
     query_chunk: int = 8,
     root_screen_limit: int = 4,
@@ -146,23 +143,8 @@ def audit_native_target(
         coverage=coverage,
         query_chunk=query_chunk,
     )
-    transport_throughput = compute_throughput(
+    screen_throughput = compute_throughput(
         screen,
-        prefix.units.token_unit_id,
-        prefix.units.count,
-        prefix.evidence_unit_id,
-    )
-    support_score = torch.where(
-        screen.edges.clean_target_score > 0,
-        screen.edges.score,
-        torch.zeros_like(screen.edges.score),
-    )
-    support_screen = replace(
-        screen,
-        edges=replace(screen.edges, score=support_score),
-    )
-    candidate_throughput = compute_throughput(
-        support_screen,
         prefix.units.token_unit_id,
         prefix.units.count,
         prefix.evidence_unit_id,
@@ -171,7 +153,7 @@ def audit_native_target(
         model,
         screen,
         prefix,
-        candidate_throughput,
+        screen_throughput,
         limit=root_screen_limit,
     )
     selected_root = select_root(roots)
@@ -203,12 +185,8 @@ def audit_native_target(
         corrupt_source_mask=root_gate.source_mask,
     )
 
-    support_flow = replace(
-        flow,
-        edges=replace(flow.edges, score=support_score),
-    )
     throughput = compute_throughput(
-        support_flow,
+        flow,
         prefix.units.token_unit_id,
         prefix.units.count,
         (selected_root,),
@@ -234,20 +212,24 @@ def audit_native_target(
         limit=carrier_limit,
         effect_direction=1.0,
     )
-    dynamics = HeadResolvedRouteModel(local_window).analyze(model, flow, prefix)
-    return NativeTargetAudit(
-        prefix,
+    dynamics = HeadResolvedRouteModel(local_window).analyze(
+        model,
         flow,
-        transport_throughput,
-        throughput,
-        corridor,
-        effect,
-        corridor_confirmed,
-        roots,
-        all_cut_margin,
-        selected_root,
-        selected_effect,
-        selected_root_confirmed,
-        carriers,
-        dynamics,
+        prefix,
+        root_unit_id=selected_root,
+    )
+    return NativeTargetAudit(
+        world=prefix,
+        flow=flow,
+        throughput=throughput,
+        corridor=corridor,
+        effect=effect,
+        corridor_confirmed=corridor_confirmed,
+        roots=roots,
+        all_evidence_cut_margin=all_cut_margin,
+        selected_root_unit_id=selected_root,
+        selected_root_effect=selected_effect,
+        selected_root_confirmed=selected_root_confirmed,
+        carriers=carriers,
+        dynamics=dynamics,
     )

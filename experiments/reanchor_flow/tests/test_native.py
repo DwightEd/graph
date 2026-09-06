@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
 
-import numpy as np
 import pytest
 import torch
 
@@ -16,27 +15,28 @@ from experiments.common.llama_message_intervention import (
 from experiments.reanchor_flow import attribution as attribution_module
 from experiments.reanchor_flow import corridor as corridor_module
 from experiments.reanchor_flow import native as native_module
+from experiments.reanchor_flow import native_flow as native_flow_module
 from experiments.reanchor_flow.attribution import (
     GradientObserver,
     contrast_direction,
     native_target_gradients,
 )
 from experiments.reanchor_flow.corridor import (
-    CarrierEffect,
     complete_mediation_confirmed,
     confirm_carriers,
 )
 from experiments.reanchor_flow.flow import FlowEdges
 from experiments.reanchor_flow.native import audit_native_target
-from experiments.reanchor_flow.native_flow import native_flow_screen
+from experiments.reanchor_flow.native_flow import (
+    attach_cut_edge_codes,
+    native_flow_screen,
+)
 from experiments.reanchor_flow.native_world import (
     NativeWorld,
+    gated_forward_cache,
     load_native_world,
     save_native_world,
-)
-from experiments.reanchor_flow.subset_artifacts import (
-    save_compact_native_audit,
-    validate_compact_native_audit,
+    source_gate,
 )
 from experiments.reanchor_flow.tests.etcc_helpers import paired_world, tiny_model
 from experiments.reanchor_flow.throughput import (
@@ -76,25 +76,6 @@ def native_world(model=None) -> NativeWorld:
         pair.candidate_unit_id,
         targets,
     ).check()
-
-
-def compact_capture_config(world: NativeWorld) -> dict:
-    return {
-        "model": "tiny",
-        "model_dtype": "float32",
-        "tokenizer": world.tokenizer_id,
-        "dataset_manifest_sha256": "d" * 64,
-        "source_info_sha256": "s" * 64,
-        "split": "test",
-        "target_policy": "evenly-spaced",
-        "flow_signal": "message",
-        "edge_coverage": 1.0,
-        "carrier_scope": "all",
-        "query_chunk": 2,
-        "root_screen_limit": 0,
-        "carrier_limit": 1,
-        "saved_edges": 4,
-    }
 
 
 def test_native_world_round_trip_and_observed_target_contract(tmp_path) -> None:
@@ -441,6 +422,61 @@ def test_native_attention_and_message_are_distinct_transport_backends() -> None:
                 assert float(total) == pytest.approx(1.0, abs=1e-5)
 
 
+def test_cut_recompute_obeys_query_chunk(monkeypatch) -> None:
+    model = tiny_model()
+    world = native_world(model)
+    target = world.targets[0]
+    prefix = world.prefix(target)
+    flow, gradients = native_flow_screen(
+        model,
+        prefix,
+        target,
+        "message",
+        carrier_scope="all",
+        coverage=1.0,
+        query_chunk=2,
+    )
+    gate = source_gate(prefix, (prefix.evidence_unit_id[0],))
+    cut = gated_forward_cache(model, flow.clean_cache, gate)
+    expected = attach_cut_edge_codes(
+        model,
+        flow.edges,
+        cut,
+        gradients,
+        gate.source_mask,
+        query_chunk=len(flow.row_position),
+    )
+
+    rows_per_call = []
+    actual_attention_rows = native_flow_module.attention_rows
+
+    def traced_attention_rows(query, key, positions, scaling):
+        rows_per_call.append(len(positions))
+        return actual_attention_rows(query, key, positions, scaling)
+
+    monkeypatch.setattr(native_flow_module, "attention_rows", traced_attention_rows)
+    actual = attach_cut_edge_codes(
+        model,
+        flow.edges,
+        cut,
+        gradients,
+        gate.source_mask,
+        query_chunk=1,
+    )
+
+    assert len(set(flow.edges.target.tolist())) > 1
+    assert len(rows_per_call) > model.config.num_hidden_layers
+    assert max(rows_per_call) <= 1
+    for name in (
+        "attention_corrupt",
+        "corrupt_target_score",
+        "corrupt_message_norm",
+        "delta_message_norm",
+        "corrupt_code",
+    ):
+        torch.testing.assert_close(getattr(actual, name), getattr(expected, name))
+
+
 @pytest.mark.parametrize("signal", ["attention", "message"])
 def test_native_corridor_restores_both_base_worlds(signal: str) -> None:
     model = tiny_model()
@@ -460,10 +496,12 @@ def test_native_corridor_restores_both_base_worlds(signal: str) -> None:
     assert result.effect.restoration_error <= 1e-6
     assert result.effect.restoration_valid
     assert result.effect.edge_count == result.corridor.count
-    assert all(float(score) > 0 for score in result.corridor.clean_target_score)
+    assert result.corridor.count > 0
 
 
-def test_native_roots_are_screened_on_positive_functional_support(monkeypatch) -> None:
+def test_native_roots_and_corridor_preserve_signed_functional_conflicts(
+    monkeypatch,
+) -> None:
     model = tiny_model()
     world = native_world(model)
     target = world.targets[0]
@@ -488,238 +526,15 @@ def test_native_roots_are_screened_on_positive_functional_support(monkeypatch) -
         carrier_limit=0,
     )
 
-    assert len(calls) == 3
-    raw_score, raw_roots, _ = calls[0]
-    support_score, support_roots, support_candidates = calls[1]
+    assert len(calls) == 2
+    raw_score, raw_roots, transport = calls[0]
+    selected_score, selected_roots, _ = calls[1]
     assert raw_roots == world.evidence_unit_id
-    assert support_roots == world.evidence_unit_id
-    assert torch.equal(
-        support_score,
-        torch.where(
-            result.flow.edges.clean_target_score > 0,
-            raw_score,
-            torch.zeros_like(raw_score),
-        ),
-    )
+    assert selected_roots == (result.selected_root_unit_id,)
+    assert torch.equal(selected_score, raw_score)
     for root in result.roots:
         assert root.route_mass == pytest.approx(
-            float(support_candidates.unit_mass[root.unit_id])
-        )
-
-
-def test_compact_native_artifact_omits_message_codes(tmp_path) -> None:
-    model = tiny_model()
-    world = native_world(model)
-    result = audit_native_target(
-        model,
-        world,
-        world.targets[0],
-        "message",
-        carrier_scope="all",
-        coverage=1.0,
-        query_chunk=2,
-        root_screen_limit=0,
-        carrier_limit=1,
-    )
-    path = tmp_path / "audit.npz"
-    capture_config = compact_capture_config(world)
-    save_compact_native_audit(
-        path,
-        world,
-        result,
-        dataset_sample_id="dataset-tiny",
-        source_id="source-tiny",
-        split="test",
-        task_type="QA",
-        generator_model="tiny",
-        model_id="tiny",
-        model_dtype="float32",
-        target_policy="evenly-spaced",
-        target_rank=0,
-        coverage=1.0,
-        carrier_scope="all",
-        query_chunk=2,
-        root_screen_limit=0,
-        carrier_limit=1,
-        saved_edges=4,
-        world_sha256="w" * 64,
-        capture_config=capture_config,
-    )
-    validate_compact_native_audit(
-        path,
-        dataset_sample_id="dataset-tiny",
-        sample_id=world.sample_id,
-        source_id="source-tiny",
-        split="test",
-        task_type="QA",
-        generator_model="tiny",
-        tokenizer_id=world.tokenizer_id,
-        world_sha256="w" * 64,
-        target=world.targets[0],
-        target_rank=0,
-        signal=result.flow.signal,
-        model_id="tiny",
-        model_dtype="float32",
-        capture_config=capture_config,
-    )
-    with np.load(path, allow_pickle=False) as stored:
-        assert int(stored["edge_saved_count"]) <= 4
-        assert not any("code" in name for name in stored.files)
-        assert "edge_root_cut_native_gradient_projection" in stored.files
-        assert "edge_root_cut_functional_score" not in stored.files
-        assert int(stored["route_model_schema"]) == 1
-        assert stored["route_head_span"].shape == (
-            model.config.num_hidden_layers,
-            model.config.num_attention_heads,
-        )
-        assert stored["reanchor_event_head"].ndim == 1
-        assert stored["local_event_head"].ndim == 1
-        assert stored["reuse_event_head"].ndim == 1
-        assert str(stored["world_kind"].item()) == ("native_source_value_message_cut")
-        assert str(stored["root_cut_functional_score_semantics"].item()) == (
-            "frozen_native_gradient_dot_root_cut_pre_WO_AV_message"
-        )
-        assert "do not directly mask Q/K" in str(stored["source_cut_semantics"].item())
-        assert float(stored["causal_effect_tolerance"]) == pytest.approx(
-            result.effect.restoration_tolerance
-        )
-        full_chain = bool(stored["corridor_confirmed"]) and bool(
-            stored["carrier_any_confirmed"]
-        )
-        assert bool(stored["carrier_value_mediated"]) == full_chain
-        assert bool(stored["full_chain_confirmed"]) == full_chain
-        assert not bool(stored["labels_used_for_capture"])
-        assert bool(stored["corridor_restoration_valid"])
-
-    local_carrier = CarrierEffect(
-        layer=0,
-        position=world.response_start,
-        route_throughput=1.0,
-        state_delta_norm=1.0,
-        target_score=1.0,
-        necessity=1.0,
-        rescue=1.0,
-        block_effect=1.0,
-        blocked_rescue=0.0,
-        mediated_rescue=1.0,
-        block_tolerance=1e-5,
-        confirmed=True,
-    )
-    local_only = replace(
-        result,
-        corridor_confirmed=False,
-        carriers=(local_carrier,),
-    )
-    local_only_path = tmp_path / "local-carrier-only.npz"
-    save_compact_native_audit(
-        local_only_path,
-        world,
-        local_only,
-        dataset_sample_id="dataset-tiny",
-        source_id="source-tiny",
-        split="test",
-        task_type="QA",
-        generator_model="tiny",
-        model_id="tiny",
-        model_dtype="float32",
-        target_policy="evenly-spaced",
-        target_rank=0,
-        coverage=1.0,
-        carrier_scope="all",
-        query_chunk=2,
-        root_screen_limit=0,
-        carrier_limit=1,
-        saved_edges=4,
-        world_sha256="w" * 64,
-        capture_config=capture_config,
-    )
-    with np.load(local_only_path, allow_pickle=False) as stored:
-        assert bool(stored["carrier_any_confirmed"])
-        assert not bool(stored["carrier_value_mediated"])
-        assert not bool(stored["full_chain_confirmed"])
-
-
-def test_compact_native_artifact_rejects_swapped_resume_identity(tmp_path) -> None:
-    model = tiny_model()
-    world = native_world(model)
-    result = audit_native_target(
-        model,
-        world,
-        world.targets[0],
-        "message",
-        carrier_scope="all",
-        coverage=1.0,
-        query_chunk=2,
-        root_screen_limit=0,
-        carrier_limit=1,
-    )
-    path = tmp_path / "audit.npz"
-    capture_config = compact_capture_config(world)
-    save_compact_native_audit(
-        path,
-        world,
-        result,
-        dataset_sample_id="dataset-tiny",
-        source_id="source-tiny",
-        split="test",
-        task_type="QA",
-        generator_model="tiny",
-        model_id="tiny",
-        model_dtype="float32",
-        target_policy="evenly-spaced",
-        target_rank=0,
-        coverage=1.0,
-        carrier_scope="all",
-        query_chunk=2,
-        root_screen_limit=0,
-        carrier_limit=1,
-        saved_edges=4,
-        world_sha256="w" * 64,
-        capture_config=capture_config,
-    )
-    validation = {
-        "dataset_sample_id": "dataset-tiny",
-        "sample_id": world.sample_id,
-        "source_id": "source-tiny",
-        "split": "test",
-        "task_type": "QA",
-        "generator_model": "tiny",
-        "tokenizer_id": world.tokenizer_id,
-        "world_sha256": "w" * 64,
-        "target": world.targets[0],
-        "target_rank": 0,
-        "signal": result.flow.signal,
-        "model_id": "tiny",
-        "model_dtype": "float32",
-        "capture_config": capture_config,
-    }
-    with pytest.raises(ValueError, match="source_id"):
-        validate_compact_native_audit(
-            path,
-            **{**validation, "source_id": "another-source"},
-        )
-
-    target = world.targets[0]
-    another_negative = target.negative_token_id + 1
-    if another_negative == target.positive_token_id:
-        another_negative += 1
-    swapped_target = TargetContrast(
-        target.query_position,
-        target.positive_token_id,
-        another_negative,
-        target.origin,
-    )
-    with pytest.raises(ValueError, match="negative_token_id"):
-        validate_compact_native_audit(
-            path,
-            **{**validation, "target": swapped_target},
-        )
-
-    stale_config = {**capture_config, "saved_edges": 8}
-    with pytest.raises(ValueError, match="edge_save_limit|capture_config"):
-        validate_compact_native_audit(
-            path,
-            **{**validation, "capture_config": stale_config},
+            float(transport.unit_mass[root.unit_id])
         )
 
 

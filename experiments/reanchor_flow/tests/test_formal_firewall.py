@@ -7,6 +7,12 @@ import torch
 
 import formal_cache
 from cache import sha256
+from experiments.reanchor_flow import subset
+from experiments.reanchor_flow.subset_data import (
+    SampleRecord,
+    inspect_records,
+    select_records,
+)
 from formal_cache import (
     FORMAL_CACHE_SCHEMA,
     FORMAL_TENSOR_FIELDS,
@@ -15,13 +21,6 @@ from formal_cache import (
     read_formal_sample_metadata,
 )
 from research_dataset import FormalResearchDataset
-
-from experiments.reanchor_flow import subset
-from experiments.reanchor_flow.subset_data import (
-    SampleRecord,
-    inspect_records,
-    select_records,
-)
 
 
 def _spec(*, split: str = "test") -> dict:
@@ -218,7 +217,7 @@ def test_formal_sample_metadata_preserves_label_retaining_legacy_behavior(
 
 def test_inspect_records_reads_only_explicit_metadata_ids() -> None:
     class Dataset:
-        sample_ids = ["one", "two", "three"]
+        sample_ids = ("one", "two", "three")
 
         def __init__(self):
             self.read = []
@@ -244,7 +243,7 @@ def test_inspect_records_reads_only_explicit_metadata_ids() -> None:
 
 def test_source_info_task_must_match_formal_metadata() -> None:
     class Dataset:
-        sample_ids = ["one"]
+        sample_ids = ("one",)
 
         @staticmethod
         def metadata(_sample_id):
@@ -285,14 +284,32 @@ def test_subset_capture_rejects_a_mismatched_dataset_split(
         {"manifest": {"split": "train"}, "spec": {}, "sample_ids": []},
     )()
     monkeypatch.setattr(subset, "open_research_dataset", lambda *_a, **_k: dataset)
+    config = subset.SubsetRunConfig(
+        model_id=str((tmp_path / "model").resolve()),
+        model_dtype="float32",
+        tokenizer_id="model",
+        dataset_root=str((tmp_path / "cache").resolve()),
+        source_info=str((tmp_path / "source.jsonl").resolve()),
+        split="test",
+        tasks=("QA",),
+        samples_per_task=1,
+        explicit_sample_ids=(),
+        selection_seed=2026,
+        targets_per_sample=1,
+        target_policy="uncertain",
+        max_response_tokens=128,
+        signal=subset.FlowSignal.MESSAGE,
+        carrier_scope="all",
+        coverage=0.9,
+        query_chunk=8,
+        root_screen_limit=4,
+        carrier_limit=2,
+        local_window=10,
+    )
     with pytest.raises(ValueError, match="differs from requested split"):
         subset.run_subset_split(
             None,
             None,
-            tmp_path / "cache",
-            tmp_path / "source.jsonl",
             tmp_path / "output",
-            split="test",
-            model_path=tmp_path / "model",
-            model_dtype="float32",
+            config,
         )

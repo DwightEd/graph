@@ -7,151 +7,91 @@ import pytest
 import torch
 
 from experiments.reanchor_flow import subset_report
-from experiments.reanchor_flow.subset_artifacts import (
-    canonical_capture_config,
-    capture_config_sha256,
-)
-from experiments.reanchor_flow.subset_data import file_sha256
+
+
+def _artifact_arrays() -> dict[str, object]:
+    transport = np.zeros((2, 2, 1, 4), dtype=np.float32)
+    transport[:, :, 0, 0] = [[0.3, 0.2], [0.4, 0.1]]
+    action = np.zeros_like(transport)
+    action[:, :, 0, 0] = [[0.4, -0.1], [0.3, 0.2]]
+    action[:, :, 0, 2] = [[0.1, 0.1], [0.4, -0.1]]
+    integration = np.zeros_like(transport)
+    integration[:, :, 0, 3] = [[0.3, -0.1], [0.2, 0.1]]
+    return {
+        "subset_audit_schema": 2,
+        "dataset_sample_id": "sample-1",
+        "task_type": "QA",
+        "response_start": 4,
+        "prediction_position": 5,
+        "query_position": 4,
+        "selected_root_confirmed": True,
+        "corridor_confirmed": True,
+        "corridor_restoration_valid": True,
+        "carrier_any_confirmed": False,
+        "full_chain_confirmed": False,
+        "root_value_effect": 1.0,
+        "selected_root_value_necessity": 0.9,
+        "selected_root_causal_score": 0.7,
+        "corridor_necessity": 0.8,
+        "corridor_conditional_rescue": 0.7,
+        "corridor_mediated_rescue": 0.6,
+        "route_row_position": np.asarray([4], dtype=np.int32),
+        "route_head_transport": transport,
+        "route_head_action": action,
+        "route_head_integration": integration,
+        "route_stage_position": np.asarray([4], dtype=np.int32),
+        "route_state_continuity": np.asarray([[0.5], [0.8]], dtype=np.float32),
+        "route_cross_head_vector_coherence": np.asarray(
+            [[0.6], [0.8]], dtype=np.float32
+        ),
+        "route_cross_head_functional_agreement": np.asarray(
+            [[0.5], [0.9]], dtype=np.float32
+        ),
+        "route_module_functional_agreement": np.asarray(
+            [[0.7], [0.9]], dtype=np.float32
+        ),
+        "route_module_vector_cosine": np.asarray([[0.2], [-0.3]], dtype=np.float32),
+    }
 
 
 def complete_capture(tmp_path):
     dataset_root = tmp_path / "cache"
     dataset_root.mkdir()
-    dataset_manifest = dataset_root / "manifest.json"
-    dataset_manifest.write_text('{"split":"test"}\n', encoding="utf-8")
-
     output = tmp_path / "output"
-    world = output / "worlds" / "QA" / "sample-1.npz"
-    world.parent.mkdir(parents=True)
-    np.savez_compressed(world, native_world_schema=1)
-    world_sha256 = file_sha256(world)
-
-    config = {
-        "model": "/model/tiny-llama",
-        "model_dtype": "float32",
-        "tokenizer": "tiny-llama",
-        "dataset_root": str(dataset_root.resolve()),
-        "dataset_manifest_sha256": file_sha256(dataset_manifest),
-        "source_info_sha256": "0" * 64,
-        "split": "test",
-        "target_policy": "evenly-spaced",
-        "flow_signal": "message",
-        "carrier_scope": "response",
-        "edge_coverage": 1.0,
-        "query_chunk": 2,
-        "root_screen_limit": 1,
-        "carrier_limit": 1,
-        "saved_edges": 4,
-    }
-    config_sha256 = capture_config_sha256(config)
-    target = {
-        "query_position": 4,
-        "positive_token_id": 9,
-        "negative_token_id": 8,
-        "contrast_origin": "label_free_evenly-spaced_observed_token_vs_native_runner",
-    }
-    target_key = "q4_a9_b8_message"
-    result_relative = f"audits/QA/sample-1/{target_key}.npz"
-    result = output / result_relative
+    result = output / "audits" / "sample-1.npz"
     result.parent.mkdir(parents=True)
-    np.savez_compressed(
-        result,
-        subset_audit_schema=1,
-        artifact_complete=1,
-        capture_config_json=canonical_capture_config(config),
-        capture_config_sha256=config_sha256,
-        world_sha256=world_sha256,
-        dataset_manifest_sha256=config["dataset_manifest_sha256"],
-        source_info_sha256=config["source_info_sha256"],
-        dataset_sample_id="sample-1",
-        sample_id="sample-1",
-        source_id="source-1",
-        split="test",
-        task_type="QA",
-        generator_model="generator",
-        tokenizer_id="tiny-llama",
-        model_id="/model/tiny-llama",
-        model_dtype="float32",
-        target_selection_policy="evenly-spaced",
-        target_selection_rank=0,
-        response_start=4,
-        prediction_position=5,
-        query_position=4,
-        positive_token_id=9,
-        negative_token_id=8,
-        contrast_origin=target["contrast_origin"],
-        flow_signal="message",
-        edge_coverage=1.0,
-        carrier_scope="response",
-        query_chunk=2,
-        root_screen_limit=1,
-        carrier_limit=1,
-        edge_save_limit=4,
-        labels_used_for_capture=0,
-        token_ids=np.asarray([1, 2, 3, 4, 5, 9], dtype=np.int64),
-        selected_root_confirmed=True,
-        corridor_confirmed=True,
-        carrier_any_confirmed=False,
-        carrier_value_mediated=False,
-        full_chain_confirmed=False,
-        corridor_restoration_valid=True,
-        root_value_effect=1.0,
-        corridor_necessity=0.8,
-        corridor_conditional_rescue=0.7,
-        corridor_mediated_rescue=0.6,
-    )
-    audit_key = f"sample-1:{target_key}"
+    np.savez_compressed(result, **_artifact_arrays())
     manifest = {
-        "subset_manifest_schema": 1,
-        "config": config,
-        "config_sha256": config_sha256,
-        "selection": [
-            {
-                "sample_id": "sample-1",
-                "source_id": "source-1",
-                "task_type": "QA",
-                "generator_model": "generator",
-            }
-        ],
+        "subset_manifest_schema": 2,
+        "config": {"split": "test", "dataset_root": str(dataset_root.resolve())},
+        "selection": [{"sample_id": "sample-1", "task_type": "QA"}],
         "analysis_complete": True,
         "labels_used_for_capture": False,
-        "samples": {
-            "sample-1": {
-                "source_id": "source-1",
-                "task_type": "QA",
-                "world": "worlds/QA/sample-1.npz",
-                "world_sha256": world_sha256,
-                "targets": [target],
-            }
-        },
+        "samples": {"sample-1": {"targets": [4]}},
         "audits": {
-            audit_key: {
-                "result": result_relative,
-                "complete": True,
-                "dataset_sample_id": "sample-1",
+            "sample-1:q4": {
+                "result": "audits/sample-1.npz",
                 "sample_id": "sample-1",
-                "source_id": "source-1",
-                "task_type": "QA",
-                "generator_model": "generator",
-                "split": "test",
-                **target,
-                "flow_signal": "message",
-                "target_rank": 0,
-                "world_sha256": world_sha256,
-                "config_sha256": config_sha256,
-                "sha256": file_sha256(result),
+                "query_position": 4,
+                "positive_token_id": 9,
+                "negative_token_id": 8,
             }
         },
     }
-    manifest_path = output / "run_manifest.json"
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    return dataset_root, output, result
+    (output / "run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    return dataset_root, output
 
 
-def test_subset_evaluation_opens_labels_only_after_complete_capture(
-    tmp_path, monkeypatch
-) -> None:
-    dataset_root, output, _result = complete_capture(tmp_path)
+def test_subset_evaluation_joins_labels_after_capture(tmp_path, monkeypatch) -> None:
+    dataset_root, output = complete_capture(tmp_path)
+    capture_loaded = False
+    original_capture_rows = subset_report._capture_rows
+
+    def capture_rows(*args):
+        nonlocal capture_loaded
+        rows = original_capture_rows(*args)
+        capture_loaded = True
+        return rows
 
     class Sample:
         def release_attention(self):
@@ -173,94 +113,122 @@ def test_subset_evaluation_opens_labels_only_after_complete_capture(
             return Labels()
 
     def open_dataset(*_args, **kwargs):
+        assert capture_loaded
         assert kwargs["retain_embedded_labels"] is True
-        assert kwargs["verify_hashes"] is True
         return Dataset()
 
+    monkeypatch.setattr(subset_report, "_capture_rows", capture_rows)
     monkeypatch.setattr(subset_report, "open_research_dataset", open_dataset)
     report = subset_report.evaluate_subset_split(dataset_root, output)
+
     hallucinated = report["groups"]["QA"]["hallucinated"]
     assert hallucinated["targets"] == 1
-    assert hallucinated["corridor_confirmed_rate"] == 1.0
-    assert report["labels_accessed_after_capture"]
-    assert report["groups"]["QA"]["route_detection"][
-        "read_without_use_peak"
-    ]["auroc"] is None
+    assert hallucinated["confirmation_rate"]["corridor_confirmed"] == 1.0
+    assert report["targets"][0]["native_source_mediated_observed_margin"] == pytest.approx(
+        0.6
+    )
+    assert report["targets"][0][
+        "response_origin_supporting_action_candidate"
+    ] == pytest.approx(
+        0.38
+    )
 
     text = (output / "mechanism_evaluation.json").read_text(encoding="utf-8")
     assert "NaN" not in text
-
-    def reject_constant(value):
-        raise AssertionError(f"non-standard JSON constant: {value}")
-
-    stored = json.loads(text, parse_constant=reject_constant)
-    assert stored["groups"]["QA"]["clean"]["root_confirmed_rate"] is None
+    assert json.loads(text)["groups"]["QA"]["clean"]["targets"] == 0
 
 
-def test_route_detection_keeps_raw_mechanisms_separate() -> None:
+def test_raw_axis_evaluation_keeps_registered_axes_separate() -> None:
     rows = [
         {
             "hallucination_label": 0,
-            "reanchor_support_peak": 2.0,
-            "reanchor_opposition_peak": 0.0,
-            "read_without_use_peak": 0.1,
-            "local_reinforcement_peak": 0.2,
-            "response_reuse_peak": 0.3,
+            "native_source_mediated_observed_margin": 1.2,
+            "response_origin_supporting_action_candidate": 0.1,
         },
         {
             "hallucination_label": 1,
-            "reanchor_support_peak": 0.1,
-            "reanchor_opposition_peak": 2.0,
-            "read_without_use_peak": 0.9,
-            "local_reinforcement_peak": 1.2,
-            "response_reuse_peak": 1.1,
+            "native_source_mediated_observed_margin": 0.1,
+            "response_origin_supporting_action_candidate": 1.3,
         },
     ]
-    metrics = subset_report.route_detection(rows)
-    assert set(metrics) == set(subset_report.ROUTE_SCORE_DIRECTION)
+    metrics = subset_report.raw_axis_evaluation(rows)
+    assert set(metrics) == set(subset_report.AXIS_DIRECTION)
     assert all(metric["auroc"] == 1.0 for metric in metrics.values())
 
 
-@pytest.mark.parametrize("failure", ("missing", "hash-mismatch"))
-def test_subset_evaluation_preflights_artifacts_before_labels(
-    tmp_path, monkeypatch, failure
+def test_mechanism_axes_use_signed_head_agreement_not_head_average() -> None:
+    artifact = _artifact_arrays()
+    action = np.asarray(artifact["route_head_action"]).copy()
+    action[:, :, 0, 2] = [[1.0, -1.0], [1.0, -1.0]]
+    artifact["route_head_action"] = action
+    axes = subset_report.mechanism_axes(artifact)
+    assert axes["response_origin_action_absolute_budget"] == 4.0
+    assert axes["response_origin_action_signed_sum"] == 0.0
+    assert axes["response_origin_functional_agreement"] == 0.0
+    assert axes["response_origin_supporting_action_candidate"] == 0.0
+
+
+def test_response_action_axis_does_not_mix_selected_source_continuity() -> None:
+    artifact = _artifact_arrays()
+    baseline = subset_report.mechanism_axes(artifact)[
+        "response_origin_supporting_action_candidate"
+    ]
+    artifact["route_state_continuity"] = np.asarray(
+        [[-1.0], [-1.0]], dtype=np.float32
+    )
+    changed = subset_report.mechanism_axes(artifact)[
+        "response_origin_supporting_action_candidate"
+    ]
+    assert changed == baseline
+
+
+def test_unconfirmed_exact_effect_remains_diagnosable_but_is_not_accepted() -> None:
+    artifact = _artifact_arrays()
+    artifact["corridor_confirmed"] = False
+    axes = subset_report.mechanism_axes(artifact)
+    assert axes["native_source_exact_bottleneck_ungated"] == pytest.approx(0.6)
+    assert axes["native_source_support_gate"] is False
+    assert axes["native_source_mediated_observed_margin"] == 0.0
+
+
+def test_subset_evaluation_refuses_incomplete_capture_before_labels(
+    tmp_path, monkeypatch
 ) -> None:
-    dataset_root, output, result = complete_capture(tmp_path)
-    if failure == "missing":
-        result.unlink()
-    else:
-        with result.open("ab") as stream:
-            stream.write(b"changed")
-
-    labels_opened = False
-
-    def open_dataset(*_args, **_kwargs):
-        nonlocal labels_opened
-        labels_opened = True
-        raise AssertionError("labels opened before artifact preflight")
-
-    monkeypatch.setattr(subset_report, "open_research_dataset", open_dataset)
-    with pytest.raises(ValueError, match="missing|hash mismatch"):
-        subset_report.evaluate_subset_split(dataset_root, output)
-    assert not labels_opened
-
-
-def test_subset_evaluation_refuses_incomplete_capture(tmp_path) -> None:
     output = tmp_path / "output"
     output.mkdir()
     (output / "run_manifest.json").write_text(
         json.dumps(
             {
-                "subset_manifest_schema": 1,
+                "subset_manifest_schema": 2,
                 "analysis_complete": False,
                 "labels_used_for_capture": False,
             }
         ),
         encoding="utf-8",
     )
-    try:
+
+    def reject_labels(*_args, **_kwargs):
+        raise AssertionError("labels opened before capture completion")
+
+    monkeypatch.setattr(subset_report, "open_research_dataset", reject_labels)
+    with pytest.raises(ValueError, match="incomplete"):
         subset_report.evaluate_subset_split(tmp_path / "cache", output)
-    except ValueError as error:
-        assert "incomplete" in str(error)
-    else:
-        raise AssertionError("incomplete capture unexpectedly opened labels")
+
+
+def test_subset_evaluation_requires_capture_dataset_root(
+    tmp_path, monkeypatch
+) -> None:
+    _dataset_root, output = complete_capture(tmp_path)
+    other_dataset_root = tmp_path / "other-cache"
+    other_dataset_root.mkdir()
+
+    def reject_capture(*_args, **_kwargs):
+        raise AssertionError("artifacts loaded before dataset identity check")
+
+    def reject_labels(*_args, **_kwargs):
+        raise AssertionError("labels opened before dataset identity check")
+
+    monkeypatch.setattr(subset_report, "_capture_rows", reject_capture)
+    monkeypatch.setattr(subset_report, "open_research_dataset", reject_labels)
+    with pytest.raises(ValueError, match="dataset_root differs from capture"):
+        subset_report.evaluate_subset_split(other_dataset_root, output)
