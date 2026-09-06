@@ -144,6 +144,62 @@ M=\left\lVert\sum_e(m_e^+-m_e^-)\right\rVert_2,
 同时分开累加正、负 target score；因此高 attention 或高 budget 但低 coherence、负 score 的
 route 不会被解释为“准确信息已整合”。
 
+### 4.3 统一的 head-resolved route model
+
+`route_model.py` 中的 `HeadResolvedRouteModel` 是审计的分析模型，而不是新的分类器。它消费
+原有逐边捕获，不重新近似 attention，也不对 head 求平均。对 native message graph，边与
+residual continuation 先变成同一 destination row 内的显式转换概率：
+
+\[
+p_e=\frac{\lVert m_e\rVert_2}
+{\lVert r_{l,t}\rVert_2+\sum_{h,j}\lVert m_{l,h,j\to t}\rVert_2},
+\qquad
+p_r=\frac{\lVert r_{l,t}\rVert_2}
+{\lVert r_{l,t}\rVert_2+\sum_{h,j}\lVert m_{l,h,j\to t}\rVert_2}.
+\]
+
+这只是 norm-based transport law，不声称向量消息按概率守恒。coverage 未保存的质量进入
+`unobserved`，不会被重新分给保留边。每个 token 的四通道来源寄存器为
+`evidence / other_prompt / response / unobserved`：
+
+\[
+z_{l+1,t}=p_r z_{l,t}+\sum_{h,j}p_{l,h,j\to t}z_{l,j}
++p_{sink}e_{unobserved}.
+\]
+
+代码同时保存每条边的 `p_e z[l,j]` 和 `[L,H,P,4]` 的 head tensor；跨 head 的求和只在
+Transformer 本身确实执行 residual addition 时发生。由此可分开读出：直接 evidence
+重读、经 response carrier 的 evidence relay、other-prompt route，以及 response-origin
+local route。
+
+固定目标功能量仍为 observed-token 与 frozen runner 的 logit margin。逐边功能量
+
+\[
+g_e=\langle\nabla_{c_e}F_t,c_e\rangle
+\]
+
+保留正负号。`g_e` 是局部一阶 action；将它按 `z[l,j]` 分配只是在上述 transport model
+下的 provenance-conditioned ledger，不是非线性隐藏状态的精确语义分解。真正的因果作用
+必须再看 source cut/patch 的 margin rerun。
+
+source cut 后，每个 `(l,h,t)` 另存
+
+\[
+B_{l,h,t}=\sum_j\lVert\Delta m_j\rVert,
+\quad M_{l,h,t}=\lVert\sum_j\Delta m_j\rVert,
+\quad \rho_{l,h,t}=M/(B+\epsilon),
+\]
+
+并把 residual input、attention write、MLP write 的 `||delta||` 与
+`gradient dot delta` 放进同一 stage ledger。于是三类量的解释被固定为：`||delta||` 测
+信息是否存在，gradient action 测它能否推动当前 target，精确 rerun 测因果必要/充分性。
+
+重锚定候选不使用句子边界。程序在每个 `(layer,head)` 的生成位置轨迹上寻找“精确 evidence
+endpoint 的 signed action 绝对值”局部峰，并保留 layer/head/position 与作用方向。local
+复用则只计算来自先前 response token、距离不超过窗口、且 provenance 仍属于 response-origin
+的逐 head route；同一 response source 对多个后续节点的作用另以 head-resolved reuse 保存。
+这些是待检验的结构量，不预先把正常的 prompt-to-response 漂移标成幻觉。
+
 ## 5. 从 source contribution 到多路由 throughput
 
 每个 destination row 先取 backend magnitude

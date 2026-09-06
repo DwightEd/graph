@@ -24,6 +24,7 @@ from .native_world import (
     gated_forward_cache,
     source_gate,
 )
+from .route_model import HeadResolvedRouteModel, RouteDynamics
 from .throughput import FlowThroughput, compute_throughput
 from .worlds import TargetContrast
 
@@ -45,6 +46,7 @@ class NativeTargetAudit:
     selected_root_effect: RootEffect
     selected_root_confirmed: bool
     carriers: tuple[CarrierEffect, ...]
+    dynamics: RouteDynamics
 
 
 def confirm_native_roots(
@@ -129,6 +131,7 @@ def audit_native_target(
     query_chunk: int = 8,
     root_screen_limit: int = 4,
     carrier_limit: int = 2,
+    local_window: int = 10,
 ) -> NativeTargetAudit:
     """Run native roots, carrier mediation, and exact corridor tests."""
 
@@ -231,6 +234,7 @@ def audit_native_target(
         limit=carrier_limit,
         effect_direction=1.0,
     )
+    dynamics = HeadResolvedRouteModel(local_window).analyze(model, flow, prefix)
     return NativeTargetAudit(
         prefix,
         flow,
@@ -245,4 +249,5 @@ def audit_native_target(
         selected_effect,
         selected_root_confirmed,
         carriers,
+        dynamics,
     )

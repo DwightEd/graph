@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 
 import numpy as np
+from sklearn.metrics import average_precision_score, roc_auc_score
 
 from research_dataset import open_research_dataset
 
@@ -20,10 +21,23 @@ from .subset_data import file_sha256, safe_sample_key
 from .worlds import TargetContrast
 
 REPORT_NAME = "mechanism_evaluation.json"
+ROUTE_SCORE_DIRECTION = {
+    # A supported reread is expected to decrease hallucination risk.
+    "reanchor_support_peak": -1.0,
+    "reanchor_opposition_peak": 1.0,
+    "read_without_use_peak": 1.0,
+    "local_reinforcement_peak": 1.0,
+    # Generic response reuse is retained as a drift/control quantity.
+    "response_reuse_peak": 1.0,
+}
 
 
 def _mean(rows: list[dict], name: str) -> float | None:
-    values = [float(row[name]) for row in rows if math.isfinite(float(row[name]))]
+    values = [
+        float(row[name])
+        for row in rows
+        if row.get(name) is not None and math.isfinite(float(row[name]))
+    ]
     if not values:
         return None
     result = float(np.mean(values))
@@ -35,7 +49,7 @@ def _rate(rows: list[dict], name: str) -> float | None:
 
 
 def summarize(rows: list[dict]) -> dict:
-    return {
+    result = {
         "targets": len(rows),
         "samples": len({row["sample_id"] for row in rows}),
         "root_confirmed_rate": _rate(rows, "root_confirmed"),
@@ -47,6 +61,41 @@ def summarize(rows: list[dict]) -> dict:
         "mean_corridor_rescue": _mean(rows, "corridor_rescue"),
         "mean_corridor_mediated_rescue": _mean(rows, "corridor_mediated_rescue"),
     }
+    for name in ROUTE_SCORE_DIRECTION:
+        result[f"mean_{name}"] = _mean(rows, name)
+    return result
+
+
+def route_detection(rows: list[dict]) -> dict[str, dict]:
+    """Evaluate frozen raw mechanisms after labels have been joined."""
+
+    result = {}
+    for name, direction in ROUTE_SCORE_DIRECTION.items():
+        finite = [
+            row
+            for row in rows
+            if row.get(name) is not None and math.isfinite(float(row[name]))
+        ]
+        label = np.asarray(
+            [row["hallucination_label"] for row in finite], dtype=np.int8
+        )
+        score = direction * np.asarray(
+            [row[name] for row in finite], dtype=np.float64
+        )
+        prevalence = float(label.mean()) if len(label) else None
+        metric = {
+            "targets": len(label),
+            "positives": int(label.sum()),
+            "prevalence": prevalence,
+            "hallucination_direction": "lower" if direction < 0 else "higher",
+            "auroc": None,
+            "auprc": None,
+        }
+        if len(np.unique(label)) == 2:
+            metric["auroc"] = float(roc_auc_score(label, score))
+            metric["auprc"] = float(average_precision_score(label, score))
+        result[name] = metric
+    return result
 
 
 def _save_json(path: Path, value: dict) -> None:
@@ -298,6 +347,12 @@ def _preflight_audits(output: Path, manifest: dict, config: dict) -> list[dict]:
                         _artifact_scalar(stored, "corridor_mediated_rescue")
                     ),
                 }
+                for name in ROUTE_SCORE_DIRECTION:
+                    row[name] = (
+                        float(_artifact_scalar(stored, name))
+                        if name in stored.files
+                        else None
+                    )
             metric_names = (
                 "root_value_effect",
                 "corridor_necessity",
@@ -379,9 +434,10 @@ def evaluate_subset_split(
         groups[task]["hallucinated"] = summarize(
             [row for row in task_rows if row["hallucination_label"] == 1]
         )
+        groups[task]["route_detection"] = route_detection(task_rows)
 
     report = {
-        "subset_evaluation_schema": 1,
+        "subset_evaluation_schema": 2,
         "capture_manifest": str(manifest_path.resolve()),
         "labels_accessed_after_capture": True,
         "selection_is_not_population_evaluation": True,
@@ -390,6 +446,10 @@ def evaluate_subset_split(
             "Value-message cut; "
             "not factual correctness"
         ),
+        "route_score_direction": {
+            name: "lower" if direction < 0 else "higher"
+            for name, direction in ROUTE_SCORE_DIRECTION.items()
+        },
         "groups": groups,
         "targets": rows,
     }

@@ -6,9 +6,11 @@
 1. passage、sentence、field 或 evidence span 构成 source-unit candidates；
 2. 在保留 layer/head/source/target 的 unrolled graph 上计算 `C(u→t)` 和
    `T(v|u,t)`；
-3. 可选择 raw attention 或 target-specific true-message backend；
-4. 以固定 `z_q(a)-z_q(b)` 对 root、carrier 和 corridor 做 exact cut/patch/block；
-5. 同一条 clean message 删除后必须能原位补回，否则该因果样本无效。
+3. `HeadResolvedRouteModel` 分开记录 evidence、other-prompt、response provenance，逐 head
+   对照 message transport、gradient action 和 source-cut residual change；
+4. 可选择 raw attention 或 target-specific true-message backend；
+5. 以固定 `z_q(a)-z_q(b)` 对 root、carrier 和 corridor 做 exact cut/patch/block；
+6. 同一条 clean message 删除后必须能原位补回，否则该因果样本无效。
 
 ```bash
 cd /share/home/tm902089733300000/a903202310/lys/research/graph

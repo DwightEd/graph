@@ -33,7 +33,7 @@ bash experiments/reanchor_flow/run_subset.sh \
 ```
 
 命令会自动执行 source unit 对齐、target/runner 冻结、native graph、source Value cut、
-root/carrier/corridor 因果验证和紧凑保存。重跑完全相同的命令会验证并跳过已有 target。
+head-resolved route model、root/carrier/corridor 因果验证和紧凑保存。重跑完全相同的命令会验证并跳过已有 target。
 无需 `paired_world.npz`。
 
 native target gradient 采用逐层 reverse VJP，每次只保留一层 autograd graph；这减少的是
@@ -151,10 +151,10 @@ save_world("data/etcc/sample-1.npz", world)
 
 ```text
 units/worlds/native world → attribution → flow → throughput
-                                              ↓
-                                      corridor/audit
-                                              ↓
-                              subset manifest/report
+                                      ↓           ↓
+                              route_model    corridor/audit
+                                      └──────┬─────┘
+                                      subset report
 ```
 
 没有第二套 message intervention：精确 edge delete、pre-`W_O` patch 和 residual patch 都复用
@@ -170,7 +170,8 @@ pytest -q \
 
 测试覆盖 native/manual forward 一致性、GQA、绝对坐标、双 transport 分离、独立 functional
 score、throughput 守恒、固定 runner、label firewall、断点恢复，以及 native/root-cut 两个世界的
-delete-and-restore 正控制。
+delete-and-restore 正控制；`route_model` 还验证 provenance 守恒、未观测 sink、逐 head 轴、
+真实 message 聚合和无句子边界的 re-anchor 节点定位。
 
 ## 旧基线
 

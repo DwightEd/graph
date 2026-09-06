@@ -567,6 +567,14 @@ def test_compact_native_artifact_omits_message_codes(tmp_path) -> None:
         assert not any("code" in name for name in stored.files)
         assert "edge_root_cut_native_gradient_projection" in stored.files
         assert "edge_root_cut_functional_score" not in stored.files
+        assert int(stored["route_model_schema"]) == 1
+        assert stored["route_head_span"].shape == (
+            model.config.num_hidden_layers,
+            model.config.num_attention_heads,
+        )
+        assert stored["reanchor_event_head"].ndim == 1
+        assert stored["local_event_head"].ndim == 1
+        assert stored["reuse_event_head"].ndim == 1
         assert str(stored["world_kind"].item()) == ("native_source_value_message_cut")
         assert str(stored["root_cut_functional_score_semantics"].item()) == (
             "frozen_native_gradient_dot_root_cut_pre_WO_AV_message"

@@ -220,6 +220,24 @@ controlled ETCC but compare native against selected-root Value-cut states.
 `full_chain_confirmed` are identical evaluation outcomes and require both `corridor_confirmed` and at
 least one confirmed carrier; a carrier alone is not reported as a complete mediated chain.
 
+Head-resolved route-model summaries are compact views of the full in-memory ledgers:
+
+- `route_head_span[L,H]`, `route_local_head[L,H]`, and `route_global_head[L,H]` preserve the
+  head coordinate; no all-head mean is saved;
+- `reanchor_event_*` stores local peaks of direct-evidence gradient action with exact
+  layer/head/position, transport mass, and signed action;
+- `local_event_*` stores target-supporting local response-origin routes;
+- `silent_event_*` stores large per-head gaps between evidence read share and functional-use share;
+- `reuse_event_*` stores response source positions repeatedly used by later rows in each head;
+- `reanchor_support_peak`, `reanchor_opposition_peak`, `read_without_use_peak`,
+  `local_reinforcement_peak`, and `response_reuse_peak` are max reductions for later label-frozen
+  evaluation, not averages or causal conclusions.
+
+The full `RouteDynamics` object additionally retains `[L+1,N,4]` node provenance,
+`[E,4]` edge provenance, `[L,H,P,4]` transport/function ledgers, per-head message integration,
+and residual/attention/MLP presence-versus-gradient ledgers. They remain in memory for mechanism
+plots; the compact subset artifact stores only decisive coordinates.
+
 ### Manifest and evaluation
 
 `run_manifest.json` records resolved data/model paths, dataset/source hashes, frozen selection,
@@ -230,3 +248,7 @@ new output directory.
 `mechanism_evaluation.json` is created separately. It records
 `labels_accessed_after_capture=true` and joins labels by
 `prediction_position-response_start`; labels are never copied back into native world or audit NPZs.
+For each raw route quantity it reports AUROC/AUPRC separately. Lower re-anchor support is oriented
+toward hallucination; evidence opposition, read-without-use, local reinforcement, and the generic
+response-reuse control are oriented upward. No learned or hand-weighted composite score is introduced
+before these individual hypotheses pass the QA pilot.

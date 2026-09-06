@@ -183,6 +183,9 @@ def test_subset_evaluation_opens_labels_only_after_complete_capture(
     assert hallucinated["targets"] == 1
     assert hallucinated["corridor_confirmed_rate"] == 1.0
     assert report["labels_accessed_after_capture"]
+    assert report["groups"]["QA"]["route_detection"][
+        "read_without_use_peak"
+    ]["auroc"] is None
 
     text = (output / "mechanism_evaluation.json").read_text(encoding="utf-8")
     assert "NaN" not in text
@@ -192,6 +195,30 @@ def test_subset_evaluation_opens_labels_only_after_complete_capture(
 
     stored = json.loads(text, parse_constant=reject_constant)
     assert stored["groups"]["QA"]["clean"]["root_confirmed_rate"] is None
+
+
+def test_route_detection_keeps_raw_mechanisms_separate() -> None:
+    rows = [
+        {
+            "hallucination_label": 0,
+            "reanchor_support_peak": 2.0,
+            "reanchor_opposition_peak": 0.0,
+            "read_without_use_peak": 0.1,
+            "local_reinforcement_peak": 0.2,
+            "response_reuse_peak": 0.3,
+        },
+        {
+            "hallucination_label": 1,
+            "reanchor_support_peak": 0.1,
+            "reanchor_opposition_peak": 2.0,
+            "read_without_use_peak": 0.9,
+            "local_reinforcement_peak": 1.2,
+            "response_reuse_peak": 1.1,
+        },
+    ]
+    metrics = subset_report.route_detection(rows)
+    assert set(metrics) == set(subset_report.ROUTE_SCORE_DIRECTION)
+    assert all(metric["auroc"] == 1.0 for metric in metrics.values())
 
 
 @pytest.mark.parametrize("failure", ("missing", "hash-mismatch"))
