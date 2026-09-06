@@ -166,7 +166,10 @@ signed_action \(s_G\) 作为方向；支持 observed/evidence contrast 的后续
 作为这些 rows 的 source。搜索 prompt 内部 hub 必须显式设置 carrier_scope=all，并满足同一个 rows
 预算。
 
-预注册默认预算为：
+下表为 `subset` 默认预算；`audit-all` 默认 train+test 的全部可用样本、完整 response（两个长度/
+样本上限的 0 均表示全部），以及 `reanchor-window`、每样本 3 targets。先用 `--scan-only` 可以完成
+完整结构扫描/比较而不运行 gradient 和 root cut；同配置去掉该参数可续做功能审计。此阶段没有验证
+MLP 接纳。以下预算不保证任意长 prefix 的功能梯度都能在 24GB 中运行。
 
 | 项目 | 默认值 | 语义 |
 |---|---:|---|
@@ -175,7 +178,7 @@ signed_action \(s_G\) 作为方向；支持 observed/evidence contrast 的后续
 | max_response_tokens | 128 | 时间轴 pilot 的 response horizon |
 | query_chunk | 8 | full-row 临时 query chunk；不改变结构定义 |
 | local_window | 10 | recent-local response 距离上限，包含对角线 |
-| max_route_rows | 256 | represented destination rows 硬上限 |
+| max_route_rows | 256 | 超限保留最近连续 destinations，所有 causal sources 保留 |
 | edges_per_head | 2 | capture 各取 transport top-k 与 absolute-functional top-k，最坏并集 2k；corridor 再硬限 k |
 | root_candidates | 4 | root 候选上限 |
 | hub_candidates | 8 | hub 候选上限 |
@@ -183,12 +186,14 @@ signed_action \(s_G\) 作为方向；支持 observed/evidence contrast 的后续
 
 full-row 时间扫描必须在 top-k 前完成四桶聚合，常驻只保留 \(O(LHP\cdot4)\) totals/winners；chunk
 内仍临时计算 causal sources，因此 OOM 时应优先缩短 response horizon 或降低 query chunk，不能以
-稀疏 cache 替代注册 selector。预算超限必须报错或要求新配置，不能静默扩大。capture 的两个 top-k 分支用于同时保留高 transport
+稀疏 cache 替代注册 selector。destination 窗口由 route_row_position 记录，截尾不影响完整样本 scan；
+不能静默扩大预算。capture 的两个 top-k 分支用于同时保留高 transport
 与低质量但高 target action 的边，不是对 head 求平均；frozen corridor 才执行每 head-row 的 k 上限。
 edge coverage 未达标时，represented full-row 中被裁剪的 mass 进入 unobserved，且不重归一到
 retained edges。scope 外 prompt destinations 没有 attention row，只沿 residual identity 保留已有
 all-evidence/other-prompt provenance；这让后层 represented row 仍能读取 prompt state，但没有审计
-prompt 内部更新。高 unobserved fraction 或大量 unrepresented rows 都会降低 completeness，不能据
+prompt 内部更新。未展开的 response 节点从 layer 1 起标为 UNOBSERVED，不能用缺失 lineage
+断言其没有证据或把它确定地归为 response-origin。高 unobserved fraction 或大量 unrepresented rows 都会降低 completeness，不能据
 稀疏图断言“其他路径不存在”。
 
 ## 7. 从普遍模式到可验证机制
@@ -391,6 +396,12 @@ discovery 图包含：
 
 ### Phase A：label-free audit
 
+所有样本先保存独立的完整 response scan，不能用选中 target prefixes 的并集代替总体结构观察。
+runner 在 full-response discovery 冻结后显式传入 prefix cache，gradient/cut 继续用同一 contrast，
+避免旧流程 prefix 二次 argmax 引发 `negative candidate is not the frozen native runner`。
+结构 selection identity/score 也不因重算变化；`temporal_switch_recomputed_score` 和
+`temporal_switch_score_delta` 单独记录同一坐标的 prefix 复现差异，不强求数值/近并列 winner 相等。
+
 冻结并保存 structural events、target、AuditPlan、预算、unobserved diagnostics 和三个彼此独立的
 discovery-only raw axes：
 
@@ -411,6 +422,13 @@ action；注册为越高风险越低）。三者分别评价，不拟合组合�
 所以不进入现有 Phase B 指标。
 
 ### Phase B：label join 与评价
+
+`audit-all` 在每 split capture 完成后自动生成 `cohort_summary.json` 和结构比较图，`--plot` 另画
+target 详细图。当前结构 cohort 对每个 layer/head 比较四桶份额、切换率，先按每样本/标注组平均
+token 后样本等权；差值来自 mixed 样本内的幻觉−非幻觉。n<3 的格子置灰，报告完整与实际扫描覆盖。
+这些是描述性结果，未控制位置、claim 类型和同 source 依赖，未实现显著性/cluster CI；不能据热图
+把差异命名成已发现的因果机制。selected-target action/integration 图与 AUROC 单独统计。
+`--scan-only` 的功能量为未测，不能从完整结构覆盖推断接纳也已在所有 tokens 上验证。
 
 完成全部 capture 后才读取 labels。三个 raw axes 按各自预注册的方向或中性双向报告约定分别输出：
 

@@ -295,11 +295,18 @@ def test_temporal_axis_excludes_no_event_fallback() -> None:
     assert axes["evidence_adoption_evaluated"] is False
 
 
-def test_temporal_axis_rejects_selection_score_mismatch() -> None:
+@pytest.mark.parametrize("recomputed", [0.4001, 0.0])
+def test_temporal_axis_preserves_frozen_score_under_prefix_drift(recomputed) -> None:
     artifact = _artifact_arrays()
-    artifact["target_reanchor_score"] = 0.9
-    with pytest.raises(ValueError, match="audited switch score disagree"):
-        subset_report.mechanism_axes(artifact)
+    artifact["reanchor_score"][0, 1, 0] = recomputed
+    axes = subset_report.mechanism_axes(artifact)
+    assert axes["temporal_switch_score"] == 0.4
+    assert axes["temporal_switch_recomputed_score"] == pytest.approx(recomputed)
+    assert axes["temporal_switch_score_delta"] == pytest.approx(
+        recomputed - 0.4, abs=np.finfo(np.float32).eps
+    )
+    assert axes["temporal_switch_evaluated"] is True
+    assert axes["evidence_adoption"] == pytest.approx(0.55)
 
 
 def test_temporal_axis_rejects_mislabeled_current_target_candidate() -> None:

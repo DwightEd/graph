@@ -20,6 +20,7 @@ from .audit import audit_target, save_audit
 from .flow import FlowSignal
 from .mechanism_plot import save_mechanism_figure
 from .route_plan import RouteBudget
+from .sample_scan import render_sample_scan
 from .subset import SubsetRunConfig, run_subset_split
 from .subset_data import REANCHOR_POLICIES
 from .subset_report import evaluate_subset_split
@@ -55,7 +56,11 @@ def subset_output_root(args: argparse.Namespace) -> Path:
         Path(__file__).resolve().parent
         / "outputs"
         / args.model.name
-        / "native_mechanism_v3"
+        / (
+            "native_mechanism_all"
+            if args.command == "audit-all"
+            else "native_mechanism_v3"
+        )
     )
 
 
@@ -226,6 +231,18 @@ def _render_subset(output: Path, tokenizer) -> int:
     return len(artifacts)
 
 
+def _render_scans(output: Path, tokenizer) -> int:
+    scans = sorted((output / "scans").glob("**/*.npz"))
+    for scan in tqdm(scans, desc=f"{output.name} timelines", unit="figure"):
+        destination = scan.with_suffix(".timeline.png")
+        if (
+            not destination.is_file()
+            or destination.stat().st_mtime < scan.stat().st_mtime
+        ):
+            render_sample_scan(scan, destination, tokenizer)
+    return len(scans)
+
+
 def subset_config_from_args(
     args: argparse.Namespace,
     tokenizer,
@@ -262,15 +279,24 @@ def subset_config_from_args(
             confirm=args.confirm,
         ),
         local_window=args.local_window,
+        scan_only=args.scan_only,
     )
 
 
 def route_plan_summary(args: argparse.Namespace) -> str:
     """Return the visible execution plan for one subset invocation."""
 
-    mode = "candidate-discovery+confirmation" if args.confirm else "candidate-discovery"
+    mode = (
+        "structure-only"
+        if args.scan_only
+        else "candidate-discovery+confirmation"
+        if args.confirm
+        else "candidate-discovery"
+    )
     return (
         f"route plan: mode={mode} target_policy={args.target_policy} "
+        f"samples_per_task={args.samples_per_task or 'all'} "
+        f"response_tokens={args.max_response_tokens or 'full'} "
         f"target_rows={args.targets_per_sample} carrier_scope={args.carrier_scope} "
         f"edges_per_head={args.edges_per_head} "
         f"max_route_rows={args.max_route_rows} "
@@ -308,6 +334,15 @@ def audit_subset(args: argparse.Namespace) -> dict:
         )
         if args.plot:
             print(f"mechanism figures: {_render_subset(output, tokenizer)}")
+        if args.plot or args.command == "audit-all":
+            print(f"sample timeline figures: {_render_scans(output, tokenizer)}")
+        if args.evaluate:
+            evaluation = evaluate_subset_split(
+                args.cache / split,
+                output,
+                plot=args.plot or args.command == "audit-all",
+            )
+            _print_evaluation(split, evaluation)
     del model, tokenizer
     clear_memory()
     return reports
@@ -321,32 +356,49 @@ def evaluate_subset(args: argparse.Namespace) -> dict:
         report = evaluate_subset_split(
             args.cache / split,
             subset_split_output(args, split),
+            plot=args.plot,
         )
         reports[split] = report
-        print(f"\n=== NATIVE SUBSET {split.upper()} ===")
-        for task, groups in report["groups"].items():
-            confirmation = groups["all"]["confirmation_rate"]
-            metrics = groups["raw_axis_evaluation"]
-            route = metrics["route_origin_competition"]
-            switch = metrics["temporal_switch_score"]
-            adoption = metrics["evidence_adoption"]
-            print(
-                f"{task:9s} clean={groups['clean']['targets']} "
-                f"hallucinated={groups['hallucinated']['targets']} "
-                f"route_auc={number(route['auroc'])} "
-                f"switch_auc(raw/neg)={number(switch['auroc'])}/"
-                f"{number(switch['negated_auroc'])} "
-                f"adoption_auc={number(adoption['auroc'])} "
-                f"n(route/switch/adopt)={route['evaluated_targets']}/"
-                f"{switch['evaluated_targets']}/{adoption['evaluated_targets']} "
-                "root_ok="
-                f"{confirmation_rate(confirmation['selected_root_confirmed'])} "
-                "corridor_ok="
-                f"{confirmation_rate(confirmation['corridor_confirmed'])} "
-                "chain_ok="
-                f"{confirmation_rate(confirmation['full_chain_confirmed'])}"
-            )
+        _print_evaluation(split, report)
     return reports
+
+
+def _print_evaluation(split: str, report: dict) -> None:
+    print(f"\n=== NATIVE MECHANISM {split.upper()} ===")
+    for task, groups in report["groups"].items():
+        coverage = report["full_scan_coverage"].get(task)
+        if coverage is not None:
+            print(
+                f"{task:9s} scanned_samples={coverage['scanned_samples']} "
+                f"tokens={coverage['scanned_response_tokens']}/"
+                f"{coverage['full_response_tokens']} "
+                f"nonhallucinated={coverage['scanned_nonhallucinated_tokens']} "
+                f"hallucinated={coverage['scanned_hallucinated_tokens']}"
+            )
+        if not groups["all"]["targets"]:
+            print(f"{task:9s} functional_targets=0; functional AUROC/AUPRC not run")
+            continue
+        confirmation = groups["all"]["confirmation_rate"]
+        metrics = groups["raw_axis_evaluation"]
+        route = metrics["route_origin_competition"]
+        switch = metrics["temporal_switch_score"]
+        adoption = metrics["evidence_adoption"]
+        print(
+            f"{task:9s} clean={groups['clean']['targets']} "
+            f"hallucinated={groups['hallucinated']['targets']} "
+            f"route_auc={number(route['auroc'])} "
+            f"switch_auc(raw/neg)={number(switch['auroc'])}/"
+            f"{number(switch['negated_auroc'])} "
+            f"adoption_auc={number(adoption['auroc'])} "
+            f"n(route/switch/adopt)={route['evaluated_targets']}/"
+            f"{switch['evaluated_targets']}/{adoption['evaluated_targets']} "
+            "root_ok="
+            f"{confirmation_rate(confirmation['selected_root_confirmed'])} "
+            "corridor_ok="
+            f"{confirmation_rate(confirmation['corridor_confirmed'])} "
+            "chain_ok="
+            f"{confirmation_rate(confirmation['full_chain_confirmed'])}"
+        )
 
 
 def add_model(command: argparse.ArgumentParser) -> None:
@@ -380,11 +432,19 @@ def add_subset(command: argparse.ArgumentParser, *, evaluation: bool = False) ->
     command.add_argument("--output", type=Path)
     command.add_argument("--split", choices=("train", "test", "all"), default="test")
     if evaluation:
+        command.add_argument(
+            "--plot", action="store_true", help="render cohort comparisons"
+        )
         return
 
     command.add_argument("--source-info", type=Path, default=SOURCE_INFO)
     command.add_argument("--task", choices=(*TASK_TYPES, "all"), default="all")
-    command.add_argument("--samples-per-task", type=int, default=1)
+    command.add_argument(
+        "--samples-per-task",
+        type=int,
+        default=1,
+        help="samples per task; 0 includes every sample without label filtering",
+    )
     command.add_argument("--sample-id", action="append")
     command.add_argument("--selection-seed", type=int, default=2026)
     command.add_argument("--targets-per-sample", type=int, default=1)
@@ -463,6 +523,19 @@ def add_subset(command: argparse.ArgumentParser, *, evaluation: bool = False) ->
         action="store_true",
         help="render a label-free mechanism figure for every completed target",
     )
+    command.add_argument(
+        "--evaluate",
+        action="store_true",
+        help="join labels and compute cohort comparisons after each split finishes",
+    )
+    command.add_argument(
+        "--scan-only",
+        action="store_true",
+        help=(
+            "save full per-head timelines without target gradients/interventions; "
+            "rerun the same output without this flag to add selected-target function"
+        ),
+    )
 
 
 def parser() -> argparse.ArgumentParser:
@@ -482,6 +555,21 @@ def parser() -> argparse.ArgumentParser:
     )
     add_subset(subset_command)
     subset_command.set_defaults(handler=audit_subset)
+
+    all_command = commands.add_parser(
+        "audit-all",
+        help="audit every sample and full response; save timelines and compare label cohorts",
+    )
+    add_subset(all_command)
+    all_command.set_defaults(
+        handler=audit_subset,
+        split="all",
+        samples_per_task=0,
+        max_response_tokens=0,
+        targets_per_sample=3,
+        target_policy="reanchor-window",
+        evaluate=True,
+    )
 
     subset_evaluate_command = commands.add_parser(
         "subset-evaluate", help="join labels after subset capture is complete"
@@ -519,14 +607,19 @@ def validate_args(args: argparse.Namespace) -> None:
     for name in ("root_screen_limit", "carrier_limit"):
         if hasattr(args, name) and getattr(args, name) < 0:
             raise ValueError(f"--{name.replace('_', '-')} cannot be negative")
-    for name in ("samples_per_task", "targets_per_sample"):
-        if hasattr(args, name) and getattr(args, name) < 1:
-            raise ValueError(f"--{name.replace('_', '-')} must be positive")
+    if hasattr(args, "samples_per_task") and args.samples_per_task < 0:
+        raise ValueError("--samples-per-task cannot be negative (0 means all)")
+    if hasattr(args, "targets_per_sample") and args.targets_per_sample < 1:
+        raise ValueError("--targets-per-sample must be positive")
     if hasattr(args, "max_response_tokens") and args.max_response_tokens < 0:
         raise ValueError("--max-response-tokens cannot be negative")
     if hasattr(args, "edge_coverage") and not 0 < args.edge_coverage <= 1:
         raise ValueError("--edge-coverage must lie in (0,1]")
-    if args.command == "subset" and args.sample_id and args.split == "all":
+    if (
+        args.command in {"subset", "audit-all"}
+        and args.sample_id
+        and args.split == "all"
+    ):
         raise ValueError("--sample-id requires one concrete --split")
 
 

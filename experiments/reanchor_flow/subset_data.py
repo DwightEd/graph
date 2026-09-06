@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +22,7 @@ from .reanchor_timeline import (
     rank_reanchor_peak_events,
     structural_reanchor_trace,
 )
+from .sample_scan import SampleScan
 from .units import build_source_units
 from .worlds import SourceUnits, TargetContrast
 
@@ -135,8 +136,10 @@ def select_records(
     seed: int,
     sample_ids: tuple[str, ...] = (),
 ) -> tuple[SampleRecord, ...]:
-    """Choose a deterministic source-diverse cohort without labels."""
+    """Choose a source-diverse cohort, or all records when the limit is zero."""
 
+    if samples_per_task < 0:
+        raise ValueError("samples_per_task cannot be negative")
     records = tuple(records)
     by_id = {record.sample_id: record for record in records}
     if len(by_id) != len(records):
@@ -156,6 +159,9 @@ def select_records(
     selected: list[SampleRecord] = []
     for task in tasks:
         candidates = [record for record in records if record.task_type == task]
+        if samples_per_task == 0:
+            selected.extend(sorted(candidates, key=lambda item: item.sample_id))
+            continue
         if len(candidates) < samples_per_task:
             raise ValueError(
                 f"task {task} has {len(candidates)} available samples; "
@@ -367,6 +373,7 @@ def freeze_target_plan(
     units: SourceUnits | None = None,
     evidence_unit_id: tuple[int, ...] = (),
     local_window: int = 10,
+    on_scan: Callable[[SampleScan], None] | None = None,
 ) -> tuple[tuple[TargetContrast, ...], tuple[TargetReanchorSelection, ...]]:
     """Freeze target contrasts and structured re-anchor provenance.
 
@@ -377,7 +384,7 @@ def freeze_target_plan(
     """
 
     reanchor_policy = policy in REANCHOR_POLICIES
-    needs_reanchor_scan = reanchor_policy and len(token_ids) - response_start > 1
+    needs_reanchor_scan = reanchor_policy or on_scan is not None
     if needs_reanchor_scan and (units is None or not evidence_unit_id):
         raise ValueError("re-anchor target selection requires source-unit evidence")
     cache = baseline_forward(
@@ -391,21 +398,24 @@ def freeze_target_plan(
     )
     origin_by_slot: dict[int, str] = {}
     selection_by_slot: dict[int, TargetReanchorSelection] = {}
+    if needs_reanchor_scan:
+        response_positions = cache.query
+        source_location = capture_source_location_buckets(
+            model,
+            cache,
+            units,
+            response_positions,
+            response_start=response_start,
+            evidence_unit_id=evidence_unit_id,
+            local_window=local_window,
+            query_chunk=query_chunk,
+        )
+        trace = structural_reanchor_trace(source_location, response_positions)
+        if on_scan is not None:
+            on_scan(SampleScan(source_location, trace))
     if reanchor_policy:
-        response_positions = cache.query[cache.query >= response_start]
         events: tuple[StructuralReanchorEvent, ...] = ()
         if len(response_positions):
-            source_location = capture_source_location_buckets(
-                model,
-                cache,
-                units,
-                response_positions,
-                response_start=response_start,
-                evidence_unit_id=evidence_unit_id,
-                local_window=local_window,
-                query_chunk=query_chunk,
-            )
-            trace = structural_reanchor_trace(source_location, response_positions)
             events = rank_reanchor_peak_events(
                 trace,
                 response_start,
@@ -507,16 +517,12 @@ def load_world_from_dataset(
     target_policy: str,
     query_chunk: int,
     local_window: int = 10,
+    scan_path: Path | None = None,
 ) -> NativeWorld:
     """Detach cache token IDs, align units, and freeze native targets."""
 
-    sample = dataset[record.sample_id]
-    try:
-        cached = sample.attention()
-        token_ids = cached.token_ids.detach().cpu().long().clone()
-        response_start = int(cached.response_idx)
-    finally:
-        sample.release_attention()
+    token_ids, response_start = sample_tokens(dataset, record.sample_id)
+    full_response_tokens = len(token_ids) - response_start
     if max_response_tokens is not None:
         token_ids = token_ids[: response_start + max_response_tokens]
     if len(token_ids) <= response_start:
@@ -542,6 +548,20 @@ def load_world_from_dataset(
         units=units,
         evidence_unit_id=evidence_units,
         local_window=local_window,
+        on_scan=(
+            None
+            if scan_path is None
+            else lambda scan: scan.save(
+                scan_path,
+                dataset_sample_id=record.sample_id,
+                source_id=record.source_id,
+                task_type=record.task_type,
+                token_ids=token_ids,
+                response_start=response_start,
+                full_response_tokens=full_response_tokens,
+                local_window=local_window,
+            )
+        ),
     )
     return NativeWorld(
         safe_sample_key(record.sample_id),
@@ -553,3 +573,17 @@ def load_world_from_dataset(
         targets,
         target_selection,
     ).check()
+
+
+def sample_tokens(dataset, sample_id: str) -> tuple[torch.Tensor, int]:
+    """Detach one cached token sequence and promptly release its attention."""
+
+    sample = dataset[sample_id]
+    try:
+        cached = sample.attention()
+        return (
+            cached.token_ids.detach().cpu().long().clone(),
+            int(cached.response_idx),
+        )
+    finally:
+        sample.release_attention()

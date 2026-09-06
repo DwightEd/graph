@@ -24,6 +24,10 @@ F_t=z_q(a)-z_q(b).
 - controlled pair 中，\(a,b\) 是运行前注册的 grounded/counterfactual candidates；native 与 pair
   estimand 不混报。
 
+\(b\) 只在完整 response 的 discovery run 冻结一次。prefix capture 通过 `fixed_runner` 显式沿用它，
+缓存 readout、gradient 与 cut 不重新定义 contrast；这修复了旧流程第二次 argmax 因近并列舍入换位而
+报 `negative candidate is not the frozen native runner` 的问题，target identity 检查仍保留。
+
 root/hub/corridor 与 adoption diagnostics 是 **target-conditioned** 的：改变 target、runner、source
 units、destination scope 或预算就得到另一个 AuditPlan。时间轴 structural switch 本身只依赖当前
 模型的 clean full-row message transport，不读取 runner、gradient、label 或 intervention outcome。
@@ -56,6 +60,12 @@ effect 重新挑一个更好看的候选。结构事件的坐标也不得由 act
 `reanchor-window` 把 \(N\) 解释为 target-row 硬总预算，先保留最多 \(\lceil N/3\rceil\) 个中心，再按
 rank 补 \(-1,+1\) 邻居。\(N=3\) 就是最强事件的三行窗口。完全没有结构事件时才回退到
 evenly-spaced rows，且 `contrast_origin` 必须记录 fallback。
+
+`audit-all` 默认覆盖 train/test 全部可用样本和完整 response，先持久化独立 `SampleScan`，随后每样本
+以 3-row event window 做功能审计。`--scan-only` 停在完整结构扫描与事后 cohort 比较，不计算 gradient/
+root cut，也不能验证接纳；去掉该参数可复用同一 world/scan 补功能。完整 scan 不依赖选中 target 的并集。
+冻结事件 identity/score 与预算内 prefix 重算是两次测量；评价保留前者，另报
+`temporal_switch_recomputed_score` 与 `temporal_switch_score_delta`，不强求分数或 winner 完全一致。
 
 ## 3. 图的原子是实际 residual message
 
@@ -228,7 +238,8 @@ subgraph，不是通过逐 route deletion 得到的“最小因果电路”。
 
 长上下文的完整 \(L\times H\times T^2\) 图既不必要也无法保证显存。时间轴扫描按
 `query_chunk` 临时生成 full rows，在 edge pruning 前聚合四桶后立即释放；常驻开销为
-\(O(LHP\cdot4)\)，不是持久化完整 triangle。v3 默认：
+\(O(LHP\cdot4)\)，不是持久化完整 triangle。以下为 `subset` 默认值；`audit-all` 改为全部样本、
+完整 response、`reanchor-window` 与 3 targets：
 
 - target_policy=reanchor、targets_per_sample=1；完整事件窗口审计建议显式使用
   `reanchor-window` 与 3 个 target rows。
@@ -237,8 +248,8 @@ subgraph，不是通过逐 route deletion 得到的“最小因果电路”。
 - local_window=10：response source 距离不超过 10（含对角线）属于 `recent_local`。
 - carrier_scope=response：只展开 response-side destination rows；所有 causal prompt positions
   仍可作为这些 rows 的 sources，因此这不等于忽略 prompt evidence。
-- max_route_rows=256：represented destination rows 的硬上限；超过时失败并要求显式缩短 horizon、
-  保持 response scope 或提高预算，不静默抽样。
+- max_route_rows=256：超限时保留靠近 target 的最近连续 destination rows，保留全部 causal sources；
+  截尾由 `route_row_position` 明确表示，不影响完整 sample scan。
 - edges_per_head=2：capture 分别保留 transport top-k 与 \(|\text{functional}|\) top-k 的并集，
   因而每个 head-row 最坏保存 \(2k\) 条候选边；冻结 corridor 再对同一 head-row 硬限制为 \(k\)。
 - corridor_edges=64：一个 AuditPlan 中显式 corridor messages 的硬上限。
@@ -256,8 +267,10 @@ M_{retained}+M_{residual}+M_{unobserved}=M_{row}.
 若 unobserved 很大，允许的结论只能是“在当前预算下发现了候选子图”；不能把稀疏图解释成完整
 信息流。response scope 外的 prompt destinations 没有 attention row；它们只沿 residual identity 保留
 已有 all-evidence/other-prompt provenance，使后层 represented row 仍可读取 prompt state。该近似没有
-建模 prompt 内部更新，不能用来定位 prompt hub。carrier_scope=all 是显式扩展实验，必须同时满足
-rows budget。
+建模 prompt 内部更新，不能用来定位 prompt hub。未展开的 response 节点从 layer 1 起进入
+UNOBSERVED，不把未知 state 继续解释为纯 response-origin；缺失 evidence lineage 不代表没有证据。
+carrier_scope=all 也受同一 destination 截尾预算约束。功能审计单层 autograd 仍可能使用
+\(O(H T^2)\) 中间量，该预算不限制完整 causal prefix 的显存。
 
 ## 8. 为什么 residual difference 或 gradient 单独都不够
 
@@ -396,6 +409,12 @@ native RAGTruth audit 不能把 observed-token support 命名成 correctness 或
 verified factual mediator。
 
 ## 13. 审计与检测严格分阶段
+
+当前 `cohort_summary.json` 先比较完整 sample scan：四类来源 transport 占比与 local→long-range
+切换率均保留 layer/head。每样本内按标注组平均 tokens，再等权平均样本；差值只取包含两类 token
+的 mixed 样本内“幻觉−非幻觉”。图中贡献样本数 <3 的格子置灰。这是描述性比较，未控制位置、
+claim 类型或共享 source 依赖，也未实现 bootstrap CI/多重检验，不能称显著机制发现。
+结构扫描覆盖、selected-target action/integration 与后述 AUROC 是独立统计口径。
 
 阶段 A 是 label-free mechanism audit：冻结 structural events、targets、AuditPlan、预算和 raw
 mechanism axes，生成图；固定的一次 selected-root cut 只增加 integration diagnostic，可选

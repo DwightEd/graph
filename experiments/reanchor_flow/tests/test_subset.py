@@ -96,6 +96,16 @@ def test_explicit_subset_preserves_requested_order() -> None:
     assert [record.sample_id for record in selected] == ["s1", "q2"]
 
 
+def test_zero_sample_limit_keeps_every_record_including_shared_sources() -> None:
+    selected = select_records(
+        records(), tasks=("QA", "Summary", "Data2txt"), samples_per_task=0, seed=19
+    )
+    assert len(selected) == len(records())
+    assert {record.sample_id for record in selected} == {
+        record.sample_id for record in records()
+    }
+
+
 def test_absolute_cache_model_identity_does_not_fall_back_to_basename(
     tmp_path,
 ) -> None:
@@ -158,6 +168,8 @@ def test_subset_argument_validation() -> None:
 
     command_parser = parser()
     args = command_parser.parse_args(["subset", "--samples-per-task", "0"])
+    validate_args(args)
+    args = command_parser.parse_args(["subset", "--samples-per-task", "-1"])
     with pytest.raises(ValueError, match="samples-per-task"):
         validate_args(args)
     args = command_parser.parse_args(["subset", "--split", "all", "--sample-id", "one"])
@@ -211,7 +223,7 @@ def test_reanchor_no_event_falls_back_and_records_origin(monkeypatch) -> None:
     monkeypatch.setattr(
         subset_data,
         "capture_source_location_buckets",
-        lambda *_args, **_kwargs: SimpleNamespace(transport=torch.ones(2, 2, 2, 4)),
+        lambda *_args, **_kwargs: SimpleNamespace(transport=torch.ones(2, 2, 3, 4)),
     )
     model = SimpleNamespace(model=SimpleNamespace(layers=[object(), object()]))
 
@@ -244,14 +256,14 @@ def test_reanchor_target_plan_persists_the_shared_structural_event(monkeypatch) 
         target=torch.tensor([11, 12, 13, 14]),
         runner=torch.tensor([21, 22, 23, 24]),
     )
-    transport = torch.zeros(2, 2, 3, 4)
+    transport = torch.zeros(2, 2, 4, 4)
     transport[..., :3] = torch.tensor([0.05, 0.05, 0.10])
     transport[..., 3] = 0.80
-    transport[0, 1, 1] = torch.tensor([0.80, 0.05, 0.05, 0.10])
+    transport[0, 1, 2] = torch.tensor([0.80, 0.05, 0.05, 0.10])
     source_position = torch.zeros_like(transport, dtype=torch.int32)
     source_unit = torch.zeros_like(transport, dtype=torch.int32)
-    source_position[0, 1, 1, 0] = 2
-    source_unit[0, 1, 1, 0] = 1
+    source_position[0, 1, 2, 0] = 2
+    source_unit[0, 1, 2, 0] = 1
     source_location = SimpleNamespace(
         transport=transport,
         source_position=source_position,
@@ -298,14 +310,14 @@ def test_reanchor_budget_covering_short_response_still_marks_event_center(
         target=torch.tensor([11, 12, 13]),
         runner=torch.tensor([21, 22, 23]),
     )
-    transport = torch.zeros(1, 2, 2, 4)
+    transport = torch.zeros(1, 2, 3, 4)
     transport[..., :3] = torch.tensor([0.05, 0.05, 0.10])
     transport[..., 3] = 0.80
-    transport[0, 1, 1] = torch.tensor([0.85, 0.05, 0.05, 0.05])
+    transport[0, 1, 2] = torch.tensor([0.85, 0.05, 0.05, 0.05])
     source_position = torch.zeros_like(transport, dtype=torch.int32)
     source_unit = torch.zeros_like(transport, dtype=torch.int32)
-    source_position[0, 1, 1, 0] = 2
-    source_unit[0, 1, 1, 0] = 1
+    source_position[0, 1, 2, 0] = 2
+    source_unit[0, 1, 2, 0] = 1
     source_location = SimpleNamespace(
         transport=transport,
         source_position=source_position,
@@ -434,6 +446,16 @@ def test_subset_pipeline_resumes_valid_native_audit(tmp_path, monkeypatch) -> No
         return real_audit(*args, **kwargs)
 
     monkeypatch.setattr(subset, "audit_native_target", record_audit_options)
+    scanned = subset.run_subset_split(
+        model, tokenizer, output, replace(config, scan_only=True)
+    )
+    assert scanned == {"samples": 1, "targets": 0, "resumed": 0, "confirmed": 0}
+    assert not seen_audit_options
+    scan_manifest = json.loads(
+        (output / "run_manifest.json").read_text(encoding="utf-8")
+    )
+    assert scan_manifest["analysis_scope"] == "structure_only"
+    assert scan_manifest["analysis_complete"]
     first = subset.run_subset_split(model, tokenizer, output, config)
     assert dataset.verify_hashes is True
     assert seen_audit_options["local_window"] == 3
@@ -446,9 +468,32 @@ def test_subset_pipeline_resumes_valid_native_audit(tmp_path, monkeypatch) -> No
     manifest = json.loads((output / "run_manifest.json").read_text(encoding="utf-8"))
     assert manifest["subset_manifest_schema"] == 3
     assert manifest["analysis_complete"]
+    assert manifest["analysis_scope"] == "structure_and_selected_target_function"
     assert manifest["labels_used_for_capture"] is False
     assert manifest["config"]["local_window"] == 3
     assert "config_sha256" not in manifest
+    scan_path = output / manifest["samples"]["q1"]["scan"]
+    with np.load(scan_path, allow_pickle=False) as scan:
+        assert (
+            int(scan["full_response_tokens"])
+            == len(pair.clean_token_ids) - pair.response_start
+        )
+        assert scan["route_row_position"].tolist() == list(
+            range(pair.response_start - 1, len(pair.clean_token_ids) - 1)
+        )
+        assert scan["reanchor_bucket_transport"].shape[:2] == (
+            model.config.num_hidden_layers,
+            model.config.num_attention_heads,
+        )
+        assert not bool(scan["labels_used_for_capture"])
+    from experiments.reanchor_flow.sample_scan import render_sample_scan
+
+    plotted = render_sample_scan(
+        scan_path,
+        tmp_path / "sample.timeline.png",
+        SimpleNamespace(convert_ids_to_tokens=lambda ids: [f"t{id}" for id in ids]),
+    )
+    assert plotted.stat().st_size > 1000
     audit_entry = next(iter(manifest["audits"].values()))
     assert "sha256" not in audit_entry
     result_path = output / audit_entry["result"]
@@ -474,6 +519,11 @@ def test_subset_pipeline_resumes_valid_native_audit(tmp_path, monkeypatch) -> No
     second = subset.run_subset_split(model, tokenizer, output, config)
     assert second["targets"] == 1
     assert second["resumed"] == 1
+    # An interrupted/older run can restore only its missing structural scan.
+    scan_path.unlink()
+    third = subset.run_subset_split(model, tokenizer, output, config)
+    assert scan_path.is_file()
+    assert third["resumed"] == 1
     with pytest.raises(ValueError, match="another subset configuration"):
         subset.run_subset_split(
             model,

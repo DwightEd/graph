@@ -29,7 +29,8 @@ NPZ 必须能用 allow_pickle=False 读取，只含标量、字符串和数值�
 
 默认 carrier_scope=response。represented rows 从 response-side predictor rows 中产生；所有早于该
 destination 的 causal prompt positions 仍可作为 source。若要搜索 prompt 内部 destination/hub，必须显式
-使用 carrier_scope=all，并同样受 rows budget 约束。
+使用 carrier_scope=all，并同样受 rows budget 约束。超过 max_route_rows 时保留最近连续 destinations，
+所有 causal sources 仍参与读取；实际窗口由 route_row_position 给出，不改变完整 sample scan。
 
 ## 2. Native world：label-free target contract
 
@@ -49,7 +50,9 @@ native_world_schema=2 是当前 label-free world；loader 只为迁移兼容读�
 | negative_token_id | [T] | native run 后冻结的 runner |
 | contrast_origin | [T] | target 选择与 contrast 语义 |
 
-该 world 只定义 observed-token contrast，不定义 factual correctness。
+该 world 只定义 observed-token contrast，不定义 factual correctness。negative_token_id 在完整
+discovery run 冻结后，prefix baseline 用 `fixed_runner` 显式保留；cache 的 runner/readout/margin、
+gradient 与 cut 必须共用它，不以 prefix 的新 argmax 覆盖。
 
 ### 2.1 Label-free target selection
 
@@ -79,6 +82,24 @@ world 与 target artifact 还必须持久化相应的 `target_reanchor_*` select
 
 非 reanchor policy 使用 `selection_recorded=false` 和文档化的空 sentinel；reanchor no-event fallback
 必须 `selection_recorded=true, fallback=true, has_event=false`，不得与非 reanchor run 混淆。
+
+### 2.2 独立样本时间轴
+
+`scans/<task>/<sample>.npz` 的 `sample_scan_schema=1` 在 target selection 前保存，不含 labels。
+`route_row_position` 覆盖所配置 response horizon 的全部 predictors；`audit-all` 默认 horizon 为完整 response。
+
+| 字段 | 形状/含义 |
+|---|---|
+| dataset_sample_id/source_id/task_type | 样本与来源 identity |
+| token_ids/response_start | 完整采集 token 序列与 response 起点 |
+| full_response_tokens/processed_response_tokens | 原始/实际采集 response 长度 |
+| route_row_position | [P_scan]，包含首个 response token 的 predictor |
+| reanchor_bucket_attention/transport | [L,H,P_scan,4]，裁剪前完整 source-row 四桶 |
+| reanchor_bucket_source_position/source_unit_id | [L,H,P_scan,4]，桶内最强 source |
+| reanchor_score | [L,H,P_scan]，纯 transport 切换几何 |
+
+对应 `.timeline.png` 保留每个 head 的完整 raster，另显示最多 4 个单 head 的四桶轨迹。
+扫描第一行没有前一个观测 predictor，不能当作已证实的“无切换”纳入 cohort 切换率分母。
 
 ## 3. Native mechanism artifact identity
 
@@ -111,7 +132,7 @@ confirmation flag 与 outcome 不进入
 | 字段 | 默认 | 语义 |
 |---|---:|---|
 | route_budget_edges_per_head | 2 | capture 每分支的 k 与 frozen corridor 每 head-row 的硬 cap |
-| route_budget_max_rows | 256 | represented destination rows 的硬上限 |
+| route_budget_max_rows | 256 | 最近连续 represented destination rows 上限；sources 不截断 |
 | route_budget_root_candidates | 4 | 保存的 root candidates 上限 |
 | route_budget_hub_candidates | 8 | 保存的 hub candidates 上限 |
 | route_budget_corridor_edges | 64 | frozen corridor 显式 messages 的硬上限 |
@@ -226,6 +247,8 @@ edge_delta_message_norm 只在相应 source-cut world 被显式生成时有意�
 scope 外 prompt destination 另作为 unrepresented-row limitation 记录，不能伪造为某个 represented
 row 的质量。它没有 attention row，只以 residual probability 1 保留已有 all-evidence/other-prompt
 provenance，使后续 represented row 仍可读取该 prompt state；这不表示 prompt 内部更新已被审计。
+未 represented 的 response state 从 layer 1 起为 UNOBSERVED，不能沿 residual 复制成确定的
+response-origin；其零 evidence register 表示未观察，不能解释为无证据。
 若实现只在 provenance ledger 中表示缺失质量，则
 route_head_transport[..., unobserved] 是最低限度的 completeness 诊断。无论采用哪种持久化方式，都
 必须满足非负和质量守恒；未保存质量不得重新归一到 retained edges。高 unobserved fraction 会降低
@@ -313,10 +336,10 @@ unknown/unobserved 且不重归一。`prompt_evidence`/`other_prompt` 是输入 
 layer 更新的 node state 可以混合多种 provenance；所以 fraction 不必分别为 1/0。它不是 full-row
 exact lineage 或语义真值。结构候选本身也不预设信息类型。
 
-每个 artifact 的时间轴只覆盖该 target 的 teacher-forced prefix。若要声称完整 response 上的事件频率，
-必须使用 target selector 的完整 response pilot 或另行运行覆盖扫描，并以独立 cohort 汇总。候选表可被
-数量上限截断；dense `reanchor_score` 才是 query-row 评价的权威。teacher forcing 也不等于自由生成
-反馈动力学。
+每个 target artifact 仅覆盖其 teacher-forced prefix 的 represented 窗口；完整 response 事件频率来自
+独立 sample scan/cohort。候选表可被截断，dense `reanchor_score` 是 prefix 重算的值；冻结的
+`target_reanchor_score` 才是选择事件的 discovery score。两次低精度计算可能改变分数/近并列 winner，
+不以数值相等校验 plan identity，也不据此重选 target。teacher forcing 不等于自由生成反馈动力学。
 
 ## 7. Residual / attention / MLP diagnostics
 
@@ -421,7 +444,13 @@ run_manifest.json 保存可恢复 config、target identity、artifact 相对路�
 artifact stage，尽管它不能改变 AuditPlan selection。
 
 subset-evaluate 必须等 manifest 标记 capture complete 后才加载 labels。它只读 mechanism artifact，
-生成独立 mechanism_evaluation.json，不回写 target、plan、score 或机制图。
+生成独立 mechanism_evaluation.json 与 cohort_summary.json，不回写 target、plan、score 或机制图。
+同配置旧 v3 subset 可补建缺失的 scan 并给 sample manifest 增加 scan 路径，冻结 world/targets 不变。
+`audit-all --scan-only` 的 analysis scope 为结构扫描；去掉该参数可在同 output 补功能审计。
+
+cohort_schema=1 将完整 scans 与 selected-target 功能观察分开。结构报告覆盖率、每 layer/head 的
+四桶份额与切换率；样本内按标注组平均后样本等权，mixed 样本另报组内差。贡献样本 <3 的格子置灰，
+没有已实现的显著性/cluster CI。`cohort_*.png` 是结构图，`cohort_functional_*.png` 仅适用于已审计 targets。
 
 ## 12. 两阶段检测评价契约
 
@@ -452,7 +481,8 @@ hallucination labels。
 
 | 字段 | 定义 | frozen hallucination-risk 方向 |
 |---|---|---|
-| temporal_switch_score | 只在 target_reanchor_is_center=true 时，读取 selection record 指定 layer/head/query 的 dense reanchor_score | 中性：同时报告 raw-higher 与 negated orientation |
+| temporal_switch_score | 只在 target_reanchor_is_center=true 时，读取冻结的 target_reanchor_score | 中性：同时报告 raw-higher 与 negated orientation |
+| temporal_switch_recomputed_score / temporal_switch_score_delta | 相同坐标的 prefix dense score / 相对 discovery 的差值 | 仅复现诊断，不改变冻结事件 |
 | target_reanchor_is_center / source_kind | selector 是否记录该 query 为事件中心及其 long-range bucket；只作分母/分层诊断 | 不单独作为连续轴拟合 |
 | evidence_adoption | 只在 prompt_evidence event center 上，读取同一 layer/head/query 的 full-row prompt-evidence bucket signed action | lower → higher risk |
 

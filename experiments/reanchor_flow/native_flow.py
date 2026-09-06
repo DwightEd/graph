@@ -41,6 +41,14 @@ def represented_positions(
     *,
     max_rows: int | None = None,
 ) -> Tensor:
+    """Keep a contiguous destination window ending at the audited query.
+
+    ``scope`` chooses eligible destinations; ``max_rows`` bounds the most
+    recent ones. Every causal token remains eligible as a message source.
+    Lineage entering from an unrepresented response state is marked unknown
+    by the route model rather than treated as a fully traced history path.
+    """
+
     if max_rows is not None and max_rows < 1:
         raise ValueError("max_rows must be positive")
     if scope == "all":
@@ -49,13 +57,8 @@ def represented_positions(
         begin, end = world.response_start - 1, target.query_position + 1
     else:
         raise ValueError("carrier_scope must be 'response' or 'all'")
-    rows = end - begin
-    if max_rows is not None and rows > max_rows:
-        raise ValueError(
-            f"carrier_scope={scope!r} requires {rows} represented rows, "
-            f"exceeding max_rows={max_rows}; use a larger explicit budget or "
-            "a narrower carrier scope"
-        )
+    if max_rows is not None:
+        begin = max(begin, end - max_rows)
     return torch.arange(begin, end)
 
 
@@ -742,6 +745,7 @@ def native_flow_screen(
         checkpoint_layers=range(len(model.model.layers)),
         checkpoint_stages=True,
         attention_query_chunk=query_chunk,
+        fixed_runner={target.query_position: target.negative_token_id},
     )
     gradients = native_target_gradients(
         model,

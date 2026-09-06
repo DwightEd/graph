@@ -99,6 +99,78 @@ def test_top_level_help_names_the_current_renderable_artifact_schema() -> None:
     assert "schema-3" in parser().format_help()
 
 
+def test_audit_all_defaults_to_all_samples_full_responses_and_bounded_targets() -> None:
+    from experiments.reanchor_flow.run import (
+        parser,
+        selected_splits,
+        subset_config_from_args,
+        validate_args,
+    )
+
+    args = parser().parse_args(["audit-all"])
+    validate_args(args)
+    assert selected_splits(args) == ("train", "test")
+    assert args.samples_per_task == 0
+    assert args.targets_per_sample == 3
+    assert args.target_policy == "reanchor-window"
+    assert args.evaluate
+    config = subset_config_from_args(
+        args, SimpleNamespace(name_or_path="model"), "test"
+    )
+    assert config.max_response_tokens is None
+    assert not config.route_budget.confirm
+
+    scan_args = parser().parse_args(["audit-all", "--scan-only"])
+    scan_config = subset_config_from_args(
+        scan_args, SimpleNamespace(name_or_path="model"), "test"
+    )
+    assert scan_config.scan_only
+    assert scan_config.manifest_value() == config.manifest_value()
+
+
+def test_audit_all_loads_model_once_and_evaluates_each_finished_split(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from experiments.reanchor_flow import run
+
+    args = run.parser().parse_args(["audit-all", "--output", str(tmp_path)])
+    model, tokenizer = object(), SimpleNamespace(name_or_path="model")
+    calls = []
+
+    def load(*_args):
+        calls.append("model")
+        return model, tokenizer
+
+    def capture(received_model, received_tokenizer, output, config):
+        assert received_model is model and received_tokenizer is tokenizer
+        assert config.samples_per_task == 0 and config.max_response_tokens is None
+        calls.append(f"capture {config.split}")
+        return {"samples": 2, "targets": 6, "resumed": 0, "confirmed": 0}
+
+    def evaluate(dataset, output, *, plot):
+        assert plot
+        calls.append(f"evaluate {output.name}")
+        return {"groups": {}}
+
+    monkeypatch.setattr(run, "load_model", load)
+    monkeypatch.setattr(run, "run_subset_split", capture)
+    monkeypatch.setattr(run, "evaluate_subset_split", evaluate)
+    monkeypatch.setattr(run, "_render_scans", lambda *_args: 2)
+    monkeypatch.setattr(run, "clear_memory", lambda: None)
+
+    reports = run.audit_subset(args)
+
+    assert calls == [
+        "model",
+        "capture train",
+        "evaluate train",
+        "capture test",
+        "evaluate test",
+    ]
+    assert set(reports) == {"train", "test"}
+
+
 def test_cli_prints_not_run_for_missing_confirmation_rate() -> None:
     from experiments.reanchor_flow.run import confirmation_rate
 

@@ -7,7 +7,7 @@ version-specific attention backend registries.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -503,8 +503,15 @@ def baseline_forward(
     checkpoint_layers: Sequence[int] = (0,),
     checkpoint_stages: bool = False,
     attention_query_chunk: int | None = None,
+    fixed_runner: Mapping[int, int] | None = None,
 ) -> ForwardCache:
-    """Capture a baseline and fixed target-versus-runner readout."""
+    """Capture a baseline, preserving already frozen competitors by query row.
+
+    A shortened causal prefix can change low-precision argmax tie breaking.
+    ``fixed_runner`` carries the original competitor into the new capture, so
+    gradients and interventions continue to measure the same logit contrast.
+    Rows without a supplied competitor select their native non-target argmax.
+    """
 
     if not getattr(model, VALIDATED_ATTRIBUTE, False):
         validate_manual_forward(model, full_token_ids)
@@ -514,6 +521,16 @@ def baseline_forward(
     source_ids = full_ids[:-1].to(device)[None]
     query = torch.arange(response_start - 1, len(full_ids) - 1)
     target = full_ids[response_start:].to(device)
+    runner = torch.full_like(target, -1)
+    for position, token in (fixed_runner or {}).items():
+        slot = position - (response_start - 1)
+        if not 0 <= slot < len(query):
+            raise ValueError("frozen runner query is outside the response predictors")
+        if not 0 <= token < model.lm_head.weight.shape[0]:
+            raise ValueError("frozen runner token is outside the model vocabulary")
+        if token == int(target[slot]):
+            raise ValueError("frozen runner must differ from the observed target")
+        runner[slot] = token
 
     checkpoints = {0, *(int(layer) for layer in checkpoint_layers)}
     layer_input: dict[int, Tensor] = {}
@@ -532,7 +549,6 @@ def baseline_forward(
             attention_query_chunk=attention_query_chunk,
         )
         response_hidden = hidden[0].index_select(0, query.to(device))
-        runner_parts: list[Tensor] = []
         logprob_parts: list[Tensor] = []
         entropy_parts: list[Tensor] = []
         for begin in range(0, len(query), READOUT_CHUNK):
@@ -553,9 +569,10 @@ def baseline_forward(
                 log_normalizer - (probability * float_logits).sum(dim=1)
             )
             logits.scatter_(1, chunk_target[:, None], -torch.inf)
-            runner_parts.append(logits.argmax(dim=1))
+            chunk_runner = runner[begin:end]
+            unfrozen = chunk_runner < 0
+            chunk_runner[unfrozen] = logits.argmax(dim=1)[unfrozen]
 
-        runner = torch.cat(runner_parts)
         direction = model.lm_head.weight.index_select(0, target).float()
         direction -= model.lm_head.weight.index_select(0, runner).float()
         if getattr(model.lm_head, "bias", None) is None:

@@ -20,7 +20,7 @@ prompt 或更早的 response relay；读到的具体位置又是否真正写入 
 完整算法见 [METHOD.md](METHOD.md)，预注册假设与结论边界见
 [MECHANISM_AUDIT.md](MECHANISM_AUDIT.md)，artifact 契约见 [SCHEMA.md](SCHEMA.md)。
 
-## 为什么这次才是完整的重锚定审计入口
+## 当前审计覆盖哪些步骤
 
 此前版本没有把这一机制闭环：早期版本画过 response 下三角路线变化和 prompt revisit，但混合或平均
 了 heads，也没有把“local 下降 + long-range 上升 + 信息接纳”绑定在同一个事件；后来的版本加入了
@@ -40,6 +40,7 @@ v3 现在补齐的是“全时间轴逐-head结构发现 → source 身份/linea
 | 结构事件与 route 分析 | `reanchor_timeline.py`、`route_model.py`、`throughput.py`、`route_plan.py` |
 | 少量冻结干预 | `native.py`、`corridor.py`、`audit.py` |
 | artifact 契约、写入与校验 | `artifact_schema.py`、`artifact_payload.py`、`artifact_validation.py` |
+| 独立完整时间轴与跨样本比较 | `sample_scan.py`、`cohort_plot.py` |
 | 数据选择、运行、评价与作图 | `subset_data.py`、`subset.py`、`subset_report.py`、`mechanism_plot.py`、`run.py` |
 
 `reanchor_timeline.py` 是唯一的时间事件定义；`route_plan.py` 只负责固定 target 的候选拓扑，
@@ -49,7 +50,11 @@ artifact 的 schema、payload 和 validator 已分开，避免在运行流程里
 
 ## 默认运行语义
 
-- 默认 `--target-policy reanchor`：在当前模型的 clean full-row transport 中按最强单 head 的结构分数
+- `audit-all` 默认扫描 train+test、QA/Summary/Data2txt 的全部可用样本（`samples-per-task=0`），
+  保留完整 response（`max-response-tokens=0`），不根据正确/幻觉标签筛样本。默认功能审计是
+  `reanchor-window`、每样本最多 3 个 target；`--scan-only` 可先只完成全部样本的结构审计。
+  `subset` 仍默认每任务 1 个样本、128 response tokens。
+- `subset` 默认 `--target-policy reanchor`：在当前模型的 clean full-row transport 中按最强单 head 的结构分数
   排序，经时间 NMS 后选择最多 \(N=\)`targets-per-sample` 个事件中心。
 - `--target-policy reanchor-window`：\(N\) 是 target row 的硬总预算；先冻结最多
   \(\lceil N/3\rceil\) 个中心，再按 rank 补中心的 \(-1/+1\) 上下文。`N=3` 即最强事件的
@@ -68,50 +73,45 @@ artifact 的 schema、payload 和 validator 已分开，避免在运行流程里
 query_position` 时，其 action 才能称为该事件对紧随 \(q+1\) token 的 immediate action；更早 event 的
 action 只是“对当前 artifact 晚期 target 的 downstream action”。
 
-## 一键运行：事件窗口机制审计
+`negative candidate is not the frozen native runner` 的原因是旧流程在完整 response 上冻结 runner，
+截取 target prefix 后又重新 argmax。近并列候选可能因数值舍入换位。现在 prefix capture 显式接收
+冻结的 runner，gradient、margin 和 cut 共用同一 contrast，仍检查 target identity。
+结构事件也保留原 discovery identity/score；prefix 重算结果作为独立诊断，不要求两次排序或分数完全相等。
 
-下面在 QA、Summary、Data2txt 各取一个样本，并给最强重锚定事件分配 3 个 target rows。它会生成
-逐-head时间轴、事件三角视图和接纳诊断，不对所有路线逐条剪除：
+## 一键运行：先比较全部正确/幻觉样本的结构
+
+在项目根目录运行。模型、cache、source-info 默认采用本项目现有服务器路径，可用同名参数覆盖：
 
 ~~~bash
-PROJECT=/share/home/tm902089733300000/a903202310/lys/research/graph
-MODEL=/share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct
-CACHE=/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876
-SOURCE_INFO=/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/source_info.jsonl
-OUTPUT="$PROJECT/experiments/reanchor_flow/outputs/temporal_reanchor_v3"
-
-cd "$PROJECT" &&
+cd /share/home/tm902089733300000/a903202310/lys/research/graph &&
 conda run --no-capture-output -n research \
-  python -m experiments.reanchor_flow.run subset \
-    --split test \
-    --task all \
-    --samples-per-task 1 \
-    --targets-per-sample 3 \
-    --target-policy reanchor-window \
-    --flow-signal message \
-    --carrier-scope response \
-    --max-response-tokens 128 \
-    --max-route-rows 256 \
-    --edges-per-head 2 \
-    --root-candidates 4 \
-    --hub-candidates 8 \
-    --corridor-edges 64 \
-    --edge-coverage 0.90 \
-    --query-chunk 8 \
-    --local-window 10 \
-    --model "$MODEL" \
-    --cache "$CACHE" \
-    --source-info "$SOURCE_INFO" \
-    --output "$OUTPUT" \
-    --plot
+  python -m experiments.reanchor_flow.run audit-all \
+    --scan-only --query-chunk 4 \
+    --output experiments/reanchor_flow/outputs/mechanism_all_v3
 ~~~
 
+每个 split 自动保存完整样本 scan 与时间轴图，并在 capture 完成后生成 cohort 汇总图/报告。
+该阶段不计算 gradient 或 root cut，适合先观察普遍模式；它没有验证 MLP 接纳或事实因果贡献。
+这里的“全部”指所配置 cache 中的全部可用样本；尚未在本地实际跑完全部 RAGTruth。
+
+随后用相同 output、相同配置去掉 `--scan-only`，复用 world/scan 补每样本最多 3 个 target 的功能审计：
+
+~~~bash
+conda run --no-capture-output -n research \
+  python -m experiments.reanchor_flow.run audit-all \
+    --query-chunk 4 \
+    --output experiments/reanchor_flow/outputs/mechanism_all_v3 --plot
+~~~
+
+`--plot` 额外绘制每个 target 的详细机制图；`audit-all` 不加它仍有样本时间轴和 cohort 图。
 运行时有 tqdm 的 sample、target 及绘图/评价阶段进度；每个 target 完成后立即落盘，相同 scientific
-config 可以恢复。旧的 `native_mechanism_v2` 或其他配置目录不能与本次 schema/config 混用，请使用
-新的 output。
+config 可以恢复。已跑过的 v3 `subset` 在同一配置下可补建缺失 scan，保留原 target plan；改为
+全量/完整 response 后配置不同，请使用新的 `mechanism_all_v3` output。旧 schema 不能混用。
 
 若进程被系统直接打印 `Killed`，通常是 OS/cgroup 的 OOM，不是 `corridor_ok=False` 导致的异常。
-先保持 `carrier-scope=response` 和有限的 `max-response-tokens`，再降低 `query-chunk`；
+先保持 `carrier-scope=response` 并降低 `query-chunk`。功能审计的单层 autograd 仍可能保存
+\(O(H T^2)\) 中间量；destination 预算不是完整 prefix 的显存上限。如必须限制
+`max-response-tokens`，该次只能称截断 response 审计，coverage 会记录差异。
 `max-route-rows`、`edges-per-head` 与 `corridor-edges` 分别限制常驻 rows、稀疏边和确认子图。full-row
 扫描仍会在 chunk 内临时计算 causal row，但只持久化四桶统计，不持久化完整 \(T^2\)。
 
@@ -145,16 +145,26 @@ conda run --no-capture-output -n research \
 
 ## 阶段 B：AUROC/AUPRC
 
-全部 label-free capture 完成后，独立读取 hallucination labels：
+`audit-all` 在每个 split 完成 label-free capture 后自动独立读取 hallucination labels。
+已有结果也可单独汇总，无需重新加载模型：
 
 ~~~bash
 cd /share/home/tm902089733300000/a903202310/lys/research/graph &&
 conda run --no-capture-output -n research \
   python -m experiments.reanchor_flow.run subset-evaluate \
-    --split test \
+    --split all \
     --cache /share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876 \
-    --output experiments/reanchor_flow/outputs/temporal_reanchor_v3
+    --output experiments/reanchor_flow/outputs/mechanism_all_v3 --plot
 ~~~
+
+`cohort_summary.json` 与 `cohort_{ALL,QA,Summary,Data2txt}.png` 比较完整 scan 上的四类来源
+transport 占比与切换率，保留每个 layer/head。先在每样本、每标注组内平均 tokens，再让样本等权；
+差值列只用同时包含两类 token 的 mixed 样本做样本内“幻觉−非幻觉”差。
+少于 3 个贡献样本的格子显示灰色。此处是描述性比较，尚未控制位置、claim 类型或同 source 样本依赖，
+不报告显著性或 bootstrap CI；未标幻觉也不等于独立核验事实正确。
+
+`cohort_functional_*.png` 仅比较选中 target 上的 action/integration。完整结构覆盖和选点功能覆盖
+分别报告；`--scan-only` 没有功能 AUROC，不能把缺失值当成零效果。
 
 结果写入 `mechanism_evaluation.json`，三个不训练的 raw axes 分开报告，不能拼成一个事后挑选的分数：
 
@@ -182,13 +192,15 @@ contrast 的局部支持，不是事实正确性。
 
 ## 关键预算
 
+下表是 `subset` 默认值；`audit-all` 覆盖为全部样本、完整 response、`reanchor-window` 与 3 targets。
+
 | 参数 | 默认 | 作用 |
 |---|---:|---|
 | `--target-policy` | reanchor | 用 full-row true-message switch 选事件中心 |
 | `--targets-per-sample` | 1 | target row 硬预算；事件窗口审计建议 3 |
 | `--carrier-scope` | response | 只展开 response destinations；prompt 仍可作 source |
 | `--max-response-tokens` | 128 | clean 时间轴 pilot 的 response horizon |
-| `--max-route-rows` | 256 | 每个 target 的 represented destination rows 硬上限 |
+| `--max-route-rows` | 256 | 超限时保留靠近 target 的最近连续 destinations；不裁剪 causal sources |
 | `--edges-per-head` | 2 | sparse capture 为 transport top-k ∪ absolute-functional top-k，最坏 2k；corridor 再限 k |
 | `--root-candidates` | 4 | root 候选上限 |
 | `--hub-candidates` | 8 | hub 候选上限 |
@@ -204,7 +216,14 @@ provenance，预算外质量由 `route_row_total - route_row_retained` 现算为
 other-prompt；经过更新后任何 winner 都可能混合 provenance。高 attention 只说明 gate，高 message transport 说明实际写入
 强，高 signed action 说明对当前 contrast 的局部一致性；三者不能互换。
 
+destination 截尾不改变完整 sample scan。未展开的 response 节点从 layer 1 起记为 `UNOBSERVED`，
+不能把它们沿用为“纯 response-origin”，也不能由缺失的 lineage 推断其没有 prompt 证据。
+
 ## 图怎么读
+
+输出按 `train/`、`test/` 分目录：`scans/<task>/*.npz` 与 `.timeline.png` 保存样本完整结构时间轴；
+`cohort_summary.json`/`cohort_*.png` 保存跨样本比较；`audits/<task>/<sample>/` 保存已选 target
+的详细功能结果。完整结构 scan 不等于完整事实接纳验证。
 
 | 面板 | 内容 | 结论上限 |
 |---|---|---|

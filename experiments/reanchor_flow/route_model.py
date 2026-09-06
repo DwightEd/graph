@@ -179,9 +179,16 @@ class HeadResolvedRouteModel:
             world.evidence_unit_id,
             world.response_start,
         )
+        unrepresented_response = torch.arange(tokens) >= world.response_start
+        unrepresented_response[flow.row_position.long()] = False
         edge_register = torch.zeros(flow.edges.count, len(CHANNEL_NAMES))
         for layer in range(layers):
             node[layer + 1] = node[layer] * residual_probability[layer, :, None]
+            # A historical token outside the destination window may already
+            # contain prompt evidence. Its embedding has a known response
+            # origin, but later states have no observed update path here.
+            node[layer + 1, unrepresented_response] = 0
+            node[layer + 1, unrepresented_response, UNOBSERVED] = 1
             selected = torch.nonzero(
                 flow.edges.layer == layer, as_tuple=False
             ).flatten()
@@ -199,9 +206,8 @@ class HeadResolvedRouteModel:
             if bool((accounted > 1.0 + 2e-5).any()):
                 raise FloatingPointError("route provenance is not conservative")
             node[layer + 1, :, UNOBSERVED] += (1 - accounted).clamp_min(0)
-            # Unrepresented destinations have residual probability one in the
-            # transport law.  Preserve that identity so a later-layer edge can
-            # still read an evidence-bearing prompt state.
+            # Prompt positions remain explicit source boundaries. Their
+            # identity is a source-origin proxy, not an expanded prompt DAG.
         return node, edge_register
 
     @staticmethod

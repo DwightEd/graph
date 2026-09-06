@@ -22,11 +22,13 @@ from .flow import FlowSignal
 from .native import audit_native_target
 from .native_world import load_native_world, save_native_world
 from .route_plan import RouteBudget
+from .sample_scan import SampleScan
 from .subset_data import (
     SampleRecord,
     inspect_records,
     load_world_from_dataset,
     safe_sample_key,
+    sample_tokens,
     select_records,
 )
 from .worlds import TargetContrast
@@ -59,6 +61,7 @@ class SubsetRunConfig:
     route_budget: RouteBudget
     local_window: int
     saved_edges: int = 2048
+    scan_only: bool = False
 
     def manifest_value(self) -> dict[str, object]:
         """Return the small JSON contract used to resume this exact run."""
@@ -194,6 +197,11 @@ def run_subset_split(
 
     manifest_path = output / MANIFEST_NAME
     manifest = open_manifest(manifest_path, config.manifest_value(), selected)
+    manifest["analysis_scope"] = (
+        "structure_only"
+        if config.scan_only
+        else "structure_and_selected_target_function"
+    )
     save_json(manifest_path, manifest)
 
     counts = {"samples": 0, "targets": 0, "resumed": 0, "confirmed": 0}
@@ -207,6 +215,7 @@ def run_subset_split(
         samples.set_postfix_str(f"{record.task_type}/{record.sample_id}", refresh=False)
         sample_key = safe_sample_key(record.sample_id)
         world_path = output / "worlds" / record.task_type / f"{sample_key}.npz"
+        scan_path = output / "scans" / record.task_type / f"{sample_key}.npz"
         frozen_sample = manifest["samples"].get(record.sample_id)
         if world_path.is_file():
             world = load_native_world(world_path)
@@ -214,6 +223,28 @@ def run_subset_split(
                 raise ValueError("saved native world has the wrong sample identity")
             if Path(world.tokenizer_id).name != config.tokenizer_id:
                 raise ValueError("saved native world uses another tokenizer")
+            if not scan_path.is_file():
+                samples.set_postfix_str(
+                    f"{record.task_type}/{record.sample_id} rebuild scan", refresh=True
+                )
+                full_tokens, response_start = sample_tokens(dataset, record.sample_id)
+                scan = SampleScan.capture(
+                    model,
+                    world,
+                    query_chunk=config.query_chunk,
+                    local_window=config.local_window,
+                )
+                scan.save(
+                    scan_path,
+                    dataset_sample_id=record.sample_id,
+                    source_id=record.source_id,
+                    task_type=record.task_type,
+                    token_ids=world.token_ids,
+                    response_start=world.response_start,
+                    full_response_tokens=len(full_tokens) - response_start,
+                    local_window=config.local_window,
+                )
+                del full_tokens, scan
         else:
             if frozen_sample is not None:
                 raise ValueError(f"frozen native world is missing: {world_path}")
@@ -228,6 +259,7 @@ def run_subset_split(
                 target_policy=config.target_policy,
                 query_chunk=config.query_chunk,
                 local_window=config.local_window,
+                scan_path=scan_path,
             )
             save_native_world(world_path, world)
 
@@ -235,6 +267,7 @@ def run_subset_split(
             "source_id": record.source_id,
             "task_type": record.task_type,
             "world": world_path.relative_to(output).as_posix(),
+            "scan": scan_path.relative_to(output).as_posix(),
             "targets": [
                 {
                     "query_position": target.query_position,
@@ -246,23 +279,31 @@ def run_subset_split(
                 for rank, target in enumerate(world.targets)
             ],
         }
-        if frozen_sample is not None and frozen_sample != sample_entry:
-            raise ValueError(
-                f"saved native world disagrees with frozen sample {record.sample_id}"
-            )
+        if frozen_sample is not None:
+            # Runs created before sample scans retain their frozen target plan.
+            frozen_sample.setdefault("scan", sample_entry["scan"])
+            if frozen_sample != sample_entry:
+                raise ValueError(
+                    f"saved native world disagrees with frozen sample {record.sample_id}"
+                )
         manifest["samples"][record.sample_id] = sample_entry
         save_json(manifest_path, manifest)
-        _run_world_targets(
-            model,
-            world,
-            record,
-            output,
-            manifest,
-            manifest_path,
-            counts,
-            config,
-        )
+        if not config.scan_only:
+            _run_world_targets(
+                model,
+                world,
+                record,
+                output,
+                manifest,
+                manifest_path,
+                counts,
+                config,
+            )
         counts["samples"] += 1
+        del world
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     manifest["analysis_complete"] = True
     manifest["counts"] = counts

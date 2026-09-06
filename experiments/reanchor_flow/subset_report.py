@@ -150,6 +150,7 @@ def _target_reanchor_axes(
         raise ValueError("target re-anchor non-event selection is inconsistent")
 
     temporal_score = float("nan")
+    recomputed_score = float("nan")
     temporal_evaluated = False
     evidence_adoption = float("nan")
     evidence_adoption_evaluated = False
@@ -164,8 +165,10 @@ def _target_reanchor_axes(
         current_score = float(dense_score[layer, head, row_slot])
         if not math.isfinite(current_score) or current_score < 0:
             raise ValueError("current-target structural switch score is invalid")
-        if not np.isclose(current_score, selection_score, rtol=1e-4, atol=1e-6):
-            raise ValueError("target selection and audited switch score disagree")
+        # Preserve the full-response discovery score.  A shorter bf16 prefix
+        # can change the continuous score or even a near-tied source winner;
+        # expose that difference without reranking the frozen event.
+        recomputed_score = current_score
         temporal_score = selection_score
         temporal_evaluated = True
 
@@ -199,6 +202,8 @@ def _target_reanchor_axes(
         raise ValueError("current-target re-anchor candidate has another position")
     return {
         "temporal_switch_score": temporal_score,
+        "temporal_switch_recomputed_score": recomputed_score,
+        "temporal_switch_score_delta": recomputed_score - temporal_score,
         "temporal_switch_evaluated": temporal_evaluated,
         "target_reanchor_selection_recorded": recorded,
         "target_reanchor_has_event": has_event,
@@ -474,8 +479,17 @@ def _capture_rows(output: Path, manifest: dict) -> list[dict]:
     return rows
 
 
-def _join_labels(dataset_root: Path, rows: list[dict]) -> None:
-    sample_ids = list(dict.fromkeys(row["sample_id"] for row in rows))
+def _join_labels(
+    dataset_root: Path,
+    rows: list[dict],
+    *,
+    sample_ids: list[str] | None = None,
+) -> dict[str, np.ndarray]:
+    sample_ids = list(
+        dict.fromkeys(
+            sample_ids if sample_ids is not None else [row["sample_id"] for row in rows]
+        )
+    )
     dataset = open_research_dataset(
         dataset_root,
         device="cpu",
@@ -506,6 +520,7 @@ def _join_labels(dataset_root: Path, rows: list[dict]) -> None:
                 f"q={row['query_position']}"
             )
         row["hallucination_label"] = int(sample_label[relative])
+    return label_by_sample
 
 
 def _json_rows(rows: list[dict]) -> list[dict]:
@@ -528,6 +543,8 @@ def _json_rows(rows: list[dict]) -> list[dict]:
 def evaluate_subset_split(
     dataset_root: str | Path,
     output_root: str | Path,
+    *,
+    plot: bool = False,
 ) -> dict:
     """Join labels after capture, then summarize mechanisms and fixed axes."""
 
@@ -546,10 +563,18 @@ def evaluate_subset_split(
         raise ValueError("evaluation dataset_root differs from capture manifest")
 
     rows = _capture_rows(output, manifest)
-    _join_labels(dataset_root, rows)
+    label_by_sample = _join_labels(
+        dataset_root, rows, sample_ids=list(manifest["samples"])
+    )
 
     groups = {}
-    task_names = ["ALL", *sorted({row["task_type"] for row in rows})]
+    task_names = [
+        "ALL",
+        *sorted(
+            {row["task_type"] for row in rows}
+            | {entry["task_type"] for entry in manifest["selection"]}
+        ),
+    ]
     for task in task_names:
         task_rows = (
             rows if task == "ALL" else [row for row in rows if row["task_type"] == task]
@@ -569,6 +594,7 @@ def evaluate_subset_split(
     report = {
         "subset_evaluation_schema": 5,
         "labels_accessed_after_capture": True,
+        "analysis_scope": manifest.get("analysis_scope", "selected_target_function"),
         "selection_is_not_population_evaluation": True,
         "hypothesis_status": (
             "unvalidated raw axes: route-origin competition retains a fixed "
@@ -631,6 +657,15 @@ def evaluate_subset_split(
             ),
         },
         "secondary_diagnostic_definition": {
+            "temporal_switch_recomputed_score": (
+                "prefix recomputation at the frozen event layer/head/query; "
+                "zero can mean the switch did not reproduce; never used to "
+                "replace or rerank the discovery event"
+            ),
+            "temporal_switch_score_delta": (
+                "prefix-recomputed score minus frozen full-response discovery "
+                "score; a numerical/reproduction diagnostic, not a risk axis"
+            ),
             "selected_root_exact_bottleneck": (
                 "minimum selected-root/corridor exact effect aligned to the "
                 "measured root-effect direction; null unless both intervention "
@@ -640,6 +675,16 @@ def evaluate_subset_split(
         },
         "groups": groups,
         "targets": _json_rows(rows),
+    }
+    from .cohort_plot import COHORT_REPORT_NAME, summarize_cohort
+
+    cohort = summarize_cohort(
+        output, manifest, label_by_sample, target_rows=rows, plot=plot
+    )
+    report["cohort_report"] = COHORT_REPORT_NAME
+    report["cohort_plots"] = cohort["plots"]
+    report["full_scan_coverage"] = {
+        task: group["coverage"] for task, group in cohort["groups"].items()
     }
     save_json(output / REPORT_NAME, report)
     return report

@@ -1,12 +1,26 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import torch
 
 from experiments.reanchor_flow.flow import SourceLocationBuckets
-from experiments.reanchor_flow.reanchor_timeline import ReanchorTimelineAuditor
+from experiments.reanchor_flow.reanchor_timeline import (
+    ReanchorTimelineAuditor,
+    structural_reanchor_trace,
+)
 from experiments.reanchor_flow.tests.test_route_model import _audit
+
+
+def test_destination_window_boundary_cannot_create_a_reanchor_event() -> None:
+    location = SimpleNamespace(transport=torch.tensor([[[[8.0, 0.0, 0.0, 0.1]]]]))
+
+    trace = structural_reanchor_trace(location, torch.tensor([1000]))
+
+    assert trace.anchor_fraction[0, 0, 0] > 0.9
+    assert not trace.dominance_flip.any()
+    assert torch.count_nonzero(trace.score) == 0
 
 
 def _location_with_prompt_switch(audit, dynamics) -> SourceLocationBuckets:

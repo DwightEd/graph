@@ -53,22 +53,24 @@ def _valid_native_world(model) -> NativeWorld:
     ).check()
 
 
-def test_represented_row_budget_fails_before_arange(monkeypatch) -> None:
+def test_represented_row_budget_keeps_contiguous_tail_and_target() -> None:
     world = paired_world()
     target = world.targets[0]
+    assert represented_positions(world, target, "all", max_rows=5).tolist() == [
+        1,
+        2,
+        3,
+        4,
+        5,
+    ]
+    assert represented_positions(world, target, "response", max_rows=2).tolist() == [
+        4,
+        5,
+    ]
+    assert represented_positions(world, target, "all").tolist() == list(range(6))
 
-    def unexpected_arange(*_args, **_kwargs):
-        raise AssertionError("row tensor was allocated before checking its budget")
 
-    monkeypatch.setattr(native_flow_module.torch, "arange", unexpected_arange)
-    with pytest.raises(
-        ValueError,
-        match=r"carrier_scope='all' requires 6 represented rows.*max_rows=5",
-    ):
-        represented_positions(world, target, "all", max_rows=5)
-
-
-def test_native_screen_checks_row_budget_before_baseline(monkeypatch) -> None:
+def test_native_screen_checks_invalid_row_budget_before_baseline(monkeypatch) -> None:
     model = tiny_model()
     pair = paired_world()
     world = NativeWorld(
@@ -85,7 +87,7 @@ def test_native_screen_checks_row_budget_before_baseline(monkeypatch) -> None:
         raise AssertionError("baseline allocated before checking the row budget")
 
     monkeypatch.setattr(native_flow_module, "baseline_forward", unexpected_baseline)
-    with pytest.raises(ValueError, match="exceeding max_rows=5"):
+    with pytest.raises(ValueError, match="max_rows must be positive"):
         native_flow_screen(
             model,
             world,
@@ -94,9 +96,30 @@ def test_native_screen_checks_row_budget_before_baseline(monkeypatch) -> None:
             carrier_scope="all",
             coverage=0.9,
             query_chunk=2,
-            max_rows=5,
+            max_rows=0,
             max_edges_per_head_row=1,
         )
+
+
+def test_native_screen_tail_preserves_all_causal_sources() -> None:
+    model = tiny_model()
+    world = _valid_native_world(model)
+    flow, gradients = native_flow_screen(
+        model,
+        world,
+        world.targets[0],
+        "message",
+        carrier_scope="response",
+        coverage=1.0,
+        query_chunk=2,
+        max_rows=1,
+        max_edges_per_head_row=8,
+    )
+
+    assert flow.row_position.tolist() == [world.targets[0].query_position]
+    assert gradients.position.tolist() == flow.row_position.tolist()
+    assert int(flow.edges.source.min()) == 0
+    assert bool((flow.edges.source < flow.row_position[0]).any())
 
 
 def test_edge_budget_unions_transport_and_functional_routes() -> None:

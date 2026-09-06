@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
 from experiments.reanchor_flow.artifact_payload import save_native_audit
 from experiments.reanchor_flow.artifact_validation import validate_native_audit
 from experiments.reanchor_flow.flow import FlowSignal
+from experiments.reanchor_flow.native_world import TargetReanchorSelection
 from experiments.reanchor_flow.tests.test_subset_artifacts import _fixture, _metadata
 
 
@@ -117,4 +120,44 @@ def test_resume_rejects_selected_root_summary_drift(tmp_path) -> None:
     np.savez_compressed(path, **arrays)
 
     with pytest.raises(ValueError, match="selected-root summaries"):
+        _validate(path, world, target, metadata)
+
+
+def test_resume_accepts_prefix_reproduction_difference_but_not_refrozen_plan(
+    tmp_path,
+) -> None:
+    world, audit, target = _fixture()
+    world.targets = (target,)
+    world.target_selection = (
+        TargetReanchorSelection(
+            query_position=target.query_position,
+            policy="reanchor",
+            has_event=True,
+            fallback=False,
+            center_position=target.query_position,
+            window_offset=0,
+            layer=0,
+            head=0,
+            source_kind="prompt_evidence",
+            source_position=0,
+            source_unit_id=0,
+            score=0.001,
+            support=1,
+            previous_anchor_fraction=0.49,
+            anchor_fraction=0.51,
+            relative_anchor_rise=0.02,
+            relative_local_fall=0.02,
+        ),
+    )
+    metadata = replace(_metadata(), target_policy="reanchor")
+    path = tmp_path / "audit.npz"
+    save_native_audit(path, world, audit, metadata)
+    arrays = _arrays(path)
+    # The prefix recomputation in this fixture no longer detects the event.
+    assert len(arrays["reanchor_candidate_position"]) == 0
+    _validate(path, world, target, metadata)
+
+    arrays["target_reanchor_score"] = np.asarray(0.9)
+    np.savez_compressed(path, **arrays)
+    with pytest.raises(ValueError, match="target_reanchor_score"):
         _validate(path, world, target, metadata)

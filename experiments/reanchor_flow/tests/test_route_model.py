@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -49,6 +50,38 @@ def _audit(coverage: float = 1.0):
         root_unit_id=audit.selected_root_unit_id,
     )
     return model, audit, dynamics
+
+
+def test_unrepresented_response_lineage_becomes_unknown_after_embedding() -> None:
+    world = SimpleNamespace(
+        response_start=2,
+        evidence_unit_id=(0,),
+        units=SimpleNamespace(token_unit_id=torch.tensor([0, 1, 2, 2])),
+    )
+    flow = SimpleNamespace(
+        row_position=torch.tensor([3]),
+        clean_cache=SimpleNamespace(layer_count=2),
+        edges=SimpleNamespace(
+            count=2,
+            layer=torch.tensor([0, 1]),
+            source=torch.tensor([2, 2]),
+            target=torch.tensor([3, 3]),
+        ),
+    )
+    residual = torch.ones(2, 4)
+    residual[:, 3] = 0.75
+
+    node, edge = HeadResolvedRouteModel()._provenance(
+        flow, world, torch.full((2,), 0.25), residual
+    )
+
+    assert node[0, 2, RESPONSE] == 1
+    assert torch.equal(node[1:, 2, UNOBSERVED], torch.ones(2))
+    assert torch.count_nonzero(node[1:, 2, RESPONSE]) == 0
+    assert edge[0, RESPONSE] == 0.25
+    assert edge[1, UNOBSERVED] == 0.25
+    assert torch.equal(node[:, 0, EVIDENCE], torch.ones(3))
+    torch.testing.assert_close(node.sum(-1), torch.ones(3, 4))
 
 
 def _synthetic_flow(
