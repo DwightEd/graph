@@ -569,3 +569,43 @@ interval。
 这些指标只检验预注册的预测关联。它们不证明 route grounded、response action 构成 self-reinforcement，
 也不允许用 test labels 选择 target、候选、方向、阈值或组合权重。若未来学习组合分数，必须在独立
 train/calibration split 冻结后再评估 test。
+
+## 13. 原始 attention / 原生载体审计（rhythm_schema=2）
+
+`attention_rhythm_run` 的每样本主 NPZ 独立于上述旧 target/schema。记 R=N−P，所有曲线保存 R+1 行，
+`row_position=P−1..N−1`。预测 token 标签对应曲线前 R 行，FAI 载体标签对应后 R 行；不得按同一个切片混接。
+主 NPZ 的 `labels_used_for_capture=false`；标签独立存于 `.labels.npz`。
+
+| 字段 | 轴与含义 |
+|---|---|
+| `distance`, `waad`, `message_distance`, `message_waad` | `[L,H,R+1]`；原始距离/幅值对照，不是事实贡献 |
+| `attention_buckets`, `message_buckets` | `[L,H,R+1,4]`；旧压缩对照，所有来源均参与 |
+| `fai`, `message_fai`, `fai_count`, `fai_full_horizon` | FAI 及真实未来窗口分母；缺失未来是 NaN |
+| `past_source_position`, `past_source_attention` | 每个 query/head 最强的严格过去来源及系数；不存在为 -1/0 |
+| `fai_best_query`, `fai_best_attention` | FAI 窗口中最强的严格后续 query，要求该 query 有 observed q+1；不改变 FAI 本身的完整分母 |
+| `distance_mean`, `local_heads`, `global_heads` | 每个 head 的跨度及描述性排名；主同载体矩阵不按这两组筛 head |
+| `map_heads`, `map_query_position`, `map_source_position`, `attention_maps` | 明确展示头/行的完整来源列；无 top-k/重归一化，展示窗口不截断上面的曲线 |
+| `relay_paths`, `relay_selection_attention_product` | `[E,7]` 为 source/write_layer/write_head/carrier/read_layer/read_head/query；系数乘积仅为展示排序 |
+
+无合法两跳候选时 `relay_paths` 是 `(0,7)`，不强造 hub。只有有候选且开启 detail 时才存在以下载体字段：
+
+| 字段 | 轴与含义 |
+|---|---|
+| `relay_node_position` | K 个 carrier/query 的实际 token 位置 |
+| `relay_residual` | `[L+1,K,D]` 完整残差，最后一行为 final norm 前状态 |
+| `relay_post_attention`, `relay_attention_write`, `relay_mlp_write` | `[L,K,D]` 实际模块状态/写入；没有随机投影 |
+| `relay_head_code` | `[L,H,K,d_head]` 所有 head 的完整 pre-W_O 净写入；没有跨 head 平均 |
+| `relay_edge_index`, `relay_edge_columns` | `[2E,4]`：layer/head/source/query，layer 严格递增的两跳见证 |
+| `relay_edge_attention`, `relay_edge_message` | `[2E]` 与 `[2E,D]`，真实系数及 post-W_O 消息 |
+| `relay_readout_direction`, `relay_observed_token_ids`, `relay_runner_token_ids` | 每个 K 节点自己的 q+1 / frozen native runner 对照，不是真/假答案标签 |
+| `relay_head_margin`, `relay_stage_margin`, `relay_attention_margin`, `relay_mlp_margin` | `[L,H,K]`、`[L+1,K]` 或 `[L,K]`，固定读出方向的带符号记账 |
+| `relay_attention_rounding_margin`, `relay_residual_rounding_margin`, `relay_logit_rounding_margin` | 有限精度差单列，不当作信息源或 head 贡献 |
+
+`.audit.npz` 的 `same_carrier_deeper_*` 保留全部物理 head 对，仅 `read_layer > write_layer` 且有完整未来窗口
+及 FAI 峰时可定义；同时保留 local/global 的论文式描述对照。`head_pairs_<split>_<task>.npz` 的 `mean_lift`、
+`valid_sources`、`positive_source_fraction` 对齐实际 head ID，先在 source 内平均样本，再在 source 间平均，
+不常驻 `[sample,head,head]`。无效或未观测的 pair 为 NaN，计数为 0。
+
+`index.json` 保存无标签样本范围与输入根目录；`--phase analyze` 使用该范围，不加载模型/tokenizer。
+`summary.json` 明列 `detection_metrics_run=false` 和未检验事项；`gallery.html` 为图/坐标的导航页。
+旧 v1 原始曲线仍可离线重分析，但缺少的向量/真实边不能补造；需要新采集时使用独立输出目录。

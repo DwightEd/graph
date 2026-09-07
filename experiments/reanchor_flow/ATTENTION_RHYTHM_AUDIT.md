@@ -1,5 +1,12 @@
 # Attention rhythm audit: merged entry point
 
+For the reviewed v2 algorithm, complete command and output interpretation, use
+[ATTENTION_RHYTHM.md](ATTENTION_RHYTHM.md). The same canonical runner now adds
+all-head same-carrier/deeper-layer statistics, prompt/history trends, bounded
+native message/residual/MLP inspection, progress bars and `--phase analyze`.
+These are observational audits; semantic counterfactuals and causal mediation
+remain unimplemented. The compatibility spellings below still work.
+
 The raw per-head audit is in `main` since `785a1cf`. Do **not** apply the older
 `attention_rhythm_audit.patch`: it adds incompatible versions of existing
 `attention_rhythm.py`, `attention_rhythm_report.py`, and their tests.
@@ -22,8 +29,8 @@ python -m experiments.reanchor_flow.audit_attention_rhythm \
 python -m experiments.reanchor_flow.audit_attention_rhythm \
   --scans experiments/reanchor_flow/outputs/mechanism_all_v3 \
   --split both --samples-per-task 0 --max-response-tokens 0 \
-  --query-chunk 8 --plots-per-task 1 \
-  --output experiments/reanchor_flow/outputs/attention_rhythm_all
+  --query-chunk 8 --plots-per-task 3 --relay-examples 2 --evaluate \
+  --output experiments/reanchor_flow/outputs/attention_rhythm_v2
 ```
 
 `--split both` maps to `--split all`, `--labels` maps to `--evaluate`, and
@@ -64,3 +71,5 @@ The new entry-point tests check argument translation and dispatch without loadin
 a language model. The existing numerical suite tests the actual observer/report;
 its optional Hugging Face Llama integration test still requires Transformers.
 No 8B/RAGTruth run is claimed by this merge.
+
+For v2, also run `test_attention_relay.py` and `test_attention_rhythm_pipeline.py`.

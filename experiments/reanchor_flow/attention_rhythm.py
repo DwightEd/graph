@@ -59,6 +59,10 @@ class AttentionRhythmObserver:
         self.buckets = {name: np.zeros((*shape, 4), np.float32)
                         for name in ("attention_buckets", "message_buckets")}
         self.winner = np.zeros(shape, np.int32)
+        self.past_source = np.full(shape, -1, np.int32)
+        self.past_attention = np.zeros(shape, np.float32)
+        self.fai_best_query = np.full(shape, -1, np.int32)
+        self.fai_best_attention = np.zeros(shape, np.float32)
         self.fai_sum = np.zeros(shape, np.float64)
         self.fai_message_sum = np.zeros(shape, np.float64)
         self.fai_message_count = np.zeros(shape, np.int32)
@@ -112,6 +116,10 @@ class AttentionRhythmObserver:
                     value = value.masked_fill(total.squeeze(-1) == 0, torch.nan)
                 self.values[prefix + name][layer, :, saved] = value.cpu().numpy()
         self.winner[layer, :, saved] = a.argmax(-1).cpu().numpy()
+        past = a.masked_fill((lag <= 0)[None], -1)
+        strength, position = past.max(-1)
+        self.past_source[layer, :, saved] = position.masked_fill(strength <= 0, -1).cpu().numpy()
+        self.past_attention[layer, :, saved] = strength.clamp_min(0).cpu().numpy()
         prompt = source < self.start
         evidence = torch.as_tensor(self.evidence, device=device)
         masks = torch.stack((
@@ -130,6 +138,14 @@ class AttentionRhythmObserver:
             storage[layer] += (weights * eligible[None]).sum(1)[:, self.start - 1:].cpu().numpy()
         message_eligible = eligible[None] & (total > 0)
         self.fai_message_count[layer] += message_eligible.sum(1)[:, self.start - 1:].cpu().numpy()
+        # Detail readout needs a strictly later query with an observed q+1.
+        best_eligible = eligible & (lag > 0) & (q[:, None] < self.tokens - 1)
+        best, index = a.masked_fill(~best_eligible[None], -1).max(1)
+        best = best[:, self.start - 1:].cpu().numpy()
+        queries = q[index][:, self.start - 1:].cpu().numpy()
+        changed = best > self.fai_best_attention[layer]
+        self.fai_best_attention[layer][changed] = best[changed]
+        self.fai_best_query[layer][changed] = queries[changed]
 
     def finish(self) -> dict[str, np.ndarray]:
         if not self.seen.all():
@@ -157,6 +173,8 @@ class AttentionRhythmObserver:
             "fai_full_horizon": count == self.config.future_hi - self.config.future_lo + 1,
             "distance_mean": distance_mean, "local_heads": local, "global_heads": global_,
             "winner_position": self.winner,
+            "past_source_position": self.past_source, "past_source_attention": self.past_attention,
+            "fai_best_query": self.fai_best_query, "fai_best_attention": self.fai_best_attention,
             "max_row_mass_error": np.array(self.mass_error),
             "max_future_attention": np.array(self.future_leak),
         }
@@ -205,8 +223,9 @@ def representative_heads(trace: dict, per_group: int = 2) -> np.ndarray:
 def capture_rhythm(model, token_ids, response_start: int, evidence_mask, *,
                    config: RhythmConfig = RhythmConfig(), query_chunk: int = 8,
                    map_tokens: int = 128, map_offset: int = 0,
-                   explicit_heads: tuple[tuple[int, int], ...] = (), paper_groups: bool = False):
-    """One no-gradient forward for all curves; one OPTIONAL forward for maps.
+                   explicit_heads: tuple[tuple[int, int], ...] = (), paper_groups: bool = False,
+                   relay_examples: int = 2):
+    """One no-gradient forward for curves; one OPTIONAL map/relay detail pass.
 
     Uses the existing shared Llama implementation, including GQA/RoPE. No new
     model forward, target selection, source cut or trainable encoder is defined.
@@ -214,7 +233,7 @@ def capture_rhythm(model, token_ids, response_start: int, evidence_mask, *,
     from experiments.common.llama_message_intervention import (
         VALIDATED_ATTRIBUTE, forward_layers, validate_manual_forward,
     )
-    if query_chunk < 1 or map_tokens < 0 or map_offset < 0:
+    if query_chunk < 1 or min(map_tokens, map_offset, relay_examples) < 0:
         raise ValueError("invalid capture/map budget")
     model.eval()
     device = model.get_input_embeddings().weight.device
@@ -224,24 +243,27 @@ def capture_rhythm(model, token_ids, response_start: int, evidence_mask, *,
     layers, heads = len(model.model.layers), model.config.num_attention_heads
     observer = AttentionRhythmObserver(layers, heads, len(ids), response_start, evidence_mask, config)
     hidden = model.get_input_embeddings()(ids[None])
-    final = forward_layers(model, hidden, 0, observer=observer, attention_query_chunk=query_chunk)
+    final = forward_layers(model, hidden, 0, observer=observer,
+                           attention_query_chunk=query_chunk, apply_final_norm=False)
     result = observer.finish()
     entropy = np.full(len(observer.rows), np.nan, np.float32)
     # Entropy[q] predicts token q+1; the last response row has no observed next token.
     predictors = observer.rows[:-1]
     for begin in range(0, len(predictors), 32):
         rows = predictors[begin:begin + 32]
-        logits = model.lm_head(final[0, rows]).float()
+        logits = model.lm_head(model.model.norm(final[0, rows])).float()
         entropy[begin:begin + len(rows)] = (
             logits.logsumexp(-1) - (logits.softmax(-1) * logits).sum(-1)
         ).cpu().numpy()
     result.update(token_ids=ids.cpu().numpy(), predictor_entropy=entropy,
-                  rhythm_schema=np.array(1), labels_used_for_capture=np.array(False))
-    del final, observer
+                  evidence_mask=np.asarray(evidence_mask, dtype=bool),
+                  rhythm_schema=np.array(2), labels_used_for_capture=np.array(False))
+    del observer
     selected = (np.asarray([l * heads + h for l, h in explicit_heads], dtype=int)
                 if explicit_heads else representative_heads(result))
     if any(not (0 <= l < layers and 0 <= h < heads) for l, h in explicit_heads):
         raise ValueError("--head must name an existing layer:head")
+    maps = None
     if map_tokens and len(selected):
         first = response_start - 1 + map_offset
         rows = np.arange(first, min(first + map_tokens, len(ids)))
@@ -249,7 +271,17 @@ def capture_rhythm(model, token_ids, response_start: int, evidence_mask, *,
             raise ValueError("map offset is outside captured response")
         groups = (result["local_heads"], result["global_heads"]) if paper_groups else None
         maps = RawMapObserver(selected, heads, rows, len(ids), groups)
-        forward_layers(model, hidden, 0, observer=maps, attention_query_chunk=query_chunk)
+    from .attention_relay import RelayObserver, select_relays
+    from .attention_rhythm_report import analyze_rhythm
+    paths, scores = select_relays(result, analyze_rhythm(result) if relay_examples else None, relay_examples)
+    result.update(relay_paths=paths, relay_selection_attention_product=scores)
+    details = RelayObserver(model, ids, final, paths, maps) if len(paths) else maps
+    del final
+    if details is not None:
+        forward_layers(model, hidden, 0, observer=details, attention_query_chunk=query_chunk)
+    if len(paths):
+        result.update(details.finish())
+    if maps is not None:
         result.update(map_heads=selected, map_query_position=rows,
                       map_source_position=np.arange(len(ids)), attention_maps=maps.maps)
         if paper_groups:

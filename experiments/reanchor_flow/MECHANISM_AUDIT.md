@@ -442,6 +442,7 @@ F_{11}-F_{00}=\Delta_P+\Delta_H+I.
 | `research_dataset.py` 的 `ResearchSample`／`LabelStore` | 原始样本、来源、坐标与标签隔离 | 已有，复用 |
 | `experiments/common/llama_message_intervention.py` | 原生 Llama/GQA 分块前向与 observer | 已有，作为唯一模型实现 |
 | `native_trace.py` | 原生状态测量；扩展所需 prompt 行、载体阶段和配对采集 | 基础已有，扩展未实现 |
+| `attention_rhythm.py` / `attention_relay.py` | 全 head 结构观测及有限两跳原生状态、模块/读出检查 | 已实现；未验证事实中介 |
 | 拟新增 `constraint_flow.py` 中的 `ConstraintFlowModel` | 同一坐标下的边差分、模块差分、最终读出闭合，以及同一载体的形成／调用查询 | 本方案核心，未实现 |
 | 现有绘图／cohort 模块 | 消费同一模型输出，生成单样本与总体图 | 配对视图未实现 |
 | `detection_metrics.py` | 完整 token 评价与来源级区间 | 已有；最终评分算法尚未确定 |
@@ -459,7 +460,8 @@ model.save(output_path)                  # 每样本 NPZ
 
 `pair_spec` 只负责输入编辑、对齐和语义预期；`readout_spec` 负责冻结判断目标。模型类不读幻觉标签、不训练分类器、不决定绘图颜色。配对载荷、分解公式和路径查询聚在同一模块，避免再次生成十几个中转模块。
 
-旧 `routing_probe`、`native_patterns` 仅作对照；旧 `route_model` 的代理 provenance 不作为新模型的事实真值。此次只更新研究文档，不删除仍用于复现的代码。
+旧 `routing_probe`、`native_patterns` 仅作对照；旧 `route_model` 的代理 provenance 不作为新模型的事实真值。
+当前已经实现的结构/原生运算入口见第 13 节；本节的语义配对核心仍是设计，旧复现代码不承担这一角色。
 
 ### 12.2 分阶段交付
 
@@ -484,6 +486,12 @@ A–D 优先控制 GPU 与人工核验成本，不先对全数据生成多个反
 - 最终读出方向依赖两端最后的 RMSNorm：要么先缓存所需 head code／MLP 输出后离线记账，要么增加一次测量重放。实际前向次数、CPU 内存、磁盘峰值都须报告，不能把“理论两个条件”偷换成“实现必然只跑两次”。
 
 ## 13. 本方案的完成状态与论文论证
+
+2026-09-07 实现更新：`attention_rhythm_run` 现提供阶段 A/B 的结构测量和有限原生载体检查，
+见 [ATTENTION_RHYTHM.md](ATTENTION_RHYTHM.md)。它检验逐 head prompt/history 趋势，保留全部 head 对，
+按同一载体与严格递增层序做描述性比较，并在少量展示样本保存两跳真实消息、完整残差/MLP、所有 head code
+及 observed−runner 记账。它没有实现本文的语义配对差分或因果中介；同一条结构路径上两个消息的存在，
+不能证明某项事实经过了该路径。原生实例的挑选只限制展示，不限制全部样本的结构统计。
 
 本次完成了历史讨论检索、上传结果／当前实现核对、文献依据审查和算法设计。对称消息差分与最终读出记账做了独立 float64 代数检查，最大误差分别约 `3.96e-16`、`2.22e-15`；这只是恒等式的数值检查，不是 Llama 或幻觉机制实验。
 
