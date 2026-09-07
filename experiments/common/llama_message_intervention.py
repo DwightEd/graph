@@ -354,6 +354,9 @@ def llama_attention(
     )
     query, key = apply_rotary(query, key, *rotary)
     scaling = float(getattr(module, "scaling", head_dim**-0.5))
+    observe_qk = getattr(observer, "observe_qk", None)
+    if callable(observe_qk):
+        observe_qk(module.layer_idx, query, key, scaling)
     output = gated_attention(
         module,
         query,
