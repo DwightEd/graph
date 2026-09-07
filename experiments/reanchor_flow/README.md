@@ -1,5 +1,49 @@
 # 逐 head 的时间轴重锚定机制审计 v3
 
+## 已完成扫描后：直接得到检测指标与事件对照
+
+`scan_analyze` 读取已有 `train/test/run_manifest.json` 和 `scans/*.npz`，在 CPU 上
+拟合逐 head 时序路由密度，评分 **test 全部已扫描 token**，包括首 token。
+它不需要 functional targets，因此 `functional_targets=0` 不再阻止这条结构检测评估路径。
+无需重跑 LLM forward、gradient 或逐路由消融。标签仍需原 cache；formal cache 的标签读取会
+反序列化单个 attention 文件，不加载模型权重。
+
+在项目根目录执行（`--scans` 指向你本次全量扫描的实际输出根目录）：
+
+```bash
+git pull --ff-only origin main
+conda run --no-capture-output -n research \
+  python -m experiments.reanchor_flow.scan_analyze \
+  --scans experiments/reanchor_flow/outputs/mechanism_all_v3 \
+  --output experiments/reanchor_flow/outputs/routing_detection_v1 \
+  --supervised-probe
+```
+
+`--supervised-probe` 额外给出一份明确使用 train 标签的线性诊断及同预算位置基线，
+用于区别“扫描没有判别信息”和“当前无监督假设不合适”。它不属于无监督主方法；只跑
+无监督检测时去掉该参数。两条结果分开汇报，绝不根据 test 指标翻转分数方向或选 head。
+若 cache 移动了，加 `--cache /新的cache根目录`，其下应有 `train/`、`test/`。
+
+首先打开 `routing_detection_v1/detection_summary.md`，其中包括 ALL 和三个任务的
+AUROC、AUPRC（average precision）、幻觉比例、按 source 成簇 bootstrap 的 95% 区间，
+以及主方法相对静态路由、位置基线的**配对差值区间**。AUPRC 应结合幻觉比例看；时序方法若
+没有稳定超过静态路由与位置对照，不能声称重锚定机制改善了检测。当前实现未在真实扫描上
+实测检测效果；单凭已经上传的 cohort 聚合值无法还原 token 排名或 AUROC。
+
+| 结果 | 用途 |
+|---|---|
+| `detection_report.json`、`detection_summary.md` | 全 token 检测结果、覆盖率、基线与不确定性 |
+| `detection_curves.png` | ALL/各任务 ROC、PR 曲线 |
+| `models/*.npz`、`source_partition.json` | 固定模型、校准参数、fit/calibration/test source 名单 |
+| `frozen_detector.json`、`predictions/*.npz` | 逐样本全部 token 分数、q→q+1、最高异常贡献 head、事后标签 |
+| `events/event_audit.json`、逐 head PNG | train 选 head 后，test 的正常/幻觉事件及邻近非事件对照轨迹 |
+| `events/event_pairs.jsonl` | 具体事件/对照位置、各桶 winner source position/unit，可继续定位人工或功能审计 |
+
+拟合、校准、全 token 评分、标签连接、bootstrap、事件统计均有 tqdm。按样本读取，fit 每样本
+最多 128 行；评分保留全部行，内存随单样本长度而变，不保存所有样本的 head tensor。
+`--no-events` 可只跑检测，`--no-plot` 关闭图片。详细建模与尚未验证的假设见
+[METHOD.md](METHOD.md#扫描后的逐-head-时序路由检测)。
+
 v3 直接审计这个生成机制：模型在位置 \(q\) 是否从最近少数 response token，切换为读取原始
 prompt 或更早的 response relay；读到的具体位置又是否真正写入 residual，并对 \(q+1\) 的生成有用。
 
@@ -41,9 +85,14 @@ v3 现在补齐的是“全时间轴逐-head结构发现 → source 身份/linea
 | 少量冻结干预 | `native.py`、`corridor.py`、`audit.py` |
 | artifact 契约、写入与校验 | `artifact_schema.py`、`artifact_payload.py`、`artifact_validation.py` |
 | 独立完整时间轴与跨样本比较 | `sample_scan.py`、`cohort_plot.py` |
+| 扫描/标签边界、无监督时序模型 | `scan_dataset.py`、`routing_transition.py` |
+| 检测流程/校准、独立评估、事件对照 | `scan_analyze.py`、`detection_metrics.py`、`routing_events.py` |
+| 可选监督读出诊断 | `routing_probe.py` |
 | 数据选择、运行、评价与作图 | `subset_data.py`、`subset.py`、`subset_report.py`、`mechanism_plot.py`、`run.py` |
 
-`reanchor_timeline.py` 是唯一的时间事件定义；`route_plan.py` 只负责固定 target 的候选拓扑，
+`reanchor_timeline.py` 定义底层 local→long-range 分数与原功能审计选点；离线检测不使用其中
+读取右邻居的 peak mask。`routing_events.py` 在同一底层分数上用固定 train 阈值和左侧 refractory
+定义可因果定位的报告事件。`route_plan.py` 只负责固定 target 的候选拓扑，
 `route_model.py` 只负责 provenance/action/integration ledger。`audit.py` 与 `corridor.py` 并非旧版重复物：
 它们保留 aligned clean/corrupt world 的双向 patch 路径，后续 fact×confidence matched audit 仍需要它。
 artifact 的 schema、payload 和 validator 已分开，避免在运行流程里手工搬运一长串字段。

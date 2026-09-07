@@ -465,3 +465,72 @@ train/calibration 冻结，test 只评估并分别报告 event coverage 与 even
 - [Path patching](https://arxiv.org/abs/2304.05969)：用冻结路径假设检验 mediation，而不是穷举路径
   生成假设。
 - [Causal tracing](https://arxiv.org/abs/2202.05262)：corrupt-restore 的节点定位逻辑。
+
+## 扫描后的逐 head 时序路由检测
+
+这一步先检验已经捕获的结构信息能否支持检测，不把干预结果当作选点分数。
+一个统一的概率模型代替手工拼接“幻觉风险指标”：分别建模每个 `(layer, head)` 的当前
+路由状态和前后状态依赖，再冻结模型评估所有 test token。
+
+**状态。** 四桶实际 message transport 是各 source edge 的 post-WO 向量范数之和，记为
+`m[t,l,h,b]`。它包含绝对量，但不是抵消后的净 residual write。状态 `z[t,l,h]` 有四维：
+归一化四桶比例的三个正交 log-ratio 坐标，加 `log(sum_b m + ε)`。比例用 ε=1e-5 平滑。
+这样“来源占比重新分配”和“绝对 transport 变化”具有各自坐标，不把四个相加为 1 的比例
+当作独立证据。每个 head 的状态、参数和协方差都独立保留。
+
+**时间条件。** `c[t]` 只包含常数、生成 token 索引的 `log1p/5` 及平方、已知 prompt 长度
+的 `log1p/8` 及平方、两者乘积、local/remote response 是否已经可读。索引由
+`response_index=q+1-response_start` 得到；没有最终回答长度、回答完成比例、右邻居峰值或标签。
+
+**密度。** 对每个 head，拟合
+
+\[
+u_t=[z_{t-1};z_t],\qquad
+p_h(u_t\mid c_t)=\mathcal N(W_hc_t,\Sigma_h).
+\]
+
+均值用固定 ridge=1e-3；8×8 协方差向自身对角收缩 5%，加小数值 floor。两遍流式统计
+完成拟合。每个 source 权重相同，同 source 内样本均分权重，各样本最多 128 个均匀位置
+参与估计；评分用全 token。核心接口是 `RoutingTransitionModel.fit(factory)`，它只接收
+`RoutingSequence` 的状态、上下文、位置和样本权重，接口没有标签。
+
+主分数为独立 head 因子乘积的负 log likelihood，即逐 head NLL 求和。求和是模型的独立性
+假设，不是先平均 head 状态；它也没有刻画跨 head 协同。每个 head 的联合 NLL **精确**分解为
+`previous-state NLL + conditional innovation NLL`。因此能同时检查进入异常状态，以及从前一
+状态无法解释的变化。另在所有训练行拟合独立 4D 当前状态密度，作为 `routing_static` 对照。
+`routing_transition` 只用条件 innovation。首 token 无前态，回退到当前密度，单独校准并记录数量。
+
+train source 中固定约 20% 留作无标签校准，剩余 source 拟合。校准按任务、首 token/续写分别
+估计各分数的 source 平衡均值和标准差，保留未裁剪的连续尾部分数。先按 ID 排除与 test source
+重叠的 train 样本，记录排除名单。所有密度、校准和 test 预测完成后，才允许标签读取。
+分数越高表示越异常，方向固定，不依据 test 结果翻转。`top_head_excess` 去掉各 head 的
+协方差体积常量和模型期望能量，排序的是异常能量贡献；这不是该 head 对事实正确性的因果贡献。
+
+**评估与独立诊断。** 逐 token AUROC、AP、各任务幻觉比例、source-cluster bootstrap 95% CI，
+及同一次重采样下的主方法−对照差值。`position` 是已生成 token 索引基线。
+可选 `SupervisedRoutingProbe` 用 train-fit 标签训练固定 L2 logistic readout：输入为所有 head
+当前状态、因果相邻差分和上下文；另训练仅上下文的位置对照，二者使用同一行预算与权重。
+固定 3 epochs、alpha=1e-3、每样本最多 128 行，不在 test 调参。其结果单独命名并单独报告，
+不能作为无监督有效性的证据。
+
+**事件审计。** `RoutingEventAudit` 只在 train 按 source 平衡、同样本同 log2 位置区间的 H−N
+切换分数差选择每任务最多三个 head。各 head 在 train 的正切换分数 90% 分位数冻结阈值；
+test 事件采用阈值穿越和左侧 4 行 refractory。对照为同一样本、相同中心标签、16 token 内且
+避开事件附近的未使用零切换位置。分别展示四桶比例、log 总量、切换分数和最强 evidence unit
+连续性；先做事件−对照，再在同 source 内做 H−N。未来 `[-8,+12]` 窗口仅用于描述，不能进入
+当前 token 检测。图中区间是按 source 的逐点近似区间，未做多重比较校正；不能据此宣称机制
+具有统计显著性。每个事件的 q、q+1 和 winner source IDs 另存 JSONL，方便继续检查具体信息。
+
+尚未验证的假设：
+
+- 幻觉在路由状态或条件转换密度中足够罕见。若错误状态常见，或训练混合分布吸收了幻觉，
+  无监督密度可能检测不到；“稳定 basin”不自动等于正确，也不自动等于幻觉。
+- 线性位置条件、单高斯和跨 head 独立假设足以表达正常变化。协同模式、多模态路由可能需要
+  更合适的模型；不能凭合成测试或聚合均值确认。
+- 四桶和每桶 winner 保留了关键判别信息。它们无法恢复完整 source 分布、hub 的事实 lineage、
+  MLP 接纳、词法/语法与事实信息的解耦，也不能区分事实证据与 verbal confidence 表征。
+- 时序路由是否增加检测价值，必须看固定 test 中相对位置/静态对照的指标和差值区间。
+  本轮设计已看过 test cohort 汇总，指标属于探索性；正式机制确认需要未参与设计的新数据。
+
+实现检验覆盖未来前缀不变性、联合密度链式分解、保留状态分布而打乱时序的对照、source 权重、
+首 token、标签隔离、并列分数指标和完整离线工作流。合成检验不是真实 RAGTruth 检测效果。
