@@ -5,37 +5,29 @@
 [MECHANISM_AUDIT.md](MECHANISM_AUDIT.md)。核心审计保留逐 head 的内容／路由变化，以及残差、MLP 和最终读出；配对引擎尚未实现。
 
 目前还没有完成这条机制的验证。四桶监督读出用于检查判别信息，`discover` 的 PCA／聚类用于
-探索写入组合；两者均不是已经验证的机制驱动检测器。下面保留现有工具的复现命令，不能把运行成功
-或输出 AUROC 当成新主线已经完成。下一项研究产物应是逐 head 原图和同一载体的形成／复用过程。
+探索写入组合；两者均不是已经验证的机制驱动检测器。
 
-## 复现已有向量探索工具（不等于机制确认）
+**2026-09-07 负结果：用户完成全量 test 后，`pattern_distance` 的 ALL AUROC 为 0.448777，
+AUPRC 为 0.054116；这批数据的幻觉占比为 0.062086。Data2txt 接近随机，QA 和 Summary
+也未支持预设分数方向。停止把模式距离作为主检测路线，不再推荐为此全量采集。**
+完整分任务结果、分数定义与结论边界见 [MECHANISM_AUDIT.md §1.2.1](MECHANISM_AUDIT.md#121-原生向量模式距离新增负结果)。
 
-以下命令覆盖已有扫描中的 train/test 全部样本与完整 response；在项目根目录启动，避免
-`ModuleNotFoundError: No module named 'experiments'`：
+这次运行检验的是“偏离常见写入模式是否对应幻觉”，没有检验约束信息的进入、整合、保留及使用。
+不通过翻转 test 分数方向、扩大采集或更换聚类参数把负结果改写成机制发现。下一项研究产物仍应是
+能逐位置核查的形成／复用过程；配对约束审计仍是待实现、待验证的方案，不能承诺其检测效果。
 
-```bash
-cd /share/home/tm902089733300000/a903202310/lys/research/graph && \
-git pull --ff-only origin main && \
-conda run --no-capture-output -n research \
-  python -m experiments.reanchor_flow.discover \
-  --scans experiments/reanchor_flow/outputs/mechanism_all_v3 \
-  --output experiments/reanchor_flow/outputs/native_discovery_v1 \
-  --model /share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct \
-  --query-chunk 8 --sketch-dim 16 --fit-rows 4096 \
-  --components 8 --patterns 6 --plots-per-task 4
-```
+## 已有向量探索产物与复现范围
 
-每个样本两次无梯度前向；首次加载模型另有一次小规模实现一致性检查。采集按样本保存并可续跑。
-同一输出目录重复执行会复用已完成的原生 trace，再运行分析；修改模型、投影或截断配置须换输出目录。
-`--phase capture` 只采集，`--phase analyze` 只分析已有 trace，不加载大模型权重。
-模型／dtype 默认可从旧扫描配置读取；原标签 cache 移动后用 `--cache /新cache根目录`。
+保留已经生成的 `traces/*.npz`、报告、预测与图，不需要重跑来确认本次负结果。
+trace 中的逐 head 写入投影、模块阶段及带符号读出仍可用于观察，但不能恢复缺失的逐 source 消息
+或语义配对响应。保存了更多内部数据，不意味着完成了信息流机制审计。
 
-默认 `--samples-per-task 0 --max-response-tokens 0` 表示全部样本／完整回答。
-`--plots-per-task 4` **只控制示例图数量**，按样本 ID 选取，不筛统计；设为 `0` 画全部已采集测试样本。
-采集、拟合、预测、标签审计和绘图都有 tqdm。需要先验证服务器环境时，使用单独输出目录加
-`--samples-per-task 1 --max-response-tokens 32`，不能把这次小样本结果解释为完整实验。
+旧 CLI 保留供复现：`--phase analyze` 只分析已有 trace，不加载模型权重；`--phase capture`
+只采集。代码默认仍为 `--phase all --samples-per-task 0 --max-response-tokens 0`，会处理全部样本
+和完整回答，每个未缓存样本需要两次同输入无梯度前向。本次只撤下全量运行推荐，没有更改 CLI 默认值。
+`--plots-per-task` 只控制示例图数量，不缩小采集范围。各阶段已有 tqdm。
 
-## 先看哪些结果
+## 已生成结果的含义
 
 | 输出（相对 `native_discovery_v1/`） | 用途 |
 |---|---|
