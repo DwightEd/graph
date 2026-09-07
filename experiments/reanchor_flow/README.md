@@ -44,6 +44,31 @@ AUROC、AUPRC（average precision）、幻觉比例、按 source 成簇 bootstra
 `--no-events` 可只跑检测，`--no-plot` 关闭图片。详细建模与尚未验证的假设见
 [METHOD.md](METHOD.md#扫描后的逐-head-时序路由检测)。
 
+## 监督读出成功后：定位实际贡献的 head
+
+如果已运行 `--supervised-probe`，在项目根目录执行：
+
+```bash
+python -m experiments.reanchor_flow.probe_heads \
+  --analysis experiments/reanchor_flow/outputs/routing_detection_v1
+```
+
+入口自动读取已保存的模型、source 划分和原扫描路径。扫描或 cache 移动后，分别用
+`--scans`、`--cache` 覆盖其含 `train/`、`test/` 的根目录。有 tqdm，不重新拟合检测器，
+不运行大模型或逐路由干预。
+
+`HeadReadout` 将完整监督 logit 精确分解为每个 head 的当前状态项、相邻变化项，以及
+上下文项和截距；保留全部 layer/head。参数 L2 排名仅用于查看系数尺度，不能代替实际贡献。
+实际筛选在原 train 的 calibration sources 上比较同一样本、同 log2 位置区间内的
+幻觉−正常贡献差，再按样本、source 平衡。取正差值最大的最多 20 个 head 作为检查预算，
+先保存选择，再读取 test 进行同样的贡献核查。fit 来源的结果单独报告。
+
+输出 `head_audit/frozen_head_selection.json` 和 `head_audit/head_report.json`。后者保存所有
+head 的 `parameter_rank`、校准选择的 `selected_rank`，以及 fit/calibration/test 的贡献差、
+正方向 source 比例和配对样本量。缺少可配对 calibration source 时，选择为空，不从 test 补选。
+这仍是**使用标签的监督读出诊断**，不是无监督 head 发现或因果重要性；当前/差分相关、head
+相互补偿、粗位置区间及有限配对来源都会影响解释，也没有验证这些 head 子集能保持完整 AUROC。
+
 v3 直接审计这个生成机制：模型在位置 \(q\) 是否从最近少数 response token，切换为读取原始
 prompt 或更早的 response relay；读到的具体位置又是否真正写入 residual，并对 \(q+1\) 的生成有用。
 
@@ -87,7 +112,7 @@ v3 现在补齐的是“全时间轴逐-head结构发现 → source 身份/linea
 | 独立完整时间轴与跨样本比较 | `sample_scan.py`、`cohort_plot.py` |
 | 扫描/标签边界、无监督时序模型 | `scan_dataset.py`、`routing_transition.py` |
 | 检测流程/校准、独立评估、事件对照 | `scan_analyze.py`、`detection_metrics.py`、`routing_events.py` |
-| 可选监督读出诊断 | `routing_probe.py` |
+| 可选监督读出与逐 head 贡献核查 | `routing_probe.py`、`probe_heads.py` |
 | 数据选择、运行、评价与作图 | `subset_data.py`、`subset.py`、`subset_report.py`、`mechanism_plot.py`、`run.py` |
 
 `reanchor_timeline.py` 定义底层 local→long-range 分数与原功能审计选点；离线检测不使用其中
