@@ -1,8 +1,74 @@
-# 逐 head 的时间轴重锚定机制审计 v3
+# 原生生成轨迹的逐 head 机制发现与审计
 
-当前四桶扫描和线性读出保留为基线。它们没有保存完整向量，不能验证约束如何被 MLP 整合与后续使用。
-下一阶段已收敛为“证据绑定 × 查询条件”的四格对照与逐 head 差分计算图，见
-[机制审计方案](MECHANISM_AUDIT.md)。该方案尚未实现；下面的命令运行现有 v3，不会生成新方案的结果。
+当前入口是 `discover`：在原始 prompt + response 上采集实际向量写入，归纳跨 head／MLP 的
+重复计算模式，再连接幻觉标签审计关联。**不预设事件必须是重锚定，不先筛 head，不逐路由消融。**
+旧四桶扫描作为输入索引和基线保留；缺失的向量需要重新运行模型，不能从旧 NPZ 恢复。
+
+## 一键运行当前流程
+
+以下命令覆盖已有扫描中的 train/test 全部样本与完整 response；在项目根目录启动，避免
+`ModuleNotFoundError: No module named 'experiments'`：
+
+```bash
+cd /share/home/tm902089733300000/a903202310/lys/research/graph && \
+git pull --ff-only origin main && \
+conda run --no-capture-output -n research \
+  python -m experiments.reanchor_flow.discover \
+  --scans experiments/reanchor_flow/outputs/mechanism_all_v3 \
+  --output experiments/reanchor_flow/outputs/native_discovery_v1 \
+  --model /share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct \
+  --query-chunk 8 --sketch-dim 16 --fit-rows 4096 \
+  --components 8 --patterns 6 --plots-per-task 4
+```
+
+每个样本两次无梯度前向；首次加载模型另有一次小规模实现一致性检查。采集按样本保存并可续跑。
+同一输出目录重复执行会复用已完成的原生 trace，再运行分析；修改模型、投影或截断配置须换输出目录。
+`--phase capture` 只采集，`--phase analyze` 只分析已有 trace，不加载大模型权重。
+模型／dtype 默认可从旧扫描配置读取；原标签 cache 移动后用 `--cache /新cache根目录`。
+
+默认 `--samples-per-task 0 --max-response-tokens 0` 表示全部样本／完整回答。
+`--plots-per-task 4` **只控制示例图数量**，按样本 ID 选取，不筛统计；设为 `0` 画全部已采集测试样本。
+采集、拟合、预测、标签审计和绘图都有 tqdm。需要先验证服务器环境时，使用单独输出目录加
+`--samples-per-task 1 --max-response-tokens 32`，不能把这次小样本结果解释为完整实验。
+
+## 先看哪些结果
+
+| 输出（相对 `native_discovery_v1/`） | 用途 |
+|---|---|
+| `summary.md`、`mechanism_report.json` | 所有模式的覆盖、来源配对差异、区间、多重比较及数值闭合 |
+| `mechanism_cohort.png` | 各任务中每个模式的正常／幻觉出现率差异与来源数 |
+| `mode_writes_<task>.png` | 各模式的逐 head 和 MLP 带符号读出表现；不平均 head |
+| `figures/<task>/<sample>.png`、同名 JSON | 全回答模式轨迹、局部 head／残差／MLP 变化和具体来源位置 |
+| `train,test/traces/<task>/<sample>.npz` | 无标签原生向量投影、逐 head 写入、来源边和模块阶段 |
+| `train,test/examples/<task>/<sample>.json` | 每个样本的无标签变化候选：前后模式、具体 head／MLP 层及带符号向量差 |
+| `train,test/predictions/<task>/<sample>.npz` | 冻结模式、坐标、变化距离和重构误差，覆盖所有采集行 |
+| `native_patterns.npz`、`pattern_geometry.npz` | 联合模式模型、保留 head 轴的模式中心与分量载荷 |
+| `source_partition.json`、`plot_selection.json` | 模型拟合来源／行、测试来源、重叠排除与无标签选图记录 |
+| `detection_report.json`、`detection_curves.png` | 所有标注 token 的 AUROC／AUPRC、来源 bootstrap 区间和基线 |
+
+模式距离、相邻变化、低 observed-token margin 和位置都输出检测诊断，但**模式稀有／变化大没有被
+假定为已证实的幻觉机制**。分数方向预先固定；不根据 test 翻转方向。首先检查模式能否复现、涉及什么
+运算，再判断与幻觉是否有稳定差异，不能只按最高 AUROC 给机制命名。
+
+## 当前实现的组织
+
+| 模块／对象 | 责任 |
+|---|---|
+| `scan_dataset.py` | 复用已有扫描的输入坐标；`ScanLabelStore` 在模式与预测保存后才读取标签 |
+| `native_trace.py`：`FrozenReadout`、`NativeTraceObserver` | 两次原生前向，逐 head 向量、模块更新与固定读出记账 |
+| `native_patterns.py`：`NativePatternModel` | 不读标签的联合向量模式学习、冻结、全 token 转换 |
+| `native_report.py`：`NativeCohort` | 流式来源级归纳、关联统计与样本／总体可视化 |
+| `discover.py` | CLI、阶段编排、续跑和数据流；不重复模型运算 |
+| `experiments/common/llama_message_intervention.py` | 已有 Llama／GQA 前向与 observer 接口，供新旧流程共用 |
+
+向量压缩、读出方向的含义、审计步骤与尚未验证的假设见 [MECHANISM_AUDIT.md](MECHANISM_AUDIT.md)。
+默认固定 16 维投影有损；全部 head 保留不等于全部信息无损。`--save-head-codes` 可另存每个 head
+在 W_O 前的完整净写入，明显增加磁盘占用。展示边只存每个 head 最多 `--display-edges 2` 条，
+其余来源仍参与完整净写入和统计，同时保存遗漏的带符号总量与绝对总量。
+
+## 以下为旧四桶基线与有限 target 审计
+
+这些入口用于复现已有结果，不生成上面的原生向量模式。
 
 ## 已完成扫描后：直接得到检测指标与事件对照
 

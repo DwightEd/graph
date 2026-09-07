@@ -1,8 +1,8 @@
-# v3：逐 head 时间轴重锚定与预算化接纳审计
+# v3 基线：逐 head 时间轴重锚定与预算化接纳审计
 
-本文记录现有 v3 实现，保留用于复现已有产物。其四桶 transport 是消息范数之和，不能恢复完整向量。
-新的约束绑定与差分计算审计设计见 [MECHANISM_AUDIT.md](MECHANISM_AUDIT.md)，尚未实现；
-本文件中的现有选择器、来源分数和 runner 目标不能替代新方案的事实对照。
+本文仅记录旧 v3 实现，用于复现已有产物。其四桶 transport 是消息范数之和，不能恢复完整向量。
+当前已实现的原生向量发现入口为 `discover`，方法和结论边界见 [MECHANISM_AUDIT.md](MECHANISM_AUDIT.md)，
+运行命令见 [README.md](README.md)。下文的结构选择器、来源分数和 runner 目标属于旧路径。
 
 ## 1. 方法要回答什么
 

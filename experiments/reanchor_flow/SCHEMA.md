@@ -1,4 +1,56 @@
-# Mechanism-audit v3 data contract
+# Mechanism audit data contracts
+
+## Native computation discovery (`discover`, schema 1)
+
+当前入口的产物与下文旧 v3 target/route schema 分开。逐样本 trace 与预测不保存幻觉标签；
+标签只在模型、预测、选图名单冻结后用于报告和图的事后覆盖。所有 NPZ 支持 `allow_pickle=False`。
+
+记 L=layers、H=query heads、Q=实际 response predictor 数、R=sketch 维数、K=展示边数、D=残差维数。
+绝对 predictor `row_position[q]` 预测 `token_ids[row_position[q]+1]`；不平均 head。
+
+| 字段 | 形状／语义 |
+|---|---|
+| `native_trace_schema`, `dataset_sample_id`, `source_id`, `task_type` | schema 与输入身份 |
+| `token_ids`, `token_text`, `response_start`, `row_position` | 输入、可读 token 文本、response 起点、绝对 predictor |
+| `sketch_projection`, `sketch_seed`, `sketch_dim` | [D,R] 固定共享投影与可复现参数 |
+| `head_sketch`, `mlp_sketch` | [L,H,Q,R]、[L,Q,R] 实际净写入的线性投影 |
+| `residual_sketch` | [L+1,Q,R] 每层输入与最后一层后的 raw residual |
+| `attention_sketch`, `post_attention_sketch` | [L,Q,R] attention 写入与加法后的状态 |
+| `head_norm`, `residual_norm`, `attention_norm`, `post_attention_norm`, `mlp_norm` | 原始完整向量范数，非四桶范数之和 |
+| `head_margin`, `attention_margin`, `post_attention_margin`, `mlp_margin`, `stage_margin` | 同一 q 使用冻结方向的直接读出项；保留各自 head／layer 轴 |
+| `observed_token_ids`, `runner_token_ids`, `final_margin`, `observed_logprob`, `entropy` | [Q] 第一次原生前向的实际读出 |
+| `final_rms_denominator`, `readout_bias`, `readout_remainder` | [Q] raw final RMS、输出偏置与最终舍入余项 |
+| `edge_source_position`, `edge_attention`, `edge_margin` | [L,H,Q,K] 显示边；空位置 -1、数值 0 |
+| `edge_sum_margin`, `edge_total_absolute_margin` | [L,H,Q] 所有 source 边的带符号和／绝对和 |
+| `omitted_margin`, `edge_omitted_absolute_margin`, `edge_rounding_remainder` | 显示遗漏与 source→head 舍入；omitted_margin 含该舍入 |
+| `head_remainder_*`, `attention_add_remainder_*`, `mlp_add_remainder_*` | `_sketch`／`_margin` 中 head 聚合（含输出偏置）和实际残差相加余项 |
+| `forward_repeat_max_abs_error` | [Q] 两次原生 raw final 向量的最大重复误差 |
+| `head_code`（可选） | [L,H,Q,head_dim] float32 的 W_O 前净写入，不是全 source 路由 |
+
+`train,test/native_manifest.json` 保存配置、输入身份、每个 trace 的相对路径与行数、完整状态。
+续跑检查配置与 token 坐标，不复用不一致 trace；输出变更需新目录。读取旧扫描只取输入 token，
+不把旧四桶数据当成新向量。
+
+`native_patterns.npz` 保存 `NativePatternModel` 的 shape、scale、mean、components、centers、
+explained_variance_ratio、fit_rows、seed。`pattern_geometry.npz` 保存恢复原 sketch 单位的
+`center_head_sketch`／`center_mlp_sketch` 与 `loading_head_sketch`／`loading_mlp_sketch`，均保留 head 轴。
+
+逐样本 predictions 保存 `coords[Q,C]`、`pattern_id[Q]`、`distance[Q]`、`transition[Q]`、
+`has_previous[Q]`、`reconstruction_error[Q]` 以及绝对／response 坐标。C 是保留 PCA 维数，
+不是类别数。首行或缺失前行的 transition=0 且 has_previous=False。
+
+逐样本 `train,test/examples/<task>/<sample>.json` 在标签读取前保存。无论是否绘图，均记录最多 8 个
+间隔至少 3 个 predictor 的高变化候选、前后模式、变化最大的 head／MLP 层和完整 signed sketch delta。
+该数量只限制人工检查清单，全部 token 的预测、转移和统计不受影响。
+
+`mechanism_report.json` 包括所有模式、全部转移（对角线为持续）、模式条件下的逐 head 有符号均值、
+位置匹配 H−N 差、source 区间、全任务×模式 BH q、未配对计数及数值闭合。
+`detection_report.json` 单独报告固定诊断的所有标注 token AUROC／AUPRC 与 source 区间。
+图和具体变化示例的预算不减少模式拟合的 head 轴或全量审计分母；示例不是已确认的机制事件。
+
+以下为旧 v3 复现路径的数据契约。
+
+## Mechanism-audit v3 data contract
 
 本文定义 v3 artifact 的语义边界。实现可以增加诊断字段，但不能改变以下不变量：时间轴结构事件先
 由 clean full-row transport 冻结，target 与 AuditPlan 随后冻结；候选选择不读取 label 或 exact
