@@ -1,5 +1,9 @@
 # 逐 head 的时间轴重锚定机制审计 v3
 
+当前四桶扫描和线性读出保留为基线。它们没有保存完整向量，不能验证约束如何被 MLP 整合与后续使用。
+下一阶段已收敛为“证据绑定 × 查询条件”的四格对照与逐 head 差分计算图，见
+[机制审计方案](MECHANISM_AUDIT.md)。该方案尚未实现；下面的命令运行现有 v3，不会生成新方案的结果。
+
 ## 已完成扫描后：直接得到检测指标与事件对照
 
 `scan_analyze` 读取已有 `train/test/run_manifest.json` 和 `scans/*.npz`，在 CPU 上
@@ -27,8 +31,8 @@ conda run --no-capture-output -n research \
 首先打开 `routing_detection_v1/detection_summary.md`，其中包括 ALL 和三个任务的
 AUROC、AUPRC（average precision）、幻觉比例、按 source 成簇 bootstrap 的 95% 区间，
 以及主方法相对静态路由、位置基线的**配对差值区间**。AUPRC 应结合幻觉比例看；时序方法若
-没有稳定超过静态路由与位置对照，不能声称重锚定机制改善了检测。当前实现未在真实扫描上
-实测检测效果；单凭已经上传的 cohort 聚合值无法还原 token 排名或 AUROC。
+没有稳定超过静态路由与位置对照，不能声称重锚定机制改善了检测。用户已运行的 ALL 结果中，
+routing_joint AUROC 约 0.530，监督 routing 约 0.835；这证明有可读出的标签关联，未证明重锚定机制。
 
 | 结果 | 用途 |
 |---|---|
@@ -69,7 +73,7 @@ head 的 `parameter_rank`、校准选择的 `selected_rank`，以及 fit/calibra
 这仍是**使用标签的监督读出诊断**，不是无监督 head 发现或因果重要性；当前/差分相关、head
 相互补偿、粗位置区间及有限配对来源都会影响解释，也没有验证这些 head 子集能保持完整 AUROC。
 
-v3 直接审计这个生成机制：模型在位置 \(q\) 是否从最近少数 response token，切换为读取原始
+v3 的原审计目标是：模型在位置 \(q\) 是否从最近少数 response token，切换为读取原始
 prompt 或更早的 response relay；读到的具体位置又是否真正写入 residual，并对 \(q+1\) 的生成有用。
 
 方法分成两层，不能混为一个分数：
@@ -86,7 +90,7 @@ prompt 或更早的 response relay；读到的具体位置又是否真正写入 
 下三角矩阵：完整 row 按 `query_chunk` 流式计算，只保留 \(L\times H\times P\times4\) 桶总量和每桶
 最强 source，所以图上的事件三角视图是桶聚合/最强 source 轨迹，不是未经压缩的全 \(T^2\) tensor。
 
-完整算法见 [METHOD.md](METHOD.md)，预注册假设与结论边界见
+现有实现见 [METHOD.md](METHOD.md)，修订后的研究设计与结论边界见
 [MECHANISM_AUDIT.md](MECHANISM_AUDIT.md)，artifact 契约见 [SCHEMA.md](SCHEMA.md)。
 
 ## 当前审计覆盖哪些步骤
@@ -96,9 +100,9 @@ prompt 或更早的 response relay；读到的具体位置又是否真正写入 
 真实 message、gradient、hub 与 intervention，却改成固定 target 的静态 route，丢掉了在完整生成时间轴
 上先找切换点的步骤。
 
-v3 现在补齐的是“全时间轴逐-head结构发现 → source 身份/lineage → 当前 token 的 action/integration
-→ 可选因果确认”。这是一条可审计的测量链，不代表这个机制已经在数据上被验证，也不自动证明它能
-检测幻觉。
+v3 已提供全时间轴逐 head 结构扫描，以及有限 target 的 action/integration 和可选干预。
+扫描本身没有向量与 MLP 状态；target 的 observed-vs-runner 目标也没有事实语义。
+因此尚未完成“限定条件选择 → 事实整合 → 后续调用”的机制闭环。
 
 ## 代码组织
 
