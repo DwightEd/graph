@@ -1,5 +1,40 @@
 # Mechanism audit data contracts
 
+## Constraint response (`constraint_flow_run`, schema 1)
+
+输入在共同有效前缀的 q 截止，候选是 q+1 的固定 positive/negative，不是 native runner。
+记 L=层、H=query heads、V=KV heads、R=保留前缀行、E=登记根位置、K=前缀行与根的并集、D=残差维、d=head dim。
+所有 `_projection` 使用同一最终判断的两端平均 inverse RMS 方向；carrier 投影不是其对 q 的因果贡献。
+
+| 字段 | 形状／语义 |
+|---|---|
+| `token_ids`, `response_start`, `query` | [2,N] 两个等长前缀；N=q+1，没有未来回答 |
+| `negative_token_id`, `positive_token_id`, `valid_prefix_end`, `valid_query_mask` | 固定下一 token 判断与共同有效范围；语义有效性由输入核验提供 |
+| `row_position`, `state_position`, `root_position`, `edited_position` | 保留行 P−1..q、状态行并集、登记根和实际输入编辑位置 |
+| `residual_pair` | [L+1,2,K,D] 原生两端状态，无投影压缩 |
+| `head_content_code`, `head_routing_code`, `head_native_code` | [L,H,R,d] 对称内容项、路由项和原生 AV 差分；每个 head 独立 |
+| `head_*_projection` | [L,H,R] 对共同候选方向的带符号记账 |
+| `source_content_projection`, `source_routing_projection` | [L,H,N] 固定 q 的所有来源；没有 source top-k |
+| `target_attention_pair` | [L,2,H,N] q 的两端完整来源行 |
+| `root_attention_pair` | [L,2,H,R,E] 每个登记根到前缀各行的原生系数 |
+| `root_value_pair`, `response_value_pair`, `query_to_kv` | [L,2,V,E,d]、[L,2,V,R,d] 和 [H]；GQA 的共享 V 只存一次 |
+| `attention_delta`, `post_attention_delta`, `mlp_delta` | [L,R,D] 原生模块的两端向量差 |
+| `state_projection`, `attention_projection`, `post_attention_projection`, `mlp_projection` | 同一目标方向；只有 q 上的增量进入输出账 |
+| `margin_pair`, `target_margin_delta`, `entropy_pair` | 两条件的固定候选 logit 差、其差与一般熵对照 |
+| `ledger_names`, `ledger_terms`, `normalization_term`, `ledger_rounding` | q 的输入、内容、路由、MLP、最终 norm 与舍入，合计为真实候选差的变化 |
+| `av_rounding`, `source_sum_rounding`, `head_sum_rounding`, `residual_add_rounding`, `final_norm_rounding` | 各运算阶段有限精度差，不能归成语义效应 |
+| `paths`, `path_roles`, `path_columns` | 最多候选与邻近对照；(s,write_layer,write_head,b,read_layer,read_head,q)，层序严格递增 |
+| `metadata` | 原始两条件文本、候选、来源、语义核验声明、输入类别和采集配置，无幻觉标签 |
+| `capture_seconds`, `peak_cuda_bytes`, `native_forward_validation_included`, `endpoint_conditions` | 采集成本与首次原生前向验证标志；batch=2 共两个条件 |
+
+每组在 fact_flip 中选路径后冻结，其他条件沿用相同路径。确认在独立 `.confirmation.npz` 中保存
+`paths`, `path_roles`, `path_effect`, `path_value_delta`, `confirmation_baseline_margin`,
+`confirmation_capture_margin_difference`, `confirmation_forward_calls`, `confirmation_seconds`。
+无路径时 effect 为空、调用数为 0，不伪造失败或成功。精确效果仅对应指定 value 路径，Q/K 和旁路未在其中。
+
+`summary.json` 保留所有事实／控制条件，包括无响应、无路径和弱于对照的结果；不计算幻觉 AUROC。
+`index.json` 是离线分析与续跑入口。旧 rhythm/native schema 不会被当成配对 trace 读取。
+
 ## Native computation discovery (`discover`, schema 1)
 
 当前入口的产物与下文旧 v3 target/route schema 分开。逐样本 trace 与预测不保存幻觉标签；
