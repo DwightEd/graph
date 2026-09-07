@@ -434,16 +434,22 @@ def _save_summary(report, output):
 
 
 def _print_report(report, output):
-    for task, group in report["groups"].items():
-        print(
-            f"\n{task}: tokens={group['known_tokens']} prevalence={group['prevalence']}"
-        )
-        for name, score in group["scores"].items():
-            print(f"  {name:22s} AUROC={score['auroc']} AUPRC={score['auprc']}")
+    sections = [("UNSUPERVISED DETECTION", report)]
     if "supervised_diagnostic" in report:
-        print(
-            "\nSupervised readout is a separate diagnostic (see report), not the unsupervised detector."
+        sections.append(
+            (
+                "SUPERVISED DIAGNOSTIC (uses train labels)",
+                report["supervised_diagnostic"],
+            )
         )
+    for title, section in sections:
+        print(f"\n=== {title} ===")
+        for task, group in section["groups"].items():
+            print(
+                f"\n{task}: tokens={group['known_tokens']} prevalence={group['prevalence']}"
+            )
+            for name, score in group["scores"].items():
+                print(f"  {name:22s} AUROC={score['auroc']} AUPRC={score['auprc']}")
     print(f"\nResults: {output / 'detection_report.json'}")
 
 
