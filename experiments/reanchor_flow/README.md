@@ -1,10 +1,13 @@
-# 原生生成轨迹的逐 head 机制发现与审计
+# 信息形成与后续使用：研究定位和现有工具
 
-当前入口是 `discover`：在原始 prompt + response 上采集实际向量写入，归纳跨 head／MLP 的
-重复计算模式，再连接幻觉标签审计关联。**不预设事件必须是重锚定，不先筛 head，不逐路由消融。**
-旧四桶扫描作为输入索引和基线保留；缺失的向量需要重新运行模型，不能从旧 NPZ 恢复。
+当前研究主线是：**被后续生成复用的中间状态怎样形成，以及它对输入约束的响应是否实际影响后续输出。**
+论文对照、具体审计顺序、通过条件与实现缺口统一记录在 [MECHANISM_AUDIT.md](MECHANISM_AUDIT.md)。
 
-## 一键运行当前流程
+目前还没有完成这条机制的验证。四桶监督读出用于检查判别信息，`discover` 的 PCA／聚类用于
+探索写入组合；两者均不是已经验证的机制驱动检测器。下面保留现有工具的复现命令，不能把运行成功
+或输出 AUROC 当成新主线已经完成。下一项研究产物应是逐 head 原图和同一载体的形成／复用过程。
+
+## 复现已有向量探索工具（不等于机制确认）
 
 以下命令覆盖已有扫描中的 train/test 全部样本与完整 response；在项目根目录启动，避免
 `ModuleNotFoundError: No module named 'experiments'`：
@@ -50,7 +53,7 @@ conda run --no-capture-output -n research \
 假定为已证实的幻觉机制**。分数方向预先固定；不根据 test 翻转方向。首先检查模式能否复现、涉及什么
 运算，再判断与幻觉是否有稳定差异，不能只按最高 AUROC 给机制命名。
 
-## 当前实现的组织
+## 已有向量工具的组织
 
 | 模块／对象 | 责任 |
 |---|---|
@@ -61,7 +64,7 @@ conda run --no-capture-output -n research \
 | `discover.py` | CLI、阶段编排、续跑和数据流；不重复模型运算 |
 | `experiments/common/llama_message_intervention.py` | 已有 Llama／GQA 前向与 observer 接口，供新旧流程共用 |
 
-向量压缩、读出方向的含义、审计步骤与尚未验证的假设见 [MECHANISM_AUDIT.md](MECHANISM_AUDIT.md)。
+现有向量字段见 [SCHEMA.md](SCHEMA.md)，研究步骤与尚未验证的假设见 [MECHANISM_AUDIT.md](MECHANISM_AUDIT.md)。
 默认固定 16 维投影有损；全部 head 保留不等于全部信息无损。`--save-head-codes` 可另存每个 head
 在 W_O 前的完整净写入，明显增加磁盘占用。展示边只存每个 head 最多 `--display-edges 2` 条，
 其余来源仍参与完整净写入和统计，同时保存遗漏的带符号总量与绝对总量。
