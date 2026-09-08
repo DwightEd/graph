@@ -85,20 +85,28 @@ origin.addEventListener('change',show);head.addEventListener('change',show);docu
 
 def render_sample(folder, targets):
     folder=Path(folder)
-    with np.load(folder/'meta.npz') as f: start=int(f['response_start']);tokens=f['token_text']
+    with np.load(folder/'meta.npz') as f: meta=dict(f)
+    start=int(meta['response_start']);tokens=meta['token_text']
+    from .selection import content_positions, uniform
+    content=set(content_positions(meta).tolist())
     labels=np.full(len(tokens)-start,-1,int)
     if (folder/'labels.npz').exists():
         with np.load(folder/'labels.npz') as f: labels=f['labels']
-    chosen=[]
-    for y in (0,1,-1):
-        options=[t for t in targets if labels[t-start]==y]
-        if options: chosen.append(options[0])
+    # Small comparisons expose every target. Large full-token runs keep a
+    # bounded HTML subset; all other saved targets remain viewable in notebook.
+    chosen=list(targets) if len(targets)<=24 else uniform(targets,22)
+    preferred=sorted(targets,key=lambda t:(t not in content,labels[t-start]!=1,t==start,t))
+    chosen=sorted(set(chosen+preferred[:2])) if len(targets)>24 else chosen
     for t in chosen: render_target(folder,t)
-    options=''.join(f'<option value="target_{t}.html">token {t}: {escape(str(tokens[t]))} ({labels[t-start]})</option>' for t in chosen)
-    rows=''.join(f'<tr><td>{t}</td><td>{escape(str(tokens[t]))}</td><td>{labels[t-start]}</td><td><a href="target_{t}.npz">npz</a></td></tr>' for t in targets)
+    first=next(t for t in preferred if t in chosen)
+    options=''.join(f'<option value="target_{t}.html"'+(' selected' if t==first else '')+f'>token {t}: {escape(repr(str(tokens[t])))} ({labels[t-start]})</option>' for t in chosen)
+    rows=''.join(f'<tr><td>{t}</td><td>{escape(repr(str(tokens[t])))}</td><td>{labels[t-start]}</td><td>'
+                 +(f'<a href="target_{t}.html">图</a> · ' if t in chosen else 'notebook 可查看 · ')
+                 +f'<a href="target_{t}.npz">npz</a></td></tr>' for t in targets)
     page=folder/'index.html'
-    page.write_text('<!doctype html><meta charset="utf-8"><h1>消息 DAG</h1><p>标签：1=H，0=N，-1=未知。展示各类第一个已完成目标；任意目标可用 notebook 即时渲染。</p>'
+    page.write_text('<!doctype html><meta charset="utf-8"><h1>消息 DAG</h1><p>标签：1=H，0=N，-1=未知。默认选择内容候选目标；不代表该词已被确认为事实。'
+        '小批的所有目标均可打开；超过24个目标时限制预生成页面，其余可用 notebook 即时查看。</p>'
         +'<select onchange="document.getElementById(\'frame\').src=this.value">'+options+'</select>'
-        +f'<iframe id="frame" src="target_{chosen[0]}.html" style="width:100%;height:1100px;border:0"></iframe>'
+        +f'<iframe id="frame" src="target_{first}.html" style="width:100%;height:1100px;border:0"></iframe>'
         +'<table><tr><th>token</th><th>text</th><th>label</th><th>graph</th></tr>'+rows+'</table>',encoding='utf-8')
     return page

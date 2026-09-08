@@ -13,15 +13,16 @@ from tqdm.auto import tqdm
 from ..attention_audit_run import analysis_manifest
 from ..attention_rhythm_report import save_json
 from ..message_lineage import CheckpointWeights
-from .cache import NativeCache, source_partition, target_positions
+from .cache import MASK_POLICY, NativeCache, read_trace, source_partition, target_positions
 from .graph import SCHEMA, Tape, blocks, prepare, trace_targets
+from .selection import paired_plan, read_labels, target_details
 from .structure import describe
 
 
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--audit', type=Path, default=Path('experiments/reanchor_flow/outputs/attention_audit_v3'))
-    p.add_argument('--output', type=Path, help='default AUDIT/message_dag')
+    p.add_argument('--output', type=Path, help='default AUDIT/message_dag_v2')
     p.add_argument('--phase', choices=('all','trace','evaluate'), default='all')
     p.add_argument('--completed-only', action='store_true')
     p.add_argument('--model', type=Path)
@@ -29,8 +30,9 @@ def parser():
     p.add_argument('--split', choices=('all','train','test'), default='all')
     p.add_argument('--task', choices=('all','QA','Summary','Data2txt'), default='all')
     p.add_argument('--sample-id', action='append', default=[])
-    p.add_argument('--samples-per-group', type=int, default=1, help='label-blind uniform samples per split/task; 0=all')
-    p.add_argument('--targets-per-sample', type=int, default=4, help='ordinary targets, uniformly spaced; 0=all')
+    p.add_argument('--selection', choices=('uniform','paired'), default='uniform', help='paired: label-stratified content comparison, not population detection evaluation')
+    p.add_argument('--samples-per-group', type=int, default=1, help='samples per split/task; paired mode needs an even total split equally N/H; 0=all eligible')
+    p.add_argument('--targets-per-sample', type=int, default=4, help='target budget; paired mode uses three targets per N-H-N comparison; 0=all eligible')
     p.add_argument('--target', action='append', type=int, default=[], help='absolute token position; requires one selected sample')
     p.add_argument('--query-chunk', type=int, default=8)
     p.add_argument('--source-chunk', type=int, default=2)
@@ -49,6 +51,15 @@ def atomic_npz(path, **values):
     temporary = path.with_suffix('.tmp.npz')
     np.savez_compressed(temporary, **values)
     temporary.replace(path)
+
+
+def ensure_labels(args, manifest):
+    missing = [e for e in manifest['samples'] if not (args.audit/e['path']).with_suffix('.labels.npz').exists()]
+    if not missing: return
+    from ..attention_audit_run import join_labels, parser as audit_parser
+    label_args = audit_parser().parse_args(['--phase','analyze','--output',str(args.audit)])
+    if manifest.get('config',{}).get('cache'): label_args.cache=Path(manifest['config']['cache'])
+    join_labels(label_args,{**manifest,'samples':missing},save_index=False)
 
 
 def plan(args, original):
@@ -84,6 +95,14 @@ def plan(args, original):
     if completed < requested and not args.completed_only:
         raise ValueError(f'{scope}: only {completed}/{requested} captures are complete; '
                          'add --completed-only to use them, or resume capture.')
+    if args.selection=='paired':
+        if args.target: raise ValueError('--target is for explicit uniform selection; paired targets come from frozen N-H-N triples')
+        entries=[e for group in groups.values() for e in group]
+        ensure_labels(args,{**native,'samples':entries})
+        selected,selection=paired_plan(args.audit,entries,args.samples_per_group,args.targets_per_sample)
+        for e in selected:
+            e['folder']=(Path('samples')/e['split']/e['task_type']/str(e['sample_id'])).as_posix()
+        return {**native,'samples':selected,'selection':selection}
     selected = []
     for entries in groups.values():
         n = args.samples_per_group
@@ -93,14 +112,17 @@ def plan(args, original):
     if args.target and len(selected)!=1:
         raise ValueError('--target requires exactly one selected sample')
     for e in selected:
-        with np.load(args.audit/e['path']) as file: trace = dict(file)
+        path=args.audit/e['path'];trace=read_trace(path)
         eligible = target_positions(trace,0)
         targets = np.asarray(args.target,int) if args.target else target_positions(trace,args.targets_per_sample)
         if not np.isin(targets,eligible).all(): raise ValueError(f"{e['sample_id']}: invalid/special target")
         e['targets'] = sorted(set(targets.tolist()))
         e['eligible_targets'] = len(eligible)
         e['folder'] = (Path('samples')/e['split']/e['task_type']/str(e['sample_id'])).as_posix()
-    return {**native, 'samples':selected}
+        labels=read_labels(path,trace) if path.with_suffix('.labels.npz').exists() else None
+        e['target_details']=target_details(trace,targets,labels)
+        e['added_special_positions']=trace['added_special_positions'].tolist()
+    return {**native, 'samples':selected,'selection':dict(mode='uniform',labels_used_for_selection=False,labels_used_for_graph=False)}
 
 
 def run(args):
@@ -108,7 +130,7 @@ def run(args):
     if min(args.samples_per_group,args.targets_per_sample,args.edge_budget,args.bootstrap)<0 or min(args.query_chunk,args.source_chunk,args.target_chunk,args.cpu_threads)<1:
         raise ValueError('invalid budgets')
     torch.set_num_threads(args.cpu_threads)
-    output = args.output or args.audit/'message_dag'
+    output = args.output or args.audit/'message_dag_v2'
     if output.resolve()==args.audit.resolve(): raise ValueError('derived output must differ from the capture directory')
     if args.phase=='evaluate':
         from .report import evaluate
@@ -116,19 +138,30 @@ def run(args):
     original = json.loads((args.audit/'index.json').read_text())
     if original.get('audit_schema')!=3 or not original['settings'].get('save_states'):
         raise ValueError('message DAGs require v3 full-state caches; old scalar summaries cannot reconstruct them')
-    manifest = plan(args, original)
+    request={k:getattr(args,k) for k in ('selection','split','task','sample_id','samples_per_group','targets_per_sample','target')}
+    previous=output/'index.json'
+    if args.selection=='paired' and previous.exists() and not args.list_available:
+        manifest=json.loads(previous.read_text())
+        if manifest.get('selection_request')!=request or manifest.get('dag_settings',{}).get('schema')!=SCHEMA:
+            raise ValueError('comparison selection/configuration changed; choose another --output to keep the frozen comparison')
+        print('Resume frozen sample IDs and N-H-N targets from index.json.',flush=True)
+    else:
+        manifest = plan(args, original)
     if args.list_available:
         print('Required: .npz + .history.npz + .qk.npz + .states.npz. '
               'Optional .attention.npz, labels and old audit results are not required for graph construction.', flush=True)
         return manifest
     model = args.model or Path(original['settings']['model'])
     cfg = json.loads((model/'config.json').read_text())
-    settings = dict(schema=SCHEMA, model=str(model), mlp_rule=args.mlp_rule, edge_budget=args.edge_budget)
+    settings = dict(schema=SCHEMA, model=str(model), mlp_rule=args.mlp_rule, edge_budget=args.edge_budget,mask_policy=MASK_POLICY)
+    if previous.exists() and json.loads(previous.read_text()).get('dag_settings')!=settings:
+        raise ValueError('DAG settings changed; choose another --output before replacing an existing comparison')
     manifest['dag_settings'] = settings
     manifest['native_audit'] = str(args.audit.resolve())
+    manifest['selection_request']=request
     peak_tape,output_bytes,layer_loads = 0,0,0
     for e in manifest['samples']:
-        with np.load(args.audit/e['path']) as file: trace = dict(file)
+        trace=read_trace(args.audit/e['path'])
         g = len(source_partition(trace)['names'])
         size = 2*cfg['num_hidden_layers']*g*len(trace['row_position'])*cfg['hidden_size']*4
         e['temporary_bytes'] = size
@@ -141,23 +174,32 @@ def run(args):
         print(f"plan {e['split']}/{e['task_type']}/{e['sample_id']}: sources={g} "
               f"targets={len(e['targets'])}/{e['eligible_targets']} temporary={size/2**30:.2f} GiB "
               f"output~{estimate/2**30:.2f} GiB before compression",flush=True)
+        print(f"  controls reclassified={trace['added_special_positions'].tolist()}; targets="+
+              ', '.join(f"{d['position']}:{d['text']!r}[{d['label']}]" for d in e['target_details']),flush=True)
     print(f"No LLM recapture. Peak temporary tape={peak_tape/2**30:.2f} GiB; one target adjoint per selected token. "
-          'Source/target budgets are sampling budgets, not a mechanism selector.',flush=True)
+          f"Selection={args.selection}; labels enter audit sampling only in paired mode, never the operators.",flush=True)
     print(f'Estimated derived arrays={output_bytes/2**30:.2f} GiB before compression; layer loads={layer_loads}.',flush=True)
     if args.plan_only: return manifest
     output.mkdir(parents=True,exist_ok=True)
     save_json(output/'index.json',manifest)  # planned targets survive interruption
+    if args.phase!='trace' or args.selection=='paired': ensure_labels(args,manifest)
     scratch = args.scratch or output/'work'
     scratch.mkdir(parents=True,exist_ok=True)
     weights = None
     for e in tqdm(manifest['samples'],desc='message DAG',unit='sample'):
         path, folder = args.audit/e['path'], output/e['folder']
         folder.mkdir(parents=True,exist_ok=True)
-        with np.load(path) as file: trace = dict(file)
+        trace=read_trace(path)
         metadata = {k:trace[k] for k in ('token_ids','token_text','special_mask','source_unit_id','evidence_mask',
-                                        'row_position','response_start','predictor_logprob')}
+                                        'row_position','response_start','predictor_logprob','capture_special_mask','added_special_positions')}
         metadata.update(layers=np.array(cfg['num_hidden_layers']),heads=np.array(cfg['num_attention_heads']),
-                        sample_id=np.array(str(e['sample_id'])))
+                        sample_id=np.array(str(e['sample_id'])),generator_model=trace.get('generator_model',np.array('unknown')))
+        label_file=path.with_suffix('.labels.npz')
+        if label_file.exists():
+            labels=read_labels(path,trace)
+            if args.selection=='paired' and any(labels[d['position']-int(trace['response_start'])]!=d['label'] for d in e['target_details']):
+                raise ValueError(f'{path}: labels changed since the comparison was frozen; choose another --output')
+            shutil.copyfile(label_file,folder/'labels.npz')  # partial reports work even if tracing is interrupted
         missing = []
         for target in e['targets']:
             destination = folder/f'target_{target}.npz'
@@ -197,15 +239,6 @@ def run(args):
     del weights
     if torch.cuda.is_available(): torch.cuda.empty_cache()
     if args.phase=='trace': return manifest
-    # Attach labels only after the selected graphs are fixed. This reuses the
-    # dataset adapter; it does not launch the old exhaustive head-pair audit.
-    if any(not (args.audit/e['path']).with_suffix('.labels.npz').exists() for e in manifest['samples']):
-        from ..attention_audit_run import join_labels, parser as audit_parser
-        label_args = audit_parser().parse_args(['--phase','analyze','--output',str(args.audit)])
-        if original.get('config',{}).get('cache'): label_args.cache=Path(original['config']['cache'])
-        join_labels(label_args,manifest,save_index=False)
-    for e in manifest['samples']:
-        shutil.copyfile((args.audit/e['path']).with_suffix('.labels.npz'),output/e['folder']/'labels.npz')
     from .report import evaluate
     return evaluate(output,manifest,bootstrap=args.bootstrap)
 

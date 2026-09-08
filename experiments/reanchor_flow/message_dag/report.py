@@ -9,10 +9,13 @@ from ..attention_audit_stats import Moments, bracket_positions, matched_differen
 from ..attention_rhythm_report import save_json
 from ..detection_metrics import detection_report
 from .structure import NAMES, HEAD_NAMES, SCORES
+from .selection import content_positions
 
 
 def evaluate(output, manifest, *, bootstrap=200):
     output = Path(output)
+    selection=manifest.get('selection',{'mode':'uniform','labels_used_for_selection':False})
+    paired=selection['mode']=='paired'
     grouped = defaultdict(lambda:defaultdict(list))
     for e in manifest['samples']: grouped[e['split']+'/'+e['task_type']][e['source_id']].append(e)
     report = {'labels_used_for_graph':False,'trained_graph':False,'cohorts':{},'detection_diagnostics':{},
@@ -21,22 +24,28 @@ def evaluate(output, manifest, *, bootstrap=200):
               'selected_samples':len(manifest['samples']),
               'completed_native_samples':manifest['analysis_coverage']['completed_samples'],
               'missing_samples':[],
+              'selection':selection,'labels_used_for_selection':paired,
               'eligible_targets_in_selected_samples':sum(e['eligible_targets'] for e in manifest['samples']),
-              'sampling':'uniform label-blind targets; nonzero budgets are not full-token population evaluation'}
+              'sampling':('label-stratified lexical-content cases; not population detection evaluation' if paired else
+                          'uniform label-blind targets; nonzero budgets are not full-token population evaluation')}
     tokens = defaultdict(lambda:defaultdict(list))
     gallery = []
     for group,sources in grouped.items():
         cohort = defaultdict(Moments)
-        count = dict(normal=0,hallucinated=0,unknown=0,missing_graph=0,missing_labels=0,matched=0)
+        count = dict(normal=0,hallucinated=0,unknown=0,missing_graph=0,missing_labels=0,matched=0,
+                     missing_pairs=0,normal_content=0,hallucinated_content=0,corrected_control_positions=0)
         for source,entries in tqdm(sources.items(),desc=f'DAG N/H {group}',unit='source'):
             acc = defaultdict(Moments)
             for e in entries:
                 folder = output/e['folder']
                 if not (folder/'meta.npz').exists():
                     count['missing_graph']+=len(e['targets'])
+                    count['missing_pairs']+=len(e.get('audit_pairs',[]))
                     report['missing_samples'].append(e['folder'])
                     continue
                 with np.load(folder/'meta.npz') as data: meta=dict(data)
+                content=set(content_positions(meta).tolist())
+                count['corrected_control_positions']+=len(meta.get('added_special_positions',[]))
                 n = len(meta['token_ids'])-int(meta['response_start'])
                 labels = np.full(n,-1,int)
                 if (folder/'labels.npz').exists():
@@ -56,6 +65,8 @@ def evaluate(output, manifest, *, bootstrap=200):
                         selected[i]=True; ready.append(target)
                         report['completed_targets']+=1
                         count['normal' if y==0 else 'hallucinated' if y==1 else 'unknown']+=1
+                        if y in (0,1) and target in content:
+                            count['normal_content' if y==0 else 'hallucinated_content']+=1
                         if y>=0 and np.isfinite(data['scores']).all():
                             arrays=tokens[e['split']]
                             for name,value in zip(SCORES,data['scores']): arrays[name].append(float(value))
@@ -63,7 +74,15 @@ def evaluate(output, manifest, *, bootstrap=200):
                                                ('task_type',e['task_type']),('target',target)):
                                 arrays[name].append(value)
                 valid=selected & np.isin(labels,(0,1))
-                pairs=bracket_positions(labels,token_classes(meta['token_text'][int(meta['response_start']):]),valid,32)
+                if paired:
+                    planned=np.asarray(e.get('audit_pairs',[]),int).reshape(-1,3)-int(meta['response_start'])
+                    complete=valid[planned].all(1)
+                    count['missing_pairs']+=int((~complete).sum())
+                    pairs=planned[complete]
+                    if len(pairs) and not ((labels[pairs[:,0]]==1)&(labels[pairs[:,1]]==0)&(labels[pairs[:,2]]==0)).all():
+                        raise ValueError('frozen N-H-N labels changed; do not silently rematch controls')
+                else:
+                    pairs=bracket_positions(labels,token_classes(meta['token_text'][int(meta['response_start']):]),valid,32)
                 count['matched']+=len(pairs)
                 for name,x in (('structure',values),('head',heads)):
                     acc[name+'_raw'].add(np.stack([mean(x[...,valid & (labels==y)],-1) for y in (0,1)]))
@@ -87,8 +106,11 @@ def evaluate(output, manifest, *, bootstrap=200):
     for split,lists in tokens.items():
         data={key:np.asarray(value) for key,value in lists.items()}
         np.savez_compressed(output/f'{split}_tokens.npz',**data)
-        report['detection_diagnostics'][split]=detection_report(data['labels'],{k:data[k] for k in SCORES},
-                         data['source_id'],data['task_type'],primary=SCORES[0],bootstrap=bootstrap)
+        if not paired:
+            report['detection_diagnostics'][split]=detection_report(data['labels'],{k:data[k] for k in SCORES},
+                             data['source_id'],data['task_type'],primary=SCORES[0],bootstrap=bootstrap)
+    report['detection_scope']='not_run_for_label_selected_cases' if paired else 'diagnostic_on_selected_targets'
+    report['comparison_ready']=any(c['normal'] and c['hallucinated'] and c['matched'] for c in report['cohorts'].values())
     report['partial']=(report['completed_targets']!=report['eligible_targets_in_selected_samples']
                        or report['selected_samples']!=report['completed_native_samples'])
     report['replication']={}
@@ -103,13 +125,16 @@ def evaluate(output, manifest, *, bootstrap=200):
     lines=['# 消息 DAG：结构与正常／幻觉比较','',
            f"选中 {report['selected_samples']}/{report['completed_native_samples']} 个已完成原生样本；已完成 {report['completed_targets']}/{report['planned_targets']} 个计划目标；所选样本共有 {report['eligible_targets_in_selected_samples']} 个普通目标。",
            '图按来源单位传播，并从同一个目标反向计入全部后续路径。稀疏边仅用于显示。',
+           ('本批按标签选取内容目标及冻结 N-H-N 对照；标签不进入图算子。该富集小批不输出总体检测 AUROC/AP。' if paired else
+            '本批均匀抽样；若没有 H 或正常对照，只能检查计算与单类案例。'),
            '这些是条件归因与探索性结构差异，不能直接命名为错误捷径或事实约束失败。','',
-           '| cohort | N | H | unknown | matched | missing graphs |','|---|---:|---:|---:|---:|---:|']
+           '| cohort | N | H | N内容 | H内容 | matched | missing graphs | missing pairs |','|---|---:|---:|---:|---:|---:|---:|---:|']
     for name,c in report['cohorts'].items():
-        lines.append(f"| {name} | {c['normal']} | {c['hallucinated']} | {c['unknown']} | {c['matched']} | {c['missing_graph']} |")
+        lines.append(f"| {name} | {c['normal']} | {c['hallucinated']} | {c['normal_content']} | {c['hallucinated_content']} | {c['matched']} | {c['missing_graph']} | {c['missing_pairs']} |")
     lines += ['', 'cohorts/*.npz：来源等权的结构与逐 head N/H 均值、位置配对差异、区间及 BY 校正。',
               '稀疏目标预算可能没有两侧正常对照；缺失显示为缺失，不解释为无差异。',
-              'summary.json 的 detection_diagnostics 保留材料支持不足这一固定对照及直接读出、logprob、位置的 AUROC/AP。',
+              ('按标签选取的小批只比较结构与配对差异；总体检测指标需另外使用均匀或全量的固定评估样本。' if paired else
+               'summary.json 的 detection_diagnostics 保留材料支持不足这一固定对照及直接读出、logprob、位置的 AUROC/AP。'),
               '该分数不是完整图模型，也不是已发现机制；多跳路径贡献不能沿所有边相加当作一次输出。']
     for split,d in report['detection_diagnostics'].items():
         lines+=['',f'## {split} 固定检测对照','', '| task | score | AUROC | AP |','|---|---|---:|---:|']
@@ -122,10 +147,14 @@ def evaluate(output, manifest, *, bootstrap=200):
     links=''.join(f'<li><a href="{escape(path)}">{escape(group)}/{escape(sample)}</a></li>' for group,sample,path in gallery)
     figures=''.join(f'<p>{escape(group)}</p><img width="1100" src="{c["statistics"].replace(".npz",".png")}"><img width="1100" src="{c["statistics"].replace(".npz","_heads.png")}">' for group,c in report['cohorts'].items())
     (output/'gallery.html').write_text('<!doctype html><meta charset="utf-8"><h1>消息 DAG</h1><p><a href="summary.md">结构／检测表</a></p>'
-                                      +f'<p>目标 {report["completed_targets"]}/{report["planned_targets"]}；红=H，绿=N，灰=特殊。</p><ul>'+links+'</ul>'+figures,encoding='utf-8')
+                                      +f'<p>目标 {report["completed_targets"]}/{report["planned_targets"]}；红=H，绿=N，灰=特殊。'
+                                      +('有 N/H 配对支持。' if report['comparison_ready'] else '当前缺少 N/H 配对支持，不能解释为没有差异。')
+                                      +'</p><ul>'+links+'</ul>'+figures,encoding='utf-8')
     import shutil
     shutil.copyfile(Path(__file__).with_name('view.ipynb'),output/'view.ipynb')
-    print(f"DAG report: {report['completed_targets']}/{report['planned_targets']} targets; {output/'gallery.html'}",flush=True)
+    totals={k:sum(c[k] for c in report['cohorts'].values()) for k in ('normal','hallucinated','matched')}
+    print(f"DAG report: {report['completed_targets']}/{report['planned_targets']} targets; "
+          f"N={totals['normal']} H={totals['hallucinated']} matched={totals['matched']}; {output/'gallery.html'}",flush=True)
     return report
 
 

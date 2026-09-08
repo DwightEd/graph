@@ -40,6 +40,8 @@ def write_array(archive, name, value):
 
 def special_token_mask(tokenizer, token_ids, extra_ids=()):
     ids = set(getattr(tokenizer, "all_special_ids", ())) | set(extra_ids)
+    ids.update(int(i) for i,token in getattr(tokenizer, 'added_tokens_decoder', {}).items()
+               if getattr(token, 'special', False))
     return np.isin(token_ids, list(ids))
 
 

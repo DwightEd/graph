@@ -14,7 +14,7 @@ from ..message_lineage import readout_directions
 from .cache import source_partition
 from .operators import LayerOperator
 
-SCHEMA = 1
+SCHEMA = 2
 
 
 class Tape:

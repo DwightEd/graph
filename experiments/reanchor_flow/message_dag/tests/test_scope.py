@@ -18,7 +18,7 @@ def interrupted_cache(directory, *, ready=True, test_planned=True):
         path = directory / samples[0]['path']
         path.parent.mkdir(parents=True)
         np.savez_compressed(path, token_ids=np.arange(5), row_position=np.arange(1,5),
-                            special_mask=np.zeros(5,bool))
+                            special_mask=np.zeros(5,bool), response_start=np.array(2))
         for suffix in ('.history.npz', '.qk.npz', '.states.npz'):
             np.savez_compressed(path.with_suffix(suffix), sentinel=np.array(1))
     original = dict(audit_schema=3, settings=dict(save_states=True, full_attention=True,
@@ -40,7 +40,7 @@ def test_empty_requested_scope_reports_available_and_all_split_uses_train(tmp_pa
     assert [(e['split'],e['sample_id']) for e in selected['samples']] == [('train','10')]
     assert selected['samples'][0]['targets'] == [2,3,4]
     assert (tmp_path/'index.json').read_bytes() == before
-    assert not (tmp_path/'message_dag').exists()
+    assert not (tmp_path/'message_dag_v2').exists()
 
 
 @pytest.mark.parametrize('ready', [True, False])
@@ -53,7 +53,7 @@ def test_list_available_needs_no_model_npz_reads_or_output(tmp_path, monkeypatch
     assert result['analysis_coverage']['completed_samples'] == int(ready)
     assert 'test/QA' in capsys.readouterr().out
     assert (tmp_path/'index.json').read_bytes() == before
-    assert not (tmp_path/'message_dag').exists()
+    assert not (tmp_path/'message_dag_v2').exists()
 
 
 def test_required_states_and_scope_local_strictness(tmp_path):

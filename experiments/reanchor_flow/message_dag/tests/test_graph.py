@@ -141,8 +141,8 @@ def test_pipeline_resume_and_portable_evaluation(tmp_path,monkeypatch):
     (native/'index.json').write_text(json.dumps(original));before=(native/'index.json').read_bytes()
     argv=['--audit',str(native),'--device','cpu','--samples-per-group','0','--targets-per-sample','2','--bootstrap','0','--edge-budget','3']
     plan=entry.run(entry.parser().parse_args([*argv,'--plan-only']))
-    assert len(plan['samples'])==12 and not (native/'message_dag').exists()
-    result=entry.run(entry.parser().parse_args(argv));output=native/'message_dag'
+    assert len(plan['samples'])==12 and not (native/'message_dag_v2').exists()
+    result=entry.run(entry.parser().parse_args(argv));output=native/'message_dag_v2'
     assert result['completed_targets']==24 and len(result['cohorts'])==6
     assert (native/'index.json').read_bytes()==before
     assert result['cohorts']['test/QA']['hallucinated']>0
