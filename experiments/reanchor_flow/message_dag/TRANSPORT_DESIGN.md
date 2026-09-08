@@ -155,6 +155,12 @@ conda run --no-capture-output -n research python -u -m experiments.reanchor_flow
 ```
 
 默认输出改为 `AUDIT/lookback_events_v2`，不混用v1的完成标记。
+如果需要继续已有v1任务，在原命令加 `--legacy-v1`，输出会回到 `lookback_events_v1`，
+按已有事件NPZ续跑原跳数算法；不会声称旧事件已完成v2逐边计算。
+索引与事件NPZ使用同目录的独立临时文件，写完后替换目标；整次运行持有输出目录写锁。
+实现采用 Python [NamedTemporaryFile](https://docs.python.org/3/library/tempfile.html#tempfile.NamedTemporaryFile)
+和 Unix [flock](https://docs.python.org/3/library/fcntl.html#fcntl.flock)，锁不随临时路径重命名。
+固定 `index.tmp.json` 的竞争已通过两个同步写入者复现；更新后不得让不识别锁的旧进程继续写同一目录。
 `--completed-only`明确跳过原生缓存缺失的样本；没有样本数、事件数、目标数的隐藏上限。
 每个事件新增 `edges_<b>.npz`：`L<layer>Q<begin>`存[head,query,source,V/K]的有符号作用；
 `AL<layer>Q<begin>`存实际 attention，来源从事件row开始，query/source绝对位置由`row_position`还原。
@@ -174,10 +180,11 @@ conda run --no-capture-output -n research python -u -m experiments.reanchor_flow
 
 本次验证已完成：
 
-- Transformers 4.57.6 / CPU：`message_dag/tests` 加 `test_message_lineage.py`，44项通过。
+- Transformers 4.57.6 / CPU：`message_dag/tests` 加 `test_message_lineage.py`，加入保存竞争与v1续跑回归后51项通过。
 - Transformers 4.44.2：新传播模块的9项检查全部通过，包含原生 V/K 消息微扰；RoPE 使用显式 `config=`。
 - 数学检查覆盖 FP32/BF16 捕获、QK增强、路径闭合、候选翻转、完整反向读出造成的重复计数，以及非有限值拒绝。
 - 六个 train/test×task 分区的 tiny 模型流程检查覆盖全部事件、标签变化、缺失缓存披露、逐边文件缺失后补算，以及删除原模型/缓存后的离线报告。标签是合成测试标签，检测指标不能作为真实研究结果。
+- 保存检查覆盖JSON/NPZ同时写入、中断后保留原文件、跨进程写锁、异常退出后重新获得锁，以及v1旧扫描字段/滞后索引/缺失事件的续跑。完整流程分别运行v1和v2。
 - 生成页面在 Node 的 DOM/Canvas 检查环境执行13个目标×3种分支选择及读取点切换，逐边SVG另行渲染核对。这不是完整浏览器兼容性测试。
 
 本环境没有原8B权重、GPU及完整真实native缓存。新代码的数学/流程验证与原数据的机制结果分开报告。

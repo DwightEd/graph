@@ -152,7 +152,8 @@ def test_same_reference_mlp_output_can_have_opposite_message_derivatives():
     assert baseline.norm()==0 and positive[0,0,1]>0 and negative[0,0,1]<0
 
 
-def test_full_scope_pipeline_resume_missing_coverage_and_offline_report(tmp_path):
+@pytest.mark.parametrize('legacy',[False,True])
+def test_full_scope_pipeline_resume_missing_coverage_and_offline_report(tmp_path,legacy):
     import json
     import shutil
     from experiments.reanchor_flow.message_dag.event_run import parser,run
@@ -174,27 +175,41 @@ def test_full_scope_pipeline_resume_missing_coverage_and_offline_report(tmp_path
     out=tmp_path/'events'
     command=['--audit',str(audit),'--output',str(out),'--device','cpu','--window','2',
              '--gain','.002','--local-floor','.05','--event-batch','3','--bootstrap','10']
+    if legacy: command.append('--legacy-v1')
     with pytest.raises(ValueError,match='requested captures complete'): run(parser().parse_args(command))
     result=run(parser().parse_args(command+['--completed-only']))
     assert result['scanned']==6 and result['native_coverage']['skipped_samples']==1
     assert result['traced']==result['events']>0
     assert set(r['sample'].split('/')[1] for r in result['samples'])=={'QA','Summary','Data2txt'}
     files=list(out.rglob('event_*.npz'));before={p:p.stat().st_mtime_ns for p in files}
-    assert all(p.with_name(p.name.replace('event_','edges_')).exists() for p in files)
+    assert all(p.with_name(p.name.replace('event_','edges_')).exists()==(not legacy) for p in files)
     scores=list(out.rglob('transport_scores.npz'))
-    assert len(scores)==6 and (out/'transport_detection.json').exists()
+    assert len(scores)==(0 if legacy else 6)
+    assert (out/'transport_detection.json').exists()==(not legacy)
     stored_scores={p:p.read_bytes() for p in scores}
+    if legacy:
+        assert result['transport']['status']=='not_available_v1'
+        for saved in out.rglob('scan.npz'):
+            with np.load(saved,allow_pickle=False) as data: values=dict(data)
+            values.pop('predictor_logprob')  # original v1 scans did not store this
+            np.savez_compressed(saved,**values)
+        # A stale index must not cause completed event files to be recomputed.
+        index=json.loads((out/'index.json').read_text())
+        for entry in index['samples']: entry['event_traced']=0
+        (out/'index.json').write_text(json.dumps(index))
+        with pytest.raises(ValueError,match='add --legacy-v1'):
+            run(parser().parse_args([x for x in command if x!='--legacy-v1']+['--completed-only']))
     # Changing only labels cannot alter the saved graph or its selection.
     for dest in audit.rglob('*.labels.npz'): np.savez_compressed(dest,labels=np.zeros(15,int))
     rerun=run(parser().parse_args(command+['--completed-only']))
     assert before=={p:p.stat().st_mtime_ns for p in files}
     assert all(r['H']==0 for r in rerun['samples'])
     for p,old in stored_scores.items(): assert p.read_bytes()==old
-    # A missing physical graph is incomplete even when its old summary exists.
-    missing_graph=files[0].with_name(files[0].name.replace('event_','edges_'))
-    missing_graph.unlink()
+    # v1 resumes missing events; v2 also resumes missing physical graphs.
+    missing=files[0] if legacy else files[0].with_name(files[0].name.replace('event_','edges_'))
+    missing.unlink()
     run(parser().parse_args(command+['--completed-only','--phase','trace']))
-    assert missing_graph.exists() and files[0].stat().st_mtime_ns!=before[files[0]]
+    assert missing.exists() and files[0].stat().st_mtime_ns!=before[files[0]]
     assert all(p.stat().st_mtime_ns==before[p] for p in files[1:])
     shutil.rmtree(audit);shutil.rmtree(fixture)
     offline=run(parser().parse_args(['--phase','evaluate','--output',str(out),'--bootstrap','0']))

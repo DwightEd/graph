@@ -2,7 +2,22 @@
 
 本文记录v1的事件定义和审计背景。当前 `event_run` 默认运行v2有符号传播图，输出改为
 `lookback_events_v2`；调研依据、逐中继V/K边、固定检测分数和新实验方案见
-[TRANSPORT_DESIGN.md](TRANSPORT_DESIGN.md)。下方v1路径用于读取已有旧结果。
+[TRANSPORT_DESIGN.md](TRANSPORT_DESIGN.md)。下方v1命令使用 `--legacy-v1` 继续已有旧结果。
+
+如果旧任务在 `index.tmp.json -> index.json` 报 `FileNotFoundError`，更新代码后可原地续跑：
+
+```bash
+git pull --ff-only origin main
+conda run --no-capture-output -n research python -u -m experiments.reanchor_flow.message_dag.event_run \
+  --audit experiments/reanchor_flow/outputs/attention_audit_v3 --legacy-v1 \
+  --phase all --split all --task all --completed-only --device cuda:0 --event-batch 2 --query-chunk 8
+```
+
+该命令保持v1跳数算法与 `lookback_events_v1` 输出目录；已完成事件按实际NPZ检查并跳过，
+即使索引中的完成数落后也不重算。它不会把v1结果当成v2逐边图或生成v2检测分数。
+重新运行前应先结束仍在写同一目录的旧版任务；旧进程不识别新锁。
+新代码的索引和NPZ使用独立临时文件，并在整个运行期间持有同目录写锁，重复启动会在计算前提示。
+进程退出后锁自动释放；不要删除锁文件来绕过仍在运行的任务。
 
 研究对象是模型从近邻读取转向远处特定来源的事件。远处来源可以是 prompt，也可以是之前的回答位置。
 回看位置与之后被标错的位置分开；不以句号、标注错误段首、H/N 标签定义事件。
@@ -67,7 +82,7 @@
 conda run --no-capture-output -n research \
   python -u -m experiments.reanchor_flow.message_dag.event_run \
   --audit experiments/reanchor_flow/outputs/attention_audit_v3 \
-  --completed-only --device cuda:0
+  --legacy-v1 --completed-only --device cuda:0
 ```
 
 默认全 split、全 task、全样本、全事件。`--completed-only` 仅明确排除原生缓存缺失项，
@@ -82,7 +97,7 @@ conda run --no-capture-output -n research \
 `.audit.npz` 或 top-k attention 无法替代这些原生文件，程序不会用近似路径悄悄补齐。
 `--list-available` 只列覆盖，不计算、不写输出。扫描后去掉 `--phase scan` 即可续跑全部事件传播。
 
-默认输出 `AUDIT/lookback_events_v1/`：
+使用 `--legacy-v1` 时输出 `AUDIT/lookback_events_v1/`：
 
 | 文件 | 内容 |
 |---|---|

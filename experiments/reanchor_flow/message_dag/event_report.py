@@ -185,7 +185,9 @@ def evaluate(output, *, bootstrap=200):
                    traced=sum(r.get('traced',0) for r in coverage),
                    zero_event_samples=sum(r['scanned'] and r.get('events')==0 for r in coverage),
                    bootstrap=bootstrap,labels_used_for_events=False,labels_used_for_dag=False)
-    summary['transport'] = report_transport(output,manifest,bootstrap=bootstrap)
+    signed_edges = manifest.get('event_settings',{}).get('schema',1)>=2
+    summary['transport'] = (report_transport(output,manifest,bootstrap=bootstrap) if signed_edges
+                            else dict(status='not_available_v1'))
     save_json(output/'summary.json',summary)
     lines = ['# 内部回看事件审计','',
              f"请求原生样本 {summary['native_coverage']['planned_samples']}；完成扫描 {summary['scanned']}；"
@@ -209,24 +211,26 @@ def evaluate(output, *, bootstrap=200):
              '该比例描述名义正候选落后而消息增强有正向局部增益；只有候选真值独立确定，才可联系正确／错误证据。',
              '0/1/2+ 跳相加还原总局部响应；full−fixed_qk 与 full−no_mlp_paths 两个路径差有重叠。',
              '状态范数、MLP方向抵消不直接等于信息量或语义丢失。teacher forcing 不证明自由生成闭环。','']
-    lines += ['## 有符号传播图与固定检测候选','',
+    lines += (['## 有符号传播图与固定检测候选','',
               '`edges_<b>.npz`保存全部物理层/头、中继、目标的V/K边，未用top-k截断。',
               '每条路径按最后跨位置边计入一次；`cut_closure_error`核对直接/多跳之和与原响应一致。',
               '这分解的是候选差的局部导数，不是候选差本身，也不是已经解耦的正确事实流量。',
               '`transport_detection.json/png`报告固定 opposition 分数及直接路径、V-only、置信度、位置对照。',
               '比较使用相同有效token并按source配对重抽样；具体条件覆盖与缺失原因必须同时查看。',
               '没有此前事件、零作用、未完成传播或明确真值候选的位置不填零，不算入无监督检测。',
-              '该分数尚需真实8B数据检验，不将正负路径作用直接命名为幻觉机制。','']
+              '该分数尚需真实8B数据检验，不将正负路径作用直接命名为幻觉机制。',''] if signed_edges
+              else ['当前是v1跳数审计；没有v2逐边传播图或opposition检测分数。',''])
     (output/'summary.md').write_text('\n'.join(lines),encoding='utf-8')
     links = '\n'.join(f'<li><a href="{html.escape(link,quote=True)}">{html.escape(name)} · b={b}</a></li>' for name,link,b in preview_links)
     figures = ''.join(f'<p>{html.escape(x["group"])}</p><img style="max-width:100%" src="cohorts/{x["group"].replace("/","_")}_heads.png">' for x in head_summary)
+    transport_link = ('<p><a href="transport_detection.json">有符号传播：AUROC/AP、配对区间与覆盖</a> · '
+                      '<a href="transport_detection.png">同token检测对照曲线</a></p>' if signed_edges
+                      else '<p>v1跳数审计；不包含v2逐边传播图及检测分数。</p>')
     (output/'gallery.html').write_text('<!doctype html><meta charset="utf-8"><title>内部回看审计</title>'
         '<main style="max-width:1100px;margin:35px auto;font:16px/1.6 system-ui"><h1>内部回看审计</h1>'
         f'<p>扫描 {summary["scanned"]} 个样本；{summary["events"]} 个回看位置；已传播 {summary["traced"]} 个。</p>'
         '<p>每个样本预览最早完成的内部事件，未按 H 标签挑选。其他事件可用 event_view --position 打开。</p>'
         '<p>下图三排为全部匹配 H、已知起点、延续位置。每格是一个物理 layer/head 的平均差；不是单 token。</p>'
-        '<p><a href="transport_detection.json">有符号传播：AUROC/AP、配对区间与覆盖</a> · '
-        '<a href="transport_detection.png">同token检测对照曲线</a></p>'
-        f'{figures}<ul>{links}</ul><a href="summary.md">定义、覆盖与解释边界</a></main>',encoding='utf-8')
+        f'{transport_link}{figures}<ul>{links}</ul><a href="summary.md">定义、覆盖与解释边界</a></main>',encoding='utf-8')
     print(f"event report: scanned={summary['scanned']}, events={summary['events']}, traced={summary['traced']}; {output/'gallery.html'}",flush=True)
     return summary
