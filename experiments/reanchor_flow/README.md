@@ -1,5 +1,12 @@
 # 信息形成与后续使用：研究定位和现有工具
 
+**当前核心代码位于 [message_dag/](message_dag/README.md)。** 新入口为 `python -m experiments.reanchor_flow.message_dag.run`。
+已实现材料单位独立传播、原生条件算子与伴随、同一目标的全路径贡献、节点平衡、逐 head N/H 和交互图。
+原 `message_lineage` 作为历史组件与对照保留；以下旧定位不作为新目录的实现状态。
+先复用少量 v3 缓存验证耗时和结构，再通过两个预算参数设 0 遍历全部数据，不需要重跑旧 head-pair 审计。
+
+## 旧组件与历史结果
+
 **研究核心见 [DAG 消息路由建模与幻觉机制发现](MESSAGE_LINEAGE.md)。**
 目标是建立保留来源、消息变换与聚合的图，从正常／幻觉比较中发现结构差异；不能先用一个分数定义幻觉机制。
 `message_lineage_run --completed-only` 已能复用 v3 缓存，进行材料向量经 value、残差与 MLP 的条件分解，
