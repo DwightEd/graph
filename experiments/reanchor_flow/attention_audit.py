@@ -259,7 +259,7 @@ class AuditObserver:
 def readout_accounting(model, final, ids, rows, states_path, heads, progress=None):
     """Exact frozen-denominator observed-vs-runner accounting, not truth attribution."""
     device, count = final.device, len(rows) - 1
-    directions, margins, entropy, logprob = [], [], [], []
+    directions, margins, entropy, logprob, runners = [], [], [], [], []
     for begin in range(0, count, 16):
         q = rows[begin:begin + 16][:count - begin]
         raw = final[0, q].float()
@@ -271,6 +271,7 @@ def readout_accounting(model, final, ids, rows, states_path, heads, progress=Non
         logprob.extend((target_logits - lse).cpu().tolist())
         logits.scatter_(1, target[:, None], -torch.inf)
         runner = logits.argmax(-1)
+        runners.extend(runner.cpu().tolist())
         margins.extend((target_logits - logits.gather(1, runner[:, None])[:, 0]).cpu().tolist())
         norm = model.model.norm
         denominator = (raw.square().mean(-1) + norm.variance_epsilon).sqrt()
@@ -299,7 +300,8 @@ def readout_accounting(model, final, ids, rows, states_path, heads, progress=Non
     result['head_sum_rounding'] = result['attention_margin'] - result['head_margin'].sum(1)
     result.update(predictor_entropy=np.r_[entropy, np.nan].astype(np.float32),
                   predictor_logprob=np.r_[logprob, np.nan].astype(np.float32),
-                  observed_margin=np.r_[margins, np.nan].astype(np.float32))
+                  observed_margin=np.r_[margins, np.nan].astype(np.float32),
+                  readout_runner_id=np.array(runners, np.int64))
     result['final_readout_rounding'] = result['observed_margin'] - result['residual_margin'][-1]
     return result
 

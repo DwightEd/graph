@@ -1,5 +1,7 @@
 # v3 基线：逐 head 时间轴重锚定与预算化接纳审计
 
+**历史方法归档。当前实现与主假设统一以 [MESSAGE_LINEAGE.md](MESSAGE_LINEAGE.md) 为准：取消峰作为关键节点的必要条件，复用完整缓存做有符号向量来源分解和同 token 检测对照。**
+
 本文仅记录旧 v3 实现，用于复现已有产物。其四桶 transport 是消息范数之和，不能恢复完整向量。
 已实现的向量探索入口为 `discover`；它的 PCA／聚类不是经过验证的机制检测算法。更正后的研究主线见
 [MECHANISM_AUDIT.md](MECHANISM_AUDIT.md)，

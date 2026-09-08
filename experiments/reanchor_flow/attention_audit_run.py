@@ -192,7 +192,7 @@ def capture(args, manifest):
             torch.cuda.empty_cache()
 
 
-def analysis_manifest(output, manifest, completed_only=False):
+def analysis_manifest(output, manifest, completed_only=False, required_suffixes=None):
     """Select committed captures without changing the index used for resuming."""
     settings = manifest['settings']
     suffixes = ['.npz', '.history.npz', '.qk.npz']
@@ -200,6 +200,9 @@ def analysis_manifest(output, manifest, completed_only=False):
         suffixes.append('.states.npz')
     if settings.get('full_attention'):
         suffixes.append('.attention.npz')
+    if required_suffixes is not None:
+        # Derived score evaluation may need only committed compact captures.
+        suffixes = list(required_suffixes)
     samples, skipped, groups = [], [], {}
     for e in tqdm(manifest['samples'], desc='check completed samples', unit='sample'):
         path = output / e['path']
