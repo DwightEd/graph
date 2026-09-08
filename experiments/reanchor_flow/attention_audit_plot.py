@@ -267,6 +267,11 @@ def plot_onset(path, metric, layer, head):
 
 
 def write_gallery(output, entries, report):
+    coverage = report.get('analysis_coverage', {})
+    status = (f"<p>Completed samples: {coverage['completed_samples']} / {coverage['planned_samples']}. "
+              f"Skipped: {coverage['skipped_samples']}. "
+              + ('Partial capture; results describe only this subset.' if coverage['partial'] else 'All planned captures are included.')
+              + '</p>') if coverage else ''
     links = []
     for group,c in report['groups'].items():
         base = Path(c['statistics']).with_suffix('')
@@ -281,7 +286,7 @@ def write_gallery(output, entries, report):
                     f'<td><a href="{html.escape(e["text"])}">all labeled tokens</a></td><td>{figure}</td></tr>')
     content = ('<!doctype html><meta charset="utf-8"><style>body{margin:30px;font:15px/1.6 sans-serif}'
                'table{border-collapse:collapse}td,th{padding:5px 15px;border-bottom:1px solid #ddd}</style>'
-               '<h1>Normal / hallucinated attention audit</h1><p>Every captured sample is listed. Positive answer = contains H; '
+               '<h1>Normal / hallucinated attention audit</h1>'+status+'<p>Every analyzed sample is listed. Positive answer = contains H; '
                'negative answer = all ordinary response tokens have known N labels.</p><ul>'+''.join(links)+'</ul>'
                '<p><a href="summary.md">Summary</a> | <a href="view_attention_audit.ipynb">Notebook: any sample, layer, head, metric</a></p>'
                '<label>Answer class <select onchange="document.querySelectorAll(\'tr[data-case]\').forEach(r=>r.hidden=this.value && r.dataset.case!==this.value)">'

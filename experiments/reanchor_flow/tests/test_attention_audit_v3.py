@@ -269,3 +269,50 @@ def test_all_tasks_full_pipeline_balanced_labels_resume_and_offline(tmp_path,mon
     again=run(parser().parse_args(['--phase','analyze','--output',str(output),
              '--horizon','1:2','--plots-per-class','0','--onset-radius','1']))
     assert again['groups']['train/ALL']['hallucinated_tokens']==6
+    # An interrupted run keeps planned samples in index.json. Ignore temporary
+    # files, reject missing companions, and do not shrink that resume index.
+    index=output/'index.json'
+    manifest=json.loads(index.read_text())
+    manifest['samples'][0]['resumed']=False  # final NPZ exists despite stale flag
+    for i,e in enumerate(manifest['samples'][-2:]):
+        path=output/e['path']
+        incomplete=path if i==0 else path.with_suffix('.qk.npz')
+        incomplete.rename(incomplete.with_suffix('.tmp.npz'))
+        path.with_suffix('.labels.npz').unlink()
+        path.with_suffix('.input.npz').unlink()
+    index.write_text(json.dumps(manifest))
+    original=index.read_bytes()
+    offline=['--phase','analyze','--output',str(output),'--horizon','1:2',
+             '--plots-per-class','0','--onset-radius','1']
+    with pytest.raises(ValueError,match='completed-only'):
+        run(parser().parse_args(offline))
+    partial=run(parser().parse_args([*offline,'--completed-only']))
+    assert index.read_bytes()==original
+    coverage=partial['analysis_coverage']
+    assert (coverage['completed_samples'],coverage['planned_samples'],coverage['skipped_samples'])==(10,12,2)
+    assert coverage['partial'] is True
+    assert coverage['groups']['test/Data2txt']['completed_samples']==0
+    assert 'test/Data2txt' not in partial['groups']
+    assert 'Data2txt' not in partial['replication']
+    assert partial['groups']['test/ALL']['samples']==4
+    assert len(json.loads((output/'review_index.json').read_text()))==10
+    assert '部分采集结果' in (output/'summary.md').read_text()
+    assert 'Partial capture' in (output/'gallery.html').read_text()
+
+
+def test_empty_interrupted_capture_does_not_load_model_or_rewrite_index(tmp_path,monkeypatch):
+    import transformers
+    from experiments.reanchor_flow.attention_audit import SCHEMA
+    from experiments.reanchor_flow.attention_audit_run import parser,run
+    def forbidden(*a,**kw): raise AssertionError('analysis must not load model/tokenizer')
+    monkeypatch.setattr(transformers.AutoModelForCausalLM,'from_pretrained',forbidden)
+    monkeypatch.setattr(transformers.AutoTokenizer,'from_pretrained',forbidden)
+    manifest=dict(audit_schema=SCHEMA,labels_used_for_capture=False,settings={},config={},
+                  samples=[dict(path='train/QA/a.npz',split='train',task_type='QA',response_tokens=10)])
+    index=tmp_path/'index.json'; index.write_text(json.dumps(manifest))
+    before=index.read_bytes()
+    with pytest.raises(ValueError,match='no completed samples'):
+        run(parser().parse_args(['--phase','analyze','--completed-only','--output',str(tmp_path)]))
+    assert index.read_bytes()==before
+    with pytest.raises(ValueError,match='only valid'):
+        run(parser().parse_args(['--phase','all','--completed-only','--output',str(tmp_path)]))

@@ -20,6 +20,7 @@ from .attention_rhythm_report import save_json
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--phase', choices=('all', 'capture', 'analyze'), default='all')
+    p.add_argument('--completed-only', action='store_true', help='analyze completed samples from an interrupted capture; keep the full resume index')
     p.add_argument('--model', type=Path, default=Path(MODEL))
     p.add_argument('--cache', type=Path, default=Path(CACHE))
     p.add_argument('--scans', type=Path)
@@ -191,7 +192,45 @@ def capture(args, manifest):
             torch.cuda.empty_cache()
 
 
-def join_labels(args, manifest):
+def analysis_manifest(output, manifest, completed_only=False):
+    """Select committed captures without changing the index used for resuming."""
+    settings = manifest['settings']
+    suffixes = ['.npz', '.history.npz', '.qk.npz']
+    if settings.get('save_states'):
+        suffixes.append('.states.npz')
+    if settings.get('full_attention'):
+        suffixes.append('.attention.npz')
+    samples, skipped, groups = [], [], {}
+    for e in tqdm(manifest['samples'], desc='check completed samples', unit='sample'):
+        path = output / e['path']
+        missing = [str(path.with_suffix(s).relative_to(output)) for s in suffixes
+                   if not path.with_suffix(s).is_file()]
+        group = groups.setdefault(e['split']+'/'+e['task_type'],
+                                 dict(planned_samples=0, completed_samples=0,
+                                      planned_tokens=0, completed_tokens=0))
+        group['planned_samples'] += 1
+        group['planned_tokens'] += e['response_tokens']
+        if missing:
+            skipped.append(dict(path=e['path'], missing_files=missing))
+        else:
+            # The final NPZ is the completion marker, even if interruption
+            # happened before updating the manifest's resumed flag.
+            samples.append(dict(e))
+            group['completed_samples'] += 1
+            group['completed_tokens'] += e['response_tokens']
+    for group, c in groups.items():
+        print(f"{group:16s} completed={c['completed_samples']}/{c['planned_samples']} "
+              f"tokens={c['completed_tokens']}/{c['planned_tokens']}", flush=True)
+    if skipped and not completed_only:
+        raise ValueError(f"{len(skipped)} captures are incomplete; use --phase analyze --completed-only to analyze completed samples, or resume capture")
+    if not samples:
+        raise ValueError('no completed samples are available for analysis')
+    coverage = dict(planned_samples=len(manifest['samples']), completed_samples=len(samples),
+                    skipped_samples=len(skipped), partial=bool(skipped), groups=groups, skipped=skipped)
+    return {**manifest, 'samples': samples, 'analysis_coverage': coverage}
+
+
+def join_labels(args, manifest, *, save_index=True):
     from research_dataset import open_research_dataset
     from .scan_dataset import ScanDataset, ScanLabelStore
     config = manifest['config']
@@ -245,10 +284,13 @@ def join_labels(args, manifest):
         e.update(normal_tokens=int(((labels==0)&ordinary).sum()),
                  hallucinated_tokens=int(((labels==1)&ordinary).sum()),
                  unknown_tokens=int(((labels<0)&ordinary).sum()),special_targets=int((~ordinary).sum()))
-    save_json(args.output/'index.json',manifest)
+    if save_index:
+        save_json(args.output/'index.json',manifest)
 
 
 def run(args):
+    if args.completed_only and args.phase != 'analyze':
+        raise ValueError('--completed-only is only valid with --phase analyze')
     if min(args.samples_per_task, args.plots_per_class, args.onset_radius) < 0 or min(args.match_window, args.cpu_threads) < 1:
         raise ValueError('invalid analysis/capture budget')
     horizons = tuple(tuple(map(int, v.split(':'))) for v in args.horizon) or HORIZONS
@@ -261,6 +303,7 @@ def run(args):
             raise ValueError('v3 analysis needs a v3 capture; old rhythm summaries cannot reconstruct missing edges')
         if args.cache == Path(CACHE) and manifest['config'].get('cache'):
             args.cache = Path(manifest['config']['cache'])
+        manifest = analysis_manifest(args.output, manifest, args.completed_only)
     else:
         manifest = prepare(args)
         # Read-only label verification before any expensive model work; the
@@ -276,7 +319,7 @@ def run(args):
     if args.phase == 'capture':
         return manifest
     if args.phase=='analyze':
-        join_labels(args, manifest)
+        join_labels(args, manifest, save_index=False)
     from .attention_audit_report import summarize
     return summarize(args.output, manifest, horizons=horizons, match_window=args.match_window,
                      onset_radius=args.onset_radius, plots_per_class=args.plots_per_class,

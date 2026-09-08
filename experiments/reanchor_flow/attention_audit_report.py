@@ -105,6 +105,8 @@ def summarize(output, manifest, *, horizons=HORIZONS, match_window=32, onset_rad
               'inference': 'source-level Student intervals; BY FDR within each cohort/contrast across every reported metric/head or pair',
               'not_established': ['claim-specific evidence relevance', 'causal factual mediation',
                                   'a validated hallucination detector']}
+    if 'analysis_coverage' in manifest:
+        report['analysis_coverage'] = manifest['analysis_coverage']
     all_moments, all_coverage, all_sources = {}, {}, {}
     rows_for_gallery, names = [], None
     with threadpool_limits(limits=cpu_threads):
@@ -229,7 +231,19 @@ def replication(output, report):
 
 
 def write_summary(output, report):
-    lines = ['# 正常／幻觉全量结构审计', '',
+    capture = report.get('analysis_coverage', {})
+    partial = capture.get('partial', False)
+    lines = ['# 正常／幻觉结构审计' + ('（部分采集结果）' if partial else ''), '']
+    if capture:
+        lines += [f"本报告分析已完成的 {capture['completed_samples']} / {capture['planned_samples']} 个样本；跳过 {capture['skipped_samples']} 个未完成或缺少配套文件的样本。",
+                  '完整续跑索引 index.json 保持不变；缺失文件清单见 summary.json 的 analysis_coverage。', '',
+                  '| 分组 | 已完成／计划样本 | 已完成／计划 token |', '|---|---:|---:|']
+        for group, c in capture['groups'].items():
+            lines.append(f"| {group} | {c['completed_samples']} / {c['planned_samples']} | {c['completed_tokens']} / {c['planned_tokens']} |")
+        if partial:
+            lines += ['', '这是运行顺序决定的已完成子集，不能当作全量结果；未采集的分组没有评估结论。']
+        lines.append('')
+    lines += [
              '主要路由统计与路径排除特殊来源、载体和目标；特殊质量对照和原生写入保留真实计算。N=正常，H=幻觉。',
              '总体图保留每个真实 layer/head。两跳矩阵保留每对严格跨层 writer/reader。', '',
              '| 分组 | 样本 | N token | H token | 排除特殊目标 | 未知标签 | 配对 token | 配对起点 |',

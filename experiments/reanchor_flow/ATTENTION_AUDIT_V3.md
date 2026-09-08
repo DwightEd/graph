@@ -194,6 +194,24 @@ conda run --no-capture-output -n research \
   --output experiments/reanchor_flow/outputs/attention_audit_v3
 ```
 
+**采集被中断，只评估已完成样本：**
+
+```bash
+conda run --no-capture-output -n research \
+  python -u -m experiments.reanchor_flow.attention_audit_run \
+  --phase analyze --completed-only \
+  --output experiments/reanchor_flow/outputs/attention_audit_v3
+```
+
+以最终 `<id>.npz` 及配套 history、Q/K（按采集设置还包括 states/full attention）文件判断完成，
+不依赖可能尚未来得及更新的 `resumed` 标志。临时文件和未完成样本不参加分析，也不会触发补采。
+已有标签会直接复用；仅为实际分析样本补读缺失的标签，不加载模型或 tokenizer。
+终端打印每个 split/task 的已完成／计划样本数与 token 数；`summary.md/json` 和 `gallery.html`
+明确标为部分结果，JSON 保留跳过样本及缺失文件清单。未采集分组不伪造零效应或 test 验证。
+`index.json` 保留完整续跑清单；以后仍可使用原全量命令继续采集。报告会重新生成，原采集数据保留。
+不加 `--completed-only` 时发现未完成样本，会在统计之前提示如何分析子集或续跑。
+如果没有任何完整样本，明确报错；这些评估仍是正常／幻觉结构比较，不是新检测 AUROC。
+
 可离线调整 `--horizon LO:HI`（可重复，HI=0 为全部可见未来，第一组必须有限）、`--match-window`、`--onset-radius` 与展示数量。
 改变排除的 token IDs 或来源定义会改变采集统计，不能把旧统计直接重命名；Q/K、原生 V 和完整来源单位数据为后续重分析保留了原始信息。
 
