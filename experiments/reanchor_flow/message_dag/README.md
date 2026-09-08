@@ -3,8 +3,13 @@
 本目录是新的核心实现。研究主线是 **消息路由模型 → 图上的生成结构 → 正常／幻觉差异**。
 不通过 WAAD 峰挑节点，不训练 GNN，不把某个高流量节点或低材料分数直接命名为幻觉机制。
 
-**内部回看事件的新实验见 [LOOKBACK_EVENTS.md](LOOKBACK_EVENTS.md)。**
-`event_run` 默认扫描所有可用样本和内部事件，远处来源包括旧回答；以原生消息的局部 Jacobian 响应追踪后续0/1/2+跳。
+**当前方法与九项原始研究的设计对应见 [TRANSPORT_DESIGN.md](TRANSPORT_DESIGN.md)。**
+`event_run` 默认扫描所有可用样本和内部事件，远处来源包括旧回答。v2将0/1/2+跳进一步展开为
+事件→真实中继→目标的有符号V/K边，并验证所有路径按最后跨位置边只计一次。
+新增固定、无标签的 `opposition` 候选分数，以及同token上的直接路径/V-only/置信度/位置对照AUROC/AP。
+默认输出 `AUDIT/lookback_events_v2`；没有此前事件的位置不填0，条件覆盖率与检测结果同时报告。
+完整物理边流式保存，HTML只裁剪显示；计算和存盘不做top-k筛选。
+原事件定义与v1审计说明保留在 [LOOKBACK_EVENTS.md](LOOKBACK_EVENTS.md)。
 下文 `run` 保留原有来源加法分摊；新事件实验不使用该分摊规则解释 MLP 导数。
 
 ## 目录与依赖
@@ -22,6 +27,8 @@
 | `view.ipynb` | 按样本编号和目标即时查看已完成图，无需模型/GPU |
 | `events.py`、`event_run.py` | 不使用标签的全量内部回看扫描、传播调度、续跑与覆盖清单 |
 | `differential.py`、`event_trace.py` | 原生 RMSNorm、QK/OV、SwiGLU 局部导数和0/1/2+跳消息响应 |
+| `transport.py` | 共享同位置后缀读出、最后跨位置V/K边、完整流式NPZ和逐目标闭合 |
+| `transport_report.py` | 无标签分数、条件覆盖、同token/source配对的AUROC/AP与对照 |
 | `event_report.py`、`event_view.py` | 离线 source 等权比较、原始 token 与逐事件传播界面 |
 
 缓存和读出工具复用父目录的 `attention_audit`、`message_lineage`；统计复用 source 分组和 tied-score AUROC/AP 实现。

@@ -1,9 +1,11 @@
 """Scan every native lookback event, trace its messages, then join labels offline."""
 import argparse
+from contextlib import ExitStack
 from dataclasses import asdict
 import json
 from pathlib import Path
 from time import perf_counter
+from tempfile import TemporaryDirectory
 
 import numpy as np
 from tqdm.auto import tqdm
@@ -15,8 +17,9 @@ from .cache import MASK_POLICY, NativeCache, read_trace
 from .events import EventConfig, scan
 from .event_trace import trace_events
 from .selection import read_labels
+from .transport import CutRecorder, prepare_local_readout
 
-SCHEMA = 1
+SCHEMA = 2
 
 
 def save_index(output, manifest):
@@ -28,7 +31,7 @@ def save_index(output, manifest):
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--audit', type=Path, default=Path('experiments/reanchor_flow/outputs/attention_audit_v3'))
-    p.add_argument('--output', type=Path, help='default AUDIT/lookback_events_v1')
+    p.add_argument('--output', type=Path, help='default AUDIT/lookback_events_v2')
     p.add_argument('--phase', choices=('all','scan','trace','evaluate'), default='all')
     p.add_argument('--completed-only', action='store_true', help='disclose and skip missing native captures')
     p.add_argument('--list-available', action='store_true', help='coverage only; no model loading or output writes')
@@ -65,7 +68,7 @@ def run(args):
     if min(args.query_chunk,args.event_batch,args.cpu_threads)<1 or args.bootstrap<0:
         raise ValueError('positive chunk/thread counts and nonnegative bootstrap required')
     torch.set_num_threads(args.cpu_threads)
-    output = args.output or args.audit/'lookback_events_v1'
+    output = args.output or args.audit/'lookback_events_v2'
     if output.resolve()==args.audit.resolve():
         raise ValueError('event output must differ from the native capture directory')
     if args.phase=='evaluate':
@@ -132,6 +135,8 @@ def run(args):
                     if (str(saved['settings'])!=str(found['settings'])
                             or not np.array_equal(saved['event_sites'],sites[sites[:,2]==row])):
                         raise ValueError(f'{destination}: saved event identity/configuration changed')
+                if not (folder/f"edges_{int(found['row_position'][row])}.npz").exists():
+                    pending.append(int(row))
             else: pending.append(int(row))
         e['event_traced'] = len(rows)-len(pending)
         save_index(output,manifest)
@@ -139,20 +144,34 @@ def run(args):
               f"{len(pending)} untraced, no event selection budget",flush=True)
         if args.phase!='scan' and pending:
             if weights is None: weights = CheckpointWeights(model,args.device)
-            with NativeCache(path,weights) as cache:
+            with NativeCache(path,weights) as cache, TemporaryDirectory(prefix='local_readout_',dir=folder) as temporary:
                 state_bytes = 3*3*min(args.event_batch,len(pending))*cache.rows*weights.config['hidden_size']*4
                 print(f'  tangent state alone {state_bytes/2**30:.3f} GiB; operators and work buffers are additional',flush=True)
+                pairs = sum(max(0,cache.rows-2-row)*(cache.rows-1-row)//2 for row in pending)
+                edge_bytes = 12*cache.layers*cache.heads*pairs
+                print(f'  all physical cut edges: about {edge_bytes/2**30:.3f} GiB uncompressed V/K/attention; streamed to NPZ',flush=True)
+                readout_path = Path(temporary)/'readout.npz'
                 with tqdm(total=len(pending),desc=f'{sample_key(e)} DAG',unit='event',leave=False) as bar:
-                    for begin in range(0,len(pending),args.event_batch):
-                        batch = sites[np.isin(sites[:,2],pending[begin:begin+args.event_batch])]
-                        def progress(stage): bar.set_postfix_str(stage,refresh=True)
-                        results = trace_events(cache,batch,window=config.window,query_chunk=args.query_chunk,
-                                               contrasts=contrasts.get(sample_key(e)),progress=progress)
-                        for result in results:
-                            result['settings'] = found['settings']
-                            atomic_npz(folder/f"event_{int(result['event_position'])}.npz",**result)
-                            e['event_traced'] += 1
-                        bar.update(len(results));save_index(output,manifest)
+                    def progress(stage): bar.set_postfix_str(stage,refresh=True)
+                    prepare_local_readout(cache,readout_path,query_chunk=args.query_chunk,
+                                          contrasts=contrasts.get(sample_key(e)),progress=progress)
+                    with np.load(readout_path,allow_pickle=False) as readout:
+                        for begin in range(0,len(pending),args.event_batch):
+                            batch = sites[np.isin(sites[:,2],pending[begin:begin+args.event_batch])]
+                            with ExitStack() as stack:
+                                recorders = {}
+                                for row in np.unique(batch[:,2]):
+                                    recorder = CutRecorder(folder/f"edges_{int(found['row_position'][row])}.npz",cache,row)
+                                    stack.callback(recorder.close);recorders[int(row)] = recorder
+                                results = trace_events(cache,batch,window=config.window,query_chunk=args.query_chunk,
+                                                       contrasts=contrasts.get(sample_key(e)),progress=progress,
+                                                       cut_readout=readout,cut_recorders=recorders)
+                            for result in results:
+                                result['settings'] = found['settings']
+                                atomic_npz(folder/f"event_{int(result['event_position'])}.npz",**result)
+                                e['event_traced'] += 1
+                            bar.update(len(results));save_index(output,manifest)
+                            del results,recorders,recorder,result
         # Labels are joined only after this sample's label-free construction.
         if path.with_suffix('.labels.npz').exists():
             atomic_npz(folder/'labels.npz',labels=read_labels(path,found))

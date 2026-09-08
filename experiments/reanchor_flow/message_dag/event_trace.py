@@ -15,7 +15,8 @@ def route_hops(state, same, cross):
 
 
 @torch.inference_mode()
-def trace_events(cache, coordinates, *, window=10, query_chunk=8, contrasts=None, progress=None):
+def trace_events(cache, coordinates, *, window=10, query_chunk=8, contrasts=None, progress=None,
+                 cut_readout=None, cut_recorders=None):
     """All later output positions per event; caller bounds the event batch.
 
     Sites are (writer layer, writer head, response-row index). Sites at the
@@ -46,6 +47,12 @@ def trace_events(cache, coordinates, *, window=10, query_chunk=8, contrasts=None
     for layer in range(int(coordinates[:,0].min()),l):
         if progress: progress(f'differential DAG L{layer+1}/{l}, events={count}')
         op = DifferentialLayer(cache,layer,query_chunk)
+        if cut_readout is not None:
+            from .transport import last_crossing_edges
+            reader = op.tensor(cut_readout[f'L{layer}'])
+            for begin,end,a,effects in last_crossing_edges(op,state[0].sum(0),reader):
+                for i,row in enumerate(event_rows):
+                    cut_recorders[int(row)].write(op,begin,end,a,effects[i])
         post = torch.empty_like(state)
         for variant in range(3):
             same,cross,codes = op.attention_jvp(state[variant].flatten(0,1),routing=variant!=1)
@@ -95,4 +102,6 @@ def trace_events(cache, coordinates, *, window=10, query_chunk=8, contrasts=None
                            mlp_response_norm=mlp_norm[i],mlp_alignment=mlp_alignment[i],
                            attention_head_energy=heads[i],positive_id=positive,negative_id=negative,
                            explicit_contrast=semantic,baseline_margin=baseline,labels_used=np.array(False)))
+        if cut_readout is not None:
+            result[-1].update(cut_recorders[int(row)].finish(result[-1]))
     return result

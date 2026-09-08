@@ -85,7 +85,7 @@ def scan(path, config=EventConfig(), *, chunk=8, device='cpu', progress=None):
     # Stable event IDs depend only on native layer/head/row coordinates.
     result['event_index'] = np.argwhere(result['event']).astype(np.int32)
     result.update({k: trace[k] for k in ('token_ids','token_text','row_position','response_start',
-                                       'special_mask','capture_special_mask') if k in trace})
+                                       'special_mask','capture_special_mask','predictor_logprob') if k in trace})
     result['labels_used'] = np.array(False)
     import json
     result['event_config'] = np.array(json.dumps(asdict(config), sort_keys=True))

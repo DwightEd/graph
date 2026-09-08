@@ -180,11 +180,22 @@ def test_full_scope_pipeline_resume_missing_coverage_and_offline_report(tmp_path
     assert result['traced']==result['events']>0
     assert set(r['sample'].split('/')[1] for r in result['samples'])=={'QA','Summary','Data2txt'}
     files=list(out.rglob('event_*.npz'));before={p:p.stat().st_mtime_ns for p in files}
+    assert all(p.with_name(p.name.replace('event_','edges_')).exists() for p in files)
+    scores=list(out.rglob('transport_scores.npz'))
+    assert len(scores)==6 and (out/'transport_detection.json').exists()
+    stored_scores={p:p.read_bytes() for p in scores}
     # Changing only labels cannot alter the saved graph or its selection.
     for dest in audit.rglob('*.labels.npz'): np.savez_compressed(dest,labels=np.zeros(15,int))
     rerun=run(parser().parse_args(command+['--completed-only']))
     assert before=={p:p.stat().st_mtime_ns for p in files}
     assert all(r['H']==0 for r in rerun['samples'])
+    for p,old in stored_scores.items(): assert p.read_bytes()==old
+    # A missing physical graph is incomplete even when its old summary exists.
+    missing_graph=files[0].with_name(files[0].name.replace('event_','edges_'))
+    missing_graph.unlink()
+    run(parser().parse_args(command+['--completed-only','--phase','trace']))
+    assert missing_graph.exists() and files[0].stat().st_mtime_ns!=before[files[0]]
+    assert all(p.stat().st_mtime_ns==before[p] for p in files[1:])
     shutil.rmtree(audit);shutil.rmtree(fixture)
     offline=run(parser().parse_args(['--phase','evaluate','--output',str(out),'--bootstrap','0']))
     assert offline['traced']==result['traced']

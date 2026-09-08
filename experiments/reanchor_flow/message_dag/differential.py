@@ -17,6 +17,12 @@ def rms_jvp(delta, reference, weight, epsilon):
         delta - reference * (delta*reference).mean(-1, keepdim=True)/variance)
 
 
+def rms_vjp(reader, reference, weight, epsilon):
+    weighted = reader*weight
+    variance = reference.square().mean(-1, keepdim=True)+epsilon
+    return torch.rsqrt(variance)*(weighted-reference*(weighted*reference).mean(-1, keepdim=True)/variance)
+
+
 def rotate(x, cos, sin):
     a, b = x.chunk(2, dim=-1)
     return x*cos + torch.cat((-b, a), dim=-1)*sin
@@ -49,6 +55,39 @@ class DifferentialLayer(LayerOperator):
         hidden = self.activation*F.linear(z, self.w['up'])
         hidden += self.up*self.silu_prime*F.linear(z, self.w['gate'])
         return F.linear(hidden, self.w['down'])
+
+    def mlp_vjp(self, reader):
+        """Adjoint of the native SwiGLU derivative, including RMS denominator."""
+        hidden = F.linear(reader, self.w['down'].T)
+        z = F.linear(hidden*self.activation, self.w['up'].T)
+        z += F.linear(hidden*self.up*self.silu_prime, self.w['gate'].T)
+        return rms_vjp(z, self.post, self.w['post_norm'], self.eps)
+
+    def attention_same_vjp(self, reader):
+        """Diagonal position blocks only: each row keeps its own output reader.
+
+        Includes Q control over the WHOLE attention row, self K competition,
+        self V, RoPE and RMSNorm. This is not a frozen-attention backward pass.
+        """
+        projected = F.linear(reader, self.w['output'].T).reshape(-1,self.h,self.hd).transpose(0,1)
+        dq,dk,dv = (torch.zeros_like(projected) for _ in range(3))
+        for begin,end,a in self.rows_attention():
+            g = projected[:,begin:end]
+            av = torch.einsum('hqs,hsd->hqd',a,self.v)
+            score = torch.einsum('hqd,hsd->hqs',g,self.v)-(g*av).sum(-1,keepdim=True)
+            ds = a*score
+            local = torch.arange(end-begin,device=self.device)
+            absolute = self.rows[begin:end]
+            dq[:,begin:end] = torch.einsum('hqs,hsd->hqd',ds,self.k)*self.scale
+            dk[:,begin:end] = ds[:,local,absolute,None]*self.q[:,begin:end]*self.scale
+            dv[:,begin:end] = a[:,local,absolute,None]*g
+        dq = rotate(dq,self.cos,-self.sin).transpose(0,1).flatten(-2)
+        dk = rotate(dk,self.cos,-self.sin)
+        def shared_heads(x):
+            return x.reshape(self.kv,self.h//self.kv,len(self.rows),self.hd).sum(1).transpose(0,1).flatten(-2)
+        z = F.linear(dq,self.wq.T)+F.linear(shared_heads(dk),self.wk.T)
+        z += F.linear(shared_heads(dv),self.w['value'].T)
+        return rms_vjp(z,self.x,self.w['input_norm'],self.eps)
 
     def attention_jvp(self, delta, *, routing=True):
         """Return same-position and strictly earlier-position derivative branches.
