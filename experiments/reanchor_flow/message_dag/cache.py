@@ -41,6 +41,7 @@ class NativeCache:
     def __init__(self, path, weights):
         self.path, self.weights = Path(path), weights
         self.stack = ExitStack()
+        self.event_readouts = {}
         self.trace = read_trace(path, runtime=True)
         for name in ("states", "history", "qk"):
             setattr(self, name, self.stack.enter_context(np.load(self.path.with_suffix(f".{name}.npz"), allow_pickle=False)))
@@ -54,6 +55,7 @@ class NativeCache:
         return self
 
     def __exit__(self, *args):
+        self.event_readouts.clear()
         return self.stack.__exit__(*args)
 
 

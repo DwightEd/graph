@@ -175,13 +175,15 @@ conda run --no-capture-output -n research python -u -m experiments.reanchor_flow
 但完整存盘仍有二次增长：每个事件约3×4×L×H×n(n−1)/2字节的有效边数据，n为事件后的query范围。
 例如L=H=32、n=512约1.50 GiB未压缩，另有块内零填充和小型汇总。程序显示估算；不会为省空间暗中丢边。
 同位置后缀缓存暂用4×L×R×D字节磁盘，单样本完成后删除，不在GPU累积所有层。
+执行优化将多批事件按层共享权重、原生捕获、attention及读出，默认使用1 GiB的CPU状态预算。
+算法身份与全部事件保持不变；性能基准、数值核对、真实GPU计时方式见 [PERFORMANCE.md](PERFORMANCE.md)。
 
 ## 当前证据状态
 
 本次验证已完成：
 
-- Transformers 4.57.6 / CPU：`message_dag/tests` 加 `test_message_lineage.py`，加入保存竞争与v1续跑回归后51项通过。
-- Transformers 4.44.2：新传播模块的9项检查全部通过，包含原生 V/K 消息微扰；RoPE 使用显式 `config=`。
+- Transformers 4.57.6 / CPU：`message_dag/tests` 加 `test_message_lineage.py`，保存竞争、v1续跑与执行优化回归共56项通过，CUDA专项1项因无GPU跳过。
+- Transformers 4.44.2：传播与执行模块14项检查通过、CUDA专项1项跳过，包含原生 V/K 消息微扰；RoPE 使用显式 `config=`。
 - 数学检查覆盖 FP32/BF16 捕获、QK增强、路径闭合、候选翻转、完整反向读出造成的重复计数，以及非有限值拒绝。
 - 六个 train/test×task 分区的 tiny 模型流程检查覆盖全部事件、标签变化、缺失缓存披露、逐边文件缺失后补算，以及删除原模型/缓存后的离线报告。标签是合成测试标签，检测指标不能作为真实研究结果。
 - 保存检查覆盖JSON/NPZ同时写入、中断后保留原文件、跨进程写锁、异常退出后重新获得锁，以及v1旧扫描字段/滞后索引/缺失事件的续跑。完整流程分别运行v1和v2。

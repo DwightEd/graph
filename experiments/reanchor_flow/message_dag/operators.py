@@ -11,7 +11,7 @@ from ..message_lineage import attention_chunks
 
 
 class LayerOperator:
-    def __init__(self, cache, layer, rule="symmetric", chunk=8):
+    def __init__(self, cache, layer, rule="symmetric", chunk=8, *, linear_allocation=True):
         self.cache, self.layer, self.chunk = cache, layer, chunk
         trace, states, weights = cache.trace, cache.states, cache.weights
         self.device = weights.device
@@ -34,12 +34,14 @@ class LayerOperator:
         self.history = {f"L{layer}": self.tensor(cache.history[f"L{layer}"])}
         dtype = getattr(torch, str(cache.qk[f"dtype_{layer}"]))
         self.post = (self.x.to(dtype) + self.tensor(states[f"attention_{layer}"]).to(dtype)).float()
-        key = f"residual_{layer+1}" if layer+1 < cache.layers else "final_residual"
-        self.next = self.tensor(states[key])
         eps = weights.config["rms_norm_eps"]
         scale = lambda x, w: w * torch.rsqrt(x.square().mean(-1, keepdim=True) + eps)
         self.input_scale = scale(self.x, self.w["input_norm"])
         self.post_scale = scale(self.post, self.w["post_norm"])
+        if not linear_allocation:
+            return  # differential operators compute their own native MLP derivative
+        key = f"residual_{layer+1}" if layer+1 < cache.layers else "final_residual"
+        self.next = self.tensor(states[key])
         z = (self.post * self.post_scale).to(dtype)
         gate, up = F.linear(z, native["gate"]).float(), F.linear(z, native["up"]).float()
         activation = F.silu(gate.to(dtype)).float()

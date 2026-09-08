@@ -91,12 +91,12 @@ class CutRecorder:
         begin_event = max(begin,self.row+1)
         if begin_event>=end: return
         if op.layer not in self.saved_layers:
-            native = op.v[:,op.rows]
-            block = op.w['output'].reshape(op.d,op.h,op.hd).permute(1,0,2)
-            gram = block.transpose(-1,-2)@block
-            write_array(self.archive,f'value_energy_L{op.layer}',native.square().sum(-1).cpu().numpy())
-            energy = torch.einsum('hsd,hde,hse->hs',native,gram,native).clamp_min(0)
-            write_array(self.archive,f'write_energy_L{op.layer}',energy.cpu().numpy())
+            if not hasattr(op,'cut_energies'):
+                native = op.v[:,op.rows]
+                energy = torch.einsum('hsd,hde,hse->hs',native,op.output_gram,native).clamp_min(0)
+                op.cut_energies = native.square().sum(-1).cpu().numpy(),energy.cpu().numpy()
+            write_array(self.archive,f'value_energy_L{op.layer}',op.cut_energies[0])
+            write_array(self.archive,f'write_energy_L{op.layer}',op.cut_energies[1])
             self.saved_layers.add(op.layer)
         # Source rows before the seed cannot be affected; future/self sources
         # are excluded by the native causal cut, not by an attention threshold.

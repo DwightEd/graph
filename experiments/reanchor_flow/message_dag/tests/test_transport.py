@@ -15,7 +15,7 @@ from experiments.reanchor_flow.message_dag.transport_report import sample_scores
 from experiments.reanchor_flow.tests.test_message_lineage import capture_fixture
 
 
-def trace_with_cut(cache, sites, folder, chunk=3, contrasts=None):
+def trace_with_cut(cache, sites, folder, chunk=3, contrasts=None, event_batch=None):
     folder.mkdir(exist_ok=True)
     suffix = folder/'readout.npz'
     prepare_local_readout(cache,suffix,query_chunk=chunk,contrasts=contrasts)
@@ -25,7 +25,7 @@ def trace_with_cut(cache, sites, folder, chunk=3, contrasts=None):
             rec = CutRecorder(folder/f'edges_{int(row)}.npz',cache,row)
             stack.callback(rec.close);recorders[int(row)] = rec
         return trace_events(cache,sites,window=2,query_chunk=chunk,contrasts=contrasts,
-                            cut_readout=reader,cut_recorders=recorders)
+                            cut_readout=reader,cut_recorders=recorders,event_batch=event_batch)
 
 
 def test_native_adjoint_includes_rms_rope_gqa_and_softmax_competition(tmp_path):
@@ -52,7 +52,7 @@ def test_last_crossing_recovers_all_paths_and_keeps_every_physical_edge(tmp_path
     with NativeCache(path,weights) as cache:
         events = trace_with_cut(cache,sites,tmp_path/'cuts')
         plain = trace_events(cache,sites,window=2,query_chunk=3)
-        changed_chunk = trace_with_cut(cache,sites,tmp_path/'chunk',chunk=8)
+        changed_chunk = trace_with_cut(cache,sites,tmp_path/'chunk',chunk=8,event_batch=1)
     for event,old,chunk in zip(events,plain,changed_chunk):
         np.testing.assert_allclose(event['margin_response'],old['margin_response'],atol=0,rtol=0)
         reconstructed = (event['cut_hop_positive']-event['cut_hop_negative']).sum(-1)

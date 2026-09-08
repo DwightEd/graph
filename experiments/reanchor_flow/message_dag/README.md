@@ -12,6 +12,8 @@
 原事件定义与v1审计说明保留在 [LOOKBACK_EVENTS.md](LOOKBACK_EVENTS.md)。
 续跑已有 `lookback_events_v1` 请加 `--legacy-v1`，保持原算法并跳过已保存事件；默认v2另存。
 进度与NPZ用独立临时文件保存，同一输出目录只允许一个运行中的写入进程（包含离线evaluate）。
+执行开销、按层共享、CPU/GPU分工和真实计时见 [PERFORMANCE.md](PERFORMANCE.md)。
+默认以1 GiB CPU状态预算共享层算子；`--profile`报告阶段耗时和CUDA峰值显存，兼容已有事件续跑。
 下文 `run` 保留原有来源加法分摊；新事件实验不使用该分摊规则解释 MLP 导数。
 
 ## 目录与依赖

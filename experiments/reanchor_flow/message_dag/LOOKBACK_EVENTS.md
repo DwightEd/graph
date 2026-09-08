@@ -88,6 +88,8 @@ conda run --no-capture-output -n research \
 默认全 split、全 task、全样本、全事件。`--completed-only` 仅明确排除原生缓存缺失项，
 不会把 train 当 test，也不改变事件阈值。要强制全部计划样本完整，去掉这个参数。
 `--event-batch 2` 和 `--query-chunk 8` 只控制计算分块；增加事件块可减少重复层加载，显存也会增加。
+当前执行器额外用 `--state-cache-gib 1` 让多批事件共享每层算子，GPU工作块大小仍由event-batch控制。
+已完成事件可直接续用；加 `--profile` 查看真实耗时和CUDA显存。说明及较大批次示例见 [PERFORMANCE.md](PERFORMANCE.md)。
 程序显示每组完整/计划样本数、每样本事件位置数和原生读取点数、逐层传播与未完成事件。
 `--model /实际权重目录` 可在首次运行时覆盖原 index 路径。需要 bias-free Llama 的 safetensors 权重。
 依赖沿用仓库 requirements；当前用 transformers 4.57.6、torch CPU 验证。

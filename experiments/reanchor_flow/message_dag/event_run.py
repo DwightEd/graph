@@ -1,5 +1,6 @@
 """Scan every native lookback event, trace its messages, then join labels offline."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict
 import json
@@ -83,6 +84,8 @@ def parser():
     p.add_argument('--local-floor', type=float, default=.50)
     p.add_argument('--query-chunk', type=int, default=8)
     p.add_argument('--event-batch', type=int, default=2, help='position events per GPU batch; never a selection budget')
+    p.add_argument('--state-cache-gib', type=float, default=1., help='CPU tangent-state budget for sharing each layer across GPU batches; 0 disables grouping')
+    p.add_argument('--profile', action='store_true', help='record synchronized stage times and CUDA peak memory per sample')
     p.add_argument('--contrasts', type=Path, help='JSON: split/task/id -> [{target, positive_id, negative_id}]')
     p.add_argument('--cpu-threads', type=int, default=4)
     p.add_argument('--bootstrap', type=int, default=200)
@@ -96,6 +99,12 @@ def atomic_npz(path, **values):
 
 def sample_key(entry):
     return f"{entry['split']}/{entry['task_type']}/{entry['sample_id']}"
+
+
+def event_group_size(rows, hidden_size, event_batch, state_cache_gib):
+    per_event = 3*3*rows*hidden_size*4
+    capacity = int(state_cache_gib*2**30)//per_event
+    return max(event_batch,capacity//event_batch*event_batch)
 
 
 def run(args):
@@ -115,6 +124,8 @@ def _run(args, output, version):
     config = EventConfig(args.window,args.gain,args.local_floor)
     if min(args.query_chunk,args.event_batch,args.cpu_threads)<1 or args.bootstrap<0:
         raise ValueError('positive chunk/thread counts and nonnegative bootstrap required')
+    if not np.isfinite(args.state_cache_gib) or args.state_cache_gib<0:
+        raise ValueError('state-cache-gib must be finite and nonnegative')
     torch.set_num_threads(args.cpu_threads)
     if args.phase=='evaluate':
         return evaluate(output,bootstrap=args.bootstrap)
@@ -194,8 +205,18 @@ def _run(args, output, version):
         if args.phase!='scan' and pending:
             if weights is None: weights = CheckpointWeights(model,args.device)
             with NativeCache(path,weights) as cache, ExitStack() as sample_stack:
-                state_bytes = 3*3*min(args.event_batch,len(pending))*cache.rows*weights.config['hidden_size']*4
-                print(f'  tangent state alone {state_bytes/2**30:.3f} GiB; operators and work buffers are additional',flush=True)
+                writers = sample_stack.enter_context(ThreadPoolExecutor(max_workers=args.cpu_threads))
+                group_size = min(len(pending),event_group_size(cache.rows,weights.config['hidden_size'],args.event_batch,args.state_cache_gib))
+                per_event = 3*3*cache.rows*weights.config['hidden_size']*4
+                work_bytes = min(args.event_batch,len(pending))*per_event
+                host_bytes = group_size*per_event if group_size>args.event_batch else 0
+                print(f'  device={args.device}; working tangent {work_bytes/2**30:.3f} GiB; '
+                      f'CPU shared states {host_bytes/2**30:.3f} GiB; group={group_size}, event batch={args.event_batch}; '
+                      'operators/work buffers additional',flush=True)
+                profile = {} if args.profile else None
+                cuda = torch.device(args.device).type=='cuda'
+                if cuda: torch.cuda.reset_peak_memory_stats(args.device)
+                trace_started = perf_counter()
                 readout = None
                 with tqdm(total=len(pending),desc=f'{sample_key(e)} DAG',unit='event',leave=False) as bar:
                     def progress(stage): bar.set_postfix_str(stage,refresh=True)
@@ -208,8 +229,8 @@ def _run(args, output, version):
                         prepare_local_readout(cache,readout_path,query_chunk=args.query_chunk,
                                               contrasts=contrasts.get(sample_key(e)),progress=progress)
                         readout = sample_stack.enter_context(np.load(readout_path,allow_pickle=False))
-                    for begin in range(0,len(pending),args.event_batch):
-                        batch = sites[np.isin(sites[:,2],pending[begin:begin+args.event_batch])]
+                    for begin in range(0,len(pending),group_size):
+                        batch = sites[np.isin(sites[:,2],pending[begin:begin+group_size])]
                         with ExitStack() as stack:
                             recorders = {}
                             if readout is not None:
@@ -218,13 +239,27 @@ def _run(args, output, version):
                                     stack.callback(recorders[int(row)].close)
                             results = trace_events(cache,batch,window=config.window,query_chunk=args.query_chunk,
                                                    contrasts=contrasts.get(sample_key(e)),progress=progress,
-                                                   cut_readout=readout,cut_recorders=recorders)
+                                                   cut_readout=readout,cut_recorders=recorders,
+                                                   event_batch=args.event_batch,profile=profile)
+                        save_started = perf_counter()
                         for result in results:
                             result['settings'] = found['settings']
+                        def save_event(result):
                             atomic_npz(folder/f"event_{int(result['event_position'])}.npz",**result)
-                            e['event_traced'] += 1
+                        list(writers.map(save_event,results))
+                        e['event_traced'] += len(results)
                         bar.update(len(results));save_index(output,manifest)
+                        if profile is not None:
+                            profile['checkpoint_seconds'] = profile.get('checkpoint_seconds',0.)+perf_counter()-save_started
                         del results,recorders,result
+                execution = dict(device=args.device,event_batch=args.event_batch,event_group=group_size,
+                                 cpu_state_gib=host_bytes/2**30,trace_seconds=perf_counter()-trace_started)
+                if cuda:
+                    execution['cuda_peak_allocated_gib'] = torch.cuda.max_memory_allocated(args.device)/2**30
+                    execution['cuda_peak_reserved_gib'] = torch.cuda.max_memory_reserved(args.device)/2**30
+                if profile is not None: execution['profile'] = profile
+                e['event_execution'] = execution
+                print('  execution: '+json.dumps(execution,sort_keys=True),flush=True)
         # Labels are joined only after this sample's label-free construction.
         if path.with_suffix('.labels.npz').exists():
             atomic_npz(folder/'labels.npz',labels=read_labels(path,found))

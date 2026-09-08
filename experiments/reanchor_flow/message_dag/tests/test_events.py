@@ -174,12 +174,14 @@ def test_full_scope_pipeline_resume_missing_coverage_and_offline_report(tmp_path
     (audit/'index.json').write_text(json.dumps(manifest))
     out=tmp_path/'events'
     command=['--audit',str(audit),'--output',str(out),'--device','cpu','--window','2',
-             '--gain','.002','--local-floor','.05','--event-batch','3','--bootstrap','10']
+             '--gain','.002','--local-floor','.05','--event-batch','3','--bootstrap','10','--profile']
     if legacy: command.append('--legacy-v1')
     with pytest.raises(ValueError,match='requested captures complete'): run(parser().parse_args(command))
     result=run(parser().parse_args(command+['--completed-only']))
     assert result['scanned']==6 and result['native_coverage']['skipped_samples']==1
     assert result['traced']==result['events']>0
+    saved_index=json.loads((out/'index.json').read_text())
+    assert all(e['event_execution']['profile']['layer_builds']>0 for e in saved_index['samples'])
     assert set(r['sample'].split('/')[1] for r in result['samples'])=={'QA','Summary','Data2txt'}
     files=list(out.rglob('event_*.npz'));before={p:p.stat().st_mtime_ns for p in files}
     assert all(p.with_name(p.name.replace('event_','edges_')).exists()==(not legacy) for p in files)
@@ -201,7 +203,7 @@ def test_full_scope_pipeline_resume_missing_coverage_and_offline_report(tmp_path
             run(parser().parse_args([x for x in command if x!='--legacy-v1']+['--completed-only']))
     # Changing only labels cannot alter the saved graph or its selection.
     for dest in audit.rglob('*.labels.npz'): np.savez_compressed(dest,labels=np.zeros(15,int))
-    rerun=run(parser().parse_args(command+['--completed-only']))
+    rerun=run(parser().parse_args(command+['--completed-only','--state-cache-gib','0']))
     assert before=={p:p.stat().st_mtime_ns for p in files}
     assert all(r['H']==0 for r in rerun['samples'])
     for p,old in stored_scores.items(): assert p.read_bytes()==old

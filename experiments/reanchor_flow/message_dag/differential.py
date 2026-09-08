@@ -30,13 +30,17 @@ def rotate(x, cos, sin):
 
 class DifferentialLayer(LayerOperator):
     def __init__(self, cache, layer, chunk=8):
-        super().__init__(cache, layer, 'up', chunk)
+        super().__init__(cache, layer, 'up', chunk, linear_allocation=False)
         self.eps = cache.weights.config['rms_norm_eps']
         prefix = f'model.layers.{layer}.self_attn.'
         self.wq = cache.weights.get(prefix+'q_proj.weight').float()
         self.wk = cache.weights.get(prefix+'k_proj.weight').float()
-        self.q = self.tensor(self.qk[f'query_{layer}'])
-        self.k = self.tensor(self.qk[f'key_{layer}']).repeat_interleave(self.h//self.kv, 0)
+        # Keep native Q/K on the device across all attention consumers.
+        for name in ('query','key'):
+            key = f'{name}_{layer}'
+            self.qk[key] = torch.as_tensor(self.qk[key],device=self.device)
+        self.q = self.qk[f'query_{layer}'].float()
+        self.k = self.qk[f'key_{layer}'].float().repeat_interleave(self.h//self.kv, 0)
         self.v = self.value.repeat_interleave(self.h//self.kv, 0)
         self.scale = float(self.qk[f'scale_{layer}'])
         from transformers import LlamaConfig
@@ -49,6 +53,27 @@ class DifferentialLayer(LayerOperator):
         sigmoid = self.gate.sigmoid()
         self.silu_prime = sigmoid * (1 + self.gate*(1-sigmoid))
         self.activation = F.silu(self.gate)
+        self.output_blocks = self.w['output'].reshape(self.d,self.h,self.hd).permute(1,0,2)
+        self.output_gram = self.output_blocks.transpose(-1,-2)@self.output_blocks
+        self.cached_attention = None
+
+    def cache_attention(self, max_bytes=128*2**20):
+        """Reuse this layer's exact rows if they fit a bounded device buffer."""
+        shape = (self.h,len(self.rows),self.k.shape[1])
+        if np.prod(shape)*4>max_bytes: return
+        # No threshold, head averaging, or reduced precision in this cache.
+        value = torch.empty(shape,device=self.device)
+        for begin,end,a in super().rows_attention(): value[:,begin:end] = a
+        self.cached_attention = value
+
+    def rows_attention(self, stop=None):
+        if self.cached_attention is None:
+            yield from super().rows_attention(stop)
+        else:
+            end_rows = len(self.rows) if stop is None else min(stop,len(self.rows))
+            for begin in range(0,end_rows,self.chunk):
+                end = min(begin+self.chunk,end_rows)
+                yield begin,end,self.cached_attention[:,begin:end]
 
     def mlp_jvp(self, delta):
         z = rms_jvp(delta, self.post, self.w['post_norm'], self.eps)
@@ -133,19 +158,25 @@ class DifferentialLayer(LayerOperator):
         return same, total-same, codes
 
     def remote_seeds(self, sites, window):
-        """Reconstruct attention once per layer, shared by all requested heads."""
+        """Batch native head writes; one CPU weight transfer per query chunk."""
         sites = np.asarray(sites,int).reshape(-1,2)  # head, row
         result = {}
         if not len(sites): return result
         source = torch.arange(len(self.cache.trace['token_ids']),device=self.device)
         ordinary = ~torch.as_tensor(self.cache.trace['special_mask'],device=self.device)
         for begin,end,a in self.rows_attention(int(sites[:,1].max())+1):
-            for head,row in sites[(sites[:,1]>=begin)&(sites[:,1]<end)]:
-                mask = ((self.rows[row]-source)>window) & ordinary
-                weights = a[head,row-begin]*mask
-                code = weights @ self.v[head]
-                block = self.w['output'][:,head*self.hd:(head+1)*self.hd]
-                result[int(head),int(row)] = F.linear(code,block), weights.cpu().numpy()
+            take = sites[(sites[:,1]>=begin)&(sites[:,1]<end)]
+            if not len(take): continue
+            mask = ((self.rows[begin:end,None]-source)>window) & ordinary
+            weights = a*mask[None]
+            code = torch.einsum('hqs,hsd->hqd',weights,self.v)
+            messages = torch.einsum('hqc,hdc->hqd',code,self.output_blocks)
+            heads = torch.as_tensor(take[:,0],device=self.device)
+            rows = torch.as_tensor(take[:,1]-begin,device=self.device)
+            selected = messages[heads,rows]
+            mass = weights[heads,rows].cpu().numpy()
+            for i,(head,row) in enumerate(take):
+                result[int(head),int(row)] = selected[i],mass[i]
         if len(result)!=len(sites): raise ValueError('duplicate/absent read site')
         return result
 
@@ -155,6 +186,8 @@ class DifferentialLayer(LayerOperator):
 
 def final_directions(cache, contrasts=None):
     """True final-RMSNorm gradient, with fixed observed/runner candidates."""
+    key = tuple(sorted((int(c['target']),int(c['positive_id']),int(c['negative_id'])) for c in (contrasts or [])))
+    if key in cache.event_readouts: return cache.event_readouts[key]
     from ..message_lineage import readout_directions
     frozen, runners = readout_directions(cache.trace,cache.states,cache.weights)
     raw = torch.as_tensor(cache.states['final_residual'],device=cache.weights.device).float()
@@ -178,4 +211,6 @@ def final_directions(cache, contrasts=None):
     variance = raw.square().mean(-1,keepdim=True)+cache.weights.config['rms_norm_eps']
     baseline = (frozen*raw).sum(-1)[:-1].cpu().numpy()
     direction = frozen-raw*(frozen*raw).mean(-1,keepdim=True)/variance
-    return direction, positive, runners, semantic, baseline
+    result = direction, positive, runners, semantic, baseline
+    cache.event_readouts[key] = result
+    return result
