@@ -247,7 +247,7 @@ def matched_joint_gap(entry, reuse, pairs, heads_per_layer):
     return np.where(deeper, np.stack(values), np.nan).astype(np.float32)
 
 
-def target_chain_tables(trace, history_archive, labels, pairs, valid):
+def target_chain_tables(trace, history_archive, labels, pairs, valid, progress=None):
     """Exhaustive two-hop *structural* evidence paths ending at labeled targets.
 
     C_ij(q) = sum_{P <= b < q} A_j(q,b)/(1-special_mass_j(q)) * E_i(b),
@@ -273,6 +273,8 @@ def target_chain_tables(trace, history_archive, labels, pairs, valid):
     safe = np.where(evalid, evidence, 0).astype(np.float32)
     shifted = np.where(np.isfinite(shifted), shifted, 0).astype(np.float32)
     for l in range(1, layers):
+        if progress is not None:
+            progress(f'two-hop pairs: reader layer {l + 1}/{layers}')
         a = history_archive[f"L{l}"][:, :-1, 1:]
         lag = trace["row_position"][:-1, None] - trace["row_position"][None, 1:]
         a = ratio(a, trace["ordinary_mass"][l, :, :-1, None])

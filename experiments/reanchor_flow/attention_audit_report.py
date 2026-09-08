@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
+from time import perf_counter
 
 import numpy as np
 from tqdm.auto import tqdm
@@ -14,15 +15,26 @@ from .attention_audit_stats import (
 from .attention_rhythm_report import save_json
 
 
-def analyze_sample(path, horizons=HORIZONS, match_window=32, onset_radius=8):
+def analyze_sample(path, horizons=HORIZONS, match_window=32, onset_radius=8, progress=None):
+    started = perf_counter()
+
+    def stage(name):
+        if progress is not None:
+            progress(f'{name}; sample elapsed={perf_counter() - started:.1f}s')
+
+    stage('load cached metrics and labels')
     with np.load(path, allow_pickle=False) as stored:
         trace = dict(stored)
     with np.load(path.with_suffix('.labels.npz'), allow_pickle=False) as stored:
         labels = stored['labels']
+    layers, heads = trace['ordinary_mass'].shape[:2]
+    legal_pairs = layers * (layers - 1) // 2 * heads * heads
+    stage(f'N/H reading metrics; {layers} layers x {heads} heads, {legal_pairs:,} deeper pairs')
     metrics = read_metrics(trace)
     reads = []
     with np.load(path.with_suffix('.history.npz'), allow_pickle=False) as history:
         for l in range(trace['ordinary_mass'].shape[0]):
+            stage(f'load history + future reuse: layer {l + 1}/{layers}')
             reads.append(incoming_reads(history[f'L{l}'], trace['ordinary_mass'][l], trace, horizons))
         fai = {k: np.stack([r[k] for r in reads]) for k in ('fai', 'enrichment', 'count')}
         full = reads[0]['full']
@@ -35,8 +47,10 @@ def analyze_sample(path, horizons=HORIZONS, match_window=32, onset_radius=8):
                 if hi:
                     value[..., ~full[:, w]] = np.nan
                 metrics[f'carrier_{name}_{suffix}'] = value
+        stage('N/H contrasts, position matching and onset windows')
         contrast = sample_contrasts(trace, labels, metrics, match_window, onset_radius)
-        chain = target_chain_tables(trace, history, labels, contrast['pairs'], contrast['valid'])
+        chain = target_chain_tables(trace, history, labels, contrast['pairs'], contrast['valid'], progress=stage)
+    stage('native writes and controls')
     writes = np.stack([trace[k][..., :-1] for k in ('attention_margin', 'mlp_margin', 'rounding_margin')])
     contrast['writes_raw'] = np.stack([mean(writes[..., contrast['valid'] & (labels == y)], -1) for y in (0, 1)])
     pairs = contrast['pairs']
@@ -46,12 +60,15 @@ def analyze_sample(path, horizons=HORIZONS, match_window=32, onset_radius=8):
     contrast['controls_raw'] = np.stack([mean(controls[..., contrast['valid'] & (labels == y)], -1) for y in (0, 1)])
     contrast['controls_matched'] = mean(matched_difference(controls,pairs), -1)
     from .attention_audit_plot import write_sample_text
+    stage('save N/H token text')
     write_sample_text(path, trace, labels)
     entry, gain = carrier_entry(trace)
     # First finite horizon is the registered primary four-state comparison.
     reuse = np.where((fai['count'][..., 0] > 0) & full[:, 0],
                      fai['enrichment'][..., 0] >= 2, np.nan)
+    stage(f'four-state tables: {legal_pairs:,} deeper head pairs')
     joint = joint_tables(entry, reuse, labels, contrast['valid'], entry.shape[1])
+    stage('position-matched four-state tables')
     gap = matched_joint_gap(entry, reuse, contrast['pairs'], entry.shape[1])
     # Persist compact per-sample arrays. Large pair matrices are aggregated
     # immediately and do not create another sample x head x head archive.
@@ -62,7 +79,9 @@ def analyze_sample(path, horizons=HORIZONS, match_window=32, onset_radius=8):
              'pairs': contrast['pairs'], 'onset_pairs': contrast['onset_pairs'],
              'horizons': np.array(horizons), 'labels': labels,
              'valid_target': contrast['valid']}
+    stage('save sample audit')
     np.savez_compressed(path.with_suffix('.audit.npz'), **audit)
+    stage('saved')
     return contrast, {'joint_raw': joint, 'joint_matched': gap,
                       'chain_raw': chain['raw'], 'chain_matched': chain['matched'],
                       'chain_excess_matched': chain['excess_matched']}, list(metrics)
@@ -111,6 +130,10 @@ def summarize(output, manifest, *, horizons=HORIZONS, match_window=32, onset_rad
     rows_for_gallery, names = [], None
     with threadpool_limits(limits=cpu_threads):
         for group, sources in grouped.items():
+            group_samples = sum(len(entries) for entries in sources.values())
+            tqdm.write(f'[audit {group}] cached CPU analysis: {group_samples} samples, '
+                       f'{len(sources)} sources; N/H metrics, future reuse, all deeper head pairs. '
+                       'This stage does not run the LLM or propagate multi-hop message vectors.')
             moments = defaultdict(Moments)
             coverage = dict(samples=0, sources=len(sources), normal_tokens=0, hallucinated_tokens=0,
                             unknown_tokens=0, special_targets=0, matched_pairs=0, matched_onsets=0,
@@ -121,8 +144,19 @@ def summarize(output, manifest, *, horizons=HORIZONS, match_window=32, onset_rad
                 source_stats = defaultdict(Moments)
                 for e in entries:
                     path = output / e['path']
-                    progress.set_postfix_str(str(e['sample_id']))
-                    contrast, matrices, current_names = analyze_sample(path, horizons, match_window, onset_radius)
+                    last_refresh = [0.0]
+
+                    def show_stage(message):
+                        progress.set_postfix_str(f"sample={e['sample_id']} "
+                            f"({coverage['samples'] + 1}/{group_samples}) {message}", refresh=False)
+                        now = perf_counter()
+                        if now - last_refresh[0] >= 1 or message.startswith('saved'):
+                            progress.refresh()
+                            last_refresh[0] = now
+
+                    contrast, matrices, current_names = analyze_sample(
+                        path, horizons, match_window, onset_radius, progress=show_stage)
+                    show_stage('aggregate sample statistics by source')
                     if names is None:
                         names = current_names
                     if names != current_names:
@@ -153,6 +187,7 @@ def summarize(output, manifest, *, horizons=HORIZONS, match_window=32, onset_rad
                     del contrast, matrices
                 for key, acc in source_stats.items():
                     moments[key].add(acc.finish()['mean'])
+            tqdm.write(f'[audit {group}] source-level intervals, multiple-comparison correction and cohort output')
             file = save_moments(output, group, moments, names, layers, heads, horizons, onset_radius)
             coverage['statistics'] = str(file.relative_to(output))
             report['groups'][group] = coverage
