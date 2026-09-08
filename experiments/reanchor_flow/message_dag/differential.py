@@ -35,7 +35,7 @@ class DifferentialLayer(LayerOperator):
         self.scale = float(self.qk[f'scale_{layer}'])
         from transformers import LlamaConfig
         from transformers.models.llama.modeling_llama import LlamaRotaryEmbedding
-        rotary = LlamaRotaryEmbedding(LlamaConfig(**cache.weights.config), device=self.device)
+        rotary = LlamaRotaryEmbedding(config=LlamaConfig(**cache.weights.config), device=self.device)
         self.cos, self.sin = (v[0].float() for v in rotary(self.x[None], self.rows[None]))
         z = self.post*self.post_scale
         self.gate = F.linear(z, self.w['gate'])
