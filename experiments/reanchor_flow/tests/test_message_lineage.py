@@ -10,12 +10,17 @@ from experiments.reanchor_flow.attention_audit import AuditConfig, capture_audit
 from experiments.reanchor_flow.message_lineage import CheckpointWeights, norm_component, propagate, swiglu_component
 
 
-def capture_fixture(tmp_path, dtype=torch.float32, ids=None):
+def capture_fixture(tmp_path, dtype=torch.float32, ids=None, qk_scale=1):
     from transformers import LlamaConfig, LlamaForCausalLM
     torch.manual_seed(82)
     cfg = LlamaConfig(vocab_size=29, hidden_size=16, intermediate_size=32,
                       num_hidden_layers=3, num_attention_heads=4, num_key_value_heads=2)
     model = LlamaForCausalLM(cfg).to(dtype).eval()
+    if qk_scale!=1:
+        with torch.no_grad():
+            for layer in model.model.layers:
+                layer.self_attn.q_proj.weight.mul_(qk_scale)
+                layer.self_attn.k_proj.weight.mul_(qk_scale)
     model.config._attn_implementation = "eager"
     checkpoint = tmp_path / "model"
     model.save_pretrained(checkpoint)

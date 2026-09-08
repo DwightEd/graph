@@ -1,6 +1,10 @@
 # 信息形成与后续使用：研究定位和现有工具
 
-**当前核心代码位于 [message_dag/](message_dag/README.md)。** 新入口为 `python -m experiments.reanchor_flow.message_dag.run`。
+**当前核心代码位于 [message_dag/](message_dag/README.md)。**
+内部“从 local 转向任意远处来源，再向后传播”的全量入口为
+`python -m experiments.reanchor_flow.message_dag.event_run`，具体运行与解释见 [内部回看事件审计](message_dag/LOOKBACK_EVENTS.md)。
+它保留物理 head，沿真实局部 Jacobian 分解0/1/2+跨位置跳，不以标注幻觉起点选事件。
+原来源分摊入口为 `python -m experiments.reanchor_flow.message_dag.run`。
 已实现材料单位独立传播、原生条件算子与伴随、同一目标的全路径贡献、节点平衡、逐 head N/H 和交互图。
 原 `message_lineage` 作为历史组件与对照保留；以下旧定位不作为新目录的实现状态。
 先复用少量 v3 缓存验证耗时和结构，再通过两个预算参数设 0 遍历全部数据，不需要重跑旧 head-pair 审计。

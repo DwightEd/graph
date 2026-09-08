@@ -3,6 +3,10 @@
 本目录是新的核心实现。研究主线是 **消息路由模型 → 图上的生成结构 → 正常／幻觉差异**。
 不通过 WAAD 峰挑节点，不训练 GNN，不把某个高流量节点或低材料分数直接命名为幻觉机制。
 
+**内部回看事件的新实验见 [LOOKBACK_EVENTS.md](LOOKBACK_EVENTS.md)。**
+`event_run` 默认扫描所有可用样本和内部事件，远处来源包括旧回答；以原生消息的局部 Jacobian 响应追踪后续0/1/2+跳。
+下文 `run` 保留原有来源加法分摊；新事件实验不使用该分摊规则解释 MLP 导数。
+
 ## 目录与依赖
 
 | 文件 | 单一职责 |
@@ -16,6 +20,9 @@
 | `view.py` | 同目标图、来源/head 选择、带标签全文和节点跨层轨迹 |
 | `run.py` | 小批／全量入口、成本估算、按目标保存与续跑 |
 | `view.ipynb` | 按样本编号和目标即时查看已完成图，无需模型/GPU |
+| `events.py`、`event_run.py` | 不使用标签的全量内部回看扫描、传播调度、续跑与覆盖清单 |
+| `differential.py`、`event_trace.py` | 原生 RMSNorm、QK/OV、SwiGLU 局部导数和0/1/2+跳消息响应 |
+| `event_report.py`、`event_view.py` | 离线 source 等权比较、原始 token 与逐事件传播界面 |
 
 缓存和读出工具复用父目录的 `attention_audit`、`message_lineage`；统计复用 source 分组和 tied-score AUROC/AP 实现。
 父目录旧实验暂作历史复现与数值对照，不再新增方法分支。新算法在本目录维护。
