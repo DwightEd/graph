@@ -192,7 +192,7 @@ def capture(args, manifest):
             torch.cuda.empty_cache()
 
 
-def analysis_manifest(output, manifest, completed_only=False, required_suffixes=None):
+def analysis_manifest(output, manifest, completed_only=False, required_suffixes=None, *, allow_empty=False):
     """Select committed captures without changing the index used for resuming."""
     settings = manifest['settings']
     suffixes = ['.npz', '.history.npz', '.qk.npz']
@@ -226,7 +226,7 @@ def analysis_manifest(output, manifest, completed_only=False, required_suffixes=
               f"tokens={c['completed_tokens']}/{c['planned_tokens']}", flush=True)
     if skipped and not completed_only:
         raise ValueError(f"{len(skipped)} captures are incomplete; use --phase analyze --completed-only to analyze completed samples, or resume capture")
-    if not samples:
+    if not samples and not allow_empty:
         raise ValueError('no completed samples are available for analysis')
     coverage = dict(planned_samples=len(manifest['samples']), completed_samples=len(samples),
                     skipped_samples=len(skipped), partial=bool(skipped), groups=groups, skipped=skipped)

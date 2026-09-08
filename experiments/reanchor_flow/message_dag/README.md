@@ -119,18 +119,31 @@ train/test 相同物理 head 的同向重复性另外报告；稀疏目标预算
 ## 5. 运行与成本
 
 先用已完成 QA 缓存运行小批。默认每 split/task 一个样本、每样本四个普通目标；选择不读取标签。
-下面明确选择 test/QA 两个样本，程序在前台打印来源传播层、目标反向层、耗时与每个完成文件：
+下面选择各个已有 split 的 QA 两个样本，程序在前台打印来源传播层、目标反向层、耗时与每个完成文件：
 
 ```bash
 conda run --no-capture-output -n research \
   python -u -m experiments.reanchor_flow.message_dag.run \
   --audit experiments/reanchor_flow/outputs/attention_audit_v3 \
-  --completed-only --split test --task QA \
+  --completed-only --split all --task QA \
   --samples-per-group 2 --targets-per-sample 4 \
   --device cuda:0 --source-chunk 2 --target-chunk 2 --query-chunk 8
 ```
 
-只看计划加 `--plan-only`。它不读取权重张量，不运行 LLM。
+若原生采集被中断，test/QA 可能尚未完成。`--completed-only` 仅跳过缺失缓存，仍遵守 split/task 筛选；
+不会自动把 train 样本当 test。先看实际可用范围：
+
+```bash
+conda run --no-capture-output -n research \
+  python -u -m experiments.reanchor_flow.message_dag.run \
+  --audit experiments/reanchor_flow/outputs/attention_audit_v3 --list-available
+```
+
+它按 split/task 列出已完成／计划数量，即使全部尚未完成也能列出；不读取模型配置或权重，不生成图。
+构图只要求 `.npz`、`.history.npz`、`.qk.npz`、`.states.npz` 四个文件，不要求旧审计完成或保存可选的 `.attention.npz`。
+显式指定无可用样本的范围时，错误会列出其他已完成范围，不悄悄切换数据。
+
+只看计算计划加 `--plan-only`。它不读取权重张量，不运行 LLM。
 所有任务／split／普通目标用同一入口；两个 0 表示全部，不按事件挑目标：
 
 ```bash

@@ -39,6 +39,7 @@ def parser():
     p.add_argument('--mlp-rule', choices=('symmetric','up'), default='symmetric')
     p.add_argument('--scratch', type=Path, help='temporary source tape; default OUTPUT/work')
     p.add_argument('--plan-only', action='store_true')
+    p.add_argument('--list-available', action='store_true', help='list completed/planned full-state caches in every split/task; no model or graph output')
     p.add_argument('--bootstrap', type=int, default=200)
     p.add_argument('--cpu-threads', type=int, default=4)
     return p
@@ -51,13 +52,38 @@ def atomic_npz(path, **values):
 
 
 def plan(args, original):
-    native = analysis_manifest(args.audit, original, args.completed_only)
+    # Only require files read by NativeCache, not optional full-attention dumps
+    # or the old audit's derived outputs. A stale resumed flag is not a marker.
+    native = analysis_manifest(args.audit, original, completed_only=True,
+                               required_suffixes=('.npz', '.history.npz', '.qk.npz', '.states.npz'),
+                               allow_empty=True)
+    if args.list_available:
+        return native
+
+    def matches(e):
+        return ((args.split == 'all' or e['split'] == args.split)
+                and (args.task == 'all' or e['task_type'] == args.task)
+                and (not args.sample_id or str(e['sample_id']) in args.sample_id))
+
     groups = defaultdict(list)
     for e in native['samples']:
-        if args.split != 'all' and e['split'] != args.split: continue
-        if args.task != 'all' and e['task_type'] != args.task: continue
-        if args.sample_id and str(e['sample_id']) not in args.sample_id: continue
-        groups[e['split']+'/'+e['task_type']].append(e)
+        if matches(e):
+            groups[e['split']+'/'+e['task_type']].append(e)
+    requested = sum(matches(e) for e in original['samples'])
+    completed = sum(map(len, groups.values()))
+    scope = f'split={args.split}, task={args.task}, sample_ids={args.sample_id or "all"}'
+    if not completed:
+        available = ', '.join(f"{name}={c['completed_samples']}" for name,c in
+                             native['analysis_coverage']['groups'].items() if c['completed_samples']) or 'none'
+        hint = 'Use --list-available and adjust --split/--task/--sample-id to an available scope.'
+        if not args.sample_id and any(args.task == 'all' or e['task_type'] == args.task for e in native['samples']):
+            hint = f'Use --split all --task {args.task} to select completed samples across splits.'
+        raise ValueError(f'No completed message-DAG samples match {scope} (0/{requested} planned). '
+                         f'Available completed scopes: {available}. '
+                         f'--completed-only still applies your split/task filters. {hint}')
+    if completed < requested and not args.completed_only:
+        raise ValueError(f'{scope}: only {completed}/{requested} captures are complete; '
+                         'add --completed-only to use them, or resume capture.')
     selected = []
     for entries in groups.values():
         n = args.samples_per_group
@@ -66,7 +92,6 @@ def plan(args, original):
         selected.extend(entries)
     if args.target and len(selected)!=1:
         raise ValueError('--target requires exactly one selected sample')
-    if not selected: raise ValueError('no samples match the requested scope')
     for e in selected:
         with np.load(args.audit/e['path']) as file: trace = dict(file)
         eligible = target_positions(trace,0)
@@ -92,6 +117,10 @@ def run(args):
     if original.get('audit_schema')!=3 or not original['settings'].get('save_states'):
         raise ValueError('message DAGs require v3 full-state caches; old scalar summaries cannot reconstruct them')
     manifest = plan(args, original)
+    if args.list_available:
+        print('Required: .npz + .history.npz + .qk.npz + .states.npz. '
+              'Optional .attention.npz, labels and old audit results are not required for graph construction.', flush=True)
+        return manifest
     model = args.model or Path(original['settings']['model'])
     cfg = json.loads((model/'config.json').read_text())
     settings = dict(schema=SCHEMA, model=str(model), mlp_rule=args.mlp_rule, edge_budget=args.edge_budget)
