@@ -7,8 +7,14 @@ import torch
 
 from experiments.reanchor_flow.message_dag import native_layer
 from experiments.reanchor_flow.message_dag.cache import NativeCache
-from experiments.reanchor_flow.message_dag.differential import DifferentialLayer, final_directions
-from experiments.reanchor_flow.message_dag.event_run import event_group_size
+from experiments.reanchor_flow.message_dag.differential import (
+    DifferentialLayer,
+    final_directions,
+)
+from experiments.reanchor_flow.message_dag.event_run import (
+    event_group_size,
+    reset_cuda_peak_memory,
+)
 from experiments.reanchor_flow.message_dag.event_trace import trace_events
 from experiments.reanchor_flow.tests.test_message_lineage import capture_fixture
 
@@ -81,6 +87,20 @@ def test_group_budget_changes_execution_size_without_dropping_remainder():
             events = list(range(243))
             selected = [e for i in range(0,len(events),group) for e in events[i:i+group]]
             assert selected==events
+
+
+def test_cuda_memory_profiling_passes_integer_device_to_legacy_torch(monkeypatch):
+    received = []
+
+    def legacy_reset(device):
+        if not isinstance(device, int):
+            raise RuntimeError('Invalid device argument')
+        received.append(device)
+
+    monkeypatch.setattr(torch.cuda, 'reset_peak_memory_stats', legacy_reset)
+
+    assert reset_cuda_peak_memory(torch, 'cuda:0') == 0
+    assert received == [0]
 
 
 def test_readout_cache_distinguishes_explicit_contrasts(tmp_path):

@@ -71,6 +71,18 @@ def event_group_size(rows, hidden_size, event_batch, state_cache_gib):
     return max(event_batch,capacity//event_batch*event_batch)
 
 
+def reset_cuda_peak_memory(torch_module, device):
+    """Reset profiling with the integer device required by older PyTorch builds."""
+    parsed = torch_module.device(device)
+    if parsed.type != 'cuda':
+        return None
+    index = parsed.index
+    if index is None:
+        index = torch_module.cuda.current_device()
+    torch_module.cuda.reset_peak_memory_stats(index)
+    return index
+
+
 def run(args):
     version = 1 if args.legacy_v1 else SCHEMA
     output = args.output or args.audit/f'lookback_events_v{version}'
@@ -193,8 +205,7 @@ def _run(args, output, version):
                       f'CPU shared states {host_bytes/2**30:.3f} GiB; group={group_size}, event batch={args.event_batch}; '
                       'operators/work buffers additional',flush=True)
                 profile = {} if args.profile else None
-                cuda = torch.device(args.device).type=='cuda'
-                if cuda: torch.cuda.reset_peak_memory_stats(args.device)
+                cuda_device = reset_cuda_peak_memory(torch,args.device)
                 trace_started = perf_counter()
                 readout = None
                 with tqdm(total=len(pending),desc=f'{sample_key(e)} DAG',unit='event',leave=False) as bar:
@@ -238,9 +249,9 @@ def _run(args, output, version):
                     'cpu_state_gib': host_bytes/2**30,
                     'trace_seconds': perf_counter()-trace_started,
                 }
-                if cuda:
-                    execution['cuda_peak_allocated_gib'] = torch.cuda.max_memory_allocated(args.device)/2**30
-                    execution['cuda_peak_reserved_gib'] = torch.cuda.max_memory_reserved(args.device)/2**30
+                if cuda_device is not None:
+                    execution['cuda_peak_allocated_gib'] = torch.cuda.max_memory_allocated(cuda_device)/2**30
+                    execution['cuda_peak_reserved_gib'] = torch.cuda.max_memory_reserved(cuda_device)/2**30
                 if profile is not None: execution['profile'] = profile
                 e['event_execution'] = execution
                 print('  execution: '+json.dumps(execution,sort_keys=True),flush=True)
