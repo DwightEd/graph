@@ -57,8 +57,9 @@ def sample_scores(folder, scan):
 
 def report_transport(output, manifest, *, bootstrap=200):
     from .event_report import labels_for
+    from .hurdle import summarize_hurdle
     output = Path(output)
-    ys,values,sources,tasks,coverage = [],[],[],[],[]
+    ys,values,sources,tasks,coverage,hurdle_samples = [],[],[],[],[],[]
     for entry in manifest['samples']:
         folder = output/entry['folder']
         if not (folder/'scan.npz').exists(): continue
@@ -81,6 +82,14 @@ def report_transport(output, manifest, *, bootstrap=200):
                              scored_N=int((common & (labels==0)).sum()),
                              scored_unknown=int((common & ~np.isin(labels,[0,1])).sum()),
                              reasons=dict(zip(unique,counts.tolist()))))
+        hurdle_samples.append({
+            'group': entry['split']+'/'+entry['task_type'],
+            'source': str(entry['source_id']),
+            'labels': labels,
+            'ordinary': ordinary,
+            'event': result['event_row'] >= 0,
+            'transport': result['risk'][0],
+        })
         ys.append(labels[common]);values.append(result['risk'][:,common])
         sources.extend([str(entry['source_id'])]*int(common.sum()))
         tasks.extend([entry['split']+'/'+entry['task_type']]*int(common.sum()))
@@ -90,10 +99,13 @@ def report_transport(output, manifest, *, bootstrap=200):
     task_array = np.asarray(tasks,dtype=str)
     report = detection_report(y,scores,np.asarray(sources,dtype=str),task_array,
                                primary='opposition',bootstrap=bootstrap)
-    report.update(status='unvalidated_event_conditioned_candidate',
+    hurdle = summarize_hurdle(hurdle_samples,bootstrap=bootstrap)
+    save_json(output/'transport_hurdle.json',hurdle)
+    report.update(status='two_stage_unvalidated_candidate',
                   event_selection='latest_detected_event_strictly_before_query',
                   comparison_scope='same_finite_tokens_for_all_scores',
                   labels_used_for_score=False,coverage=coverage,
+                  hurdle=hurdle,
                   ordinary_tokens=sum(c['ordinary_tokens'] for c in coverage),
                   primary_scored=sum(c['primary_scored'] for c in coverage),
                   common_scored=len(y))
@@ -106,4 +118,4 @@ def report_transport(output, manifest, *, bootstrap=200):
         print(f"  {group}: AUROC={metric['auroc']} AP={metric['auprc']} "
               f"prevalence={stats['prevalence']} sources={stats['sources']}",flush=True)
     return dict(primary='opposition',ordinary_tokens=report['ordinary_tokens'],
-                primary_scored=report['primary_scored'],common_scored=len(y))
+                primary_scored=report['primary_scored'],common_scored=len(y),hurdle=hurdle)

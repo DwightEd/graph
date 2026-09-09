@@ -180,6 +180,10 @@ def test_full_scope_pipeline_resume_missing_coverage_and_offline_report(tmp_path
     result=run(parser().parse_args(command+['--completed-only']))
     assert result['scanned']==6 and result['native_coverage']['skipped_samples']==1
     assert result['traced']==result['events']>0
+    assert result['transport']['hurdle']
+    for group in result['transport']['hurdle'].values():
+        assert group['estimand'].startswith('event incidence')
+        assert group['N']['tokens'] + group['H']['tokens'] > 0
     saved_index=json.loads((out/'index.json').read_text())
     assert saved_index['method_id']=='lookback_transport'
     assert saved_index['method_schema']==f'message-dag/lookback-tangent@{1 if legacy else 2}'
