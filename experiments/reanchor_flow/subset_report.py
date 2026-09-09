@@ -11,10 +11,9 @@ import numpy as np
 from sklearn.metrics import average_precision_score, roc_auc_score
 from tqdm.auto import tqdm
 
-from research_dataset import open_research_dataset
-
 from .artifact_schema import AUDIT_SCHEMA
 from .artifacts import save_json
+from .dataset import LabelSource, RagTruthLabelSource
 from .route_model import EVIDENCE, RESPONSE
 from .subset import MANIFEST_NAME, MANIFEST_SCHEMA
 
@@ -480,36 +479,17 @@ def _capture_rows(output: Path, manifest: dict) -> list[dict]:
 
 
 def _join_labels(
-    dataset_root: Path,
+    label_source: LabelSource,
     rows: list[dict],
     *,
     sample_ids: list[str] | None = None,
 ) -> dict[str, np.ndarray]:
-    sample_ids = list(
+    sample_ids = tuple(
         dict.fromkeys(
             sample_ids if sample_ids is not None else [row["sample_id"] for row in rows]
         )
     )
-    dataset = open_research_dataset(
-        dataset_root,
-        device="cpu",
-        retain_embedded_labels=True,
-    )
-    labels = dataset.prepare_evaluation_labels(sample_ids)
-    label_by_sample = {}
-    for sample_id in tqdm(
-        sample_ids,
-        desc=f"{dataset_root.name} evaluation labels",
-        unit="sample",
-        dynamic_ncols=True,
-    ):
-        sample = dataset[sample_id]
-        try:
-            label_by_sample[sample_id] = (
-                labels.response_labels(sample).detach().cpu().numpy()
-            )
-        finally:
-            sample.release_attention()
+    label_by_sample = label_source.load(sample_ids)
 
     for row in rows:
         relative = row.pop("prediction_position") - row.pop("response_start")
@@ -541,14 +521,15 @@ def _json_rows(rows: list[dict]) -> list[dict]:
 
 
 def evaluate_subset_split(
-    dataset_root: str | Path,
+    dataset_location: str | Path,
     output_root: str | Path,
     *,
+    label_source: LabelSource | None = None,
     plot: bool = False,
 ) -> dict:
     """Join labels after capture, then summarize mechanisms and fixed axes."""
 
-    dataset_root = Path(dataset_root)
+    dataset_location = Path(dataset_location)
     output = Path(output_root)
     manifest_path = output / MANIFEST_NAME
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -558,13 +539,23 @@ def evaluate_subset_split(
         raise ValueError("subset capture is incomplete")
     if manifest.get("labels_used_for_capture") is not False:
         raise ValueError("capture manifest violates the label firewall")
-    captured_dataset_root = Path(manifest["config"]["dataset_root"]).resolve()
-    if captured_dataset_root != dataset_root.resolve():
-        raise ValueError("evaluation dataset_root differs from capture manifest")
+    config = manifest["config"]
+    location_key = (
+        "dataset_manifest" if "dataset_manifest" in config else "dataset_root"
+    )
+    captured_location = Path(config[location_key]).resolve()
+    if captured_location != dataset_location.resolve():
+        raise ValueError(
+            f"evaluation {location_key} differs from capture manifest"
+        )
+    if label_source is None:
+        if location_key != "dataset_root":
+            raise ValueError("manifest evaluation requires an explicit label source")
+        label_source = RagTruthLabelSource(dataset_location)
 
     rows = _capture_rows(output, manifest)
     label_by_sample = _join_labels(
-        dataset_root, rows, sample_ids=list(manifest["samples"])
+        label_source, rows, sample_ids=list(manifest["samples"])
     )
 
     groups = {}

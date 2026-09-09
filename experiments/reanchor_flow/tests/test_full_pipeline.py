@@ -19,7 +19,7 @@ import torch
 pytest.importorskip("transformers")
 pytest.importorskip("matplotlib")
 
-from experiments.reanchor_flow import subset, subset_data, subset_report
+from experiments.reanchor_flow import dataset as dataset_module, subset, subset_report
 from experiments.reanchor_flow.cohort_plot import GROUPS
 from experiments.reanchor_flow.route_plan import RouteBudget
 from experiments.reanchor_flow.sample_scan import render_sample_scan
@@ -94,10 +94,9 @@ def test_full_scan_labels_resume_and_functional_refinement(tmp_path, monkeypatch
             allow_labels=retain_embedded_labels,
         )
 
-    monkeypatch.setattr(subset, "open_research_dataset", open_fixture)
-    monkeypatch.setattr(subset_report, "open_research_dataset", open_fixture)
+    monkeypatch.setattr(dataset_module, "open_research_dataset", open_fixture)
     monkeypatch.setattr(
-        subset_data, "build_source_units", lambda *_args: paired_world().units
+        dataset_module, "build_source_units", lambda *_args: paired_world().units
     )
     cache = tmp_path / "cache"
     cache.mkdir()
@@ -115,27 +114,28 @@ def test_full_scan_labels_resume_and_functional_refinement(tmp_path, monkeypatch
         model_id="tiny-llama",
         model_dtype="float32",
         tokenizer_id="tiny-llama",
-        dataset_root=str(cache.resolve()),
-        source_info=str(source_info.resolve()),
-        split="test",
-        tasks=("QA", "Summary"),
-        samples_per_task=0,
-        explicit_sample_ids=(),
-        selection_seed=2026,
-        targets_per_sample=3,
-        target_policy="reanchor-window",
-        max_response_tokens=None,
-        signal=subset.FlowSignal.MESSAGE,
-        carrier_scope="response",
-        coverage=0.9,
-        query_chunk=2,
-        route_budget=RouteBudget(max_rows=2),
-        local_window=1,
-        saved_edges=64,
+        cohort=subset.CohortPlan(("QA", "Summary"), 0, (), 2026),
+        targets=subset.TargetPlan(3, "reanchor-window", None),
+        mechanism=subset.MechanismPlan(
+            signal=subset.FlowSignal.MESSAGE,
+            carrier_scope="response",
+            coverage=0.9,
+            query_chunk=2,
+            route_budget=RouteBudget(max_rows=2),
+            local_window=1,
+            saved_edges=64,
+        ),
         scan_only=True,
     )
+    corpus = dataset_module.RagTruthAuditCorpus.open(
+        cache,
+        source_info,
+        split="test",
+        model_id=config.model_id,
+        tokenizer=tokenizer,
+    )
 
-    counts = subset.run_subset_split(model, tokenizer, output, config)
+    counts = subset.SubsetAuditRunner(model, tokenizer, corpus, output, config).run()
     assert counts == {"samples": 3, "targets": 0, "resumed": 0, "confirmed": 0}
     assert not label_access
     manifest = _read_json(output / "run_manifest.json")
@@ -183,13 +183,22 @@ def test_full_scan_labels_resume_and_functional_refinement(tmp_path, monkeypatch
     assert timeline.stat().st_size > 10_000
 
     mtimes = {path: path.stat().st_mtime_ns for path in saved_files}
-    assert subset.run_subset_split(model, tokenizer, output, config)["targets"] == 0
+    assert (
+        subset.SubsetAuditRunner(model, tokenizer, corpus, output, config).run()[
+            "targets"
+        ]
+        == 0
+    )
     assert len(label_access) == 1
     assert mtimes == {path: path.stat().st_mtime_ns for path in saved_files}
 
-    refined = subset.run_subset_split(
-        model, tokenizer, output, replace(config, scan_only=False)
-    )
+    refined = subset.SubsetAuditRunner(
+        model,
+        tokenizer,
+        corpus,
+        output,
+        replace(config, scan_only=False),
+    ).run()
     assert refined["samples"] == 3
     assert refined["targets"] == 9
     assert refined["resumed"] == 0
@@ -224,9 +233,13 @@ def test_full_scan_labels_resume_and_functional_refinement(tmp_path, monkeypatch
             assert len(stored["route_row_position"]) <= 2
             assert int(stored["route_row_position"][-1]) == query
     artifact_mtimes = {path: path.stat().st_mtime_ns for path in artifacts}
-    resumed = subset.run_subset_split(
-        model, tokenizer, output, replace(config, scan_only=False)
-    )
+    resumed = subset.SubsetAuditRunner(
+        model,
+        tokenizer,
+        corpus,
+        output,
+        replace(config, scan_only=False),
+    ).run()
     assert resumed["targets"] == resumed["resumed"] == 9
     assert artifact_mtimes == {path: path.stat().st_mtime_ns for path in artifacts}
     assert len(label_access) == 2

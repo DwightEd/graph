@@ -1,1 +1,4 @@
-"""Source-resolved, signed message propagation on a native computation DAG."""
+"""Conservation-certified source allocation and lookback transport studies.
+
+See ``ARCHITECTURE.md`` before interpreting either method as a mechanism.
+"""

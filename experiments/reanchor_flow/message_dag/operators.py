@@ -7,43 +7,21 @@ weights, autograd, ablation, dense D x D operators, or averaged heads.
 import torch
 import torch.nn.functional as F
 
-from ..message_lineage import attention_chunks
+from .native_layer import NativeLayer
 
 
-class LayerOperator:
-    def __init__(self, cache, layer, rule="symmetric", chunk=8, *, linear_allocation=True):
-        self.cache, self.layer, self.chunk = cache, layer, chunk
-        trace, states, weights = cache.trace, cache.states, cache.weights
-        self.device = weights.device
+class LayerOperator(NativeLayer):
+    """Conditional source-allocation operator at a native reference layer."""
+
+    def __init__(self, cache, layer, rule="symmetric", chunk=8):
+        super().__init__(cache, layer, chunk)
         self.source_values = None  # shared across targets in the same layer block
-        prefix = f"model.layers.{layer}."
-        names = {"input_norm": "input_layernorm.weight", "post_norm": "post_attention_layernorm.weight",
-                 "value": "self_attn.v_proj.weight", "output": "self_attn.o_proj.weight",
-                 "gate": "mlp.gate_proj.weight", "up": "mlp.up_proj.weight", "down": "mlp.down_proj.weight"}
-        native = {k: weights.get(prefix + name) for k, name in names.items()}
-        self.w = {k: value.float() for k, value in native.items()}
-        self.rows = torch.as_tensor(trace["row_position"], device=self.device)
-        self.carrier = self.rows >= int(trace["response_start"])
-        self.h = weights.config["num_attention_heads"]
-        self.kv = weights.config["num_key_value_heads"]
-        self.d = weights.config["hidden_size"]
-        self.hd = self.d // self.h
-        self.x = self.tensor(states[f"residual_{layer}"])
-        self.value = self.tensor(states[f"value_{layer}"])
-        self.qk = {f"{name}_{layer}": cache.qk[f"{name}_{layer}"] for name in ("query", "key", "dtype", "scale")}
-        self.history = {f"L{layer}": self.tensor(cache.history[f"L{layer}"])}
-        dtype = getattr(torch, str(cache.qk[f"dtype_{layer}"]))
-        self.post = (self.x.to(dtype) + self.tensor(states[f"attention_{layer}"]).to(dtype)).float()
-        eps = weights.config["rms_norm_eps"]
-        scale = lambda x, w: w * torch.rsqrt(x.square().mean(-1, keepdim=True) + eps)
-        self.input_scale = scale(self.x, self.w["input_norm"])
-        self.post_scale = scale(self.post, self.w["post_norm"])
-        if not linear_allocation:
-            return  # differential operators compute their own native MLP derivative
         key = f"residual_{layer+1}" if layer+1 < cache.layers else "final_residual"
-        self.next = self.tensor(states[key])
+        self.next = self.tensor(cache.states[key])
+        dtype = getattr(torch, str(cache.qk[f"dtype_{layer}"]))
         z = (self.post * self.post_scale).to(dtype)
-        gate, up = F.linear(z, native["gate"]).float(), F.linear(z, native["up"]).float()
+        gate = F.linear(z, self.native_weights["gate"]).float()
+        up = F.linear(z, self.native_weights["up"]).float()
         activation = F.silu(gate.to(dtype)).float()
         if rule == "symmetric":
             secant = torch.where(gate != 0, activation / torch.where(gate != 0, gate, 1), .5)
@@ -52,19 +30,6 @@ class LayerOperator:
             self.up_factor, self.gate_factor = activation, None
         else:
             raise ValueError("MLP allocation must be symmetric or up")
-
-    def tensor(self, x):
-        return torch.as_tensor(x, device=self.device, dtype=torch.float32)
-
-    def rows_attention(self, stop=None):
-        c = self.cache
-        for begin,end,a in attention_chunks(c.trace,self.qk,self.history,self.layer,self.device,self.chunk):
-            if stop is not None:
-                if begin>=stop: return
-                end=min(end,stop)
-                a=a[:,:end-begin]
-            yield begin,end,a
-            if stop is not None and end==stop: return
 
     def values(self, part):
         """[group,R,D] -> [group,Hkv,R,d]; prompt predictor is a boundary."""

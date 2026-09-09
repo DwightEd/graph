@@ -8,7 +8,7 @@ import torch
 from experiments.reanchor_flow.message_dag.cache import NativeCache
 from experiments.reanchor_flow.message_dag.differential import DifferentialLayer, rms_jvp, rms_vjp
 from experiments.reanchor_flow.message_dag.event_trace import trace_events
-from experiments.reanchor_flow.message_dag.transport import CutRecorder, prepare_local_readout
+from experiments.reanchor_flow.message_dag.cut_artifact import CutRecorder, prepare_local_readout
 from experiments.reanchor_flow.message_dag.transport import last_crossing_edges
 from experiments.reanchor_flow.message_dag.differential import final_directions
 from experiments.reanchor_flow.message_dag.transport_report import sample_scores

@@ -584,7 +584,7 @@ def test_native_plan_freezes_roots_before_optional_confirmation() -> None:
 
 
 def test_target_policy_uses_only_clean_margin() -> None:
-    from experiments.reanchor_flow.subset_data import target_slots
+    from experiments.reanchor_flow.target_selection import target_slots
 
     cache = SimpleNamespace(
         query=torch.arange(5),

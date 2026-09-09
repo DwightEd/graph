@@ -181,6 +181,8 @@ def test_full_scope_pipeline_resume_missing_coverage_and_offline_report(tmp_path
     assert result['scanned']==6 and result['native_coverage']['skipped_samples']==1
     assert result['traced']==result['events']>0
     saved_index=json.loads((out/'index.json').read_text())
+    assert saved_index['method_id']=='lookback_transport'
+    assert saved_index['method_schema']==f'message-dag/lookback-tangent@{1 if legacy else 2}'
     assert all(e['event_execution']['profile']['layer_builds']>0 for e in saved_index['samples'])
     assert set(r['sample'].split('/')[1] for r in result['samples'])=={'QA','Summary','Data2txt'}
     files=list(out.rglob('event_*.npz'));before={p:p.stat().st_mtime_ns for p in files}
@@ -214,6 +216,7 @@ def test_full_scope_pipeline_resume_missing_coverage_and_offline_report(tmp_path
     assert missing.exists() and files[0].stat().st_mtime_ns!=before[files[0]]
     assert all(p.stat().st_mtime_ns==before[p] for p in files[1:])
     shutil.rmtree(audit);shutil.rmtree(fixture)
-    offline=run(parser().parse_args(['--phase','evaluate','--output',str(out),'--bootstrap','0']))
+    from experiments.reanchor_flow.message_dag.evaluation import OfflineEvaluator
+    offline=OfflineEvaluator(out,bootstrap=0).run()
     assert offline['traced']==result['traced']
     assert (out/'gallery.html').exists() and list(out.rglob('preview.html'))

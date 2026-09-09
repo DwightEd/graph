@@ -4,8 +4,20 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import quote
 
 import numpy as np
+
+
+def safe_sample_key(sample_id: str) -> str:
+    """Encode a dataset ID as one readable, reversible filename component."""
+
+    if not sample_id:
+        raise ValueError("sample_id cannot be empty")
+    encoded = quote(sample_id, safe="._-")
+    if encoded in {".", ".."}:
+        return f"sample-{encoded}"
+    return encoded
 
 
 def as_array(value) -> np.ndarray:

@@ -17,13 +17,24 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from experiments.common.ragtruth_alignment import TASK_TYPES
 
 from .audit import audit_target, save_audit
+from .dataset import (
+    ManifestAuditCorpus,
+    ManifestLabelSource,
+    RagTruthAuditCorpus,
+)
 from .flow import FlowSignal
 from .mechanism_plot import save_mechanism_figure
 from .route_plan import RouteBudget
 from .sample_scan import render_sample_scan
-from .subset import SubsetRunConfig, run_subset_split
-from .subset_data import REANCHOR_POLICIES
+from .subset import (
+    CohortPlan,
+    MechanismPlan,
+    SubsetAuditRunner,
+    SubsetRunConfig,
+    TargetPlan,
+)
 from .subset_report import evaluate_subset_split
+from .target_selection import REANCHOR_POLICIES
 from .worlds import load_world
 
 MODEL = Path(
@@ -66,6 +77,35 @@ def subset_output_root(args: argparse.Namespace) -> Path:
 
 def subset_split_output(args: argparse.Namespace, split: str) -> Path:
     return subset_output_root(args) / split
+
+
+def split_manifest_path(path: Path, split: str) -> Path:
+    """Resolve one split from either a JSON file or a train/test directory."""
+
+    return path / f"{split}.json" if path.is_dir() else path
+
+
+def audit_corpus_from_args(args: argparse.Namespace, tokenizer, split: str):
+    """Construct the only external data dependency used by the audit runner."""
+
+    if args.dataset_manifest is not None:
+        corpus = ManifestAuditCorpus.open(
+            split_manifest_path(args.dataset_manifest, split)
+        )
+        if corpus.identity.split.casefold() != split.casefold():
+            raise ValueError(
+                f"dataset split {corpus.identity.split!r} differs from requested "
+                f"split {split!r}"
+            )
+        return corpus
+    return RagTruthAuditCorpus.open(
+        args.cache / split,
+        args.source_info,
+        split=split,
+        model_id=str(args.model.resolve()),
+        tokenizer=tokenizer,
+        sample_ids=tuple(args.sample_id or ()),
+    )
 
 
 def load_model(path: Path, device: str, dtype: str):
@@ -247,6 +287,7 @@ def subset_config_from_args(
     args: argparse.Namespace,
     tokenizer,
     split: str,
+    available_tasks: tuple[str, ...] = TASK_TYPES,
 ) -> SubsetRunConfig:
     """Translate one validated CLI request into the subset service contract."""
 
@@ -254,31 +295,34 @@ def subset_config_from_args(
         model_id=str(args.model.resolve()),
         model_dtype=args.dtype,
         tokenizer_id=Path(tokenizer.name_or_path).name,
-        dataset_root=str((args.cache / split).resolve()),
-        source_info=str(args.source_info.resolve()),
-        split=split,
-        tasks=TASK_TYPES if args.task == "all" else (args.task,),
-        samples_per_task=args.samples_per_task,
-        explicit_sample_ids=tuple(args.sample_id or ()),
-        selection_seed=args.selection_seed,
-        targets_per_sample=args.targets_per_sample,
-        target_policy=args.target_policy,
-        max_response_tokens=(
-            None if args.max_response_tokens == 0 else args.max_response_tokens
+        cohort=CohortPlan(
+            tasks=available_tasks if args.task == "all" else (args.task,),
+            samples_per_task=args.samples_per_task,
+            sample_ids=tuple(args.sample_id or ()),
+            seed=args.selection_seed,
         ),
-        signal=FlowSignal(args.flow_signal),
-        carrier_scope=args.carrier_scope,
-        coverage=args.edge_coverage,
-        query_chunk=args.query_chunk,
-        route_budget=RouteBudget(
-            edges_per_head=args.edges_per_head,
-            max_rows=args.max_route_rows,
-            root_candidates=args.root_candidates,
-            hub_candidates=args.hub_candidates,
-            corridor_edges=args.corridor_edges,
-            confirm=args.confirm,
+        targets=TargetPlan(
+            count=args.targets_per_sample,
+            policy=args.target_policy,
+            max_response_tokens=(
+                None if args.max_response_tokens == 0 else args.max_response_tokens
+            ),
         ),
-        local_window=args.local_window,
+        mechanism=MechanismPlan(
+            signal=FlowSignal(args.flow_signal),
+            carrier_scope=args.carrier_scope,
+            coverage=args.edge_coverage,
+            query_chunk=args.query_chunk,
+            route_budget=RouteBudget(
+                edges_per_head=args.edges_per_head,
+                max_rows=args.max_route_rows,
+                root_candidates=args.root_candidates,
+                hub_candidates=args.hub_candidates,
+                corridor_edges=args.corridor_edges,
+                confirm=args.confirm,
+            ),
+            local_window=args.local_window,
+        ),
         scan_only=args.scan_only,
     )
 
@@ -314,17 +358,25 @@ def audit_subset(args: argparse.Namespace) -> dict:
     reports = {}
     for split in selected_splits(args):
         output = subset_split_output(args, split)
-        config = subset_config_from_args(args, tokenizer, split)
-        counts = run_subset_split(
+        corpus = audit_corpus_from_args(args, tokenizer, split)
+        available_tasks = tuple(dict.fromkeys(row.task_type for row in corpus.records))
+        config = subset_config_from_args(
+            args,
+            tokenizer,
+            split,
+            available_tasks,
+        )
+        counts = SubsetAuditRunner(
             model,
             tokenizer,
+            corpus,
             output,
             config,
-        )
+        ).run()
         reports[split] = counts
         confirmation = (
             f"corridors_confirmed={counts['confirmed']}"
-            if config.route_budget.confirm
+            if config.mechanism.route_budget.confirm
             else "exact_confirmation=not-requested"
         )
         print(
@@ -337,9 +389,22 @@ def audit_subset(args: argparse.Namespace) -> dict:
         if args.plot or args.command == "audit-all":
             print(f"sample timeline figures: {_render_scans(output, tokenizer)}")
         if args.evaluate:
+            dataset_path = (
+                split_manifest_path(args.dataset_manifest, split)
+                if args.dataset_manifest is not None
+                else args.cache / split
+            )
+            label_source = (
+                ManifestLabelSource.open(
+                    split_manifest_path(args.label_manifest, split)
+                )
+                if args.label_manifest is not None
+                else None
+            )
             evaluation = evaluate_subset_split(
-                args.cache / split,
+                dataset_path,
                 output,
+                label_source=label_source,
                 plot=args.plot or args.command == "audit-all",
             )
             _print_evaluation(split, evaluation)
@@ -353,9 +418,20 @@ def evaluate_subset(args: argparse.Namespace) -> dict:
 
     reports = {}
     for split in selected_splits(args):
+        dataset_path = (
+            split_manifest_path(args.dataset_manifest, split)
+            if args.dataset_manifest is not None
+            else args.cache / split
+        )
+        label_source = (
+            ManifestLabelSource.open(split_manifest_path(args.label_manifest, split))
+            if args.label_manifest is not None
+            else None
+        )
         report = evaluate_subset_split(
-            args.cache / split,
+            dataset_path,
             subset_split_output(args, split),
+            label_source=label_source,
             plot=args.plot,
         )
         reports[split] = report
@@ -429,6 +505,21 @@ def add_corridor(command: argparse.ArgumentParser) -> None:
 def add_subset(command: argparse.ArgumentParser, *, evaluation: bool = False) -> None:
     command.add_argument("--model", type=Path, default=MODEL)
     command.add_argument("--cache", type=Path, default=CACHE)
+    command.add_argument(
+        "--dataset-manifest",
+        type=Path,
+        help=(
+            "dataset-neutral aligned input JSON; for --split all pass a "
+            "directory containing train.json and test.json"
+        ),
+    )
+    command.add_argument(
+        "--label-manifest",
+        type=Path,
+        help=(
+            "separate post-capture label JSON; for --split all pass a directory"
+        ),
+    )
     command.add_argument("--output", type=Path)
     command.add_argument("--split", choices=("train", "test", "all"), default="test")
     if evaluation:
@@ -438,7 +529,11 @@ def add_subset(command: argparse.ArgumentParser, *, evaluation: bool = False) ->
         return
 
     command.add_argument("--source-info", type=Path, default=SOURCE_INFO)
-    command.add_argument("--task", choices=(*TASK_TYPES, "all"), default="all")
+    command.add_argument(
+        "--task",
+        default="all",
+        help="task name from the selected corpus, or all",
+    )
     command.add_argument(
         "--samples-per-task",
         type=int,
@@ -525,7 +620,8 @@ def add_subset(command: argparse.ArgumentParser, *, evaluation: bool = False) ->
     )
     command.add_argument(
         "--evaluate",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=False,
         help="join labels and compute cohort comparisons after each split finishes",
     )
     command.add_argument(
@@ -621,6 +717,22 @@ def validate_args(args: argparse.Namespace) -> None:
         and args.split == "all"
     ):
         raise ValueError("--sample-id requires one concrete --split")
+    if getattr(args, "dataset_manifest", None) is not None:
+        if args.split == "all" and args.dataset_manifest.suffix:
+            raise ValueError(
+                "--dataset-manifest must be a directory when --split is all"
+            )
+        if getattr(args, "evaluate", True) and args.label_manifest is None:
+            raise ValueError(
+                "manifest-dataset evaluation requires a separate --label-manifest"
+            )
+    if getattr(args, "label_manifest", None) is not None:
+        if args.dataset_manifest is None:
+            raise ValueError("--label-manifest requires --dataset-manifest")
+        if args.split == "all" and args.label_manifest.suffix:
+            raise ValueError(
+                "--label-manifest must be a directory when --split is all"
+            )
 
 
 def main() -> None:

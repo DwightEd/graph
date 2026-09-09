@@ -8,7 +8,7 @@ import numpy as np
 
 from experiments.reanchor_flow.flow import FlowSignal
 from experiments.reanchor_flow.route_plan import RouteBudget
-from experiments.reanchor_flow.subset_data import SampleRecord
+from experiments.reanchor_flow.dataset import CorpusIdentity, SampleRecord
 from experiments.reanchor_flow.worlds import TargetContrast
 
 
@@ -37,28 +37,37 @@ class RecordingTqdm:
 
 
 def _config(tmp_path):
-    from experiments.reanchor_flow.subset import SubsetRunConfig
+    from experiments.reanchor_flow.subset import (
+        CohortPlan,
+        MechanismPlan,
+        SubsetRunConfig,
+        TargetPlan,
+    )
 
     return SubsetRunConfig(
         model_id="model",
         model_dtype="float32",
         tokenizer_id="tokenizer",
-        dataset_root=str(tmp_path / "cache"),
+        cohort=CohortPlan(("QA",), 1, (), 2026),
+        targets=TargetPlan(1, "uncertain", 128),
+        mechanism=MechanismPlan(
+            FlowSignal.MESSAGE,
+            "response",
+            0.9,
+            8,
+            RouteBudget(),
+            10,
+        ),
+    )
+
+
+def _identity(tmp_path, split="test"):
+    return CorpusIdentity(
+        "ragtruth",
+        str(tmp_path / "cache"),
+        split,
+        "tokenizer",
         source_info=str(tmp_path / "source.jsonl"),
-        split="test",
-        tasks=("QA",),
-        samples_per_task=1,
-        explicit_sample_ids=(),
-        selection_seed=2026,
-        targets_per_sample=1,
-        target_policy="uncertain",
-        max_response_tokens=128,
-        signal=FlowSignal.MESSAGE,
-        carrier_scope="response",
-        coverage=0.9,
-        query_chunk=8,
-        route_budget=RouteBudget(),
-        local_window=10,
     )
 
 
@@ -78,7 +87,7 @@ def test_subset_cli_defaults_to_budgeted_discovery() -> None:
     )
 
     assert args.carrier_scope == "response"
-    assert config.route_budget == RouteBudget(
+    assert config.mechanism.route_budget == RouteBudget(
         edges_per_head=2,
         max_rows=256,
         root_candidates=4,
@@ -99,7 +108,9 @@ def test_top_level_help_names_the_current_renderable_artifact_schema() -> None:
     assert "schema-3" in parser().format_help()
 
 
-def test_audit_all_defaults_to_all_samples_full_responses_and_bounded_targets() -> None:
+def test_audit_all_defaults_to_all_samples_full_responses_and_bounded_targets(
+    tmp_path,
+) -> None:
     from experiments.reanchor_flow.run import (
         parser,
         selected_splits,
@@ -117,15 +128,17 @@ def test_audit_all_defaults_to_all_samples_full_responses_and_bounded_targets() 
     config = subset_config_from_args(
         args, SimpleNamespace(name_or_path="model"), "test"
     )
-    assert config.max_response_tokens is None
-    assert not config.route_budget.confirm
+    assert config.targets.max_response_tokens is None
+    assert not config.mechanism.route_budget.confirm
 
     scan_args = parser().parse_args(["audit-all", "--scan-only"])
     scan_config = subset_config_from_args(
         scan_args, SimpleNamespace(name_or_path="model"), "test"
     )
     assert scan_config.scan_only
-    assert scan_config.manifest_value() == config.manifest_value()
+    assert scan_config.manifest_value(_identity(tmp_path)) == config.manifest_value(
+        _identity(tmp_path)
+    )
 
 
 def test_audit_all_loads_model_once_and_evaluates_each_finished_split(
@@ -142,19 +155,32 @@ def test_audit_all_loads_model_once_and_evaluates_each_finished_split(
         calls.append("model")
         return model, tokenizer
 
-    def capture(received_model, received_tokenizer, output, config):
-        assert received_model is model and received_tokenizer is tokenizer
-        assert config.samples_per_task == 0 and config.max_response_tokens is None
-        calls.append(f"capture {config.split}")
-        return {"samples": 2, "targets": 6, "resumed": 0, "confirmed": 0}
+    def corpus(_args, _tokenizer, split):
+        return SimpleNamespace(
+            identity=_identity(tmp_path, split),
+            records=(SampleRecord(split, split, "QA", "generator"),),
+        )
 
-    def evaluate(dataset, output, *, plot):
+    class Runner:
+        def __init__(self, received_model, received_tokenizer, _corpus, _output, config):
+            assert received_model is model and received_tokenizer is tokenizer
+            assert config.cohort.samples_per_task == 0
+            assert config.targets.max_response_tokens is None
+            self.split = _corpus.identity.split
+
+        def run(self):
+            calls.append(f"capture {self.split}")
+            return {"samples": 2, "targets": 6, "resumed": 0, "confirmed": 0}
+
+    def evaluate(dataset, output, *, label_source, plot):
         assert plot
+        assert label_source is None
         calls.append(f"evaluate {output.name}")
         return {"groups": {}}
 
     monkeypatch.setattr(run, "load_model", load)
-    monkeypatch.setattr(run, "run_subset_split", capture)
+    monkeypatch.setattr(run, "audit_corpus_from_args", corpus)
+    monkeypatch.setattr(run, "SubsetAuditRunner", Runner)
     monkeypatch.setattr(run, "evaluate_subset_split", evaluate)
     monkeypatch.setattr(run, "_render_scans", lambda *_args: 2)
     monkeypatch.setattr(run, "clear_memory", lambda: None)
@@ -198,27 +224,30 @@ def test_resumed_target_advances_target_progress(tmp_path, monkeypatch) -> None:
     destination.parent.mkdir(parents=True)
     np.savez_compressed(destination, corridor_confirmed=False)
     config = _config(tmp_path)
-    identity = subset._audit_identity(
+    corpus = SimpleNamespace(identity=_identity(tmp_path))
+    runner = subset.SubsetAuditRunner(
+        object(),
+        SimpleNamespace(name_or_path="tokenizer"),
+        corpus,
+        output,
+        config,
+    )
+    identity = runner._audit_identity(
         world,
         record,
         target,
         0,
         destination,
-        output,
-        config,
     )
     manifest = {"audits": {"q1:q4_a9_b8_message": identity}}
     counts = {"samples": 0, "targets": 0, "resumed": 0, "confirmed": 0}
 
-    subset._run_world_targets(
-        object(),
-        world,
+    runner._run_targets(
         record,
-        output,
+        world,
         manifest,
         output / "run_manifest.json",
         counts,
-        config,
     )
 
     progress = RecordingTqdm.instances[-1]
@@ -233,7 +262,10 @@ def test_subset_split_advances_sample_progress(tmp_path, monkeypatch) -> None:
 
     RecordingTqdm.instances.clear()
     record = SampleRecord("q1", "source-a", "QA", "generator")
-    dataset = SimpleNamespace(manifest={"split": "test"}, spec={})
+    corpus = SimpleNamespace(
+        identity=_identity(tmp_path),
+        records=(record,),
+    )
     world = SimpleNamespace(
         sample_id="q1",
         tokenizer_id="tokenizer",
@@ -241,24 +273,19 @@ def test_subset_split_advances_sample_progress(tmp_path, monkeypatch) -> None:
         target_selection=(),
     )
     monkeypatch.setattr(subset, "tqdm", RecordingTqdm)
-    monkeypatch.setattr(subset, "open_research_dataset", lambda *_args, **_kw: dataset)
     monkeypatch.setattr(
-        subset,
-        "load_source_info",
-        lambda _path: {"source-a": {"task_type": "QA"}},
+        subset.SubsetAuditRunner,
+        "_load_or_build_world",
+        lambda *_args: world,
     )
-    monkeypatch.setattr(subset, "inspect_records", lambda *_args, **_kw: (record,))
-    monkeypatch.setattr(subset, "select_records", lambda *_args, **_kw: (record,))
-    monkeypatch.setattr(subset, "load_world_from_dataset", lambda *_args, **_kw: world)
-    monkeypatch.setattr(subset, "save_native_world", lambda *_args: None)
-    monkeypatch.setattr(subset, "_run_world_targets", lambda *_args: None)
 
-    counts = subset.run_subset_split(
+    counts = subset.SubsetAuditRunner(
         object(),
         SimpleNamespace(name_or_path="tokenizer"),
+        corpus,
         tmp_path / "output",
         _config(tmp_path),
-    )
+    ).run()
 
     progress = RecordingTqdm.instances[-1]
     assert progress.options["unit"] == "sample"
@@ -303,16 +330,20 @@ def test_computed_target_reports_internal_phases(tmp_path, monkeypatch) -> None:
     record = SampleRecord("q1", "source-a", "QA", "generator")
     output = tmp_path / "output"
     counts = {"samples": 0, "targets": 0, "resumed": 0, "confirmed": 0}
-
-    subset._run_world_targets(
+    runner = subset.SubsetAuditRunner(
         object(),
-        world,
-        record,
+        SimpleNamespace(name_or_path="tokenizer"),
+        SimpleNamespace(identity=_identity(tmp_path)),
         output,
+        _config(tmp_path),
+    )
+
+    runner._run_targets(
+        record,
+        world,
         {"audits": {}},
         output / "run_manifest.json",
         counts,
-        _config(tmp_path),
     )
 
     progress = RecordingTqdm.instances[-1]

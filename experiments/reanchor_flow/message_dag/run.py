@@ -1,9 +1,9 @@
 """Build message DAGs from completed v3 caches, then compare N/H offline."""
 import argparse
-from collections import defaultdict
 import json
-from pathlib import Path
 import shutil
+from collections import defaultdict
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import perf_counter
 
@@ -13,7 +13,14 @@ from tqdm.auto import tqdm
 from ..attention_audit_run import analysis_manifest
 from ..attention_rhythm_report import save_json
 from ..message_lineage import CheckpointWeights
-from .cache import MASK_POLICY, NativeCache, read_trace, source_partition, target_positions
+from .artifacts import SOURCE_ALLOCATION, artifact_header, atomic_path
+from .cache import (
+    MASK_POLICY,
+    NativeCache,
+    read_trace,
+    source_partition,
+    target_positions,
+)
 from .graph import SCHEMA, Tape, blocks, prepare, trace_targets
 from .selection import paired_plan, read_labels, target_details
 from .structure import describe
@@ -48,15 +55,15 @@ def parser():
 
 
 def atomic_npz(path, **values):
-    temporary = path.with_suffix('.tmp.npz')
-    np.savez_compressed(temporary, **values)
-    temporary.replace(path)
+    with atomic_path(path) as temporary:
+        np.savez_compressed(temporary, **values)
 
 
 def ensure_labels(args, manifest):
     missing = [e for e in manifest['samples'] if not (args.audit/e['path']).with_suffix('.labels.npz').exists()]
     if not missing: return
-    from ..attention_audit_run import join_labels, parser as audit_parser
+    from ..attention_audit_run import join_labels
+    from ..attention_audit_run import parser as audit_parser
     label_args = audit_parser().parse_args(['--phase','analyze','--output',str(args.audit)])
     if manifest.get('config',{}).get('cache'): label_args.cache=Path(manifest['config']['cache'])
     join_labels(label_args,{**manifest,'samples':missing},save_index=False)
@@ -122,7 +129,15 @@ def plan(args, original):
         labels=read_labels(path,trace) if path.with_suffix('.labels.npz').exists() else None
         e['target_details']=target_details(trace,targets,labels)
         e['added_special_positions']=trace['added_special_positions'].tolist()
-    return {**native, 'samples':selected,'selection':dict(mode='uniform',labels_used_for_selection=False,labels_used_for_graph=False)}
+    return {
+        **native,
+        'samples': selected,
+        'selection': {
+            'mode': 'uniform',
+            'labels_used_for_selection': False,
+            'labels_used_for_graph': False,
+        },
+    }
 
 
 def run(args):
@@ -153,10 +168,17 @@ def run(args):
         return manifest
     model = args.model or Path(original['settings']['model'])
     cfg = json.loads((model/'config.json').read_text())
-    settings = dict(schema=SCHEMA, model=str(model), mlp_rule=args.mlp_rule, edge_budget=args.edge_budget,mask_policy=MASK_POLICY)
+    settings = {
+        'schema': SCHEMA,
+        'model': str(model),
+        'mlp_rule': args.mlp_rule,
+        'edge_budget': args.edge_budget,
+        'mask_policy': MASK_POLICY,
+    }
     if previous.exists() and json.loads(previous.read_text()).get('dag_settings')!=settings:
         raise ValueError('DAG settings changed; choose another --output before replacing an existing comparison')
     manifest['dag_settings'] = settings
+    manifest.update(artifact_header(SOURCE_ALLOCATION, SCHEMA))
     manifest['native_audit'] = str(args.audit.resolve())
     manifest['selection_request']=request
     peak_tape,output_bytes,layer_loads = 0,0,0
@@ -215,9 +237,11 @@ def run(args):
         if weights is None: weights=CheckpointWeights(model,args.device)
         started = perf_counter()
         progress = tqdm(total=cfg['num_hidden_layers']*(len(missing)+1),desc=str(e['sample_id']),unit='layer',leave=False)
-        def update(stage):
-            progress.set_postfix_str(f'{stage}; elapsed={perf_counter()-started:.1f}s',refresh=False)
-            progress.update(1)
+        def update(stage, progress_bar=progress, sample_started=started):
+            progress_bar.set_postfix_str(
+                f'{stage}; elapsed={perf_counter()-sample_started:.1f}s', refresh=False
+            )
+            progress_bar.update(1)
         with NativeCache(path,weights) as cache, TemporaryDirectory(prefix='dag-',dir=scratch) as temporary:
             tape = Tape(cache,temporary)
             try:

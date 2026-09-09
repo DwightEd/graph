@@ -11,26 +11,17 @@ import numpy as np
 import torch
 from tqdm.auto import tqdm
 
-from experiments.common.ragtruth_alignment import load_source_info
-from research_dataset import open_research_dataset
-
 from .artifact_payload import save_native_audit
 from .artifact_schema import METHOD_VERSION, NativeAuditMetadata
 from .artifact_validation import validate_native_audit
-from .artifacts import save_json
+from .artifacts import safe_sample_key, save_json
+from .dataset import AuditCorpus, AuditSample, CorpusIdentity, SampleRecord, select_records
 from .flow import FlowSignal
 from .native import audit_native_target
-from .native_world import load_native_world, save_native_world
+from .native_world import NativeWorld, load_native_world, save_native_world
 from .route_plan import RouteBudget
 from .sample_scan import SampleScan
-from .subset_data import (
-    SampleRecord,
-    inspect_records,
-    load_world_from_dataset,
-    safe_sample_key,
-    sample_tokens,
-    select_records,
-)
+from .target_selection import freeze_target_plan
 from .worlds import TargetContrast
 
 MANIFEST_NAME = "run_manifest.json"
@@ -38,22 +29,28 @@ MANIFEST_SCHEMA = 3
 
 
 @dataclass(frozen=True)
-class SubsetRunConfig:
-    """Scientific and input identity shared by every target in one run."""
+class CohortPlan:
+    """Label-free sample-selection policy."""
 
-    model_id: str
-    model_dtype: str
-    tokenizer_id: str
-    dataset_root: str
-    source_info: str
-    split: str
     tasks: tuple[str, ...]
     samples_per_task: int
-    explicit_sample_ids: tuple[str, ...]
-    selection_seed: int
-    targets_per_sample: int
-    target_policy: str
+    sample_ids: tuple[str, ...]
+    seed: int
+
+
+@dataclass(frozen=True)
+class TargetPlan:
+    """Teacher-forced response rows to freeze before functional analysis."""
+
+    count: int
+    policy: str
     max_response_tokens: int | None
+
+
+@dataclass(frozen=True)
+class MechanismPlan:
+    """Route-capture, intervention, and persistence settings."""
+
     signal: FlowSignal
     carrier_scope: str
     coverage: float
@@ -61,33 +58,43 @@ class SubsetRunConfig:
     route_budget: RouteBudget
     local_window: int
     saved_edges: int = 2048
+
+
+@dataclass(frozen=True)
+class SubsetRunConfig:
+    """One readable run contract instead of a flat parameter bundle."""
+
+    model_id: str
+    model_dtype: str
+    tokenizer_id: str
+    cohort: CohortPlan
+    targets: TargetPlan
+    mechanism: MechanismPlan
     scan_only: bool = False
 
-    def manifest_value(self) -> dict[str, object]:
-        """Return the small JSON contract used to resume this exact run."""
+    def manifest_value(self, corpus: CorpusIdentity) -> dict[str, object]:
+        """Serialize the existing resume contract without changing audit math."""
 
         return {
             "method": METHOD_VERSION,
             "model": self.model_id,
             "model_dtype": self.model_dtype,
             "tokenizer": self.tokenizer_id,
-            "dataset_root": self.dataset_root,
-            "source_info": self.source_info,
-            "split": self.split,
-            "tasks": list(self.tasks),
-            "samples_per_task": self.samples_per_task,
-            "explicit_sample_ids": list(self.explicit_sample_ids),
-            "selection_seed": self.selection_seed,
-            "targets_per_sample": self.targets_per_sample,
-            "target_policy": self.target_policy,
-            "max_response_tokens": self.max_response_tokens,
-            "flow_signal": self.signal.value,
-            "carrier_scope": self.carrier_scope,
-            "edge_coverage": self.coverage,
-            "query_chunk": self.query_chunk,
-            "route_budget": asdict(self.route_budget),
-            "local_window": self.local_window,
-            "saved_edges": self.saved_edges,
+            **corpus.manifest_fields(),
+            "tasks": list(self.cohort.tasks),
+            "samples_per_task": self.cohort.samples_per_task,
+            "explicit_sample_ids": list(self.cohort.sample_ids),
+            "selection_seed": self.cohort.seed,
+            "targets_per_sample": self.targets.count,
+            "target_policy": self.targets.policy,
+            "max_response_tokens": self.targets.max_response_tokens,
+            "flow_signal": self.mechanism.signal.value,
+            "carrier_scope": self.mechanism.carrier_scope,
+            "edge_coverage": self.mechanism.coverage,
+            "query_chunk": self.mechanism.query_chunk,
+            "route_budget": asdict(self.mechanism.route_budget),
+            "local_window": self.mechanism.local_window,
+            "saved_edges": self.mechanism.saved_edges,
         }
 
 
@@ -130,144 +137,198 @@ def _target_key(target: TargetContrast, signal: FlowSignal) -> str:
     )
 
 
-def _target_selection_manifest(world, target_rank: int) -> dict | None:
+def _target_selection_manifest(world: NativeWorld, target_rank: int) -> dict | None:
     if not world.target_selection:
         return None
     selection = world.target_selection[target_rank]
     return {**asdict(selection), "is_center": selection.is_center}
 
 
-def _model_matches(dataset, model_path: str | Path) -> bool:
-    recorded = str(getattr(dataset, "spec", {}).get("model_path", ""))
-    if not recorded:
-        return True
-    recorded_path = Path(recorded)
-    requested_path = Path(model_path)
-    if recorded_path.is_absolute():
-        return recorded_path.resolve() == requested_path.resolve()
-    return recorded_path.name == requested_path.name
+class SubsetAuditRunner:
+    """Run ``select -> freeze targets -> audit -> persist`` for one corpus split."""
 
+    def __init__(
+        self,
+        model,
+        tokenizer,
+        corpus: AuditCorpus,
+        output_root: str | Path,
+        config: SubsetRunConfig,
+    ) -> None:
+        self.model = model
+        self.tokenizer = tokenizer
+        self.corpus = corpus
+        self.output = Path(output_root)
+        self.config = config
 
-def run_subset_split(
-    model,
-    tokenizer,
-    output_root: str | Path,
-    config: SubsetRunConfig,
-) -> dict[str, int]:
-    """Run resumable native mechanism audits on one real-data split."""
-
-    dataset_root = Path(config.dataset_root)
-    source_path = Path(config.source_info)
-    output = Path(output_root)
-    dataset = open_research_dataset(
-        dataset_root,
-        device="cpu",
-        retain_embedded_labels=False,
-    )
-    dataset_split = str(dataset.manifest.get("split", "")).casefold()
-    if dataset_split != config.split.casefold():
-        raise ValueError(
-            f"dataset split {dataset_split!r} differs from requested split "
-            f"{config.split!r}"
+    def run(self) -> dict[str, int]:
+        self.corpus.identity.validate_runtime(
+            self.config.model_id,
+            self.config.tokenizer_id,
         )
-    if not _model_matches(dataset, config.model_id):
-        raise ValueError("cached observer and current model differ")
-    if Path(tokenizer.name_or_path).name != config.tokenizer_id:
-        raise ValueError("configured and loaded tokenizers differ")
-    sources = load_source_info(source_path)
-    selected = select_records(
-        inspect_records(
-            dataset,
-            sample_ids=config.explicit_sample_ids or None,
-            source_info=sources,
-        ),
-        tasks=config.tasks,
-        samples_per_task=config.samples_per_task,
-        seed=config.selection_seed,
-        sample_ids=config.explicit_sample_ids,
-    )
-    dataset.verify_hashes = True
-    if len({record.sample_id for record in selected}) != len(selected):
-        raise ValueError("subset selection contains duplicate sample IDs")
-    for record in selected:
-        if record.source_id not in sources:
-            raise ValueError(
-                f"source_info lacks {record.source_id} for {record.sample_id}"
+        cohort = self.config.cohort
+        selected = select_records(
+            self.corpus.records,
+            tasks=cohort.tasks,
+            samples_per_task=cohort.samples_per_task,
+            seed=cohort.seed,
+            sample_ids=cohort.sample_ids,
+        )
+        manifest_path = self.output / MANIFEST_NAME
+        manifest = open_manifest(
+            manifest_path,
+            self.config.manifest_value(self.corpus.identity),
+            selected,
+        )
+        manifest["analysis_scope"] = (
+            "structure_only"
+            if self.config.scan_only
+            else "structure_and_selected_target_function"
+        )
+        save_json(manifest_path, manifest)
+
+        counts = {"samples": 0, "targets": 0, "resumed": 0, "confirmed": 0}
+        samples = tqdm(
+            selected,
+            desc=f"{self.corpus.identity.split} samples",
+            unit="sample",
+            dynamic_ncols=True,
+        )
+        for record in samples:
+            samples.set_postfix_str(
+                f"{record.task_type}/{record.sample_id}",
+                refresh=False,
             )
+            world = self._load_or_build_world(record, manifest, samples)
+            self._record_sample(record, world, manifest, manifest_path)
+            if not self.config.scan_only:
+                self._run_targets(
+                    record,
+                    world,
+                    manifest,
+                    manifest_path,
+                    counts,
+                )
+            counts["samples"] += 1
+            del world
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
-    manifest_path = output / MANIFEST_NAME
-    manifest = open_manifest(manifest_path, config.manifest_value(), selected)
-    manifest["analysis_scope"] = (
-        "structure_only"
-        if config.scan_only
-        else "structure_and_selected_target_function"
-    )
-    save_json(manifest_path, manifest)
+        manifest["analysis_complete"] = True
+        manifest["counts"] = counts
+        save_json(manifest_path, manifest)
+        return counts
 
-    counts = {"samples": 0, "targets": 0, "resumed": 0, "confirmed": 0}
-    samples = tqdm(
-        selected,
-        desc=f"{config.split} samples",
-        unit="sample",
-        dynamic_ncols=True,
-    )
-    for record in samples:
-        samples.set_postfix_str(f"{record.task_type}/{record.sample_id}", refresh=False)
+    def _paths(self, record: SampleRecord) -> tuple[Path, Path]:
         sample_key = safe_sample_key(record.sample_id)
-        world_path = output / "worlds" / record.task_type / f"{sample_key}.npz"
-        scan_path = output / "scans" / record.task_type / f"{sample_key}.npz"
+        return (
+            self.output / "worlds" / record.task_type / f"{sample_key}.npz",
+            self.output / "scans" / record.task_type / f"{sample_key}.npz",
+        )
+
+    def _load_or_build_world(
+        self,
+        record: SampleRecord,
+        manifest: dict,
+        progress,
+    ) -> NativeWorld:
+        world_path, scan_path = self._paths(record)
         frozen_sample = manifest["samples"].get(record.sample_id)
         if world_path.is_file():
             world = load_native_world(world_path)
-            if world.sample_id != sample_key:
+            if world.sample_id != safe_sample_key(record.sample_id):
                 raise ValueError("saved native world has the wrong sample identity")
-            if Path(world.tokenizer_id).name != config.tokenizer_id:
+            if Path(world.tokenizer_id).name != self.config.tokenizer_id:
                 raise ValueError("saved native world uses another tokenizer")
             if not scan_path.is_file():
-                samples.set_postfix_str(
-                    f"{record.task_type}/{record.sample_id} rebuild scan", refresh=True
+                progress.set_postfix_str(
+                    f"{record.task_type}/{record.sample_id} rebuild scan",
+                    refresh=True,
                 )
-                full_tokens, response_start = sample_tokens(dataset, record.sample_id)
+                sample = self.corpus.load_sample(record)
                 scan = SampleScan.capture(
-                    model,
+                    self.model,
                     world,
-                    query_chunk=config.query_chunk,
-                    local_window=config.local_window,
+                    query_chunk=self.config.mechanism.query_chunk,
+                    local_window=self.config.mechanism.local_window,
                 )
-                scan.save(
-                    scan_path,
-                    dataset_sample_id=record.sample_id,
-                    source_id=record.source_id,
-                    task_type=record.task_type,
-                    token_ids=world.token_ids,
-                    response_start=world.response_start,
-                    full_response_tokens=len(full_tokens) - response_start,
-                    local_window=config.local_window,
-                )
-                del full_tokens, scan
-        else:
-            if frozen_sample is not None:
-                raise ValueError(f"frozen native world is missing: {world_path}")
-            world = load_world_from_dataset(
-                dataset,
-                record,
-                sources[record.source_id],
-                tokenizer,
-                model,
-                max_response_tokens=config.max_response_tokens,
-                targets_per_sample=config.targets_per_sample,
-                target_policy=config.target_policy,
-                query_chunk=config.query_chunk,
-                local_window=config.local_window,
-                scan_path=scan_path,
-            )
-            save_native_world(world_path, world)
+                self._save_scan(scan, scan_path, sample, world)
+            return world
 
+        if frozen_sample is not None:
+            raise ValueError(f"frozen native world is missing: {world_path}")
+        sample = self.corpus.load_sample(record)
+        world = self._build_world(sample, scan_path)
+        save_native_world(world_path, world)
+        return world
+
+    def _build_world(self, sample: AuditSample, scan_path: Path) -> NativeWorld:
+        full_response_tokens = sample.full_response_tokens
+        prepared = sample.truncate_response(self.config.targets.max_response_tokens)
+        targets, target_selection = freeze_target_plan(
+            self.model,
+            prepared.token_ids,
+            prepared.response_start,
+            count=self.config.targets.count,
+            policy=self.config.targets.policy,
+            query_chunk=self.config.mechanism.query_chunk,
+            units=prepared.units,
+            evidence_unit_id=prepared.evidence_unit_id,
+            local_window=self.config.mechanism.local_window,
+            on_scan=lambda scan: scan.save(
+                scan_path,
+                dataset_sample_id=prepared.record.sample_id,
+                source_id=prepared.record.source_id,
+                task_type=prepared.record.task_type,
+                token_ids=prepared.token_ids,
+                response_start=prepared.response_start,
+                full_response_tokens=full_response_tokens,
+                local_window=self.config.mechanism.local_window,
+            ),
+        )
+        return NativeWorld(
+            safe_sample_key(prepared.record.sample_id),
+            self.config.tokenizer_id,
+            prepared.token_ids,
+            prepared.response_start,
+            prepared.units,
+            prepared.evidence_unit_id,
+            targets,
+            target_selection,
+        ).check()
+
+    def _save_scan(
+        self,
+        scan: SampleScan,
+        scan_path: Path,
+        sample: AuditSample,
+        world: NativeWorld,
+    ) -> None:
+        scan.save(
+            scan_path,
+            dataset_sample_id=sample.record.sample_id,
+            source_id=sample.record.source_id,
+            task_type=sample.record.task_type,
+            token_ids=world.token_ids,
+            response_start=world.response_start,
+            full_response_tokens=sample.full_response_tokens,
+            local_window=self.config.mechanism.local_window,
+        )
+
+    def _record_sample(
+        self,
+        record: SampleRecord,
+        world: NativeWorld,
+        manifest: dict,
+        manifest_path: Path,
+    ) -> None:
+        world_path, scan_path = self._paths(record)
         sample_entry = {
             "source_id": record.source_id,
             "task_type": record.task_type,
-            "world": world_path.relative_to(output).as_posix(),
-            "scan": scan_path.relative_to(output).as_posix(),
+            "world": world_path.relative_to(self.output).as_posix(),
+            "scan": scan_path.relative_to(self.output).as_posix(),
             "targets": [
                 {
                     "query_position": target.query_position,
@@ -279,8 +340,8 @@ def run_subset_split(
                 for rank, target in enumerate(world.targets)
             ],
         }
+        frozen_sample = manifest["samples"].get(record.sample_id)
         if frozen_sample is not None:
-            # Runs created before sample scans retain their frozen target plan.
             frozen_sample.setdefault("scan", sample_entry["scan"])
             if frozen_sample != sample_entry:
                 raise ValueError(
@@ -288,172 +349,160 @@ def run_subset_split(
                 )
         manifest["samples"][record.sample_id] = sample_entry
         save_json(manifest_path, manifest)
-        if not config.scan_only:
-            _run_world_targets(
-                model,
-                world,
-                record,
-                output,
-                manifest,
-                manifest_path,
-                counts,
-                config,
-            )
-        counts["samples"] += 1
-        del world
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
-    manifest["analysis_complete"] = True
-    manifest["counts"] = counts
-    save_json(manifest_path, manifest)
-    return counts
+    def _audit_identity(
+        self,
+        world: NativeWorld,
+        record: SampleRecord,
+        target: TargetContrast,
+        target_rank: int,
+        destination: Path,
+    ) -> dict[str, object]:
+        return {
+            "result": destination.relative_to(self.output).as_posix(),
+            "dataset_sample_id": record.sample_id,
+            "sample_id": world.sample_id,
+            "source_id": record.source_id,
+            "task_type": record.task_type,
+            "split": self.corpus.identity.split,
+            "query_position": target.query_position,
+            "positive_token_id": target.positive_token_id,
+            "negative_token_id": target.negative_token_id,
+            "contrast_origin": target.origin,
+            "reanchor_selection": _target_selection_manifest(world, target_rank),
+            "flow_signal": self.config.mechanism.signal.value,
+            "target_rank": target_rank,
+        }
 
-
-def _audit_identity(
-    world,
-    record: SampleRecord,
-    target: TargetContrast,
-    target_rank: int,
-    destination: Path,
-    output: Path,
-    config: SubsetRunConfig,
-) -> dict[str, object]:
-    return {
-        "result": destination.relative_to(output).as_posix(),
-        "dataset_sample_id": record.sample_id,
-        "sample_id": world.sample_id,
-        "source_id": record.source_id,
-        "task_type": record.task_type,
-        "split": config.split,
-        "query_position": target.query_position,
-        "positive_token_id": target.positive_token_id,
-        "negative_token_id": target.negative_token_id,
-        "contrast_origin": target.origin,
-        "reanchor_selection": _target_selection_manifest(world, target_rank),
-        "flow_signal": config.signal.value,
-        "target_rank": target_rank,
-    }
-
-
-def _run_world_targets(
-    model,
-    world,
-    record: SampleRecord,
-    output: Path,
-    manifest: dict,
-    manifest_path: Path,
-    counts: dict[str, int],
-    config: SubsetRunConfig,
-) -> None:
-    sample_key = safe_sample_key(record.sample_id)
-    targets = tqdm(
-        enumerate(world.targets),
-        total=len(world.targets),
-        desc=f"{config.split}/{record.task_type}/{record.sample_id} targets",
-        unit="target",
-        leave=False,
-        dynamic_ncols=True,
-    )
-    for target_rank, target in targets:
-        target_key = _target_key(target, config.signal)
-        key = f"{record.sample_id}:{target_key}"
-        destination = (
-            output / "audits" / record.task_type / sample_key / f"{target_key}.npz"
-        )
-        identity = _audit_identity(
-            world,
-            record,
-            target,
-            target_rank,
-            destination,
-            output,
-            config,
-        )
-        existing_entry = manifest["audits"].get(key)
-        if existing_entry is not None and existing_entry != identity:
-            raise ValueError(f"subset manifest audit {key} has another identity")
-
-        metadata = NativeAuditMetadata(
+    def _metadata(
+        self,
+        record: SampleRecord,
+        target_rank: int,
+    ) -> NativeAuditMetadata:
+        mechanism = self.config.mechanism
+        return NativeAuditMetadata(
             dataset_sample_id=record.sample_id,
             source_id=record.source_id,
-            split=config.split,
+            split=self.corpus.identity.split,
             task_type=record.task_type,
             generator_model=record.generator_model,
-            model_id=config.model_id,
-            model_dtype=config.model_dtype,
-            target_policy=config.target_policy,
+            model_id=self.config.model_id,
+            model_dtype=self.config.model_dtype,
+            target_policy=self.config.targets.policy,
             target_rank=target_rank,
-            coverage=config.coverage,
-            carrier_scope=config.carrier_scope,
-            query_chunk=config.query_chunk,
-            route_budget=config.route_budget,
-            local_window=config.local_window,
-            saved_edges=config.saved_edges,
+            coverage=mechanism.coverage,
+            carrier_scope=mechanism.carrier_scope,
+            query_chunk=mechanism.query_chunk,
+            route_budget=mechanism.route_budget,
+            local_window=mechanism.local_window,
+            saved_edges=mechanism.saved_edges,
         )
-        if destination.is_file():
-            validate_native_audit(
-                destination,
+
+    def _run_targets(
+        self,
+        record: SampleRecord,
+        world: NativeWorld,
+        manifest: dict,
+        manifest_path: Path,
+        counts: dict[str, int],
+    ) -> None:
+        mechanism = self.config.mechanism
+        if not world.targets:
+            return
+        sample_key = safe_sample_key(record.sample_id)
+        targets = tqdm(
+            enumerate(world.targets),
+            total=len(world.targets),
+            desc=(
+                f"{self.corpus.identity.split}/{record.task_type}/"
+                f"{record.sample_id} targets"
+            ),
+            unit="target",
+            leave=False,
+            dynamic_ncols=True,
+        )
+        for target_rank, target in targets:
+            target_key = _target_key(target, mechanism.signal)
+            key = f"{record.sample_id}:{target_key}"
+            destination = (
+                self.output
+                / "audits"
+                / record.task_type
+                / sample_key
+                / f"{target_key}.npz"
+            )
+            identity = self._audit_identity(
                 world,
+                record,
                 target,
-                config.signal,
-                metadata,
-            )
-            counts["targets"] += 1
-            counts["resumed"] += 1
-            targets.set_postfix_str("resumed", refresh=False)
-            with np.load(destination, allow_pickle=False) as stored:
-                counts["confirmed"] += int(stored["corridor_confirmed"])
-        else:
-            result = audit_native_target(
-                model,
-                world,
-                target,
-                config.signal,
-                carrier_scope=config.carrier_scope,
-                coverage=config.coverage,
-                query_chunk=config.query_chunk,
-                route_budget=config.route_budget,
-                local_window=config.local_window,
-                on_phase=lambda phase: targets.set_postfix_str(phase, refresh=True),
-            )
-            save_native_audit(
+                target_rank,
                 destination,
-                world,
-                result,
-                metadata,
             )
-            validate_native_audit(
-                destination,
-                world,
-                target,
-                config.signal,
-                metadata,
-            )
-            counts["targets"] += 1
-            counts["confirmed"] += int(result.corridor_confirmed)
-            targets.set_postfix_str("computed", refresh=False)
-            prefix = (
-                f"{config.split}/{record.task_type}/{record.sample_id} "
-                f"q={target.query_position} signal={config.signal.value} "
-                f"root={result.selected_root_unit_id}"
-            )
-            if config.route_budget.confirm:
-                detail = (
-                    f"root_ok={result.selected_root_confirmed} "
-                    f"corridor_ok={result.corridor_confirmed} "
-                    f"restore={result.effect.restoration_error:.4g}"
+            existing_entry = manifest["audits"].get(key)
+            if existing_entry is not None and existing_entry != identity:
+                raise ValueError(f"subset manifest audit {key} has another identity")
+            metadata = self._metadata(record, target_rank)
+            if destination.is_file():
+                validate_native_audit(
+                    destination,
+                    world,
+                    target,
+                    mechanism.signal,
+                    metadata,
                 )
+                counts["targets"] += 1
+                counts["resumed"] += 1
+                targets.set_postfix_str("resumed", refresh=False)
+                with np.load(destination, allow_pickle=False) as stored:
+                    counts["confirmed"] += int(stored["corridor_confirmed"])
             else:
-                detail = (
-                    f"corridor_edges={result.corridor.count} "
-                    f"hubs={len(result.plan.hubs)} exact=not-run"
+                result = audit_native_target(
+                    self.model,
+                    world,
+                    target,
+                    mechanism.signal,
+                    carrier_scope=mechanism.carrier_scope,
+                    coverage=mechanism.coverage,
+                    query_chunk=mechanism.query_chunk,
+                    route_budget=mechanism.route_budget,
+                    local_window=mechanism.local_window,
+                    on_phase=lambda phase: targets.set_postfix_str(
+                        phase,
+                        refresh=True,
+                    ),
                 )
-            tqdm.write(f"{prefix} {detail}")
-            del result
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        manifest["audits"][key] = identity
-        save_json(manifest_path, manifest)
+                save_native_audit(destination, world, result, metadata)
+                validate_native_audit(
+                    destination,
+                    world,
+                    target,
+                    mechanism.signal,
+                    metadata,
+                )
+                counts["targets"] += 1
+                counts["confirmed"] += int(result.corridor_confirmed)
+                targets.set_postfix_str("computed", refresh=False)
+                prefix = (
+                    f"{self.corpus.identity.split}/{record.task_type}/"
+                    f"{record.sample_id} q={target.query_position} "
+                    f"signal={mechanism.signal.value} "
+                    f"root={result.selected_root_unit_id}"
+                )
+                if mechanism.route_budget.confirm:
+                    detail = (
+                        f"root_ok={result.selected_root_confirmed} "
+                        f"corridor_ok={result.corridor_confirmed} "
+                        f"restore={result.effect.restoration_error:.4g}"
+                    )
+                else:
+                    detail = (
+                        f"corridor_edges={result.corridor.count} "
+                        f"hubs={len(result.plan.hubs)} exact=not-run"
+                    )
+                tqdm.write(f"{prefix} {detail}")
+                del result
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            manifest["audits"][key] = identity
+            save_json(manifest_path, manifest)

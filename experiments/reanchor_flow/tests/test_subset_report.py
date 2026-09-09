@@ -132,33 +132,19 @@ def test_subset_evaluation_joins_labels_after_capture(tmp_path, monkeypatch) -> 
         capture_loaded = True
         return rows
 
-    class Sample:
-        def release_attention(self):
-            pass
-
     class Labels:
         @staticmethod
-        def response_labels(_sample):
-            return torch.tensor([0, 1])
-
-    class Dataset:
-        def __getitem__(self, sample_id):
-            assert sample_id == "sample-1"
-            return Sample()
-
-        @staticmethod
-        def prepare_evaluation_labels(sample_ids):
-            assert sample_ids == ["sample-1"]
-            return Labels()
-
-    def open_dataset(*_args, **kwargs):
-        assert capture_loaded
-        assert kwargs["retain_embedded_labels"] is True
-        return Dataset()
+        def load(sample_ids):
+            assert capture_loaded
+            assert sample_ids == ("sample-1",)
+            return {"sample-1": np.asarray([0, 1])}
 
     monkeypatch.setattr(subset_report, "_capture_rows", capture_rows)
-    monkeypatch.setattr(subset_report, "open_research_dataset", open_dataset)
-    report = subset_report.evaluate_subset_split(dataset_root, output)
+    report = subset_report.evaluate_subset_split(
+        dataset_root,
+        output,
+        label_source=Labels(),
+    )
 
     hallucinated = report["groups"]["QA"]["hallucinated"]
     assert hallucinated["targets"] == 1
@@ -395,12 +381,17 @@ def test_subset_evaluation_refuses_incomplete_capture_before_labels(
         encoding="utf-8",
     )
 
-    def reject_labels(*_args, **_kwargs):
-        raise AssertionError("labels opened before capture completion")
+    class RejectLabels:
+        @staticmethod
+        def load(*_args):
+            raise AssertionError("labels opened before capture completion")
 
-    monkeypatch.setattr(subset_report, "open_research_dataset", reject_labels)
     with pytest.raises(ValueError, match="incomplete"):
-        subset_report.evaluate_subset_split(tmp_path / "cache", output)
+        subset_report.evaluate_subset_split(
+            tmp_path / "cache",
+            output,
+            label_source=RejectLabels(),
+        )
 
 
 def test_subset_evaluation_requires_capture_dataset_root(tmp_path, monkeypatch) -> None:
@@ -411,10 +402,10 @@ def test_subset_evaluation_requires_capture_dataset_root(tmp_path, monkeypatch) 
     def reject_capture(*_args, **_kwargs):
         raise AssertionError("artifacts loaded before dataset identity check")
 
-    def reject_labels(*_args, **_kwargs):
-        raise AssertionError("labels opened before dataset identity check")
-
     monkeypatch.setattr(subset_report, "_capture_rows", reject_capture)
-    monkeypatch.setattr(subset_report, "open_research_dataset", reject_labels)
     with pytest.raises(ValueError, match="dataset_root differs from capture"):
-        subset_report.evaluate_subset_split(other_dataset_root, output)
+        subset_report.evaluate_subset_split(
+            other_dataset_root,
+            output,
+            label_source=object(),
+        )

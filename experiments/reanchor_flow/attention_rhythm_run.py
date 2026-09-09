@@ -65,7 +65,7 @@ def capture(args):
     from research_dataset import open_research_dataset
     from transformers import AutoModelForCausalLM, AutoTokenizer
     from .scan_dataset import ScanDataset
-    from .subset_data import inspect_records, select_records, sample_tokens
+    from .dataset import inspect_records, sample_tokens, select_records
     from .units import build_source_units
 
     config = RhythmConfig(args.window, args.future_lo, args.future_hi, args.local_window, args.head_fraction)

@@ -95,7 +95,11 @@ def capture(args):
     from .constraint_flow import capture_constraint_pair, select_constraint_paths, confirm_paths, PATH_COLUMNS
 
     if args.pairs:
-        records = [json.loads(line) for line in args.pairs.read_text().splitlines() if line.strip()]
+        records = [
+            json.loads(line)
+            for line in args.pairs.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
     else:
         records = synthetic_records(args.synthetic_sources)
     groups = defaultdict(list)
@@ -236,7 +240,9 @@ def analyze(args, manifest):
               "先检查事实翻转是否改变候选偏好、是否超过一致重命名／措辞／无关事实对照，再检查冻结路径的效果。",
               "所有失败、无路径和未确认实例均保留。不要把低敏感性直接作为幻觉评分。",
               "源级区间和完整逐例数值见 summary.json；逐 head 内容／路由与原生 MLP、RMSNorm 见各 NPZ/PNG。"]
-    (args.output / "summary.md").write_text("\n".join(lines) + "\n")
+    (args.output / "summary.md").write_text(
+        "\n".join(lines) + "\n", encoding="utf-8"
+    )
     if not args.no_plot:
         plot_cohort(entries, args.output / "cohort.png")
         write_gallery(gallery, args.output / "gallery.html")
@@ -267,7 +273,7 @@ def parser():
 
 def run(args):
     if args.phase == "analyze":
-        manifest = json.loads((args.output / "index.json").read_text())
+        manifest = json.loads((args.output / "index.json").read_text(encoding="utf-8"))
     else:
         if args.query_chunk < 1 or args.synthetic_sources < 1 or args.confirm_sources < 0:
             raise ValueError("query chunk/source count must be positive; confirmation budget nonnegative")

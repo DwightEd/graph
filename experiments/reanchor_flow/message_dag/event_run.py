@@ -1,14 +1,12 @@
 """Scan every native lookback event, trace its messages, then join labels offline."""
 import argparse
-from concurrent.futures import ThreadPoolExecutor
-from contextlib import ExitStack, contextmanager
-from dataclasses import asdict
 import json
-import os
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
+from dataclasses import asdict
 from pathlib import Path
-import socket
+from tempfile import TemporaryDirectory
 from time import perf_counter
-from tempfile import NamedTemporaryFile, TemporaryDirectory
 
 import numpy as np
 from tqdm.auto import tqdm
@@ -16,49 +14,14 @@ from tqdm.auto import tqdm
 from ..attention_audit_run import analysis_manifest
 from ..attention_rhythm_report import save_json
 from ..message_lineage import CheckpointWeights
+from .artifacts import LOOKBACK_TRANSPORT, artifact_header, atomic_path, output_writer
 from .cache import MASK_POLICY, NativeCache, read_trace
-from .events import EventConfig, scan
+from .cut_artifact import CutRecorder, prepare_local_readout
 from .event_trace import trace_events
+from .events import EventConfig, scan
 from .selection import read_labels
-from .transport import CutRecorder, prepare_local_readout
 
 SCHEMA = 2
-
-
-@contextmanager
-def atomic_path(destination):
-    """Each write owns a temporary name on the destination filesystem."""
-    destination = Path(destination)
-    with NamedTemporaryFile(dir=destination.parent,prefix=f'.{destination.stem}.',
-                            suffix=destination.suffix,delete=False) as handle:
-        temporary = Path(handle.name)
-    try:
-        yield temporary
-        temporary.replace(destination)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-@contextmanager
-def output_writer(output):
-    """One writer for the whole run, including scan, resume and evaluation."""
-    import fcntl
-    output.mkdir(parents=True,exist_ok=True)
-    # Keep the inode: unlinking a lock file permits two independent locks.
-    with (output/'.event_run.lock').open('a+',encoding='utf-8') as handle:
-        try:
-            fcntl.flock(handle,fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            handle.seek(0)
-            owner = handle.read().strip() or 'owner not yet recorded'
-            raise RuntimeError(f'output already has an active writer ({owner}): {output}; '
-                               'finish/stop that run or choose another --output') from exc
-        handle.seek(0);handle.truncate()
-        handle.write(f'host={socket.gethostname()} pid={os.getpid()}\n');handle.flush()
-        try:
-            yield
-        finally:
-            fcntl.flock(handle,fcntl.LOCK_UN)
 
 
 def save_index(output, manifest):
@@ -120,6 +83,7 @@ def run(args):
 
 def _run(args, output, version):
     import torch
+
     from .event_report import evaluate
     config = EventConfig(args.window,args.gain,args.local_floor)
     if min(args.query_chunk,args.event_batch,args.cpu_threads)<1 or args.bootstrap<0:
@@ -149,8 +113,14 @@ def _run(args, output, version):
         raise ValueError('no complete captures in the requested scope; --list-available reports missing files')
     model = str(args.model or original['settings'].get('model',''))
     contrasts = json.loads(args.contrasts.read_text()) if args.contrasts else {}
-    settings = dict(schema=version,event=asdict(config),mask_policy=MASK_POLICY,model=model,contrasts=contrasts)
-    request = dict(split=args.split,task=args.task,sample_id=sorted(args.sample_id))
+    settings = {
+        'schema': version,
+        'event': asdict(config),
+        'mask_policy': MASK_POLICY,
+        'model': model,
+        'contrasts': contrasts,
+    }
+    request = {'split': args.split, 'task': args.task, 'sample_id': sorted(args.sample_id)}
     previous_path = output/'index.json'
     previous = json.loads(previous_path.read_text()) if previous_path.exists() else {}
     if previous.get('event_settings',{}).get('schema')==1 and version!=1:
@@ -160,6 +130,7 @@ def _run(args, output, version):
         raise ValueError('event definition, checkpoint, contrasts or sample scope changed; choose another --output')
     manifest.update(event_settings=settings,request=request,native_audit=str(args.audit.resolve()),
                     labels_used_for_events=False,labels_used_for_dag=False)
+    manifest.update(artifact_header(LOOKBACK_TRANSPORT, version))
     prior = {e['path']:e for e in previous.get('samples',[])}
     for e in manifest['samples']:
         e.update({k:v for k,v in prior.get(e['path'],{}).items() if k.startswith('event_') or k=='read_sites'})
@@ -244,16 +215,21 @@ def _run(args, output, version):
                         save_started = perf_counter()
                         for result in results:
                             result['settings'] = found['settings']
-                        def save_event(result):
-                            atomic_npz(folder/f"event_{int(result['event_position'])}.npz",**result)
+                        def save_event(result, destination_folder=folder):
+                            atomic_npz(destination_folder/f"event_{int(result['event_position'])}.npz",**result)
                         list(writers.map(save_event,results))
                         e['event_traced'] += len(results)
                         bar.update(len(results));save_index(output,manifest)
                         if profile is not None:
                             profile['checkpoint_seconds'] = profile.get('checkpoint_seconds',0.)+perf_counter()-save_started
                         del results,recorders,result
-                execution = dict(device=args.device,event_batch=args.event_batch,event_group=group_size,
-                                 cpu_state_gib=host_bytes/2**30,trace_seconds=perf_counter()-trace_started)
+                execution = {
+                    'device': args.device,
+                    'event_batch': args.event_batch,
+                    'event_group': group_size,
+                    'cpu_state_gib': host_bytes/2**30,
+                    'trace_seconds': perf_counter()-trace_started,
+                }
                 if cuda:
                     execution['cuda_peak_allocated_gib'] = torch.cuda.max_memory_allocated(args.device)/2**30
                     execution['cuda_peak_reserved_gib'] = torch.cuda.max_memory_reserved(args.device)/2**30

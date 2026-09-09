@@ -1,5 +1,10 @@
 # 消息 DAG：来源、聚合与同目标路径贡献
 
+> **2026-09-09 方法边界已重定。** 当前权威的模块职责、artifact 约定和方法主张见
+> [ARCHITECTURE.md](ARCHITECTURE.md)。本文件保留 v1/v2 数学与复现实录，但不再把
+> source allocation、local Jacobian 和 last-crossing cut 合称为一个方法，也不把闭合
+> 当作幻觉机制证据。统一入口为 `python -m experiments.reanchor_flow.message_dag`。
+
 本目录是新的核心实现。研究主线是 **消息路由模型 → 图上的生成结构 → 正常／幻觉差异**。
 不通过 WAAD 峰挑节点，不训练 GNN，不把某个高流量节点或低材料分数直接命名为幻觉机制。
 

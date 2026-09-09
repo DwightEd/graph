@@ -10,12 +10,12 @@ import torch
 
 from experiments.reanchor_flow.reanchor_timeline import StructuralReanchorEvent
 from experiments.reanchor_flow.route_plan import RouteBudget
-from experiments.reanchor_flow.subset_data import (
+from experiments.reanchor_flow.dataset import (
     SampleRecord,
     inspect_records,
-    reanchor_target_positions,
     select_records,
 )
+from experiments.reanchor_flow.target_selection import reanchor_target_positions
 from experiments.reanchor_flow.tests.etcc_helpers import paired_world, tiny_model
 
 
@@ -109,17 +109,20 @@ def test_zero_sample_limit_keeps_every_record_including_shared_sources() -> None
 def test_absolute_cache_model_identity_does_not_fall_back_to_basename(
     tmp_path,
 ) -> None:
-    from experiments.reanchor_flow.subset import _model_matches
+    from experiments.reanchor_flow.dataset import CorpusIdentity
 
     requested = tmp_path / "requested" / "same-name"
-    exact = SimpleNamespace(spec={"model_path": str(requested)})
-    another = SimpleNamespace(
-        spec={"model_path": str(tmp_path / "another" / "same-name")}
-    )
-    legacy = SimpleNamespace(spec={"model_path": "same-name"})
-    assert _model_matches(exact, requested)
-    assert not _model_matches(another, requested)
-    assert _model_matches(legacy, requested)
+    def identity(model_id: str) -> CorpusIdentity:
+        return CorpusIdentity(
+            "manifest", "dataset.json", "test", "tokenizer", model_id
+        )
+
+    identity(str(requested)).validate_runtime(str(requested), "tokenizer")
+    with pytest.raises(ValueError, match="observer and current model differ"):
+        identity(str(tmp_path / "another" / "same-name")).validate_runtime(
+            str(requested), "tokenizer"
+        )
+    identity("same-name").validate_runtime(str(requested), "tokenizer")
 
 
 def test_manifest_uses_schema_and_plain_identity_for_resume(tmp_path) -> None:
@@ -156,9 +159,9 @@ def test_subset_cli_needs_no_pair_and_keeps_corridor_contract() -> None:
         "test",
     )
     assert config.tokenizer_id == "tiny-llama"
-    assert config.signal.value == "message"
-    assert config.carrier_scope == "response"
-    assert config.tasks == ("QA", "Summary", "Data2txt")
+    assert config.mechanism.signal.value == "message"
+    assert config.mechanism.carrier_scope == "response"
+    assert config.cohort.tasks == ("QA", "Summary", "Data2txt")
     with pytest.raises(SystemExit):
         command_parser.parse_args(["corridor"])
 
@@ -206,7 +209,7 @@ def test_reanchor_window_count_is_a_hard_target_row_budget() -> None:
 
 
 def test_reanchor_no_event_falls_back_and_records_origin(monkeypatch) -> None:
-    from experiments.reanchor_flow import subset_data
+    from experiments.reanchor_flow import target_selection
 
     cache = SimpleNamespace(
         query=torch.tensor([4, 5, 6]),
@@ -219,15 +222,15 @@ def test_reanchor_no_event_falls_back_and_records_origin(monkeypatch) -> None:
         observed_checkpoint_layers.extend(kwargs["checkpoint_layers"])
         return cache
 
-    monkeypatch.setattr(subset_data, "baseline_forward", fake_baseline)
+    monkeypatch.setattr(target_selection, "baseline_forward", fake_baseline)
     monkeypatch.setattr(
-        subset_data,
+        target_selection,
         "capture_source_location_buckets",
         lambda *_args, **_kwargs: SimpleNamespace(transport=torch.ones(2, 2, 3, 4)),
     )
     model = SimpleNamespace(model=SimpleNamespace(layers=[object(), object()]))
 
-    targets, selections = subset_data.freeze_target_plan(
+    targets, selections = target_selection.freeze_target_plan(
         model,
         torch.arange(8),
         5,
@@ -249,7 +252,7 @@ def test_reanchor_no_event_falls_back_and_records_origin(monkeypatch) -> None:
 
 
 def test_reanchor_target_plan_persists_the_shared_structural_event(monkeypatch) -> None:
-    from experiments.reanchor_flow import subset_data
+    from experiments.reanchor_flow import target_selection
 
     cache = SimpleNamespace(
         query=torch.tensor([4, 5, 6, 7]),
@@ -269,15 +272,15 @@ def test_reanchor_target_plan_persists_the_shared_structural_event(monkeypatch) 
         source_position=source_position,
         source_unit_id=source_unit,
     )
-    monkeypatch.setattr(subset_data, "baseline_forward", lambda *_a, **_k: cache)
+    monkeypatch.setattr(target_selection, "baseline_forward", lambda *_a, **_k: cache)
     monkeypatch.setattr(
-        subset_data,
+        target_selection,
         "capture_source_location_buckets",
         lambda *_args, **_kwargs: source_location,
     )
     model = SimpleNamespace(model=SimpleNamespace(layers=[object(), object()]))
 
-    targets, selections = subset_data.freeze_target_plan(
+    targets, selections = target_selection.freeze_target_plan(
         model,
         torch.arange(9),
         5,
@@ -303,7 +306,7 @@ def test_reanchor_target_plan_persists_the_shared_structural_event(monkeypatch) 
 def test_reanchor_budget_covering_short_response_still_marks_event_center(
     monkeypatch,
 ) -> None:
-    from experiments.reanchor_flow import subset_data
+    from experiments.reanchor_flow import target_selection
 
     cache = SimpleNamespace(
         query=torch.tensor([4, 5, 6]),
@@ -329,15 +332,15 @@ def test_reanchor_budget_covering_short_response_still_marks_event_center(
         checkpoint_layers.extend(kwargs["checkpoint_layers"])
         return cache
 
-    monkeypatch.setattr(subset_data, "baseline_forward", fake_baseline)
+    monkeypatch.setattr(target_selection, "baseline_forward", fake_baseline)
     monkeypatch.setattr(
-        subset_data,
+        target_selection,
         "capture_source_location_buckets",
         lambda *_args, **_kwargs: source_location,
     )
     model = SimpleNamespace(model=SimpleNamespace(layers=[object()]))
 
-    targets, selections = subset_data.freeze_target_plan(
+    targets, selections = target_selection.freeze_target_plan(
         model,
         torch.arange(8),
         5,
@@ -359,7 +362,7 @@ def test_reanchor_budget_covering_short_response_still_marks_event_center(
 
 
 def test_subset_pipeline_resumes_valid_native_audit(tmp_path, monkeypatch) -> None:
-    from experiments.reanchor_flow import subset, subset_data
+    from experiments.reanchor_flow import dataset as dataset_module, subset
 
     pair = paired_world()
 
@@ -384,9 +387,9 @@ def test_subset_pipeline_resumes_valid_native_audit(tmp_path, monkeypatch) -> No
         assert kwargs["retain_embedded_labels"] is False
         return dataset
 
-    monkeypatch.setattr(subset, "open_research_dataset", open_dataset)
+    monkeypatch.setattr(dataset_module, "open_research_dataset", open_dataset)
     monkeypatch.setattr(
-        subset,
+        dataset_module,
         "load_source_info",
         lambda _path: {
             "source-a": {
@@ -397,7 +400,7 @@ def test_subset_pipeline_resumes_valid_native_audit(tmp_path, monkeypatch) -> No
         },
     )
     monkeypatch.setattr(
-        subset_data,
+        dataset_module,
         "build_source_units",
         lambda *_args, **_kwargs: pair.units,
     )
@@ -413,30 +416,31 @@ def test_subset_pipeline_resumes_valid_native_audit(tmp_path, monkeypatch) -> No
         model_id=str((tmp_path / "tiny-llama").resolve()),
         model_dtype="float32",
         tokenizer_id="tiny-llama",
-        dataset_root=str(cache.resolve()),
-        source_info=str(source.resolve()),
-        split="test",
-        tasks=("QA",),
-        samples_per_task=1,
-        explicit_sample_ids=(),
-        selection_seed=2026,
-        targets_per_sample=1,
-        target_policy="reanchor",
-        max_response_tokens=None,
-        signal=subset.FlowSignal.MESSAGE,
-        carrier_scope="all",
-        coverage=1.0,
-        query_chunk=2,
-        route_budget=RouteBudget(
-            edges_per_head=2,
-            max_rows=32,
-            root_candidates=2,
-            hub_candidates=1,
-            corridor_edges=8,
-            confirm=False,
+        cohort=subset.CohortPlan(("QA",), 1, (), 2026),
+        targets=subset.TargetPlan(1, "reanchor", None),
+        mechanism=subset.MechanismPlan(
+            signal=subset.FlowSignal.MESSAGE,
+            carrier_scope="all",
+            coverage=1.0,
+            query_chunk=2,
+            route_budget=RouteBudget(
+                edges_per_head=2,
+                max_rows=32,
+                root_candidates=2,
+                hub_candidates=1,
+                corridor_edges=8,
+                confirm=False,
+            ),
+            local_window=3,
+            saved_edges=4,
         ),
-        local_window=3,
-        saved_edges=4,
+    )
+    corpus = dataset_module.RagTruthAuditCorpus.open(
+        cache,
+        source,
+        split="test",
+        model_id=config.model_id,
+        tokenizer=tokenizer,
     )
     real_audit = subset.audit_native_target
     seen_audit_options = {}
@@ -446,9 +450,13 @@ def test_subset_pipeline_resumes_valid_native_audit(tmp_path, monkeypatch) -> No
         return real_audit(*args, **kwargs)
 
     monkeypatch.setattr(subset, "audit_native_target", record_audit_options)
-    scanned = subset.run_subset_split(
-        model, tokenizer, output, replace(config, scan_only=True)
-    )
+    scanned = subset.SubsetAuditRunner(
+        model,
+        tokenizer,
+        corpus,
+        output,
+        replace(config, scan_only=True),
+    ).run()
     assert scanned == {"samples": 1, "targets": 0, "resumed": 0, "confirmed": 0}
     assert not seen_audit_options
     scan_manifest = json.loads(
@@ -456,7 +464,7 @@ def test_subset_pipeline_resumes_valid_native_audit(tmp_path, monkeypatch) -> No
     )
     assert scan_manifest["analysis_scope"] == "structure_only"
     assert scan_manifest["analysis_complete"]
-    first = subset.run_subset_split(model, tokenizer, output, config)
+    first = subset.SubsetAuditRunner(model, tokenizer, corpus, output, config).run()
     assert dataset.verify_hashes is True
     assert seen_audit_options["local_window"] == 3
     assert first == {
@@ -516,18 +524,22 @@ def test_subset_pipeline_resumes_valid_native_audit(tmp_path, monkeypatch) -> No
             AssertionError("resume recomputed a completed audit")
         ),
     )
-    second = subset.run_subset_split(model, tokenizer, output, config)
+    second = subset.SubsetAuditRunner(model, tokenizer, corpus, output, config).run()
     assert second["targets"] == 1
     assert second["resumed"] == 1
     # An interrupted/older run can restore only its missing structural scan.
     scan_path.unlink()
-    third = subset.run_subset_split(model, tokenizer, output, config)
+    third = subset.SubsetAuditRunner(model, tokenizer, corpus, output, config).run()
     assert scan_path.is_file()
     assert third["resumed"] == 1
     with pytest.raises(ValueError, match="another subset configuration"):
-        subset.run_subset_split(
+        subset.SubsetAuditRunner(
             model,
             tokenizer,
+            corpus,
             output,
-            replace(config, local_window=4),
-        )
+            replace(
+                config,
+                mechanism=replace(config.mechanism, local_window=4),
+            ),
+        ).run()

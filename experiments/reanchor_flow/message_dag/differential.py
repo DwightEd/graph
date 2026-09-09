@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .operators import LayerOperator
+from .native_layer import NativeLayer
 
 
 def rms_jvp(delta, reference, weight, epsilon):
@@ -28,10 +28,11 @@ def rotate(x, cos, sin):
     return x*cos + torch.cat((-b, a), dim=-1)*sin
 
 
-class DifferentialLayer(LayerOperator):
+class DifferentialLayer(NativeLayer):
+    """Native local Jacobian; deliberately independent of source allocation."""
+
     def __init__(self, cache, layer, chunk=8):
-        super().__init__(cache, layer, 'up', chunk, linear_allocation=False)
-        self.eps = cache.weights.config['rms_norm_eps']
+        super().__init__(cache, layer, chunk)
         prefix = f'model.layers.{layer}.self_attn.'
         self.wq = cache.weights.get(prefix+'q_proj.weight').float()
         self.wk = cache.weights.get(prefix+'k_proj.weight').float()

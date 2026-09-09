@@ -143,6 +143,9 @@ def test_pipeline_resume_and_portable_evaluation(tmp_path,monkeypatch):
     plan=entry.run(entry.parser().parse_args([*argv,'--plan-only']))
     assert len(plan['samples'])==12 and not (native/'message_dag_v2').exists()
     result=entry.run(entry.parser().parse_args(argv));output=native/'message_dag_v2'
+    manifest=json.loads((output/'index.json').read_text())
+    assert manifest['method_id']=='source_allocation'
+    assert manifest['method_schema']=='message-dag/source-allocation@2'
     assert result['completed_targets']==24 and len(result['cohorts'])==6
     assert (native/'index.json').read_bytes()==before
     assert result['cohorts']['test/QA']['hallucinated']>0

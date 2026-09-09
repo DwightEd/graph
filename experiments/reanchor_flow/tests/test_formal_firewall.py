@@ -7,8 +7,8 @@ import torch
 
 import formal_cache
 from cache import sha256
-from experiments.reanchor_flow import subset
-from experiments.reanchor_flow.subset_data import (
+from experiments.reanchor_flow import dataset as dataset_module
+from experiments.reanchor_flow.dataset import (
     SampleRecord,
     inspect_records,
     select_records,
@@ -283,32 +283,16 @@ def test_subset_capture_rejects_a_mismatched_dataset_split(
         (),
         {"manifest": {"split": "train"}, "spec": {}, "sample_ids": []},
     )()
-    monkeypatch.setattr(subset, "open_research_dataset", lambda *_a, **_k: dataset)
-    config = subset.SubsetRunConfig(
-        model_id=str((tmp_path / "model").resolve()),
-        model_dtype="float32",
-        tokenizer_id="model",
-        dataset_root=str((tmp_path / "cache").resolve()),
-        source_info=str((tmp_path / "source.jsonl").resolve()),
-        split="test",
-        tasks=("QA",),
-        samples_per_task=1,
-        explicit_sample_ids=(),
-        selection_seed=2026,
-        targets_per_sample=1,
-        target_policy="uncertain",
-        max_response_tokens=128,
-        signal=subset.FlowSignal.MESSAGE,
-        carrier_scope="all",
-        coverage=0.9,
-        query_chunk=8,
-        route_budget=subset.RouteBudget(),
-        local_window=10,
+    monkeypatch.setattr(
+        dataset_module,
+        "open_research_dataset",
+        lambda *_a, **_k: dataset,
     )
     with pytest.raises(ValueError, match="differs from requested split"):
-        subset.run_subset_split(
-            None,
-            None,
-            tmp_path / "output",
-            config,
+        dataset_module.RagTruthAuditCorpus.open(
+            tmp_path / "cache",
+            tmp_path / "source.jsonl",
+            split="test",
+            model_id=str((tmp_path / "model").resolve()),
+            tokenizer=type("Tokenizer", (), {"name_or_path": "model"})(),
         )

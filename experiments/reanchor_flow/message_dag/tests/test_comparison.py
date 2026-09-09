@@ -127,7 +127,7 @@ def test_paired_run_resume_and_partial_report_keep_frozen_controls(tmp_path, mon
     folder = output / hall['folder']
     assert hall['audit_pairs'] == [[7, 6, 10]]
     assert all((folder / f'target_{t}.html').exists() for t in hall['targets'])
-    assert 'src="target_7.html"' in (folder / 'index.html').read_text()
+    assert 'src="target_7.html"' in (folder / 'index.html').read_text(encoding='utf-8')
     frozen = (output / 'index.json').read_bytes()
     with pytest.raises(ValueError, match='DAG settings changed'):
         entry.run(entry.parser().parse_args([*argv, '--mlp-rule', 'up']))

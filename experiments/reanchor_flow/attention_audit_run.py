@@ -58,7 +58,7 @@ def prepare(args):
     from transformers import AutoConfig, AutoTokenizer
     from research_dataset import open_research_dataset
     from .scan_dataset import ScanDataset
-    from .subset_data import inspect_records, select_records, sample_tokens
+    from .dataset import inspect_records, sample_tokens, select_records
     from .units import build_source_units
 
     config = native_config(args)

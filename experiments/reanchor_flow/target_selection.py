@@ -1,20 +1,15 @@
-"""Label-free cohort, sample, source-unit, and target construction."""
+"""Label-free target contrasts and structural re-anchor selection."""
 
 from __future__ import annotations
 
-import hashlib
-from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
-from pathlib import Path
+from collections.abc import Callable
 
 import torch
 
 from experiments.common.llama_message_intervention import baseline_forward
-from experiments.common.ragtruth_alignment import canonical_task_type
-
 from .flow import SourceLocationBuckets
 from .native_flow import capture_source_location_buckets
-from .native_world import NativeWorld, TargetReanchorSelection
+from .native_world import TargetReanchorSelection
 from .reanchor_timeline import (
     SOURCE_KIND_NAMES,
     StructuralReanchorEvent,
@@ -23,175 +18,10 @@ from .reanchor_timeline import (
     structural_reanchor_trace,
 )
 from .sample_scan import SampleScan
-from .units import build_source_units
 from .worlds import SourceUnits, TargetContrast
 
 REANCHOR_POLICIES = ("reanchor", "reanchor-window")
 REANCHOR_NMS_RADIUS = 1
-
-
-@dataclass(frozen=True)
-class SampleRecord:
-    """Metadata allowed to select a sample before labels are opened."""
-
-    sample_id: str
-    source_id: str
-    task_type: str
-    generator_model: str
-
-
-def _hash_rank(seed: int, *parts: str) -> bytes:
-    value = "\x1f".join((str(seed), *parts)).encode("utf-8")
-    return hashlib.sha256(value).digest()
-
-
-def safe_sample_key(sample_id: str) -> str:
-    if (
-        sample_id
-        and Path(sample_id).name == sample_id
-        and "\\" not in sample_id
-        and sample_id not in {".", ".."}
-    ):
-        return sample_id
-    digest = hashlib.sha256(sample_id.encode("utf-8")).hexdigest()[:20]
-    return f"sample-{digest}"
-
-
-def _record_task(
-    sample_id: str,
-    cached_task,
-    source: Mapping | None,
-) -> str:
-    cache_value = None
-    if cached_task is not None and str(cached_task).strip():
-        cache_value = canonical_task_type(cached_task)
-    source_value = None if source is None else canonical_task_type(source["task_type"])
-    if (
-        cache_value is not None
-        and source_value is not None
-        and cache_value != source_value
-    ):
-        raise ValueError(f"sample {sample_id} and source_info disagree on task type")
-    task = source_value or cache_value
-    if task is None:
-        raise ValueError(
-            f"sample {sample_id} has no task type in formal metadata or source_info"
-        )
-    return task
-
-
-def inspect_records(
-    dataset,
-    *,
-    sample_ids: Iterable[str] | None = None,
-    source_info: Mapping[str, Mapping] | None = None,
-) -> tuple[SampleRecord, ...]:
-    """Read allow-listed metadata, optionally for explicit IDs only.
-
-    Formal datasets provide a memory-mapped metadata path that does not
-    dereference co-located attention or label tensors. ``source_info`` is the
-    authoritative task fallback; when both sources contain a task, they must
-    agree.
-    """
-
-    records = []
-    available = tuple(map(str, dataset.sample_ids))
-    selected = available if sample_ids is None else tuple(map(str, sample_ids))
-    available_set = set(available)
-    missing = [sample_id for sample_id in selected if sample_id not in available_set]
-    if missing:
-        raise ValueError(f"sample IDs not found: {', '.join(missing)}")
-    metadata_reader = getattr(dataset, "metadata", None)
-    for sample_id in selected:
-        if callable(metadata_reader):
-            metadata = metadata_reader(sample_id)
-            source_id = str(metadata["source_id"])
-            cached_task = metadata.get("task_type")
-            generator_model = str(metadata.get("generator_model") or "")
-        else:
-            sample = dataset[sample_id]
-            try:
-                source_id = str(sample.source_id)
-                cached_task = sample.task_type
-                generator_model = str(getattr(sample, "generator_model", "") or "")
-            finally:
-                sample.release_attention()
-        source = None if source_info is None else source_info.get(source_id)
-        records.append(
-            SampleRecord(
-                sample_id,
-                source_id,
-                _record_task(sample_id, cached_task, source),
-                generator_model,
-            )
-        )
-    return tuple(records)
-
-
-def select_records(
-    records: Iterable[SampleRecord],
-    *,
-    tasks: tuple[str, ...],
-    samples_per_task: int,
-    seed: int,
-    sample_ids: tuple[str, ...] = (),
-) -> tuple[SampleRecord, ...]:
-    """Choose a source-diverse cohort, or all records when the limit is zero."""
-
-    if samples_per_task < 0:
-        raise ValueError("samples_per_task cannot be negative")
-    records = tuple(records)
-    by_id = {record.sample_id: record for record in records}
-    if len(by_id) != len(records):
-        raise ValueError("dataset contains duplicate sample IDs")
-    if sample_ids:
-        missing = [sample_id for sample_id in sample_ids if sample_id not in by_id]
-        if missing:
-            raise ValueError(f"sample IDs not found: {', '.join(missing)}")
-        selected = tuple(by_id[sample_id] for sample_id in sample_ids)
-        invalid = [item.sample_id for item in selected if item.task_type not in tasks]
-        if invalid:
-            raise ValueError(
-                "explicit samples fall outside --task: " + ", ".join(invalid)
-            )
-        return selected
-
-    selected: list[SampleRecord] = []
-    for task in tasks:
-        candidates = [record for record in records if record.task_type == task]
-        if samples_per_task == 0:
-            selected.extend(sorted(candidates, key=lambda item: item.sample_id))
-            continue
-        if len(candidates) < samples_per_task:
-            raise ValueError(
-                f"task {task} has {len(candidates)} available samples; "
-                f"{samples_per_task} requested"
-            )
-        by_source: dict[str, list[SampleRecord]] = {}
-        for record in candidates:
-            by_source.setdefault(record.source_id, []).append(record)
-        primary = []
-        for source_id, source_records in by_source.items():
-            representative = min(
-                source_records,
-                key=lambda item: _hash_rank(seed, task, source_id, item.sample_id),
-            )
-            primary.append(representative)
-        primary.sort(key=lambda item: _hash_rank(seed, task, item.source_id))
-        chosen = primary[:samples_per_task]
-        if len(chosen) < samples_per_task:
-            chosen_ids = {record.sample_id for record in chosen}
-            remaining = [
-                record for record in candidates if record.sample_id not in chosen_ids
-            ]
-            remaining.sort(
-                key=lambda item: _hash_rank(seed, task, item.source_id, item.sample_id)
-            )
-            chosen.extend(remaining[: samples_per_task - len(chosen)])
-        selected.extend(chosen)
-    if not selected:
-        raise ValueError("no samples match the requested task subset")
-    return tuple(selected)
 
 
 def reanchor_target_positions(
@@ -503,87 +333,3 @@ def freeze_target_plan(
     )
     del cache
     return targets, selections
-
-
-def load_world_from_dataset(
-    dataset,
-    record: SampleRecord,
-    source: dict,
-    tokenizer,
-    model,
-    *,
-    max_response_tokens: int | None,
-    targets_per_sample: int,
-    target_policy: str,
-    query_chunk: int,
-    local_window: int = 10,
-    scan_path: Path | None = None,
-) -> NativeWorld:
-    """Detach cache token IDs, align units, and freeze native targets."""
-
-    token_ids, response_start = sample_tokens(dataset, record.sample_id)
-    full_response_tokens = len(token_ids) - response_start
-    if max_response_tokens is not None:
-        token_ids = token_ids[: response_start + max_response_tokens]
-    if len(token_ids) <= response_start:
-        raise ValueError(f"sample {record.sample_id} has an empty response")
-    if canonical_task_type(source["task_type"]) != record.task_type:
-        raise ValueError(
-            f"sample {record.sample_id} and source_info disagree on task type"
-        )
-    units = build_source_units(source, tokenizer, token_ids, response_start)
-    evidence_units = tuple(
-        unit_id
-        for unit_id, kind in enumerate(units.kind)
-        if kind not in {"other_prompt", "response"}
-        and bool((units.token_unit_id == unit_id).any())
-    )
-    targets, target_selection = freeze_target_plan(
-        model,
-        token_ids,
-        response_start,
-        count=targets_per_sample,
-        policy=target_policy,
-        query_chunk=query_chunk,
-        units=units,
-        evidence_unit_id=evidence_units,
-        local_window=local_window,
-        on_scan=(
-            None
-            if scan_path is None
-            else lambda scan: scan.save(
-                scan_path,
-                dataset_sample_id=record.sample_id,
-                source_id=record.source_id,
-                task_type=record.task_type,
-                token_ids=token_ids,
-                response_start=response_start,
-                full_response_tokens=full_response_tokens,
-                local_window=local_window,
-            )
-        ),
-    )
-    return NativeWorld(
-        safe_sample_key(record.sample_id),
-        Path(tokenizer.name_or_path).name,
-        token_ids,
-        response_start,
-        units,
-        evidence_units,
-        targets,
-        target_selection,
-    ).check()
-
-
-def sample_tokens(dataset, sample_id: str) -> tuple[torch.Tensor, int]:
-    """Detach one cached token sequence and promptly release its attention."""
-
-    sample = dataset[sample_id]
-    try:
-        cached = sample.attention()
-        return (
-            cached.token_ids.detach().cpu().long().clone(),
-            int(cached.response_idx),
-        )
-    finally:
-        sample.release_attention()

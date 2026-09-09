@@ -296,7 +296,7 @@ def test_all_tasks_full_pipeline_balanced_labels_resume_and_offline(tmp_path,mon
     assert 'Data2txt' not in partial['replication']
     assert partial['groups']['test/ALL']['samples']==4
     assert len(json.loads((output/'review_index.json').read_text()))==10
-    assert '部分采集结果' in (output/'summary.md').read_text()
+    assert '部分采集结果' in (output/'summary.md').read_text(encoding='utf-8')
     assert 'Partial capture' in (output/'gallery.html').read_text()
 
 

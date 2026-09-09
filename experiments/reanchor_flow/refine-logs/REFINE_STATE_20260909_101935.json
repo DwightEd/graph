@@ -1,0 +1,9 @@
+{
+  "current_phase": "problem_anchor_and_initial_proposal",
+  "iteration": 0,
+  "problem_anchor": "experiments/reanchor_flow/refine-logs/PROBLEM_ANCHOR.md",
+  "proposal": "experiments/reanchor_flow/refine-logs/REFINED_PROPOSAL.md",
+  "review_status": "pending",
+  "evidence_status": "design_only_no_new_8b_results",
+  "next_action": "independent novelty and identifiability review"
+}

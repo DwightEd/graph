@@ -177,8 +177,6 @@ def test_functional_report_uses_own_query_and_fixed_cut_without_confirmation(tmp
 def test_production_evaluation_of_scan_only_run_joins_all_samples(
     tmp_path, monkeypatch
 ):
-    import torch
-
     from experiments.reanchor_flow import subset_report
 
     output = tmp_path / "output"
@@ -195,29 +193,14 @@ def test_production_evaluation_of_scan_only_run_joins_all_samples(
     )
     (output / subset_report.MANIFEST_NAME).write_text(json.dumps(manifest))
 
-    class Sample:
-        def __init__(self, sample_id):
-            self.sample_id = sample_id
-
-        def release_attention(self):
-            pass
-
-    class LabelStore:
-        def response_labels(self, sample):
-            return torch.from_numpy(labels[sample.sample_id])
-
-    class Dataset:
-        def __getitem__(self, sample_id):
-            return Sample(sample_id)
-
-        def prepare_evaluation_labels(self, sample_ids):
+    class Labels:
+        def load(self, sample_ids):
             assert set(sample_ids) == set(labels)
-            return LabelStore()
+            return labels
 
-    monkeypatch.setattr(
-        subset_report, "open_research_dataset", lambda *a, **k: Dataset()
+    report = subset_report.evaluate_subset_split(
+        dataset_root, output, label_source=Labels(), plot=True
     )
-    report = subset_report.evaluate_subset_split(dataset_root, output, plot=True)
     assert report["analysis_scope"] == "structure_only"
     assert report["targets"] == []
     assert set(report["groups"]) == {"ALL", "QA"}

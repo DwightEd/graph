@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from experiments.reanchor_flow.message_dag import operators
+from experiments.reanchor_flow.message_dag import native_layer
 from experiments.reanchor_flow.message_dag.cache import NativeCache
 from experiments.reanchor_flow.message_dag.differential import DifferentialLayer, final_directions
 from experiments.reanchor_flow.message_dag.event_run import event_group_size
@@ -25,11 +25,11 @@ def test_layer_grouping_preserves_events_and_reuses_native_inputs(tmp_path,monke
         counts[name] += 1
         return get(name)
     monkeypatch.setattr(weights,'get',counted_get)
-    chunks = operators.attention_chunks
+    chunks = native_layer.attention_chunks
     def counted_attention(*args,**kwargs):
         counts['attention_reconstruction'] += 1
         yield from chunks(*args,**kwargs)
-    monkeypatch.setattr(operators,'attention_chunks',counted_attention)
+    monkeypatch.setattr(native_layer,'attention_chunks',counted_attention)
     profile = {}
     with NativeCache(path,weights) as cache:
         grouped = trace_events(cache,sites,event_batch=2,query_chunk=3,window=2,profile=profile)

@@ -21,7 +21,7 @@ from experiments.reanchor_flow.native_world import (
     gated_forward_cache,
     source_gate,
 )
-from experiments.reanchor_flow.subset_data import freeze_target_plan
+from experiments.reanchor_flow.target_selection import freeze_target_plan
 from experiments.reanchor_flow.tests.etcc_helpers import paired_world, tiny_model
 
 
