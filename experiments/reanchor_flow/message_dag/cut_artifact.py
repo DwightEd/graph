@@ -122,8 +122,20 @@ class CutRecorder:
         )
         if not (np.isfinite(error).all() and np.isfinite(scale).all()):
             raise ValueError("nonfinite last-crossing response; cannot certify path conservation")
-        if np.any(np.abs(error) > 2e-7 + 2e-4 * scale):
-            raise ValueError("last-crossing cut does not reconstruct the native 1/2+ hop response")
+        allowance = 2e-7 + 2e-4 * scale
+        if np.any(np.abs(error) > allowance):
+            ratio = np.abs(error) / allowance
+            hop, target = np.unravel_index(ratio.argmax(), ratio.shape)
+            raise ValueError(
+                "last-crossing cut does not reconstruct the native 1/2+ hop response: "
+                f"event_position={int(self.rows[self.row])}, "
+                f"hop={('1', '2+')[hop]}, "
+                f"target_position={int(self.rows[target])+1}, "
+                f"cut={net[hop, target]:.9g}, expected={expected[hop, target]:.9g}, "
+                f"error={error[hop, target]:.9g}, allowance={allowance[hop, target]:.9g}, "
+                f"violations={int((ratio > 1).sum())}/{ratio.size}; "
+                "no closed artifact was published"
+            )
         result = {
             "cut_schema": np.array(1),
             "cut_signed": self.signed,
