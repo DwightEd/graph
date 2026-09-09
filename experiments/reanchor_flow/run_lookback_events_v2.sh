@@ -10,7 +10,7 @@ git log -3 --oneline
 conda run --no-capture-output -n research \
   python -m pytest -q \
   experiments/reanchor_flow/message_dag/tests/test_causal_jvp.py \
-  experiments/reanchor_flow/message_dag/tests/test_event_execution.py::test_cuda_memory_profiling_passes_integer_device_to_legacy_torch
+  experiments/reanchor_flow/message_dag/tests/test_event_execution.py::test_cuda_memory_profiling_initializes_allocator_before_reset
 
 conda run --no-capture-output -n research \
   python -u -m experiments.reanchor_flow.message_dag lookback \

@@ -89,18 +89,25 @@ def test_group_budget_changes_execution_size_without_dropping_remainder():
             assert selected==events
 
 
-def test_cuda_memory_profiling_passes_integer_device_to_legacy_torch(monkeypatch):
-    received = []
+def test_cuda_memory_profiling_initializes_allocator_before_reset():
+    calls = []
 
-    def legacy_reset(device):
-        if not isinstance(device, int):
-            raise RuntimeError('Invalid device argument')
-        received.append(device)
+    class LazyCuda:
+        initialized = False
 
-    monkeypatch.setattr(torch.cuda, 'reset_peak_memory_stats', legacy_reset)
+        def init(self):
+            self.initialized = True
+            calls.append('init')
 
-    assert reset_cuda_peak_memory(torch, 'cuda:0') == 0
-    assert received == [0]
+        def reset_peak_memory_stats(self, device):
+            if not self.initialized:
+                raise RuntimeError('Invalid device argument')
+            calls.append(('reset', device))
+
+    fake_torch = type('FakeTorch', (), {'device': torch.device, 'cuda': LazyCuda()})
+
+    assert reset_cuda_peak_memory(fake_torch, 'cuda:0') == 0
+    assert calls == ['init', ('reset', 0)]
 
 
 def test_readout_cache_distinguishes_explicit_contrasts(tmp_path):

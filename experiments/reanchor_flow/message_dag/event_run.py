@@ -72,10 +72,11 @@ def event_group_size(rows, hidden_size, event_batch, state_cache_gib):
 
 
 def reset_cuda_peak_memory(torch_module, device):
-    """Reset profiling with the integer device required by older PyTorch builds."""
+    """Initialize CUDA before resetting allocator statistics for this device."""
     parsed = torch_module.device(device)
     if parsed.type != 'cuda':
         return None
+    torch_module.cuda.init()
     index = parsed.index
     if index is None:
         index = torch_module.cuda.current_device()
