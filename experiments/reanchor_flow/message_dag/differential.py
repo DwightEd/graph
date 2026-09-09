@@ -116,10 +116,10 @@ class DifferentialLayer(NativeLayer):
         return rms_vjp(z,self.x,self.w['input_norm'],self.eps)
 
     def attention_jvp(self, delta, *, routing=True):
-        """Return same-position and strictly earlier-position derivative branches.
+        """Return disjoint same-position and strictly earlier-position branches.
 
-        Query changes are same-position control. Key/value changes at s<q are
-        cross-position transmission. This counts real position hops, not layers.
+        Form cross-position responses directly. Subtracting two full residual-space
+        projections leaks roundoff from same-position Q/K/V into the hop counters.
         """
         batch, r, _ = delta.shape
         z = rms_jvp(delta, self.x, self.w['input_norm'], self.eps)
@@ -131,32 +131,33 @@ class DifferentialLayer(NativeLayer):
             dq = rotate(dq,self.cos,self.sin)
             dk = rotate(dk,self.cos,self.sin).repeat_interleave(self.h//self.kv,1)
         same = torch.zeros((batch,r,self.d), device=self.device)
-        total = torch.zeros_like(same)
+        cross = torch.zeros_like(same)
         codes = torch.zeros((batch,self.h,r,self.hd), device=self.device)
         for begin,end,a in self.rows_attention():
             qrows = self.rows[begin:end]
             ar = a[...,self.rows]
             local = torch.arange(end-begin,device=self.device)
             a_self = a[:,local,qrows]
-            all_code = torch.einsum('hqs,bhsd->bhqd',ar,dv)
+            earlier = self.rows[None,:] < qrows[:,None]
+            a_cross = ar * earlier[None]
+            cross_code = torch.einsum('hqs,bhsd->bhqd',a_cross,dv)
             self_code = a_self[None,...,None]*dv[:,:,begin:end]
             if routing:
                 ds_q = torch.einsum('bhqd,hsd->bhqs',dq[:,:,begin:end],self.k)*self.scale
                 ds_k = torch.einsum('hqd,bhsd->bhqs',self.q[:,begin:end],dk)*self.scale
-                ds = ds_q.clone()
-                ds[...,self.rows] += ds_k
-                da = a[None]*(ds-(ds*a[None]).sum(-1,keepdim=True))
-                all_code += torch.einsum('bhqs,hsd->bhqd',da,self.v)
                 da_query = a[None]*(ds_q-(ds_q*a[None]).sum(-1,keepdim=True))
                 self_code += torch.einsum('bhqs,hsd->bhqd',da_query,self.v)
-                # A change to K_q changes the whole softmax row, not only A_qq.
-                key_self = ds_k[:,:,local,torch.arange(begin,end,device=self.device)]
+                # A key change controls the entire softmax row, including prompt V.
                 av = torch.einsum('hqs,hsd->hqd',a,self.v)
+                key_self = ds_k[:,:,local,torch.arange(begin,end,device=self.device)]
                 self_code += (a_self[None]*key_self)[...,None]*(self.v[:,qrows]-av)[None]
-            codes[:,:,begin:end] = all_code
-            total[:,begin:end] = F.linear(all_code.transpose(1,2).flatten(-2),self.w['output'])
+                weighted_key = a_cross[None] * ds_k
+                cross_code += torch.einsum('bhqs,hsd->bhqd',weighted_key,self.v[:,self.rows])
+                cross_code -= weighted_key.sum(-1,keepdim=True)*av[None]
+            codes[:,:,begin:end] = self_code+cross_code
             same[:,begin:end] = F.linear(self_code.transpose(1,2).flatten(-2),self.w['output'])
-        return same, total-same, codes
+            cross[:,begin:end] = F.linear(cross_code.transpose(1,2).flatten(-2),self.w['output'])
+        return same, cross, codes
 
     def remote_seeds(self, sites, window):
         """Batch native head writes; one CPU weight transfer per query chunk."""
