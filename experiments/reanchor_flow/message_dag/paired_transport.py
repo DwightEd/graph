@@ -1,10 +1,9 @@
 """Aligned selective/common decomposition of two closed last-crossing cuts."""
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 import numpy as np
-
 
 SCREEN_SCHEMA = 1
 _EDGE_CHUNK = re.compile(r"^L(\d+)Q(\d+)$")

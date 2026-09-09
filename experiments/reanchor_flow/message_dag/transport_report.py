@@ -55,6 +55,42 @@ def sample_scores(folder, scan):
                 reason=reason,labels_used=np.array(False),primary=np.array('opposition'))
 
 
+def report_event_incidence(output, manifest, *, bootstrap=200):
+    """Report the hurdle's first stage when legacy cuts have no transport score."""
+
+    from .event_report import labels_for
+    from .hurdle import summarize_hurdle
+
+    output = Path(output)
+    samples = []
+    for entry in manifest["samples"]:
+        folder = output / entry["folder"]
+        scan_path = folder / "scan.npz"
+        if not scan_path.exists():
+            continue
+        with np.load(scan_path, allow_pickle=False) as archive:
+            scan = dict(archive)
+        rows = np.asarray(scan["row_position"])[:-1]
+        targets = rows + 1
+        event_rows = np.unique(scan["event_index"][:, 2])
+        prior_event = np.searchsorted(event_rows, np.arange(len(rows)), side="left") > 0
+        special = scan["special_mask"]
+        ordinary = ~special[rows] & ~special[targets]
+        samples.append(
+            {
+                "group": entry["split"] + "/" + entry["task_type"],
+                "source": str(entry["source_id"]),
+                "labels": labels_for(folder, scan),
+                "ordinary": ordinary,
+                "event": prior_event,
+                "transport": np.full(len(rows), np.nan),
+            }
+        )
+    result = summarize_hurdle(samples, bootstrap=bootstrap)
+    save_json(output / "transport_hurdle.json", result)
+    return result
+
+
 def report_transport(output, manifest, *, bootstrap=200):
     from .event_report import labels_for
     from .hurdle import summarize_hurdle

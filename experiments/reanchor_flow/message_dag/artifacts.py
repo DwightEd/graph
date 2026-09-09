@@ -16,6 +16,7 @@ _replace_locks_guard = Lock()
 CONTAINER_SCHEMA = 1
 SOURCE_ALLOCATION = "source_allocation"
 LOOKBACK_TRANSPORT = "lookback_transport"
+COUNTERFACTUAL_MEDIATION = "counterfactual_mediation"
 
 
 class UnsupportedArtifactSchema(ValueError):
@@ -32,6 +33,7 @@ def artifact_header(method_id: str, method_version: int) -> dict[str, object]:
     schema_names = {
         SOURCE_ALLOCATION: "source-allocation",
         LOOKBACK_TRANSPORT: "lookback-tangent",
+        COUNTERFACTUAL_MEDIATION: "counterfactual-mediation",
     }
     if method_id not in schema_names:
         raise ValueError(f"unknown message-DAG method: {method_id}")
@@ -56,9 +58,11 @@ def read_descriptor(output: Path) -> tuple[ArtifactDescriptor, dict]:
         )
     method_id = manifest.get("method_id")
     method_schema = manifest.get("method_schema")
-    if method_id not in (SOURCE_ALLOCATION, LOOKBACK_TRANSPORT) or not isinstance(
-        method_schema, str
-    ):
+    if method_id not in (
+        SOURCE_ALLOCATION,
+        LOOKBACK_TRANSPORT,
+        COUNTERFACTUAL_MEDIATION,
+    ) or not isinstance(method_schema, str):
         raise UnsupportedArtifactSchema(f"{index_path}: invalid method identity")
     return ArtifactDescriptor(method_id, method_schema), manifest
 

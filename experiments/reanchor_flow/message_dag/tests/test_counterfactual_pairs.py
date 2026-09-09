@@ -3,7 +3,9 @@ import json
 import numpy as np
 import pytest
 
-from experiments.reanchor_flow.message_dag.counterfactual_pairs import CounterfactualPair
+from experiments.reanchor_flow.message_dag.counterfactual_pairs import (
+    CounterfactualPair,
+)
 
 
 class WordTokenizer:

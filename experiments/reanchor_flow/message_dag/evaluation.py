@@ -2,7 +2,12 @@
 
 from pathlib import Path
 
-from .artifacts import LOOKBACK_TRANSPORT, SOURCE_ALLOCATION, read_descriptor
+from .artifacts import (
+    COUNTERFACTUAL_MEDIATION,
+    LOOKBACK_TRANSPORT,
+    SOURCE_ALLOCATION,
+    read_descriptor,
+)
 
 
 class OfflineEvaluator:
@@ -22,4 +27,8 @@ class OfflineEvaluator:
             from .report import evaluate
 
             return evaluate(self.output, manifest, bootstrap=self.bootstrap)
+        if descriptor.method_id == COUNTERFACTUAL_MEDIATION:
+            from .counterfactual_report import evaluate
+
+            return evaluate(self.output)
         raise AssertionError(f"unhandled method identity: {descriptor.method_id}")

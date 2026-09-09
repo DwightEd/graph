@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from hashlib import sha256
 import json
 import re
+from dataclasses import dataclass
+from hashlib import sha256
 
 import numpy as np
-
 
 PAIR_SCHEMA = 1
 CONSTRAINT_KINDS = frozenset({"entity", "negation", "time", "scope"})

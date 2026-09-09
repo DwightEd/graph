@@ -4,7 +4,6 @@ from collections import defaultdict
 
 import numpy as np
 
-
 LABELS = (("N", 0), ("H", 1))
 
 
@@ -14,7 +13,7 @@ def _estimate(values, bootstrap, seed):
     result = {
         "mean": float(finite.mean()) if len(finite) else float("nan"),
         "ci95": [float("nan"), float("nan")],
-        "sources": int(len(finite)),
+        "sources": len(finite),
     }
     if len(finite) > 1 and bootstrap:
         rng = np.random.default_rng(seed)
@@ -28,7 +27,7 @@ def _difference(first, second, bootstrap, seed):
     values = np.asarray(
         [[first.get(source, np.nan), second.get(source, np.nan)] for source in sources],
         dtype=float,
-    )
+    ).reshape(-1, 2)
     means = np.full(2, np.nan)
     for column in range(2):
         finite = values[:, column][np.isfinite(values[:, column])]

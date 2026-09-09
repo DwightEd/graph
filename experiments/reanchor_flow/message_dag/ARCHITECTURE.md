@@ -12,6 +12,7 @@ operands and an artifact lifecycle, but they are not one generic graph method.
 | Source allocation | Additive allocation at a fixed native reference, including an explicit SwiGLU allocation rule | Conditional ancestry diagnostic |
 | Lookback transport | Native local Jacobian/JVP seeded by a detected response read | Main route-level audit |
 | Last-crossing cut | Unique partition of every 1/2+ cross-position path by its final V/K crossing | Conservation-certified explanation of the local response |
+| Counterfactual mediation screen | Aligned selective/common last-crossing transport plus a finite post-WO message exchange | Constraint-routing mechanism test |
 
 The allocation engine must not be described as a native Jacobian. The tangent
 engine must not inherit its allocation rules. Numerical closure means that an
@@ -53,6 +54,7 @@ The new common CLI is:
 ```text
 python -m experiments.reanchor_flow.message_dag lookback [lookback options]
 python -m experiments.reanchor_flow.message_dag allocate [allocation options]
+python -m experiments.reanchor_flow.message_dag counterfactual [counterfactual options]
 python -m experiments.reanchor_flow.message_dag evaluate OUTPUT [--bootstrap N]
 ```
 
@@ -106,6 +108,12 @@ alignment, and allocation rules do affect scientific identity.
 | `cut_artifact.py` | Persist same-position suffix readers, stream physical cut edges, certify closure, and atomically commit |
 | `selection.py` | Target/sample selection and explicit label-use provenance |
 | `event_report.py`, `report.py`, views | Offline scoring, label join, and presentation |
+| `counterfactual_pairs.py` | Validate and freeze reviewed, token-aligned semantic interventions |
+| `counterfactual_capture.py` | Capture both worlds and freeze/trace the union constraint-linked event plan |
+| `paired_transport.py` | Compare closed paired cuts and separate matched common/selective transport |
+| `message_exchange.py` | Run bounded bidirectional post-WO carrier exchange and candidate-sequence readout |
+| `counterfactual_study.py` | Expose the resumable phase workflow through one small public API |
+| `counterfactual_report.py` | Evaluate the complete screen funnel and finite witnesses offline |
 
 `native_layer.NativeLayer` is the only shared algorithm dependency of allocation
 and tangent operators. The tangent operator no longer subclasses the allocation
@@ -113,7 +121,7 @@ operator.
 
 ## Dominant research method
 
-The next method is **Counterfactual Last-Crossing Mediation Screen (CLCMS)**. It uses an
+The implemented experimental method is **Counterfactual Last-Crossing Mediation Screen (CLCMS)**. It uses an
 aligned minimal pair that changes exactly one evidence constraint while holding
 payload, candidate contrast, valid response prefix, and position alignment
 fixed. Each world first receives an independently closed, per-head signed
@@ -130,8 +138,9 @@ This separates constraint-switch-selective transport from pair-invariant
 payload transport. The graph only proposes a relay. The current claim gate is a
 bounded bidirectional post-WO head-message exchange in the original model,
 measured on the evidence-consistent sequence log-odds in each world. It is not
-called a natural indirect effect. K-cache and V-cache exchanges are separate
-branch tests; full K/Q/MLP/residual mediation remains future work.
+called a natural indirect effect. The current finite intervention exchanges the
+physical post-WO head message only; separate K/Q/MLP/residual interventions
+remain future work. See `COUNTERFACTUAL_METHOD.md` for the executable protocol.
 
 The contribution is the combination of:
 
@@ -171,5 +180,8 @@ route-resolved attribution audit, not a hallucination mechanism or detector.
   an explicitly label-selected diagnostic.
 - Split preview/render fields from scientific artifacts where old schemas
   currently mix them.
-- Implement CLCM only after a minimal-pair/alignment contract and intervention
-  capture protocol are preregistered.
+- Add content hashes for checkpoint/capture identities; the current study
+  freezes scientific inputs and tokenized pairs but still identifies the model
+  by local path.
+- Add preregistered lexical, positional, paraphrase, irrelevant-source, and
+  random-carrier controls before interpreting a positive pilot as a mechanism.

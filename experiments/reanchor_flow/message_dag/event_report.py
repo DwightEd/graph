@@ -1,13 +1,18 @@
 """Offline, source-balanced comparisons; labels never define lookback events."""
-from collections import defaultdict
 import csv
 import html
 import json
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
-from ..attention_audit_stats import bracket_positions, matched_difference, mean, token_classes
+from ..attention_audit_stats import (
+    bracket_positions,
+    matched_difference,
+    mean,
+    token_classes,
+)
 from ..attention_rhythm_report import save_json
 
 METRICS = ('local_mass','remote_mass','time_tv','remote_gain')
@@ -65,7 +70,7 @@ def plot_cohort(path, values, counts):
 
 def evaluate(output, *, bootstrap=200):
     from .event_view import render_event
-    from .transport_report import report_transport
+    from .transport_report import report_event_incidence, report_transport
     output = Path(output)
     manifest = json.loads((output/'index.json').read_text())
     heads = defaultdict(lambda:defaultdict(list))
@@ -186,8 +191,14 @@ def evaluate(output, *, bootstrap=200):
                    zero_event_samples=sum(r['scanned'] and r.get('events')==0 for r in coverage),
                    bootstrap=bootstrap,labels_used_for_events=False,labels_used_for_dag=False)
     signed_edges = manifest.get('event_settings',{}).get('schema',1)>=2
-    summary['transport'] = (report_transport(output,manifest,bootstrap=bootstrap) if signed_edges
-                            else dict(status='not_available_v1'))
+    summary['transport'] = (
+        report_transport(output,manifest,bootstrap=bootstrap)
+        if signed_edges
+        else {
+            'status': 'not_available_v1',
+            'hurdle': report_event_incidence(output,manifest,bootstrap=bootstrap),
+        }
+    )
     save_json(output/'summary.json',summary)
     lines = ['# 内部回看事件审计','',
              f"请求原生样本 {summary['native_coverage']['planned_samples']}；完成扫描 {summary['scanned']}；"

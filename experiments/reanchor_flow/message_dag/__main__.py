@@ -1,4 +1,4 @@
-"""Unified command line for lookback transport, source allocation and evaluation."""
+"""Unified command line for message-DAG studies and offline evaluation."""
 
 import argparse
 import sys
@@ -9,7 +9,9 @@ from .evaluation import OfflineEvaluator
 
 def parser() -> argparse.ArgumentParser:
     command = argparse.ArgumentParser(description=__doc__)
-    command.add_argument("command", choices=("lookback", "allocate", "evaluate"))
+    command.add_argument(
+        "command", choices=("lookback", "allocate", "counterfactual", "evaluate")
+    )
     command.add_argument("arguments", nargs=argparse.REMAINDER)
     return command
 
@@ -24,6 +26,10 @@ def main(argv=None):
         from . import run
 
         return run.run(run.parser().parse_args(args.arguments))
+    if args.command == "counterfactual":
+        from . import counterfactual_run
+
+        return counterfactual_run.run(counterfactual_run.parser().parse_args(args.arguments))
 
     evaluate_parser = argparse.ArgumentParser(description="evaluate a committed study offline")
     evaluate_parser.add_argument("output", type=Path)

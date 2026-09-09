@@ -56,3 +56,22 @@ def test_hurdle_reports_missing_transport_without_zero_imputation():
     assert report["H"]["transport_coverage_given_event"] == 0.5
     assert report["H"]["transport_given_event"]["mean"] == 0.5
     assert np.isnan(report["N"]["transport_given_event"]["mean"])
+
+
+def test_hurdle_keeps_conditional_contrast_missing_when_no_transport_exists():
+    samples = [
+        {
+            "group": "test/QA",
+            "source": "s1",
+            "labels": np.array([0, 1]),
+            "ordinary": np.ones(2, dtype=bool),
+            "event": np.ones(2, dtype=bool),
+            "transport": np.full(2, np.nan),
+        }
+    ]
+
+    report = summarize_hurdle(samples, bootstrap=0)["test/QA"]
+
+    assert report["N"]["events"] == 1
+    assert report["H"]["events"] == 1
+    assert np.isnan(report["H_minus_N"]["transport_given_event"]["mean"])
