@@ -102,6 +102,8 @@ alignment, and allocation rules do affect scientific identity.
 | `operators.py` | Conditional source-allocation operator only |
 | `graph.py` | Source forward tape, target reverse allocation, and balance calculations |
 | `events.py` | Label-free lookback event rule and scan |
+| `reanchor.py` | Collapse label-free layer/head reads into token-level breadth/focality/agreement morphology |
+| `reanchor_report.py` | Source-balanced all-token incidence and anchor-balanced fixed-horizon outcomes |
 | `differential.py` | Native RMS/QK/OV/SwiGLU local JVP/VJP only |
 | `event_trace.py` | Event-seeded 0/1/2+ hop propagation and batching |
 | `transport.py` | Pure last-crossing V/K edge calculation |

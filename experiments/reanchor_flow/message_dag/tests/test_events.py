@@ -1,11 +1,19 @@
 import numpy as np
-import torch
 import pytest
+import torch
 
-from experiments.reanchor_flow.message_dag.events import EventConfig, row_change, detect_layer, scan
-from experiments.reanchor_flow.message_dag.event_trace import trace_events, route_hops
 from experiments.reanchor_flow.message_dag.cache import NativeCache
-from experiments.reanchor_flow.message_dag.differential import DifferentialLayer, rms_jvp
+from experiments.reanchor_flow.message_dag.differential import (
+    DifferentialLayer,
+    rms_jvp,
+)
+from experiments.reanchor_flow.message_dag.event_trace import route_hops, trace_events
+from experiments.reanchor_flow.message_dag.events import (
+    EventConfig,
+    detect_layer,
+    row_change,
+    scan,
+)
 from experiments.reanchor_flow.tests.test_message_lineage import capture_fixture
 
 
@@ -113,6 +121,13 @@ def test_no_events_is_valid_and_scan_does_not_read_label_files(tmp_path):
     y=scan(path,EventConfig(2,.01,.1),chunk=8)
     for k in ('event_index','event','remote_gain','time_tv'):
         np.testing.assert_allclose(x[k],y[k],equal_nan=True,atol=2e-7)
+    assert int(x['reanchor_metric_schema']) == 1
+    assert x['evidence_mask'].shape == x['special_mask'].shape
+    for name in (
+        'remote_positive_gain', 'remote_gain_focality',
+        'remote_gain_effective_sources', 'remote_gain_distance',
+    ):
+        assert x[name].shape == x['event'].shape
     with NativeCache(path,weights) as cache: assert trace_events(cache,[])==[]
 
 
@@ -156,7 +171,8 @@ def test_same_reference_mlp_output_can_have_opposite_message_derivatives():
 def test_full_scope_pipeline_resume_missing_coverage_and_offline_report(tmp_path,legacy):
     import json
     import shutil
-    from experiments.reanchor_flow.message_dag.event_run import parser,run
+
+    from experiments.reanchor_flow.message_dag.event_run import parser, run
     fixture=tmp_path/'fixture';fixture.mkdir()
     path,trace,weights=capture_fixture(fixture,ids=[1,3,5,7,9,11,13,15,17,19,21,23,25,2,4,6,8,10,12,14],qk_scale=8)
     audit=tmp_path/'audit';audit.mkdir();entries=[]
@@ -181,6 +197,8 @@ def test_full_scope_pipeline_resume_missing_coverage_and_offline_report(tmp_path
     assert result['scanned']==6 and result['native_coverage']['skipped_samples']==1
     assert result['traced']==result['events']>0
     assert result['transport']['hurdle']
+    assert result['reanchor']['status']=='complete'
+    assert (out/'reanchor_summary.json').exists()
     for group in result['transport']['hurdle'].values():
         assert group['estimand'].startswith('event incidence')
         assert group['N']['tokens'] + group['H']['tokens'] > 0
@@ -195,6 +213,11 @@ def test_full_scope_pipeline_resume_missing_coverage_and_offline_report(tmp_path
     assert len(scores)==(0 if legacy else 6)
     assert (out/'transport_detection.json').exists()==(not legacy)
     stored_scores={p:p.read_bytes() for p in scores}
+    upgrade_scan = next(out.rglob('scan.npz'))
+    if not legacy:
+        with np.load(upgrade_scan,allow_pickle=False) as data: values=dict(data)
+        values.pop('remote_gain_focality')
+        np.savez_compressed(upgrade_scan,**values)
     if legacy:
         assert result['transport']['status']=='not_available_v1'
         for saved in out.rglob('scan.npz'):
@@ -210,6 +233,9 @@ def test_full_scope_pipeline_resume_missing_coverage_and_offline_report(tmp_path
     # Changing only labels cannot alter the saved graph or its selection.
     for dest in audit.rglob('*.labels.npz'): np.savez_compressed(dest,labels=np.zeros(15,int))
     rerun=run(parser().parse_args(command+['--completed-only','--state-cache-gib','0']))
+    if not legacy:
+        with np.load(upgrade_scan,allow_pickle=False) as data:
+            assert 'remote_gain_focality' in data
     assert before=={p:p.stat().st_mtime_ns for p in files}
     assert all(r['H']==0 for r in rerun['samples'])
     for p,old in stored_scores.items(): assert p.read_bytes()==old

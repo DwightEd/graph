@@ -64,6 +64,9 @@ requirements, recorded by `reviewed=true`.
 ### 2. Constraint-linked lookback union
 
 Each world is scanned independently with the existing label-free event rule.
+The current ordinary response carrier is named the Reanchor Query Token (RQT),
+and a past ordinary source receiving remote gain is a Reanchor Source Token
+(RST). See `REANCHOR_PROFILE.md` for the non-counterfactual morphology audit.
 The frozen event set is the union of events in both worlds, restricted to sites
 whose strongest remote gain points into the changed constraint coordinates in
 at least one world. Taking the union prevents one world from defining which

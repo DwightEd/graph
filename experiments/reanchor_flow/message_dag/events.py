@@ -1,6 +1,6 @@
 """Label-free local-to-remote events, including remote response carriers."""
-from dataclasses import dataclass, asdict
 from contextlib import ExitStack
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
@@ -35,11 +35,33 @@ def row_change(current, previous, query, special, window):
     a = np.divide(a, den_a, out=np.full_like(a, np.nan), where=den_a > 0)
     b = np.divide(b, den_b, out=np.full_like(b, np.nan), where=den_b > 0)
     gain = (a-b) * remote
+    positive_gain = np.maximum(gain, 0)
+    positive_total = positive_gain.sum(-1)
+    gain_distribution = np.divide(
+        positive_gain,
+        positive_total[:, None],
+        out=np.zeros_like(positive_gain),
+        where=positive_total[:, None] > 0,
+    )
+    gain_entropy = -np.where(
+        gain_distribution > 0,
+        gain_distribution * np.log(np.maximum(gain_distribution, 1e-30)),
+        0,
+    ).sum(-1)
     best = np.argmax(np.nan_to_num(gain, nan=-np.inf), axis=-1)
     positive = gain[np.arange(len(a)), best] > 0
     return dict(remote_mass=(a*remote).sum(-1), local_mass=(a*(ordinary & ~remote)).sum(-1),
                 remote_gain=gain.sum(-1), previous_local=(b*(ordinary & ~remote)).sum(-1),
                 time_tv=.5*np.abs(a-b).sum(-1),
+                remote_positive_gain=positive_total,
+                remote_gain_focality=np.divide(
+                    positive_gain.max(-1), positive_total,
+                    out=np.full_like(positive_total, np.nan), where=positive_total > 0),
+                remote_gain_effective_sources=np.where(
+                    positive_total > 0, np.exp(gain_entropy), np.nan),
+                remote_gain_distance=np.where(
+                    positive_total > 0,
+                    (gain_distribution * (query-source)).sum(-1), np.nan),
                 peak_source=np.where(positive, best, -1))
 
 
@@ -51,6 +73,11 @@ def detect_layer(chunks, rows, special, start, config):
         if output is None:
             output = {name: np.full((a.shape[0], len(rows)), np.nan, np.float32)
                       for name in ('remote_mass','local_mass','remote_gain','previous_local','time_tv')}
+            for name in (
+                'remote_positive_gain', 'remote_gain_focality',
+                'remote_gain_effective_sources', 'remote_gain_distance',
+            ):
+                output[name] = np.full((a.shape[0], len(rows)), np.nan, np.float32)
             output['peak_source'] = np.full((a.shape[0], len(rows)), -1, np.int32)
             output['event'] = np.zeros((a.shape[0], len(rows)), bool)
         for i, query in enumerate(rows[begin:end], begin):
@@ -85,7 +112,9 @@ def scan(path, config=EventConfig(), *, chunk=8, device='cpu', progress=None):
     # Stable event IDs depend only on native layer/head/row coordinates.
     result['event_index'] = np.argwhere(result['event']).astype(np.int32)
     result.update({k: trace[k] for k in ('token_ids','token_text','row_position','response_start',
-                                       'special_mask','capture_special_mask','predictor_logprob') if k in trace})
+                                       'special_mask','capture_special_mask','evidence_mask',
+                                       'predictor_logprob') if k in trace})
+    result['reanchor_metric_schema'] = np.array(1)
     result['labels_used'] = np.array(False)
     import json
     result['event_config'] = np.array(json.dumps(asdict(config), sort_keys=True))

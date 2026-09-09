@@ -14,6 +14,7 @@ from ..attention_audit_stats import (
     token_classes,
 )
 from ..attention_rhythm_report import save_json
+from .artifacts import atomic_path
 
 METRICS = ('local_mass','remote_mass','time_tv','remote_gain')
 COHORTS = ('all_H','start_H','continuing_H')
@@ -70,6 +71,8 @@ def plot_cohort(path, values, counts):
 
 def evaluate(output, *, bootstrap=200):
     from .event_view import render_event
+    from .reanchor import REQUIRED_SCAN_FIELDS, ReanchorProfiler
+    from .reanchor_report import summarize_reanchor
     from .transport_report import report_event_incidence, report_transport
     output = Path(output)
     manifest = json.loads((output/'index.json').read_text())
@@ -78,14 +81,42 @@ def evaluate(output, *, bootstrap=200):
     candidate_states = defaultdict(lambda:defaultdict(list))
     observations = defaultdict(int)
     coverage = [];preview_links = []
+    reanchor_records = [];reanchor_missing = []
     match_counts = defaultdict(lambda:np.zeros(3,int))
     for e in manifest['samples']:
         folder = output/e['folder'];scan_path = folder/'scan.npz'
         record = dict(sample=f"{e['split']}/{e['task_type']}/{e['sample_id']}",scanned=False)
         coverage.append(record)
-        if not scan_path.exists(): continue
+        if not scan_path.exists():
+            reanchor_missing.append(record['sample'])
+            continue
         with np.load(scan_path,allow_pickle=False) as data: scan = dict(data)
         labels = labels_for(folder,scan)
+        if all(name in scan for name in REQUIRED_SCAN_FIELDS):
+            profile = ReanchorProfiler().run(scan)
+            serializable_profile = {
+                name: (
+                    np.array(json.dumps(value, sort_keys=True))
+                    if isinstance(value, dict)
+                    else value
+                )
+                for name, value in profile.items()
+            }
+            with atomic_path(folder/'reanchor_profile.npz') as temporary:
+                np.savez_compressed(temporary, **serializable_profile)
+            reanchor_records.append({
+                'group': e['split']+'/'+e['task_type'],
+                'source': str(e['source_id']),
+                'profile': profile,
+                'labels': labels,
+                'response_start': int(scan['response_start']),
+                'special_mask': scan['special_mask'],
+                'predictor_logprob': scan.get(
+                    'predictor_logprob', np.full(len(scan['row_position']), np.nan)
+                ),
+            })
+        else:
+            reanchor_missing.append(record['sample'])
         start = int(scan['response_start']);rows = scan['row_position']
         special = scan['special_mask']
         targets = rows[:-1]+1
@@ -199,6 +230,21 @@ def evaluate(output, *, bootstrap=200):
             'hurdle': report_event_incidence(output,manifest,bootstrap=bootstrap),
         }
     )
+    if reanchor_records:
+        reanchor = summarize_reanchor(reanchor_records, bootstrap=bootstrap)
+        reanchor.update(
+            status='partial' if reanchor_missing else 'complete',
+            missing_scans=reanchor_missing,
+        )
+    else:
+        reanchor = {
+            'status': 'not_available_rescan_required',
+            'missing_scans': reanchor_missing,
+            'labels_used_for_profile': False,
+            'labels_used_for_outcomes': False,
+        }
+    summary['reanchor'] = reanchor
+    save_json(output/'reanchor_summary.json', reanchor)
     save_json(output/'summary.json',summary)
     lines = ['# 内部回看事件审计','',
              f"请求原生样本 {summary['native_coverage']['planned_samples']}；完成扫描 {summary['scanned']}；"

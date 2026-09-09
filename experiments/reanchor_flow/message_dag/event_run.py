@@ -19,6 +19,7 @@ from .cache import MASK_POLICY, NativeCache, read_trace
 from .cut_artifact import CutRecorder, prepare_local_readout
 from .event_trace import trace_events
 from .events import EventConfig, scan
+from .reanchor import REQUIRED_SCAN_FIELDS
 from .selection import read_labels
 
 SCHEMA = 2
@@ -144,15 +145,22 @@ def _run(args, output, version):
         folder.mkdir(parents=True,exist_ok=True)
         scan_path = folder/'scan.npz'
         started = perf_counter()
+        needs_scan = not scan_path.exists()
+        previous_sites = None
         if scan_path.exists():
             with np.load(scan_path,allow_pickle=False) as stored: found = dict(stored)
             if str(found['settings'])!=json.dumps(settings,sort_keys=True) or not np.array_equal(found['token_ids'],read_trace(path)['token_ids']):
                 raise ValueError(f'{scan_path}: capture identity/configuration changed')
-        else:
+            if not all(name in found for name in REQUIRED_SCAN_FIELDS):
+                previous_sites = found['event_index']
+                needs_scan = True
+        if needs_scan:
             with tqdm(total=original['settings'].get('num_hidden_layers',0) or None,desc=sample_key(e),unit='layer',leave=False) as bar:
                 def progress(stage):
                     bar.set_postfix_str(stage,refresh=False);bar.update()
                 found = scan(path,config,chunk=args.query_chunk,device=args.device,progress=progress)
+            if previous_sites is not None and not np.array_equal(previous_sites, found['event_index']):
+                raise ValueError(f'{scan_path}: reanchor metric upgrade changed frozen events')
             found['settings'] = np.array(json.dumps(settings,sort_keys=True))
             atomic_npz(scan_path,**found)
         sites = found['event_index']
