@@ -48,8 +48,10 @@ class MessageGate:
     it. ``source_mask`` applies in every layer, optionally only to
     ``source_targets``. ``layer_edges`` and ``sparse_layer_edges`` address exact
     layer/head/query/source edges. ``head_output_patch`` adds pre-``W_O`` head
-    messages after deletion. ``residual_replace`` replaces named layer-input
-    token states. All coordinates are absolute model positions.
+    messages after deletion. ``attention_write_patch`` adds a post-``W_O``
+    vector before the residual add and same-layer MLP. ``residual_replace``
+    replaces named layer-input token states. All coordinates are absolute model
+    positions.
     """
 
     split_layer: int
@@ -60,6 +62,7 @@ class MessageGate:
     layer_edges: dict[int, Tensor] | None = None
     sparse_layer_edges: dict[int, Tensor] | None = None
     head_output_patch: dict[int, dict[int, dict[int, Tensor]]] | None = None
+    attention_write_patch: dict[int, dict[int, Tensor]] | None = None
     residual_replace: dict[int, dict[int, Tensor]] | None = None
 
 
@@ -444,6 +447,22 @@ def forward_layers(
             observer,
             attention_query_chunk,
         )
+        write_patches = (
+            None
+            if gate is None or gate.attention_write_patch is None
+            else gate.attention_write_patch.get(layer_index)
+        )
+        if write_patches:
+            attention_output = attention_output.clone()
+            for position, addition in write_patches.items():
+                if not 0 <= position < attention_output.shape[1]:
+                    raise ValueError("attention write patch names an invalid position")
+                if addition.numel() != attention_output.shape[-1]:
+                    raise ValueError("attention write patch has the wrong hidden size")
+                attention_output[:, position] += addition.reshape(-1).to(
+                    device=attention_output.device,
+                    dtype=attention_output.dtype,
+                )
         observe_attention_write = getattr(observer, "observe_attention_write", None)
         if callable(observe_attention_write):
             observe_attention_write(layer_index, attention_output)
@@ -640,6 +659,13 @@ def first_changed_layer(gate: MessageGate, layer_count: int) -> int | None:
                 for value in head_patches.values()
             )
         )
+    if gate.attention_write_patch is not None:
+        starts.extend(
+            layer
+            for layer, replacements in gate.attention_write_patch.items()
+            if 0 <= layer < layer_count
+            and any(value.numel() and bool(value.any()) for value in replacements.values())
+        )
     if gate.residual_replace is not None:
         starts.extend(
             layer
@@ -707,6 +733,7 @@ def gate_to(gate: MessageGate, device: torch.device) -> MessageGate:
         layer_edges=move_map(gate.layer_edges, boolean=True),
         sparse_layer_edges=move_map(gate.sparse_layer_edges, boolean=False),
         head_output_patch=move_nested(gate.head_output_patch),
+        attention_write_patch=move_states(gate.attention_write_patch),
         residual_replace=move_states(gate.residual_replace),
     )
 

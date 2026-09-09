@@ -138,6 +138,54 @@ def test_head_output_patch_uses_absolute_query_and_head_coordinates() -> None:
     torch.testing.assert_close(output[0, 1, :, 0], torch.tensor([0.0, 4.0]))
 
 
+def test_attention_write_patch_is_observed_after_wo_and_before_the_mlp() -> None:
+    model = tiny_model()
+    tokens = torch.arange(1, 7)[None]
+    hidden = model.get_input_embeddings()(tokens)
+
+    class Observer:
+        def __init__(self):
+            self.write = None
+
+        def observe_head_output(self, *_):
+            pass
+
+        def observe_attention_write(self, layer, write):
+            if layer == 1:
+                self.write = write.detach().clone()
+
+    baseline, patched = Observer(), Observer()
+    addition = torch.linspace(-0.2, 0.3, model.config.hidden_size)
+    forward_layers(model, hidden, 0, observer=baseline, apply_final_norm=False)
+    forward_layers(
+        model,
+        hidden,
+        0,
+        gate=MessageGate(
+            split_layer=0,
+            attention_write_patch={1: {3: addition}},
+        ),
+        observer=patched,
+        apply_final_norm=False,
+    )
+
+    difference = patched.write - baseline.write
+    torch.testing.assert_close(difference[0, 3], addition, atol=1e-7, rtol=1e-6)
+    torch.testing.assert_close(difference[0, :3], torch.zeros_like(difference[0, :3]))
+    torch.testing.assert_close(difference[0, 4:], torch.zeros_like(difference[0, 4:]))
+
+    cache = baseline_forward(model, tokens[0], response_start=3)
+    margin_delta = rerun_gate(
+        model,
+        cache,
+        MessageGate(
+            split_layer=0,
+            attention_write_patch={1: {3: addition}},
+        ),
+    )
+    assert margin_delta.abs().max() > 1e-6
+
+
 def test_query_chunking_matches_full_attention_and_reports_absolute_rows() -> None:
     query, key, value, mask = attention_inputs()
 
