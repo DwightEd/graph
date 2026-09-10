@@ -2,7 +2,12 @@ from control_graph.detector import GraphAnomalyDetector
 from control_graph.graph import ControlEdge, ControlGraph
 
 
-def graph(event_id: str, values: tuple[float, float, float, float]) -> ControlGraph:
+def graph(
+    event_id: str,
+    values: tuple[float, float, float, float],
+    *,
+    relation: str = "temporal",
+) -> ControlGraph:
     kinds = (
         ("source_onset", ("source_constraint",), "onset_choice"),
         ("source_followup", ("source_constraint",), "followup_choice"),
@@ -17,7 +22,7 @@ def graph(event_id: str, values: tuple[float, float, float, float]) -> ControlGr
         event_id=event_id,
         source_id=f"source-{event_id}",
         split="train",
-        relation="temporal",
+        relation=relation,
         edges=tuple(
             ControlEdge(kind, sources, target, value)
             for (kind, sources, target), value in zip(kinds, values, strict=True)
@@ -58,3 +63,38 @@ def test_fit_requires_enough_graphs_to_define_a_reference_distribution() -> None
         assert "at least four" in str(error)
     else:
         raise AssertionError("fit accepted an undefined one-graph reference")
+
+
+def test_detector_calibrates_each_relation_separately() -> None:
+    temporal = [
+        graph(f"temporal-{index}", (1.0, 1.0, 0.1, 0.1))
+        for index in range(4)
+    ]
+    numerical = [
+        graph(
+            f"numerical-{index}",
+            (10.0, 10.0, 5.0, 5.0),
+            relation="numerical",
+        )
+        for index in range(4)
+    ]
+
+    detector = GraphAnomalyDetector().fit(temporal + numerical)
+    score = detector.score(
+        [graph("same-numerical", (10.0, 10.0, 5.0, 5.0), relation="numerical")]
+    )[0]
+
+    assert score.score == 0.0
+
+
+def test_detector_rejects_a_relation_without_a_reference_profile() -> None:
+    detector = GraphAnomalyDetector().fit(
+        [graph(str(index), (1.0, 1.0, 0.1, 0.1)) for index in range(4)]
+    )
+
+    try:
+        detector.score([graph("unknown", (1.0, 1.0, 0.1, 0.1), relation="causal")])
+    except ValueError as error:
+        assert "no fitted reference" in str(error)
+    else:
+        raise AssertionError("detector silently reused another relation's profile")

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 
@@ -92,8 +92,13 @@ class DetectGraphAnomalies:
         model = {
             "schema": "control-graph/robust-reference@1",
             "edge_order": list(EDGE_ORDER),
-            "center": detector.center.tolist(),
-            "scale": detector.scale.tolist(),
+            "profiles": {
+                relation: {
+                    "center": profile.center.tolist(),
+                    "scale": profile.scale.tolist(),
+                }
+                for relation, profile in detector.profiles.items()
+            },
             "fit_split": self.config.fit_split,
             "fit_sources": sorted(fit_sources),
             "graph_sha256": _sha256(self.config.graph_path),

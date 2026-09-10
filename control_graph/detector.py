@@ -20,33 +20,41 @@ class AnomalyScore:
     contributions: dict[str, float]
 
 
+@dataclass(frozen=True)
+class ReferenceProfile:
+    center: np.ndarray
+    scale: np.ndarray
+
+
 class GraphAnomalyDetector:
-    """Fit a robust normal profile and score graph-edge deviations."""
+    """Fit robust relation-conditional profiles and score edge deviations."""
 
     def __init__(self) -> None:
-        self.center: np.ndarray | None = None
-        self.scale: np.ndarray | None = None
+        self.profiles: dict[str, ReferenceProfile] = {}
 
     def fit(self, graphs: list[ControlGraph]) -> GraphAnomalyDetector:
-        if len(graphs) < 4:
-            raise ValueError("graph anomaly fit requires at least four graphs")
-        values = _matrix(graphs)
-        center = np.median(values, axis=0)
-        mad = 1.4826 * np.median(np.abs(values - center), axis=0)
-        iqr = (np.percentile(values, 75, axis=0) - np.percentile(values, 25, axis=0)) / 1.349
-        std = np.std(values, axis=0)
-        floor = np.maximum(np.abs(center) * 0.05, 0.05)
-        self.center = center
-        self.scale = np.where(mad > 1e-8, mad, np.where(iqr > 1e-8, iqr, np.maximum(std, floor)))
+        relations = sorted({graph.relation for graph in graphs})
+        if not relations:
+            raise ValueError("at least one graph is required")
+        self.profiles = {
+            relation: _fit_profile(
+                [graph for graph in graphs if graph.relation == relation], relation
+            )
+            for relation in relations
+        }
         return self
 
     def score(self, graphs: list[ControlGraph]) -> tuple[AnomalyScore, ...]:
-        if self.center is None or self.scale is None:
+        if not self.profiles:
             raise RuntimeError("fit must be called before score")
-        standardized = (_matrix(graphs) - self.center) / self.scale
-        squared = standardized**2
         scores = []
-        for graph, row in zip(graphs, squared, strict=True):
+        for graph in graphs:
+            profile = self.profiles.get(graph.relation)
+            if profile is None:
+                raise ValueError(
+                    f"no fitted reference profile for relation {graph.relation!r}"
+                )
+            row = ((_matrix([graph])[0] - profile.center) / profile.scale) ** 2
             contributions = {
                 name: float(value) for name, value in zip(EDGE_ORDER, row, strict=True)
             }
@@ -63,6 +71,21 @@ class GraphAnomalyDetector:
                 )
             )
         return tuple(scores)
+
+
+def _fit_profile(graphs: list[ControlGraph], relation: str) -> ReferenceProfile:
+    if len(graphs) < 4:
+        raise ValueError(
+            f"graph anomaly fit requires at least four graphs for relation {relation!r}"
+        )
+    values = _matrix(graphs)
+    center = np.median(values, axis=0)
+    mad = 1.4826 * np.median(np.abs(values - center), axis=0)
+    iqr = (np.percentile(values, 75, axis=0) - np.percentile(values, 25, axis=0)) / 1.349
+    std = np.std(values, axis=0)
+    floor = np.maximum(np.abs(center) * 0.05, 0.05)
+    scale = np.where(mad > 1e-8, mad, np.where(iqr > 1e-8, iqr, np.maximum(std, floor)))
+    return ReferenceProfile(center=center, scale=scale)
 
 
 def _matrix(graphs: list[ControlGraph]) -> np.ndarray:
