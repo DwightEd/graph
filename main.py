@@ -12,6 +12,7 @@ from control_graph.audit_evaluation import (
     AuditEvaluationConfig,
 )
 from control_graph.evaluation import DetectionEvaluator, EvaluationConfig
+from control_graph.onset_choice import OnsetChoiceAudit, OnsetChoiceConfig
 from control_graph.pipeline import (
     BuildConfig,
     BuildGraphDataset,
@@ -56,6 +57,16 @@ def parser() -> argparse.ArgumentParser:
     audit_evaluate.add_argument("--output", type=Path, required=True)
     audit_evaluate.add_argument("--bootstrap", type=int, default=1000)
     audit_evaluate.add_argument("--seed", type=int, default=20260910)
+
+    onset = commands.add_parser(
+        "onset-audit", help="test pre-onset lookback against factual-choice instability"
+    )
+    onset.add_argument("--audit", type=Path, required=True)
+    onset.add_argument("--output", type=Path, required=True)
+    onset.add_argument("--pre-window", type=int, default=3)
+    onset.add_argument("--match-window", type=int, default=64)
+    onset.add_argument("--bootstrap", type=int, default=200)
+    onset.add_argument("--seed", type=int, default=20260910)
     return root
 
 
@@ -75,10 +86,21 @@ def main(argv: list[str] | None = None) -> None:
         result = AttentionAuditScorer(
             AuditScoreConfig(args.audit, args.output, args.completed_only)
         ).run()
-    else:
+    elif args.command == "audit-evaluate":
         result = AttentionAuditEvaluator(
             AuditEvaluationConfig(
                 args.audit, args.scores, args.output, args.bootstrap, args.seed
+            )
+        ).run()
+    else:
+        result = OnsetChoiceAudit(
+            OnsetChoiceConfig(
+                args.audit,
+                args.output,
+                args.pre_window,
+                args.match_window,
+                args.bootstrap,
+                args.seed,
             )
         ).run()
     print(json.dumps(result, indent=2, sort_keys=True))

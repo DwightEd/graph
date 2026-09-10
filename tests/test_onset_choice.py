@@ -3,6 +3,7 @@ import json
 import numpy as np
 
 from control_graph.onset_choice import OnsetChoiceAudit, OnsetChoiceConfig
+from main import main
 
 GROUPS = np.array(
     ["special", "evidence", "other_prompt", "history_far", "history_local", "self"]
@@ -115,3 +116,29 @@ def test_onset_audit_skips_punctuation_and_tests_instability_with_lookback(tmp_p
     assert report["classification"]["instability"]["auroc"] == 1.0
     assert report["classification"]["remote_gain"]["auroc"] == 1.0
     assert report["joint"]["onset_instability_vs_remote_gain"]["estimate"] == 1.0
+
+
+def test_onset_audit_command_runs_the_same_workflow(tmp_path, capsys) -> None:
+    audit_root = tmp_path / "audit"
+    output = tmp_path / "onsets"
+    audit_root.mkdir()
+    write_onset_fixture(audit_root)
+
+    main(
+        [
+            "onset-audit",
+            "--audit",
+            str(audit_root),
+            "--output",
+            str(output),
+            "--pre-window",
+            "3",
+            "--match-window",
+            "8",
+            "--bootstrap",
+            "0",
+        ]
+    )
+
+    assert json.loads(capsys.readouterr().out)["matched_pairs"] == 4
+    assert (output / "events.jsonl").is_file()
