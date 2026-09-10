@@ -1,9 +1,0 @@
-{
-  "current_phase": "complete",
-  "iteration": 2,
-  "problem_anchor": "experiments/reanchor_flow/refine-logs/PROBLEM_ANCHOR.md",
-  "proposal": "experiments/reanchor_flow/refine-logs/FINAL_REFINED_PROPOSAL.md",
-  "review_status": "ready_for_experiment_planning_bounded_witness_only",
-  "evidence_status": "design_only_no_new_8b_results",
-  "next_action": "preregister experiment plan and intervention contract"
-}

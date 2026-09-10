@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 from control_graph.data import FactorialEvent
 
@@ -12,6 +13,16 @@ EDGE_ORDER = (
     "source_followup",
     "prefix_followup",
     "source_prefix_coupling",
+)
+EDGE_LAYOUT = (
+    ("source_onset", ("source_constraint",), "onset_choice"),
+    ("source_followup", ("source_constraint",), "followup_choice"),
+    ("prefix_followup", ("generated_prefix",), "followup_choice"),
+    (
+        "source_prefix_coupling",
+        ("source_constraint", "generated_prefix"),
+        "followup_choice",
+    ),
 )
 GRAPH_SCHEMA = "control-graph/constraint-control@1"
 
@@ -62,6 +73,19 @@ class ControlGraph:
             raise ValueError("control graph record has an invalid field set")
         if record["schema"] != GRAPH_SCHEMA or not isinstance(record["edges"], list):
             raise ValueError("control graph record has an unsupported schema")
+        edge_fields = {"kind", "sources", "target", "weight"}
+        if any(not isinstance(edge, dict) or set(edge) != edge_fields for edge in record["edges"]):
+            raise ValueError("control graph record has an invalid edge field set")
+        if any(
+            not isinstance(edge["kind"], str)
+            or not isinstance(edge["sources"], list)
+            or not all(isinstance(source, str) for source in edge["sources"])
+            or not isinstance(edge["target"], str)
+            or type(edge["weight"]) not in {int, float}
+            or not isfinite(edge["weight"])
+            for edge in record["edges"]
+        ):
+            raise ValueError("control graph record has invalid edge values")
         edges = tuple(
             ControlEdge(
                 kind=edge["kind"],
@@ -78,7 +102,8 @@ class ControlGraph:
             relation=record["relation"],
             edges=edges,
         )
-        if tuple(graph.signature()) != EDGE_ORDER:
+        layout = tuple((edge.kind, edge.sources, edge.target) for edge in graph.edges)
+        if layout != EDGE_LAYOUT:
             raise ValueError("control graph record has a non-canonical edge schema")
         return graph
 

@@ -17,7 +17,7 @@ class AnomalyScore:
     relation: str
     score: float
     dominant_edge: str
-    contributions: dict[str, float]
+    edge_deviations: dict[str, float]
 
 
 @dataclass(frozen=True)
@@ -54,20 +54,20 @@ class GraphAnomalyDetector:
                 raise ValueError(
                     f"no fitted reference profile for relation {graph.relation!r}"
                 )
-            row = ((_matrix([graph])[0] - profile.center) / profile.scale) ** 2
-            contributions = {
+            row = (_matrix([graph])[0] - profile.center) / profile.scale
+            deviations = {
                 name: float(value) for name, value in zip(EDGE_ORDER, row, strict=True)
             }
-            dominant = max(contributions, key=contributions.__getitem__)
+            dominant = max(deviations, key=lambda name: abs(deviations[name]))
             scores.append(
                 AnomalyScore(
                     event_id=graph.event_id,
                     source_id=graph.source_id,
                     split=graph.split,
                     relation=graph.relation,
-                    score=float(np.mean(row)),
+                    score=float(np.mean(row**2)),
                     dominant_edge=dominant,
-                    contributions=contributions,
+                    edge_deviations=deviations,
                 )
             )
         return tuple(scores)

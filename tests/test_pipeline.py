@@ -63,6 +63,12 @@ def test_build_then_detect_keeps_labels_outside_the_scoring_path(tmp_path) -> No
         for line in (tmp_path / "detection" / "scores.jsonl").read_text().splitlines()
     ]
     assert all("label" not in record for record in score_records)
+    assert set(score_records[0]["edge_deviations"]) == {
+        "source_onset",
+        "source_followup",
+        "prefix_followup",
+        "source_prefix_coupling",
+    }
     assert score_records[1]["anomaly_score"] > score_records[0]["anomaly_score"]
 
 

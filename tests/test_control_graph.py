@@ -1,5 +1,7 @@
+import pytest
+
 from control_graph.data import FactorialEvent, FactorialMargins
-from control_graph.graph import ControlGraphBuilder
+from control_graph.graph import ControlGraph, ControlGraphBuilder
 
 
 def event_with(margins: FactorialMargins) -> FactorialEvent:
@@ -56,3 +58,25 @@ def test_graph_signature_is_invariant_to_swapping_a_and_b() -> None:
     assert builder.build(event_with(margins)).signature() == builder.build(
         event_with(swapped)
     ).signature()
+
+
+def test_factorial_margins_reject_boolean_values() -> None:
+    with pytest.raises(ValueError, match="finite numbers"):
+        FactorialMargins(
+            onset_a=True,
+            onset_b=-1.0,
+            world_a_after_a=1.0,
+            world_a_after_b=0.0,
+            world_b_after_a=0.0,
+            world_b_after_b=-1.0,
+        )
+
+
+def test_serialized_graph_rejects_undeclared_edge_fields() -> None:
+    record = ControlGraphBuilder().build(
+        event_with(FactorialMargins(1.0, -1.0, 1.0, 0.0, 0.0, -1.0))
+    ).to_record()
+    record["edges"][0]["label"] = 1
+
+    with pytest.raises(ValueError, match="edge field"):
+        ControlGraph.from_record(record)

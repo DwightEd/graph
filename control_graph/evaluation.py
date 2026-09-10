@@ -76,7 +76,7 @@ def _load_scores(path: Path) -> list[dict]:
         "relation",
         "anomaly_score",
         "dominant_edge",
-        "contributions",
+        "edge_deviations",
     }
     records = _read_jsonl(path)
     for record in records:

@@ -2,198 +2,114 @@
 
 ## Active question
 
-The active experiment asks whether a label-free directed attention-row
-hypergraph can learn useful token representations by recovering deliberately
-held-out typed source endpoints against role- and lag-matched causal non-edges.
+At a factual commitment, does the generated prefix override the source
+constraint even when the source still causally affects the answer candidates?
 
-This is narrower than factual grounding or hallucination detection. The
-available cache contains attention rows, token boundaries, diagonal mass and
-native unresolved sparse-cache mass. It does not contain hidden states,
-per-head OV messages, FFN outputs, prompt-query rows or factual evidence labels.
+This is more specific than “hallucinations attend locally.” The proposed
+failure has three parts:
 
-## Latest evidence: the ordered-layout objective failed
+1. the source can still influence the current choice;
+2. the generated prefix independently pushes the follow-up choice;
+3. source-prefix coupling is abnormally weak or strong relative to comparable
+   normal events, so source control is not stably carried into continuation.
 
-The completed 64D ordered-layout run used 149 QA samples, 30,619 tokens, 2,307
-positive tokens and prevalence `0.075345`. Its best validation loss was
-`1.946106` at epoch 5, but every frozen unsupervised reader was weak:
+## Implemented method
 
-| Reader | AUROC | AUPRC |
-|---|---:|---:|
-| PCA-kNN | 0.548162 | 0.083510 |
-| Isolation Forest | 0.550779 | 0.082963 |
-| Autoencoder | 0.540130 | 0.081410 |
-| Deep SVDD | 0.526438 | 0.078837 |
-| LOF | 0.518836 | 0.076342 |
-
-Absolute position reached `0.617076 / 0.112859`. The frozen embedding's linear
-and MLP readability probes reached only `0.597574 / 0.096996` and
-`0.552147 / 0.079619`, compared with first-order GCN results of
-`0.7865 / 0.2999` and `0.7785 / 0.2760`. GCN PCA-kNN was
-`0.6982 / 0.1617`.
-
-**Decision.** Stop the old all-objectives configuration. It jointly optimized
-clean local-row, P/R/U and ordered-layout targets and did not force every scored
-positive support out of the student graph. The result rejects that training
-objective as a useful representation learner. It does not by itself isolate or
-falsify layer order, exact endpoints, or the directed-hypergraph architecture.
-
-## Active implementation
-
-`experiments/directed_route_hypergraph/` remains the only active implementation.
-One sample produces one causal typed graph:
+One event is measured under two source worlds and two generated prefixes. The
+six answer-token margins are decomposed into four causal graph edges:
 
 ```text
-node: token
-edge: (source, response target, layer, head, retained weight)
-clean row: retained + diagonal + native unresolved = 1
+source constraint -> onset choice       source_onset
+source constraint -> follow-up choice   source_followup
+generated prefix  -> follow-up choice   prefix_followup
+(source, prefix)   -> follow-up choice   source_prefix_coupling
 ```
 
-The new primary objective is forced held-out endpoint recovery:
+The graph schema is fixed before labels are read. A robust reference profile is
+fit separately for every relation type on the unlabeled fit split. The score is
+the mean squared robust z-distance of the four edge weights. The output also
+reports each edge's signed standardized deviation, so a high score remains
+mechanistically inspectable instead of losing the direction of change.
 
-1. sample positive retained edges from the clean graph;
-2. force-remove those exact edges from the student graph;
-3. use the existing GroundedRoute matched-negative sampler;
-4. match negative sources on prompt/response role and logarithmic lag while
-   preserving exact target, layer and head;
-5. score positive versus negative sources from the final node latent;
-6. optimize a weighted pairwise ranking loss without hallucination labels.
+The fit and score splits must be source-disjoint. A relation without at least
+four fit events has no defensible reference distribution and is rejected. The
+evaluation module joins hallucination labels only after scores are frozen.
 
-This is the primary mechanism gate. A representation that cannot distinguish a
-hidden true endpoint from a role/lag-matched non-edge has not learned evidence
-for exact typed topology.
+## Why the previous autoencoding direction is stopped
 
-## Corruption semantics
+The earlier ordered-layout experiment did not support reconstruction as the
+main method. Autoencoder AUROC/AUPRC was `0.540130/0.081410`; Deep SVDD was
+`0.526438/0.078837`; position alone was `0.617076/0.112859`. Predicting one
+layer from the next is also dominated by residual continuity, token position,
+and shared computation. Low prediction error therefore need not mean that a
+constraint was correctly bound or used.
 
-Native missing cache mass and artificial training masks are separate channels:
+GraphMAE shows why reconstruction design matters: it masks attributes and
+avoids naive structure reconstruction. GOOD-D and one-class graph
+transformation learning show viable label-free graph baselines, but they assume
+enough graph diversity to learn a common normal manifold. Our graph currently
+has fixed roles and only four causal coordinates; adding a GNN or decoder now
+would add parameters without adding identifiable information.
 
-```text
-native unresolved = endpoint absent because sparse cache did not retain it
-masked mass        = known retained endpoint deliberately hidden for training
-```
+Neural self-supervision is deferred until the deterministic graph beats
+position and simple non-graph controls. If used later, the candidate objective
+is masked causal-edge recovery or counterfactual equivariance—not
+layer-to-layer prediction.
 
-The student-only masked channel cannot mutate the graph's native `unresolved`
-tensor. A corrupted row is conserved as retained-kept plus diagonal plus native
-unresolved plus masked mass. If optional clean P/R/U or ordered-layout teachers
-are enabled, they always use the uncorrupted graph. This prevents an artificial
-holdout from being interpreted as inherent cache uncertainty.
+## Preserved empirical clues
 
-## Deterministic and variational representations
+The old attention audit supports a sharper candidate than generic “failure to
+look back”:
 
-The deterministic encoder is the mandatory fair baseline. With four 16D route
-slots it exports one 64D vector per token.
+- at hallucination onset, many heads shifted from local history toward distant
+  response history while prompt share still decreased;
+- inside hallucinated spans, local-history share increased and attention
+  change decreased;
+- 94.46% of matched hallucinated tokens were not onset tokens;
+- signed head messages could cancel, so attention mass alone did not establish
+  use of the attended information;
+- the supplied reanchor run found candidate anchors in only 23 of 688 samples
+  and no successfully traced anchors in the shown records.
 
-The VAE is an explicit ablation, not the default explanation for poor results:
+The resulting hypothesis is **old-response relay takeover**: the model may
+retrieve semantically related remote content but fail to restore the source
+condition that governs the correct relation. The prefix then becomes a stable
+local attractor and expands the first wrong commitment. These observations are
+hypothesis-generating, not yet causal evidence.
 
-```text
-latent_mode=vae, export=mean         -> 64D deterministic evaluation embedding
-latent_mode=vae, export=mean_logvar  -> 128D deterministic evaluation embedding
-```
+## Required experiments
 
-The decoder may use a reparameterized posterior sample during training;
-evaluation uses the posterior mean so repeated export is deterministic. KL
-free bits and warmup are optimization controls. Posterior variance measures
-latent dispersion under the artificial censoring task and prior; it is not
-language-model confidence, factual uncertainty, or a hallucination score.
+1. Build minimal A/B source worlds and A/B prefixes for RAGTruth factual events.
+2. Freeze commitment-token and answer-candidate alignment before reading labels.
+3. Fit reference profiles only on source-disjoint unlabeled data.
+4. Compare the four-edge score with position, margin, entropy, attention-only,
+   Isolation Forest, Deep SVDD, and an autoencoder under identical splits.
+5. Report event coverage, relation coverage, AUROC, AUPRC, prevalence, and
+   source-cluster bootstrap intervals.
+6. Test normal/hallucination edge distributions on a discovery split, but never
+   use those labels to change the graph schema or detector on the test split.
+7. Replicate across QA, summarization, and data-to-text; at least two model
+   families are required for a general mechanism claim.
 
-The evaluator accepts arbitrary embedding dimensions. Its PCA reader may use a
-32D internal basis, but this does not constrain the encoder to 32D.
+## Claim gates
 
-## Relation to Information Flow
+- If the score does not beat position and raw-margin controls, it is not a graph
+  anomaly result.
+- If source or prefix interventions do not move the answer margin, the event is
+  non-identifying and must be reported as uncovered, not silently discarded.
+- If performance vanishes after relation-conditioned calibration, the original
+  effect was task/relation confounding.
+- If normal and hallucinated events differ only inside an already-wrong span,
+  the signal is a consequence, not an onset detector.
+- If an autoencoder only lowers reconstruction loss, no hallucination claim is
+  permitted.
+- A model-mechanism claim requires consistent directional effects and causal
+  interventions across models; AUROC alone is insufficient.
 
-The available attention cache can support only an attention-transport proxy,
-not the value-aware contribution layout from *Information Flow Reveals When to
-Trust Language Models*. That paper requires hidden states, per-head OV paths and
-residual attribution, and its complete detector additionally uses a neural
-reranker plus correctness-supervised XGBoost.
+## Current limitation
 
-The old ordered layout transferred only the algebra of multiplying
-non-commuting layer transitions; its failed joint-objective run provides no
-positive detection evidence. Ordered P/R/U and endpoint-layout objectives now
-remain optional auxiliaries with zero default weight. They may support a layer
-order claim only if they add value over endpoint-only recovery and beat reverse,
-shuffled and last-layer controls.
-
-Permitted terms are `typed endpoint recovery` and, for the old auxiliary,
-`layer-ordered attention transport endpoint layout`. Do not call either one
-functional contribution, causal information flow, factual grounding, or
-trust-before-generation.
-
-## Required experiment matrix
-
-Use the same source split, token rows, training budget, seeds and downstream
-readers for:
-
-1. failed ordered-layout checkpoint as the frozen negative reference;
-2. deterministic endpoint recovery;
-3. deterministic endpoint recovery plus P/R/U auxiliary;
-4. deterministic endpoint recovery plus ordered-layout auxiliary;
-5. VAE endpoint recovery with `mean` export;
-6. VAE endpoint recovery with `mean_logvar` export;
-7. first-order GCN;
-8. position-only control; a no-message control only after implementing a
-   clean-teacher/separate-student view (the generic `no_message` variant is not
-   valid for endpoint recovery because it removes the positive teacher edges);
-9. real endpoints versus role/lag-matched endpoint rewire and weight shuffle;
-10. correct layer order versus reverse, shuffled and last-layer auxiliaries.
-
-Report held-out pair count and forced-mask coverage before downstream metrics.
-Report every embedding's actual dimension. Fit all label-free readers only on
-the source-disjoint calibration split; use labels only after scores are frozen
-and for explicitly named readability diagnostics.
-
-## Acceptance gates
-
-The endpoint-recovery mechanism requires all of the following:
-
-1. every supervised positive edge is absent from the student graph;
-2. native unresolved mass remains unchanged by artificial masking;
-3. matched negatives preserve role, log-lag, target, layer and head and are
-   verified non-edges;
-4. final node latents receive gradient from endpoint ranking;
-5. deterministic endpoint recovery improves substantially over the failed
-   `0.5482 / 0.0835` PCA-kNN reference;
-6. real endpoints beat matched rewires under paired source bootstrap;
-7. node readability exceeds position readability;
-8. GCN is matched or any remaining gap is explained by a preregistered control;
-9. at least five seeds and QA/Summary/Data2txt task splits support the result.
-
-A VAE claim has additional gates:
-
-1. deterministic and VAE runs use identical graph/objective/split budgets;
-2. evaluation export is deterministic;
-3. KL, active dimensions and posterior scale show no collapse or explosion;
-4. any `mean_logvar` gain survives controls for token position, response length,
-   retained coverage and native unresolved mass;
-5. VAE improves frozen readers, not only training ranking loss.
-
-## Stop rules
-
-```text
-forced holdout leaks         -> implementation invalid; do not evaluate
-real ~= matched non-edge     -> remove exact-endpoint mechanism claim
-embedding <= position        -> representation remains shortcut-dominated
-deterministic <= old failure -> stop adding posterior capacity
-deterministic << GCN         -> retain GCN as method; diagnose objective/inputs
-VAE <= deterministic         -> remove variational module
-variance tracks coverage     -> treat it as censoring metadata, not uncertainty
-ordered ~= reverse           -> remove layer-order contribution claim
-no AUPRC gain                -> retain as representation audit, not detector
-```
-
-## Next experiment
-
-Run one frozen QA sequence before adding another mechanism:
-
-```text
-1. deterministic endpoint-only smoke test and invariant checks
-2. deterministic endpoint-only full QA, multiple seeds
-3. identical VAE mean / mean_logvar runs
-4. optional flow/layout auxiliaries one at a time
-5. matched endpoint rewire and position control; then a dedicated
-   clean-teacher/no-message-student control
-```
-
-Archive checkpoint method/version, full learning config, graph sidecars,
-embedding indices, actual embedding dimension, frozen scores, evaluation report,
-commit SHA and exact source split for every run. A lower reconstruction,
-ranking or KL loss is not a hallucination result.
+The repository implements graph construction, label-free scoring, and isolated
+evaluation. It does not yet capture the six factorial margins from a language
+model. That stage requires an explicit event-construction protocol; adapting
+RAGTruth automatically without verified answer candidates and counterfactual
+worlds would manufacture invalid ground truth.

@@ -45,8 +45,10 @@ def test_detector_scores_control_graph_deviation_without_labels() -> None:
     )
 
     assert anomalous.score > near.score
-    assert anomalous.dominant_edge in anomalous.contributions
-    assert set(anomalous.contributions) == {
+    assert anomalous.dominant_edge in anomalous.edge_deviations
+    assert anomalous.edge_deviations["source_followup"] < 0
+    assert anomalous.edge_deviations["prefix_followup"] > 0
+    assert set(anomalous.edge_deviations) == {
         "source_onset",
         "source_followup",
         "prefix_followup",

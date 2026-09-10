@@ -21,7 +21,7 @@ def score(event_id: str, source_id: str, value: float) -> dict:
         "relation": "temporal",
         "anomaly_score": value,
         "dominant_edge": "source_followup",
-        "contributions": {
+        "edge_deviations": {
             "source_onset": 0.0,
             "source_followup": value,
             "prefix_followup": 0.0,

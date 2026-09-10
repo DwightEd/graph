@@ -25,7 +25,7 @@ class FactorialMargins:
 
     def __post_init__(self) -> None:
         values = tuple(vars(self).values())
-        if not all(isinstance(value, (int, float)) and isfinite(value) for value in values):
+        if not all(type(value) in {int, float} and isfinite(value) for value in values):
             raise ValueError("factorial margins must be finite numbers")
 
 

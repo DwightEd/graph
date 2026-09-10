@@ -84,7 +84,7 @@ class DetectGraphAnomalies:
                     "relation": score.relation,
                     "anomaly_score": score.score,
                     "dominant_edge": score.dominant_edge,
-                    "contributions": score.contributions,
+                    "edge_deviations": score.edge_deviations,
                 }
                 for score in scores
             ],

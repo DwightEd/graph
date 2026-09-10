@@ -1,7 +1,7 @@
 # Experiment history and decisions
 
 This document preserves the main experiments that preceded the current
-held-out typed endpoint-recovery experiment. Historical code was removed during
+factorial constraint-control graph experiment. Historical code was removed during
 repository consolidation; the numbers below are retained so rejected
 hypotheses are not silently repeated.
 
@@ -298,9 +298,9 @@ objectives were enabled together. It therefore rejects the current joint
 clean-support objective, not all possible uses of layer order or exact typed
 graphs.
 
-## 13. New active line: leakage-free typed endpoint recovery
+## 13. Stopped line: leakage-free typed endpoint recovery
 
-The current implementation reuses GroundedRoute's existing
+The retired implementation reused GroundedRoute's
 `matched_negative_edges` sampler. For every sampled positive
 `(source,target,layer,head)` edge, the student graph is forced to hide that exact
 edge. The final node latent must rank the clean positive source above causal
@@ -321,12 +321,12 @@ from the posterior, but evaluation exports deterministically. Posterior
 variance measures dispersion under this corruption model and Gaussian
 bottleneck; it is not factual uncertainty or a hallucination score.
 
-**Decision.** Run endpoint-only deterministic recovery first, compare it with
-the existing GCN under the same readers, then test VAE and ordered auxiliaries
-as separate deltas. If deterministic recovery cannot improve on the failed
-ordered-layout representation, do not use a VAE to conceal the objective
-failure. If real endpoints do not beat role/lag-matched rewires, remove the
-exact-topology mechanism claim.
+**Decision.** This plan was not promoted to the main method. It retained a
+representation-learning objective without first establishing that its graph
+coordinates identified source-constraint use. The code was removed during the
+constraint-control consolidation. A future endpoint-recovery baseline must be
+reimplemented against the frozen input and split contracts rather than revived
+as hidden compatibility code.
 
 ## Historical branches represented by this record
 
@@ -356,3 +356,64 @@ ce54c1f  HoloRoute readable runner state before consolidation
 ```
 
 The active code is now maintained only on `main`; this document is the durable record of rejected and retained ideas.
+
+## 14. Attention-onset and within-span differences retained from reanchor
+
+The attention audit covered 2,946 samples, 509,834 response tokens and 42,587
+hallucinated tokens. The most informative comparison separated hallucination
+onsets from later tokens inside the same span.
+
+For 7,097 matched hallucinated tokens across 303 sources, most heads increased
+local-history share (`998` significant increases versus `7` decreases), while
+far-history distance and attention change predominantly fell. For 259 onset
+events across 189 sources, the pattern differed: far-history share increased in
+`646` heads versus `9` decreases, while prompt share still more often decreased
+(`80` increases versus `349` decreases). Overall, 94.46% of matched
+hallucinated tokens were not onset tokens.
+
+Two controls changed the interpretation:
+
+- all 36 detailed relay cases were rooted at BOS, exposing a special-token
+  confound in the old graph;
+- in an inspected carrier, positive and negative signed head effects
+  (`+0.048524` and `-0.062407`) canceled, so attention mass alone could not show
+  whether retrieved information was used.
+
+**Retained hypothesis.** Hallucination onset may involve retrieval from distant
+response history while prompt-constraint control falls; later span tokens then
+show the expected local continuation regime. This is better described as
+old-response relay takeover than as generic failure to look back.
+
+## 15. Hard reanchor coverage failure
+
+The supplied `reanchor/analytic-trace@2` summary considered 688 samples. Only
+23 had candidate anchors and 665 had none, for 3.34% sample coverage. The shown
+per-event records reported `anchors_traced: 0`.
+
+**Decision.** A hard-threshold reanchor node cannot define the study population
+or primary detector. It selects a small, non-random subset and creates severe
+conditioning bias. Event construction now starts from independently defined
+factual commitments; lookback behavior may be a secondary measurement, not an
+inclusion criterion.
+
+## 16. Active line: factorial constraint-control graph anomaly
+
+The active method replaces attention feature lists and learned reconstruction
+with one fixed four-edge causal graph per factual event. A two-source by
+two-prefix intervention separates source main effect, prefix main effect, and
+their interaction. A fourth edge measures source control at onset.
+
+The graph schema is label-free and frozen. Robust reference profiles are fitted
+per relation on an unlabeled source-disjoint split; hallucination labels enter
+only post-hoc evaluation. The first claim is deliberately modest: abnormal
+constraint-control graphs may provide a detectable signal. Mechanism language
+requires replicated directional intervention effects, not AUROC alone.
+
+The previous 2x2 quantity called `control_erosion` was algebraically twice the
+prefix main effect, not pure source erosion. The new decomposition records all
+factorial terms explicitly and removes that ambiguity.
+
+**Decision.** Do not add an autoencoder or GNN until the four causal coordinates
+beat position, raw-margin and attention-only controls under identical splits.
+If a later self-supervised model is warranted, test masked causal-edge recovery
+or A/B-swap equivariance instead of adjacent-layer prediction.
