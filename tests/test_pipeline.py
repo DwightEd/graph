@@ -56,6 +56,7 @@ def test_build_then_detect_keeps_labels_outside_the_scoring_path(tmp_path) -> No
     ).run()
 
     assert build_summary["graphs"] == 8
+    assert set(build_summary) == {"schema", "graphs", "sources", "splits", "output"}
     assert result["fit_graphs"] == 6
     assert result["scored_graphs"] == 2
     score_records = [
@@ -63,6 +64,8 @@ def test_build_then_detect_keeps_labels_outside_the_scoring_path(tmp_path) -> No
         for line in (tmp_path / "detection" / "scores.jsonl").read_text().splitlines()
     ]
     assert all("label" not in record for record in score_records)
+    model = json.loads((tmp_path / "detection" / "model.json").read_text())
+    assert set(model) == {"schema", "edge_order", "profiles", "fit_split", "fit_sources"}
     assert set(score_records[0]["edge_deviations"]) == {
         "source_onset",
         "source_followup",

@@ -59,6 +59,19 @@ def test_evaluation_opens_labels_only_after_scores_are_frozen(tmp_path) -> None:
     assert report["auroc"] == 1.0
     assert report["auprc"] == 1.0
     assert report["labels_used_stage"] == "evaluation_only"
+    assert set(report) == {
+        "schema",
+        "events",
+        "sources",
+        "prevalence",
+        "auroc",
+        "auprc",
+        "cluster_bootstrap",
+        "bootstrap_replicates",
+        "valid_bootstrap_replicates",
+        "confidence_intervals",
+        "labels_used_stage",
+    }
 
 
 def test_evaluation_requires_exact_score_label_alignment(tmp_path) -> None:

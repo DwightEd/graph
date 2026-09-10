@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from hashlib import sha256
 from pathlib import Path
 
 import numpy as np
@@ -57,7 +56,6 @@ class DetectionEvaluator:
             "bootstrap_replicates": self.config.bootstrap,
             "valid_bootstrap_replicates": valid_bootstraps,
             "confidence_intervals": intervals,
-            "score_sha256": sha256(self.config.scores_path.read_bytes()).hexdigest(),
             "labels_used_stage": "evaluation_only",
         }
         self.config.output_path.parent.mkdir(parents=True, exist_ok=True)

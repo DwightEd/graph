@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from hashlib import sha256
 from pathlib import Path
 
 from control_graph.data import load_factorial_events
@@ -44,7 +43,6 @@ class BuildGraphDataset:
             "graphs": len(graphs),
             "sources": len({graph.source_id for graph in graphs}),
             "splits": sorted({graph.split for graph in graphs}),
-            "input_sha256": _sha256(self.config.input_path),
             "output": str(self.config.output_path),
         }
 
@@ -101,7 +99,6 @@ class DetectGraphAnomalies:
             },
             "fit_split": self.config.fit_split,
             "fit_sources": sorted(fit_sources),
-            "graph_sha256": _sha256(self.config.graph_path),
         }
         (output / "model.json").write_text(
             json.dumps(model, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -146,7 +143,3 @@ def _write_jsonl(path: Path, records: list[dict]) -> None:
         "".join(json.dumps(record, sort_keys=True, allow_nan=False) + "\n" for record in records),
         encoding="utf-8",
     )
-
-
-def _sha256(path: Path) -> str:
-    return sha256(path.read_bytes()).hexdigest()
