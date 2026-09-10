@@ -13,6 +13,7 @@ EDGE_ORDER = (
     "prefix_followup",
     "source_prefix_coupling",
 )
+GRAPH_SCHEMA = "control-graph/constraint-control@1"
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,51 @@ class ControlGraph:
 
     def signature(self) -> dict[str, float]:
         return {edge.kind: edge.weight for edge in self.edges}
+
+    def to_record(self) -> dict:
+        return {
+            "schema": GRAPH_SCHEMA,
+            "event_id": self.event_id,
+            "source_id": self.source_id,
+            "split": self.split,
+            "relation": self.relation,
+            "edges": [
+                {
+                    "kind": edge.kind,
+                    "sources": list(edge.sources),
+                    "target": edge.target,
+                    "weight": edge.weight,
+                }
+                for edge in self.edges
+            ],
+        }
+
+    @classmethod
+    def from_record(cls, record: dict) -> ControlGraph:
+        expected = {"schema", "event_id", "source_id", "split", "relation", "edges"}
+        if not isinstance(record, dict) or set(record) != expected:
+            raise ValueError("control graph record has an invalid field set")
+        if record["schema"] != GRAPH_SCHEMA or not isinstance(record["edges"], list):
+            raise ValueError("control graph record has an unsupported schema")
+        edges = tuple(
+            ControlEdge(
+                kind=edge["kind"],
+                sources=tuple(edge["sources"]),
+                target=edge["target"],
+                weight=float(edge["weight"]),
+            )
+            for edge in record["edges"]
+        )
+        graph = cls(
+            event_id=record["event_id"],
+            source_id=record["source_id"],
+            split=record["split"],
+            relation=record["relation"],
+            edges=edges,
+        )
+        if tuple(graph.signature()) != EDGE_ORDER:
+            raise ValueError("control graph record has a non-canonical edge schema")
+        return graph
 
 
 class ControlGraphBuilder:
