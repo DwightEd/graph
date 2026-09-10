@@ -10,17 +10,9 @@ import numpy as np
 from tqdm.auto import tqdm
 
 from control_graph.audit import REQUIRED_GROUPS, load_audit_manifest
-from control_graph.metrics import binary_detection_metrics
+from control_graph.onset_statistics import summarize_onsets
 
 PAIR_SCHEMA = "control-graph/onset-choice-pair@1"
-PAIRED_METRICS = (
-    "instability",
-    "predictor_entropy",
-    "remote_gain",
-    "evidence_gain",
-    "far_history_gain",
-    "local_loss",
-)
 
 
 @dataclass(frozen=True)
@@ -81,13 +73,16 @@ class OnsetChoiceAudit:
             "".join(json.dumps(pair, sort_keys=True, allow_nan=False) + "\n" for pair in pairs),
             encoding="utf-8",
         )
-        report = _summarize(
+        report = summarize_onsets(
             pairs,
             processed=processed,
             skipped=skipped,
             spans=spans,
             content_onsets=content_onsets,
-            config=self.config,
+            pre_window=self.config.pre_window,
+            match_window=self.config.match_window,
+            bootstrap=self.config.bootstrap,
+            seed=self.config.seed,
             event_path=event_path,
         )
         (output / "summary.json").write_text(
@@ -116,6 +111,9 @@ class OnsetChoiceAudit:
                 and index not in used_controls
                 and 0 < index
                 and abs(index - response_index) <= self.config.match_window
+                and np.all(
+                    labels[max(0, index - self.config.pre_window + 1) : index + 1] == 0
+                )
                 and _token_class(trace["token_text"][index]) == token_class
                 and not trace["special_targets"][index]
             ]
@@ -335,151 +333,4 @@ def _measure(trace: dict, response_index: int, pre_window: int) -> dict | None:
         "local_loss": float(np.nanmean(local_loss)),
         "dispersion_gain": dispersion_gain,
         "head_remote_fraction": float(np.nanmean(remote > 0)),
-    }
-
-
-def _summarize(
-    pairs: list[dict],
-    *,
-    processed: int,
-    skipped: int,
-    spans: int,
-    content_onsets: int,
-    config: OnsetChoiceConfig,
-    event_path: Path,
-) -> dict:
-    sources = np.asarray([pair["source_id"] for pair in pairs], dtype=str)
-    classification = {}
-    for metric in ("instability", "predictor_entropy", "remote_gain"):
-        labels = np.tile([1, 0], len(pairs))
-        values = np.asarray(
-            [value for pair in pairs for value in (pair["onset"][metric], pair["control"][metric])]
-        )
-        paired_sources = np.repeat(sources, 2)
-        classification[metric] = binary_detection_metrics(
-            labels,
-            values,
-            paired_sources,
-            bootstrap=config.bootstrap,
-            seed=config.seed,
-            source_balanced=True,
-        )
-    differences = {
-        metric: _mean_difference(pairs, sources, metric, config.bootstrap, config.seed)
-        for metric in PAIRED_METRICS
-    }
-    joint = {
-        f"{role}_instability_vs_{metric}": _source_correlation(
-            pairs, sources, role, "instability", metric, config.bootstrap, config.seed
-        )
-        for role in ("onset", "control")
-        for metric in ("remote_gain", "predictor_entropy")
-    }
-    return {
-        "schema": "control-graph/onset-choice-audit@1",
-        "samples_processed": processed,
-        "samples_skipped": skipped,
-        "hallucination_spans": spans,
-        "content_onsets": content_onsets,
-        "matched_pairs": len(pairs),
-        "unmatched_onsets": content_onsets - len(pairs),
-        "sources": len(set(sources)),
-        "settings": {
-            "pre_window": config.pre_window,
-            "match_window": config.match_window,
-            "bootstrap": config.bootstrap,
-            "matching": "same_response_nearest_same_token_class_without_replacement",
-        },
-        "classification": classification,
-        "paired_differences": differences,
-        "joint": joint,
-        "lookback_modes": {
-            role: _mode_counts(pairs, role) for role in ("onset", "control")
-        },
-        "events": str(event_path),
-    }
-
-
-def _source_means(values: np.ndarray, sources: np.ndarray) -> np.ndarray:
-    groups = np.unique(sources)
-    return np.asarray([values[sources == source].mean() for source in groups])
-
-
-def _mean_difference(
-    pairs: list[dict], sources: np.ndarray, metric: str, bootstrap: int, seed: int
-) -> dict:
-    values = np.asarray(
-        [pair["onset"][metric] - pair["control"][metric] for pair in pairs]
-    )
-    source_values = _source_means(values, sources)
-    rng = np.random.default_rng(seed)
-    estimates = [
-        float(rng.choice(source_values, len(source_values), replace=True).mean())
-        for _ in range(bootstrap)
-    ]
-    return {
-        "mean": float(source_values.mean()),
-        "confidence_interval": np.quantile(estimates, [0.025, 0.975]).tolist()
-        if estimates
-        else None,
-        "sources": len(source_values),
-    }
-
-
-def _source_correlation(
-    pairs: list[dict],
-    sources: np.ndarray,
-    role: str,
-    left: str,
-    right: str,
-    bootstrap: int,
-    seed: int,
-) -> dict:
-    unique = np.unique(sources)
-    x = _source_means(np.asarray([pair[role][left] for pair in pairs]), sources)
-    y = _source_means(np.asarray([pair[role][right] for pair in pairs]), sources)
-    estimate = _spearman(x, y)
-    rng = np.random.default_rng(seed)
-    bootstraps = []
-    for _ in range(bootstrap):
-        selected = rng.integers(0, len(unique), len(unique))
-        value = _spearman(x[selected], y[selected])
-        if value is not None:
-            bootstraps.append(value)
-    return {
-        "estimate": estimate,
-        "confidence_interval": np.quantile(bootstraps, [0.025, 0.975]).tolist()
-        if bootstraps
-        else None,
-        "sources": len(unique),
-        "valid_bootstrap_replicates": len(bootstraps),
-    }
-
-
-def _spearman(left: np.ndarray, right: np.ndarray) -> float | None:
-    left_rank, right_rank = _ranks(left), _ranks(right)
-    if np.std(left_rank) == 0 or np.std(right_rank) == 0:
-        return None
-    return float(np.corrcoef(left_rank, right_rank)[0, 1])
-
-
-def _ranks(values: np.ndarray) -> np.ndarray:
-    order = np.argsort(values, kind="stable")
-    ranks = np.empty(len(values), dtype=np.float64)
-    start = 0
-    while start < len(values):
-        stop = start + 1
-        while stop < len(values) and values[order[stop]] == values[order[start]]:
-            stop += 1
-        ranks[order[start:stop]] = 0.5 * (start + stop - 1)
-        start = stop
-    return ranks
-
-
-def _mode_counts(pairs: list[dict], role: str) -> dict:
-    names = ("focused_evidence", "focused_far_relay", "diffuse_global", "local_persistence")
-    counts = {name: sum(pair[role]["lookback_mode"] == name for pair in pairs) for name in names}
-    return {
-        "counts": counts,
-        "fractions": {name: count / len(pairs) for name, count in counts.items()},
     }

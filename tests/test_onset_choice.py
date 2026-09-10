@@ -10,7 +10,7 @@ GROUPS = np.array(
 )
 
 
-def write_onset_fixture(root) -> None:
+def write_onset_fixture(root, *, contaminate_first_control: bool = False) -> None:
     samples = []
     for number in range(4):
         sample_id = f"sample-{number}"
@@ -36,6 +36,9 @@ def write_onset_fixture(root) -> None:
         instability = 0.1 + 0.1 * number
         observed_margin = np.array([1.0, 1.0, 1.0, -instability, 1.0, np.nan])
         predictor_entropy = np.array([1.0, 1.0, 1.0, 1.5 + number, 1.0, np.nan])
+        response_text = [" Normal", " answer", ",", " Wrong", "."]
+        if number == 0 and contaminate_first_control:
+            response_text = [" Normal", ",", ",", " Wrong", " After"]
         np.savez_compressed(
             path,
             audit_schema=np.array(3),
@@ -44,9 +47,7 @@ def write_onset_fixture(root) -> None:
             source_id=np.array(f"source-{number}"),
             task_type=np.array("QA"),
             token_ids=np.arange(response_start + response_tokens),
-            token_text=np.array(
-                ["prompt"] * response_start + [" Normal", " answer", ",", " Wrong", "."]
-            ),
+            token_text=np.array(["prompt"] * response_start + response_text),
             response_start=np.array(response_start),
             special_mask=np.zeros(response_start + response_tokens, dtype=bool),
             group_names=GROUPS,
@@ -142,3 +143,20 @@ def test_onset_audit_command_runs_the_same_workflow(tmp_path, capsys) -> None:
 
     assert json.loads(capsys.readouterr().out)["matched_pairs"] == 4
     assert (output / "events.jsonl").is_file()
+
+
+def test_normal_control_window_cannot_include_hallucinated_tokens(tmp_path) -> None:
+    audit_root = tmp_path / "audit"
+    output = tmp_path / "onsets"
+    audit_root.mkdir()
+    write_onset_fixture(audit_root, contaminate_first_control=True)
+
+    report = OnsetChoiceAudit(
+        OnsetChoiceConfig(audit_root, output, pre_window=3, match_window=8, bootstrap=0),
+        progress=False,
+    ).run()
+
+    assert report["matched_pairs"] == 3
+    assert report["unmatched_onsets"] == 1
+    events = (output / "events.jsonl").read_text()
+    assert "sample-0" not in events
