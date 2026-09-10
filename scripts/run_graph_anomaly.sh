@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 2 || $# -gt 4 ]]; then
+if [[ $# -gt 4 ]]; then
   echo "usage: $0 FACTORIAL_EVENTS OUTPUT_ROOT [FIT_SPLIT] [SCORE_SPLIT]" >&2
   exit 2
 fi
 
-events=$1
-output_root=$2
+events=${1:-data/pilot_factorial_events.jsonl}
+output_root=${2:-outputs/graph_anomaly_pilot}
 fit_split=${3:-train}
 score_split=${4:-test}
 

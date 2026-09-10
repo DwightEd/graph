@@ -5,8 +5,8 @@ import pytest
 from control_graph.pipeline import (
     BuildConfig,
     BuildGraphDataset,
-    DetectionConfig,
     DetectGraphAnomalies,
+    DetectionConfig,
 )
 
 

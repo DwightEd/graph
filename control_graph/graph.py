@@ -7,7 +7,6 @@ from math import isfinite
 
 from control_graph.data import FactorialEvent
 
-
 EDGE_ORDER = (
     "source_onset",
     "source_followup",

@@ -10,8 +10,8 @@ from control_graph.evaluation import DetectionEvaluator, EvaluationConfig
 from control_graph.pipeline import (
     BuildConfig,
     BuildGraphDataset,
-    DetectionConfig,
     DetectGraphAnomalies,
+    DetectionConfig,
 )
 
 

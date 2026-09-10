@@ -42,9 +42,18 @@ python main.py evaluate \
 The shell wrapper runs the label-free build and detection stages:
 
 ```bash
+bash scripts/run_graph_anomaly.sh
+```
+
+With explicit research input and output paths:
+
+```bash
 bash scripts/run_graph_anomaly.sh \
   data/factorial_events.jsonl outputs/run-001 train test
 ```
+
+The no-argument form uses `data/pilot_factorial_events.jsonl`, a synthetic
+pipeline smoke test rather than an experiment result.
 
 It refuses to overwrite existing artifacts. Evaluation is deliberately a
 separate command so labels cannot enter graph construction or calibration.
