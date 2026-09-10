@@ -1,8 +1,10 @@
 import json
 
+import numpy as np
 import pytest
 
 from control_graph.evaluation import DetectionEvaluator, EvaluationConfig
+from control_graph.metrics import binary_detection_metrics
 
 
 def write_jsonl(path, records) -> None:
@@ -84,3 +86,19 @@ def test_evaluation_requires_exact_score_label_alignment(tmp_path) -> None:
         DetectionEvaluator(
             EvaluationConfig(scores_path, labels_path, tmp_path / "report.json")
         ).run()
+
+
+def test_source_balancing_prevents_long_sources_from_dominating() -> None:
+    labels = np.array([1, 1, 1, 1, 1, 0])
+    scores = np.array([0.0, 0.0, 0.0, 0.0, 1.0, 0.5])
+    sources = np.array(["long"] * 4 + ["short-positive", "short-negative"])
+
+    token_weighted = binary_detection_metrics(
+        labels, scores, sources, bootstrap=0, seed=1
+    )
+    source_balanced = binary_detection_metrics(
+        labels, scores, sources, bootstrap=0, seed=1, source_balanced=True
+    )
+
+    assert token_weighted["auroc"] == pytest.approx(0.2)
+    assert source_balanced["auroc"] == pytest.approx(0.5)

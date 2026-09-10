@@ -58,6 +58,38 @@ pipeline smoke test rather than an experiment result.
 It refuses to overwrite existing artifacts. Evaluation is deliberately a
 separate command so labels cannot enter graph construction or calibration.
 
+## Fast evaluation of existing attention-audit traces
+
+The completed `attention_audit_v3` compact files can be screened without
+another model forward:
+
+```bash
+bash scripts/run_attention_audit_evaluation.sh \
+  experiments/reanchor_flow/outputs/attention_audit_v3 \
+  outputs/attention_mechanism_qa688_v1 \
+  200
+```
+
+The first command stage reads only `index.json` and completed `<sample>.npz`
+files. For each ordinary response token it records four route-conditioned
+support proxies: evidence, other prompt, far response history, and local
+history (including self). Labels are not opened until the second stage, after
+the JSONL scores have been written.
+
+`constraint_displacement = far_history_support + local_history_support -
+evidence_support` is the tested mechanism score. The report also evaluates an
+unsigned attention-only displacement, negative observed margin, and relative
+position. Results are reported separately for all labeled tokens, N-to-H
+onsets, and H-to-H span continuations, with source-cluster bootstrap intervals.
+Point estimates give every source equal total weight so long answers cannot
+dominate the reported AUROC/AUPRC.
+
+`--completed-only` means the run covers every trace that currently has a
+compact `.npz`; it does not infer missing features from label-only samples.
+The score is a cheap observational allocation of each head's emitted-token
+margin by message-strength share. It is not an exact source-token causal
+decomposition and is intended as a gate before expensive interventions.
+
 ## Input contract
 
 Each input line is one independently identified factual event:
@@ -95,6 +127,10 @@ defined and measured.
 - `control_graph/detector.py`: relation-conditional robust anomaly scoring.
 - `control_graph/pipeline.py`: build and detect file workflows.
 - `control_graph/evaluation.py`: label-only post-hoc AUROC/AUPRC evaluation.
+- `control_graph/audit.py`: label-free scoring of native attention-audit files.
+- `control_graph/audit_evaluation.py`: onset/continuation evaluation of frozen
+  audit scores.
+- `control_graph/metrics.py`: shared binary metrics and source bootstrap.
 - `docs/METHOD.md`: estimands, claims, confounds, and experiment gates.
 - `docs/EXPERIMENT_HISTORY.md`: retained positive and negative findings.
 

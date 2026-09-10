@@ -166,3 +166,40 @@ The implemented code begins at the validated six-margin event boundary. It does
 not yet generate counterfactual source worlds or capture model logits. This is
 intentional: those operations require dataset-specific factual alignment and
 cannot be safely inferred from RAGTruth labels alone.
+
+## 9. Existing-trace screening experiment
+
+Before paying for factorial recapture, the `audit-score` command uses the
+already captured v3 arrays as an observational screen. For layer `l`, head
+`h`, response predictor `q`, and source group `g`, define
+
+```text
+share(l,h,q,g) = message_mass(l,h,q,g) / message_ordinary_mass(l,h,q)
+support(q,g) = sum_lh share(l,h,q,g) * head_margin(l,h,q)
+               / sum_lh |head_margin(l,h,q)|
+```
+
+`head_margin` is the whole head's signed contribution to the observed emitted
+token versus its runner-up. `message_mass` is attention weighted by projected
+value norm. Their product allocates the observed head action according to
+route strength; it does not recover each source message's signed projection.
+
+The fixed four-edge token graph is:
+
+```text
+evidence ---------> emitted-token margin
+other prompt -----> emitted-token margin
+far history ------> emitted-token margin
+local+self -------> emitted-token margin
+```
+
+The primary ranking score is history support minus evidence support. It is
+evaluated against three predeclared shortcuts: the same route displacement
+using attention alone, negative observed margin, and response position. Labels
+are joined only after score serialization. Source-cluster bootstrap avoids
+treating many correlated tokens from one RAG source as independent samples.
+
+This screen can establish a reusable signal in existing data, but cannot by
+itself establish that a constraint was causally transmitted or overwritten.
+That claim still requires the factorial interventions in Sections 1--4 or an
+exact source-level signed decomposition from the saved Q/K and state files.

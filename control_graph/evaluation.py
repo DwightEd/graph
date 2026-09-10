@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-from sklearn.metrics import average_precision_score, roc_auc_score
+
+from control_graph.metrics import binary_detection_metrics
 
 
 @dataclass(frozen=True)
@@ -35,14 +36,12 @@ class DetectionEvaluator:
             raise ValueError("evaluation labels must exactly match frozen score event IDs")
         y_true = np.asarray([labels[record["event_id"]] for record in scores], dtype=np.int8)
         y_score = np.asarray([record["anomaly_score"] for record in scores], dtype=np.float64)
-        if len(np.unique(y_true)) != 2:
-            raise ValueError("evaluation requires both normal and hallucination labels")
         source_ids = np.asarray([record["source_id"] for record in scores], dtype=str)
-        intervals, valid_bootstraps = _cluster_bootstrap(
+        metrics = binary_detection_metrics(
             y_true,
             y_score,
             source_ids,
-            replicates=self.config.bootstrap,
+            bootstrap=self.config.bootstrap,
             seed=self.config.seed,
         )
         report = {
@@ -50,13 +49,10 @@ class DetectionEvaluator:
             "events": len(scores),
             "sources": len(set(source_ids)),
             "prevalence": float(y_true.mean()),
-            "auroc": float(roc_auc_score(y_true, y_score)),
-            "auprc": float(average_precision_score(y_true, y_score)),
             "cluster_bootstrap": "source_id",
             "bootstrap_replicates": self.config.bootstrap,
-            "valid_bootstrap_replicates": valid_bootstraps,
-            "confidence_intervals": intervals,
             "labels_used_stage": "evaluation_only",
+            **metrics,
         }
         self.config.output_path.parent.mkdir(parents=True, exist_ok=True)
         self.config.output_path.write_text(
@@ -104,37 +100,3 @@ def _read_jsonl(path: Path) -> list[dict]:
     if not records or any(not isinstance(record, dict) for record in records):
         raise ValueError(f"JSONL must contain at least one object: {path}")
     return records
-
-
-def _cluster_bootstrap(
-    labels: np.ndarray,
-    scores: np.ndarray,
-    source_ids: np.ndarray,
-    *,
-    replicates: int,
-    seed: int,
-) -> tuple[dict[str, list[float] | None], int]:
-    if replicates < 0:
-        raise ValueError("bootstrap must be non-negative")
-    groups = np.unique(source_ids)
-    by_group = {group: np.flatnonzero(source_ids == group) for group in groups}
-    rng = np.random.default_rng(seed)
-    estimates = []
-    for _ in range(replicates):
-        sampled = rng.choice(groups, size=len(groups), replace=True)
-        indices = np.concatenate([by_group[group] for group in sampled])
-        if len(np.unique(labels[indices])) != 2:
-            continue
-        estimates.append(
-            (
-                roc_auc_score(labels[indices], scores[indices]),
-                average_precision_score(labels[indices], scores[indices]),
-            )
-        )
-    if not estimates:
-        return {"auroc": None, "auprc": None}, 0
-    values = np.asarray(estimates)
-    return {
-        "auroc": np.quantile(values[:, 0], [0.025, 0.975]).tolist(),
-        "auprc": np.quantile(values[:, 1], [0.025, 0.975]).tolist(),
-    }, len(estimates)
