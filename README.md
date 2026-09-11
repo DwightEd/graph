@@ -1,145 +1,78 @@
-# Constraint-Control Graph Anomaly Detection
+# Candidate-conditioned path residuals
 
-This repository tests one narrow mechanism hypothesis: a hallucination can start
-after the model has recovered relevant content but failed to preserve the
-source constraint's control over the emitted fact.
+当前方法用固定图算子读取**候选状态与真实 attention 端点的条件对齐**，用于无监督幻觉检测。不训练新神经网络，也不需要先进行模型消融。
 
-The active method represents each factual commitment event as a fixed-role,
-signed causal graph with exactly four measured edges. It does not train an
-attention autoencoder, predict the next layer, or use hallucination labels to
-construct or score graphs.
+先固定每行 attention 在角色、来源段落、距离区间中的质量以及 self edge，再比较真实路径与组内端点置换期望对候选状态的作用。保留路径、候选排名、层和最终 head 通道。二步 source-through-history residual 包含一阶偏离，不解释成纯二阶交互或真实因果贡献。
 
-## Execution path
+**状态：已实现并验证软件流程；尚无新方法在自然数据上的检测有效性结果。** CHARM、TOHA、graph scattering、attention rollout 都是邻近已有工作，“固定图算子替代 AE”本身不是充分创新。[完整研究方案](refine-logs/FINAL_PROPOSAL.md)给出一手文献、精确公式和可证伪条件。[历史正负结果](docs/EXPERIMENT_HISTORY.md)继续保留。
+
+## 默认执行路径
+
+远端完整流程可用 `bash scripts/run_route_evaluation.sh`，自动运行准备、提取、评分和评价，默认沿用 reanchor 的远端数据／模型路径。参数和目前尚缺的 reanchor 机制评估见 [路由分析及远端运行](docs/REANCHOR_ROUTING_ANALYSIS.md)。
 
 ```text
-factorial margins JSONL
-  -> ControlGraphBuilder.build()
-  -> canonical graph JSONL
-  -> GraphAnomalyDetector.fit()/score()
-  -> frozen anomaly scores
-  -> DetectionEvaluator.run() + separate labels
+RAGTruth 原始 prompt / response
+  -> RagtruthPreparer.run(): 按 task/generator 选择，按 source 拆分
+  -> FrozenGraphCapture.run(): 本地冻结 Llama 的因果 edges + candidate states
+  -> PathEncoder.encode(): observed / conditional-null / residual / signal
+  -> RouteDetector.run(): 条件参考 -> 冻结全流分数
+  -> RouteEvaluator.run(): 此时才连接幻觉标签
 ```
 
-The single entry point is `main.py`:
+入口是 `main.py`。从仓库根目录运行：
 
 ```bash
-python main.py build \
-  --input data/factorial_events.jsonl \
-  --output outputs/graphs.jsonl
+python -m pip install -r requirements-model.txt
+
+python main.py prepare \
+  --dataset /path/to/RAGTruth/dataset --task QA \
+  --generator llama-2-7b-chat --max-sources 256 \
+  --output outputs/run/input.jsonl
+
+python main.py extract \
+  --input outputs/run/input.jsonl --model /path/to/local/llama \
+  --device cuda --dtype bfloat16 --output outputs/run/features
 
 python main.py detect \
-  --graphs outputs/graphs.jsonl \
-  --output outputs/detection \
-  --fit-split train \
-  --score-split test
+  --features outputs/run/features --neighbors 3 --per-source 8 \
+  --output outputs/run/detection
 
 python main.py evaluate \
-  --scores outputs/detection/scores.jsonl \
-  --labels data/test_labels.jsonl \
-  --output outputs/evaluation.json
+  --scores outputs/run/detection/scores.jsonl \
+  --labels /path/to/RAGTruth/dataset/response.jsonl \
+  --output outputs/run/evaluation.json --bootstrap 1000
 ```
 
-The shell wrapper runs the label-free build and detection stages:
+`--generator` 必须与数据中的 `model` 字符串相同。probe Llama 可以与原生成器不同，但此时属于 replay，不能声称是原生成器的内部轨迹。保留原始 prompt，采用 BOS + 单独分词后追加 response 的协议，不自动还原 chat template。
 
-```bash
-bash scripts/run_graph_anomaly.sh
-```
+默认最终层、深度 `1 2`、候选数 `2`、全部终点 heads。用 `--end-layers` 指定从零开始的终点层，`--depths`、`--candidates` 指定预声明比较。终点必须有足够的前序层，参数写入 manifest。
 
-With explicit research input and output paths:
+`--max-tokens` 默认 2048；`--max-attention-mb` 默认 1024，只估计全部 attention 的存储，不包含权重、logits、激活和暂存。仍使用稠密 attention，长上下文可能昂贵。超过限制直接失败，不静默截断或漏样本；完成 manifest 在整个提取成功后写入。不下载模型。
 
-```bash
-bash scripts/run_graph_anomaly.sh \
-  data/factorial_events.jsonl outputs/run-001 train test
-```
+## 无监督分数和对照
 
-The no-argument form uses `data/pilot_factorial_events.jsonl`, a synthetic
-pipeline smoke test rather than an experiment result.
+参考与测试 source_id 完全隔离。参考条件为 task、generator、prompt 长度区间、已生成长度区间，不使用回答总长度。每个来源等量取样。四种表征使用共享标准差和有效坐标，分别居中后计算 `mean(z²)`；`*_knn` 是补充读出。
 
-It refuses to overwrite existing artifacts. Evaluation is deliberately a
-separate command so labels cannot enter graph construction or calibration.
+恒定坐标不参与距离；整组无有效坐标时输出零分和 `reference_active_features=0`，表示参考没有辨别力，不表示正常。参考组不足所需来源数时失败，不跨组回退。
 
-## Fast evaluation of existing attention-audit traces
+输出包含 `residual`、`observed`、`null`、`signal`、对应 kNN、entropy、negative-margin 和 position。评价保留全部响应 token，包含首 token；报告全流、span onset、response first error、continuation 的来源平衡 AUROC/AP，以及配对来源 bootstrap AUROC 差。生成 token 的候选覆盖率不等于正确答案覆盖率，后者当前未知。未实施报警阈值选择。
 
-The completed `attention_audit_v3` compact files can be screened without
-another model forward:
+## 文件职责和基线
 
-```bash
-bash scripts/run_attention_audit_evaluation.sh \
-  experiments/reanchor_flow/outputs/attention_audit_v3 \
-  outputs/attention_mechanism_qa688_v1 \
-  200
-```
+| 文件 | 职责 |
+|---|---|
+| `main.py` | 参数解析、构造对象、调用 `run()`、输出 |
+| `route_graph/data.py` | 数据准备、无标签输入契约 |
+| `route_graph/capture.py` | 冻结模型、token 对齐、原生提取 |
+| `route_graph/operator.py` | 强条件零模型与有序路径读出 |
+| `route_graph/detector.py` | 参考拟合、同条件评分与对照 |
+| `route_graph/evaluation.py` | 标签连接、完整覆盖与统计 |
 
-The first command stage reads only `index.json` and completed `<sample>.npz`
-files. For each ordinary response token it records four route-conditioned
-support proxies: evidence, other prompt, far response history, and local
-history (including self). Labels are not opened until the second stage, after
-the JSONL scores have been written.
-
-`constraint_displacement = far_history_support + local_history_support -
-evidence_support` is the tested mechanism score. The report also evaluates an
-unsigned attention-only displacement, negative observed margin, and relative
-position. Results are reported separately for all labeled tokens, N-to-H
-onsets, and H-to-H span continuations, with source-cluster bootstrap intervals.
-Point estimates give every source equal total weight so long answers cannot
-dominate the reported AUROC/AUPRC.
-
-`--completed-only` means the run covers every trace that currently has a
-compact `.npz`; it does not infer missing features from label-only samples.
-The score is a cheap observational allocation of each head's emitted-token
-margin by message-strength share. It is not an exact source-token causal
-decomposition and is intended as a gate before expensive interventions.
-
-## Input contract
-
-Each input line is one independently identified factual event:
-
-```json
-{
-  "schema": "control-graph/factorial-event@1",
-  "event_id": "question-17/fact-0",
-  "source_id": "question-17",
-  "split": "train",
-  "relation": "temporal",
-  "margins": {
-    "onset_a": 1.4,
-    "onset_b": -1.1,
-    "world_a_after_a": 1.2,
-    "world_a_after_b": 0.3,
-    "world_b_after_a": -0.4,
-    "world_b_after_b": -1.3
-  }
-}
-```
-
-Every number is an `A minus B` answer-token logit margin. `onset_a` and
-`onset_b` are measured before a generated prefix under source worlds A and B.
-The other four values form the source-world by generated-prefix 2x2 factorial
-intervention. RAGTruth labels alone cannot produce this record; the paired
-worlds, answer candidates, commitment position, and prefixes must first be
-defined and measured.
-
-## Files
-
-- `main.py`: argument parsing and dispatch only.
-- `control_graph/data.py`: strict label-free factorial-event input.
-- `control_graph/graph.py`: four causal estimands and graph serialization.
-- `control_graph/detector.py`: relation-conditional robust anomaly scoring.
-- `control_graph/pipeline.py`: build and detect file workflows.
-- `control_graph/evaluation.py`: label-only post-hoc AUROC/AUPRC evaluation.
-- `control_graph/audit.py`: label-free scoring of native attention-audit files.
-- `control_graph/audit_evaluation.py`: onset/continuation evaluation of frozen
-  audit scores.
-- `control_graph/metrics.py`: shared binary metrics and source bootstrap.
-- `docs/METHOD.md`: estimands, claims, confounds, and experiment gates.
-- `docs/EXPERIMENT_HISTORY.md`: retained positive and negative findings.
-
-## Tests
+旧四边 factorial 和 retrospective onset 审计从 `python -m control_graph.cli` 运行，见[历史基线说明](docs/BASELINES.md)。旧 `attention_audit_v3` 只有角色聚合值，无法恢复新算子需要的 token 连接。
 
 ```bash
 python -m pytest -q
+python -m ruff check main.py route_graph control_graph tests
 ```
 
-The current implementation is a method scaffold, not a reported hallucination
-detector result. A claim requires measured factorial events, source-disjoint
-splits, frozen thresholds, task/relationship controls, and multiple models.
+安装 `requirements-model.txt` 后执行真实 tiny Llama CPU 集成测试。它使用随机权重，只验证软件。只安装基础依赖时模型测试跳过，不能据此声称模型提取已验证。

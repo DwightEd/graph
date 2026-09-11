@@ -1,27 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -gt 4 ]]; then
-  echo "usage: $0 FACTORIAL_EVENTS OUTPUT_ROOT [FIT_SPLIT] [SCORE_SPLIT]" >&2
+if [[ $# -lt 3 || $# -gt 4 ]]; then
+  echo "usage: $0 PREPARED_RESPONSES LOCAL_LLAMA OUTPUT_ROOT [DEVICE]" >&2
   exit 2
 fi
 
-events=${1:-data/pilot_factorial_events.jsonl}
-output_root=${2:-outputs/graph_anomaly_pilot}
-fit_split=${3:-train}
-score_split=${4:-test}
+input=$1
+model=$2
+output=$3
+device=${4:-cpu}
 
-if [[ ! -f "$events" ]]; then
-  echo "factorial event JSONL does not exist: $events" >&2
+if [[ ! -f "$input" || ! -d "$model" || -e "$output" ]]; then
+  echo "input and local model must exist; output must be new" >&2
   exit 2
 fi
 
-python main.py build \
-  --input "$events" \
-  --output "$output_root/graphs.jsonl"
-
-python main.py detect \
-  --graphs "$output_root/graphs.jsonl" \
-  --output "$output_root/detection" \
-  --fit-split "$fit_split" \
-  --score-split "$score_split"
+python main.py extract --input "$input" --model "$model" \
+  --output "$output/features" --device "$device"
+python main.py detect --features "$output/features" --output "$output/detection"

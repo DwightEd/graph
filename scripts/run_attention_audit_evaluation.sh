@@ -19,12 +19,12 @@ if [[ -e "$output_dir" ]]; then
   exit 2
 fi
 
-python -u main.py audit-score \
+python -u -m control_graph.cli audit-score \
   --audit "$audit_root" \
   --output "$output_dir/scores" \
   --completed-only
 
-python -u main.py audit-evaluate \
+python -u -m control_graph.cli audit-evaluate \
   --audit "$audit_root" \
   --scores "$output_dir/scores/scores.jsonl" \
   --output "$output_dir/evaluation.json" \

@@ -1,6 +1,6 @@
 import json
 
-from main import main
+from control_graph.cli import main
 
 
 def test_build_command_exposes_the_graph_builder(tmp_path, capsys) -> None:

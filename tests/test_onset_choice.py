@@ -2,8 +2,8 @@ import json
 
 import numpy as np
 
+from control_graph.cli import main
 from control_graph.onset_choice import OnsetChoiceAudit, OnsetChoiceConfig
-from main import main
 
 GROUPS = np.array(
     ["special", "evidence", "other_prompt", "history_far", "history_local", "self"]

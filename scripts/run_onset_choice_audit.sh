@@ -21,7 +21,7 @@ if [[ -e "$output_dir" ]]; then
   exit 2
 fi
 
-python -u main.py onset-audit \
+python -u -m control_graph.cli onset-audit \
   --audit "$audit_root" \
   --output "$output_dir" \
   --pre-window "$pre_window" \
