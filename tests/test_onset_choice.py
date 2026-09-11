@@ -1,9 +1,10 @@
 import json
 
 import numpy as np
+import pytest
 
-from control_graph.cli import main
-from control_graph.onset_choice import OnsetChoiceAudit, OnsetChoiceConfig
+from main import main
+from onset_analysis.analysis import OnsetChoiceAudit, OnsetChoiceConfig
 
 GROUPS = np.array(
     ["special", "evidence", "other_prompt", "history_far", "history_local", "self"]
@@ -86,7 +87,9 @@ def write_onset_fixture(root, *, contaminate_first_control: bool = False) -> Non
     )
 
 
-def test_onset_audit_skips_punctuation_and_tests_instability_with_lookback(tmp_path) -> None:
+def test_onset_audit_skips_punctuation_and_tests_instability_with_lookback(
+    tmp_path,
+) -> None:
     audit_root = tmp_path / "audit"
     output = tmp_path / "onsets"
     audit_root.mkdir()
@@ -104,7 +107,9 @@ def test_onset_audit_skips_punctuation_and_tests_instability_with_lookback(tmp_p
         progress=False,
     ).run()
 
-    records = [json.loads(line) for line in (output / "events.jsonl").read_text().splitlines()]
+    records = [
+        json.loads(line) for line in (output / "events.jsonl").read_text().splitlines()
+    ]
     first = records[0]
     assert report["hallucination_spans"] == 4
     assert report["content_onsets"] == 4
@@ -152,7 +157,9 @@ def test_normal_control_window_cannot_include_hallucinated_tokens(tmp_path) -> N
     write_onset_fixture(audit_root, contaminate_first_control=True)
 
     report = OnsetChoiceAudit(
-        OnsetChoiceConfig(audit_root, output, pre_window=3, match_window=8, bootstrap=0),
+        OnsetChoiceConfig(
+            audit_root, output, pre_window=3, match_window=8, bootstrap=0
+        ),
         progress=False,
     ).run()
 
@@ -160,3 +167,103 @@ def test_normal_control_window_cannot_include_hallucinated_tokens(tmp_path) -> N
     assert report["unmatched_onsets"] == 1
     events = (output / "events.jsonl").read_text()
     assert "sample-0" not in events
+
+
+@pytest.mark.parametrize("early_error", [False, True])
+def test_first_error_is_not_replaced_by_a_later_measurable_onset(tmp_path, early_error):
+    audit = tmp_path / "audit"
+    audit.mkdir()
+    write_onset_fixture(audit)
+    if early_error:
+        index = json.loads((audit / "index.json").read_text())
+        for entry in index["samples"]:
+            path = audit / entry["path"]
+            with np.load(path, allow_pickle=False) as saved:
+                arrays = {name: saved[name] for name in saved.files}
+            # Two extra normal tokens leave an uncontaminated control before the later error.
+            queries = [0, 1, 1, 1, 2, 3, 4, 5]
+            for name in ("mass", "ordinary_mass", "entropy_normalized", "top1"):
+                arrays[name] = arrays[name][:, :, queries]
+            for name in ("observed_margin", "predictor_entropy"):
+                arrays[name] = arrays[name][queries]
+            for name in ("token_ids", "token_text", "special_mask"):
+                arrays[name] = np.concatenate(
+                    (
+                        arrays[name][:6],
+                        np.repeat(arrays[name][6:7], 2),
+                        arrays[name][6:],
+                    )
+                )
+            entry["response_tokens"] = 7
+            np.savez_compressed(path, **arrays)
+            np.savez_compressed(
+                path.with_suffix(".labels.npz"),
+                labels=np.array([1, 0, 0, 0, 1, 1, 0], dtype=np.int8),
+            )
+        (audit / "index.json").write_text(json.dumps(index))
+    output = tmp_path / "onsets"
+    main(
+        [
+            "onset-audit",
+            "--audit",
+            str(audit),
+            "--output",
+            str(output),
+            "--pre-window",
+            "1",
+            "--bootstrap",
+            "0",
+        ]
+    )
+    report = json.loads((output / "summary.json").read_text())
+    assert report["cohorts"]["first_error"]["matched_pairs"] == (
+        0 if early_error else 4
+    )
+    assert report["cohorts"]["later_onsets"]["matched_pairs"] == (
+        4 if early_error else 0
+    )
+    assert report["coverage"]["first_error_spans"] == 4
+    assert report["coverage"]["first_errors_without_prior_predictor"] == (
+        4 if early_error else 0
+    )
+    assert report["span_structure"]["hallucination_tokens"] == (
+        12 if early_error else 8
+    )
+    assert report["span_structure"]["continuation_tokens"] == 4
+    assert report["interpretation"]["margin"] == "observer_token_compatibility"
+
+
+def test_joint_analysis_retains_differences_between_events_from_one_source(tmp_path):
+    audit = tmp_path / "audit"
+    audit.mkdir()
+    write_onset_fixture(audit)
+    index = json.loads((audit / "index.json").read_text())
+    for entry in index["samples"]:
+        entry["source_id"] = "shared-source"
+        path = audit / entry["path"]
+        with np.load(path, allow_pickle=False) as saved:
+            arrays = {name: saved[name] for name in saved.files}
+        arrays["source_id"] = np.array("shared-source")
+        np.savez_compressed(path, **arrays)
+    (audit / "index.json").write_text(json.dumps(index))
+    report = OnsetChoiceAudit(
+        OnsetChoiceConfig(audit, tmp_path / "onsets", bootstrap=0), progress=False
+    ).run()
+    joint = report["joint"]["onset_instability_vs_remote_gain"]
+    assert joint["estimate"] == pytest.approx(1.0)
+    assert joint["events"] == 4
+    assert joint["sources"] == 1
+    assert joint["confidence_interval"] is None
+
+
+def test_normal_control_also_requires_a_normal_baseline_predictor(tmp_path):
+    audit = tmp_path / "audit"
+    audit.mkdir()
+    write_onset_fixture(audit)
+    for path in audit.glob("train/QA/*.labels.npz"):
+        np.savez_compressed(path, labels=np.array([1, 0, 1, 1, 0], dtype=np.int8))
+    with pytest.raises(ValueError, match="matched normal control"):
+        OnsetChoiceAudit(
+            OnsetChoiceConfig(audit, tmp_path / "onsets", pre_window=1, bootstrap=0),
+            progress=False,
+        ).run()

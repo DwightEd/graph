@@ -7,6 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+from tqdm.auto import tqdm
 
 from route_graph.capture import file_digest
 from route_graph.data import read_jsonl, text_digest, write_jsonl
@@ -50,7 +51,9 @@ class SourceReference:
             raise ValueError("reference feature dimensions differ")
         self.width = widths.pop()
         self.profiles = {}
-        for key, by_source in grouped.items():
+        for key, by_source in tqdm(
+            grouped.items(), desc="fit reference", unit="stratum"
+        ):
             quota = min(self.per_source, min(map(len, by_source.values())))
             selected = []
             for source in sorted(by_source):
@@ -221,7 +224,7 @@ class RouteDetector:
             raise ValueError("no test tokens")
         reference = SourceReference(self.neighbors, self.per_source).fit(fit)
         scores = []
-        for row in test:
+        for row in tqdm(test, desc="score tokens", unit="token"):
             values = reference.score(row)
             values.update(
                 entropy=row["entropy"],

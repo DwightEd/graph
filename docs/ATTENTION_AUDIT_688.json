@@ -1,0 +1,219 @@
+{
+  "bootstrap_replicates": 200,
+  "cluster_bootstrap": "source_id",
+  "cohorts": {
+    "all": {
+      "negatives": 133390,
+      "positives": 20123,
+      "scores": {
+        "attention_displacement": {
+          "auprc": 0.28220828615764554,
+          "auroc": 0.7121617952471169,
+          "confidence_intervals": {
+            "auprc": [
+              0.2373687490369645,
+              0.3290633303323369
+            ],
+            "auroc": [
+              0.6855140306532561,
+              0.7376414249901322
+            ]
+          },
+          "valid_bootstrap_replicates": 200
+        },
+        "constraint_displacement": {
+          "auprc": 0.12601230657912452,
+          "auroc": 0.5458588669599536,
+          "confidence_intervals": {
+            "auprc": [
+              0.11252889742171632,
+              0.14139680880561833
+            ],
+            "auroc": [
+              0.5370440719921797,
+              0.5550688222787628
+            ]
+          },
+          "valid_bootstrap_replicates": 200
+        },
+        "negative_margin": {
+          "auprc": 0.14594530609063747,
+          "auroc": 0.5860875778184569,
+          "confidence_intervals": {
+            "auprc": [
+              0.13124945472666993,
+              0.16308711432361392
+            ],
+            "auroc": [
+              0.5756227044663298,
+              0.5954595515555134
+            ]
+          },
+          "valid_bootstrap_replicates": 200
+        },
+        "relative_position": {
+          "auprc": 0.13941036924429134,
+          "auroc": 0.5941801324885301,
+          "confidence_intervals": {
+            "auprc": [
+              0.12397012893336093,
+              0.15608013929950085
+            ],
+            "auroc": [
+              0.5723818289867609,
+              0.6133856684633208
+            ]
+          },
+          "valid_bootstrap_replicates": 200
+        }
+      },
+      "source_balanced_prevalence": 0.11737585588061625,
+      "token_prevalence": 0.1310833610182851,
+      "tokens": 153513
+    },
+    "continuation": {
+      "negatives": 133390,
+      "positives": 19453,
+      "scores": {
+        "attention_displacement": {
+          "auprc": 0.2808540907416295,
+          "auroc": 0.7151054038926832,
+          "confidence_intervals": {
+            "auprc": [
+              0.23491363199695975,
+              0.32788652983585087
+            ],
+            "auroc": [
+              0.6877893916557857,
+              0.7410069454542744
+            ]
+          },
+          "valid_bootstrap_replicates": 200
+        },
+        "constraint_displacement": {
+          "auprc": 0.12247013233294987,
+          "auroc": 0.5455372421435607,
+          "confidence_intervals": {
+            "auprc": [
+              0.10908388121451286,
+              0.13739918152670882
+            ],
+            "auroc": [
+              0.5366147577585674,
+              0.5554267059014711
+            ]
+          },
+          "valid_bootstrap_replicates": 200
+        },
+        "negative_margin": {
+          "auprc": 0.13848596368898983,
+          "auroc": 0.5807687413722616,
+          "confidence_intervals": {
+            "auprc": [
+              0.12476380331816575,
+              0.15501841308189668
+            ],
+            "auroc": [
+              0.5695939926852233,
+              0.5900227722456615
+            ]
+          },
+          "valid_bootstrap_replicates": 200
+        },
+        "relative_position": {
+          "auprc": 0.13660369787694568,
+          "auroc": 0.5970385522021251,
+          "confidence_intervals": {
+            "auprc": [
+              0.12122637939500905,
+              0.15354140651095718
+            ],
+            "auroc": [
+              0.5745667546798601,
+              0.6161248437287405
+            ]
+          },
+          "valid_bootstrap_replicates": 200
+        }
+      },
+      "source_balanced_prevalence": 0.11408495747860734,
+      "token_prevalence": 0.12727439267745333,
+      "tokens": 152843
+    },
+    "onset": {
+      "negatives": 133390,
+      "positives": 667,
+      "scores": {
+        "attention_displacement": {
+          "auprc": 0.009170228988311492,
+          "auroc": 0.6330937414614048,
+          "confidence_intervals": {
+            "auprc": [
+              0.00812148281194455,
+              0.010818148949024034
+            ],
+            "auroc": [
+              0.6012480053641787,
+              0.6574899484211181
+            ]
+          },
+          "valid_bootstrap_replicates": 200
+        },
+        "constraint_displacement": {
+          "auprc": 0.00684676961162573,
+          "auroc": 0.5534397205423689,
+          "confidence_intervals": {
+            "auprc": [
+              0.005795015735223861,
+              0.008445080484992653
+            ],
+            "auroc": [
+              0.5202304377725147,
+              0.5832046784215175
+            ]
+          },
+          "valid_bootstrap_replicates": 200
+        },
+        "negative_margin": {
+          "auprc": 0.01627195096719487,
+          "auroc": 0.7077820213066495,
+          "confidence_intervals": {
+            "auprc": [
+              0.013493660790559546,
+              0.02069264801172754
+            ],
+            "auroc": [
+              0.6832826882198945,
+              0.735767084145291
+            ]
+          },
+          "valid_bootstrap_replicates": 200
+        },
+        "relative_position": {
+          "auprc": 0.005810081887798264,
+          "auroc": 0.5097232976830216,
+          "confidence_intervals": {
+            "auprc": [
+              0.005309144495044843,
+              0.006435595928100093
+            ],
+            "auroc": [
+              0.48243473765423267,
+              0.5365951882895014
+            ]
+          },
+          "valid_bootstrap_replicates": 200
+        }
+      },
+      "source_balanced_prevalence": 0.0060683454375427435,
+      "token_prevalence": 0.004975495498183609,
+      "tokens": 134057
+    }
+  },
+  "labeled_tokens": 153513,
+  "labels_used_stage": "evaluation_only",
+  "point_estimate_weighting": "equal_source",
+  "schema": "control-graph/audit-evaluation@1",
+  "sources": 688,
+  "tokens_joined": 153513
+}

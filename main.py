@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
+from onset_analysis.analysis import OnsetChoiceAudit, OnsetChoiceConfig
 from route_graph.capture import CaptureConfig, FrozenGraphCapture
 from route_graph.data import RagtruthPreparer
 from route_graph.detector import RouteDetector
@@ -60,6 +61,16 @@ def parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--output", type=Path, required=True)
     evaluate.add_argument("--bootstrap", type=int, default=1000)
     evaluate.add_argument("--seed", type=int, default=20260911)
+    onset = commands.add_parser(
+        "onset-audit",
+        help="joint onset-choice and lookback analysis of existing traces",
+    )
+    onset.add_argument("--audit", type=Path, required=True)
+    onset.add_argument("--output", type=Path, required=True)
+    onset.add_argument("--pre-window", type=int, default=3)
+    onset.add_argument("--match-window", type=int, default=64)
+    onset.add_argument("--bootstrap", type=int, default=200)
+    onset.add_argument("--seed", type=int, default=20260910)
     return root
 
 
@@ -93,9 +104,20 @@ def main(argv: list[str] | None = None) -> None:
         result = RouteDetector(
             args.features, args.output, args.neighbors, args.per_source
         ).run()
-    else:
+    elif args.command == "evaluate":
         result = RouteEvaluator(
             args.scores, args.labels, args.output, args.bootstrap, args.seed
+        ).run()
+    else:
+        result = OnsetChoiceAudit(
+            OnsetChoiceConfig(
+                args.audit,
+                args.output,
+                args.pre_window,
+                args.match_window,
+                args.bootstrap,
+                args.seed,
+            )
         ).run()
     print(json.dumps(result, indent=2, allow_nan=False))
 

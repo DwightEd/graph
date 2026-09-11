@@ -1,5 +1,7 @@
 # 实现核验（2026-09-11）
 
+后续维护已移除下文提到的 control_graph 历史入口，保留并完善 onset 分析为 onset_analysis；当前运行说明见 [ONSET_RESEARCH.md](ONSET_RESEARCH.md)。以下 33 项测试是移除前的历史核验记录。
+
 范围：将 graph 的默认流程改为固定候选条件路径算子；保留 factorial 和 retrospective onset 的既有消费者，移至明确命名的基线入口。没有新增检测器训练或模型干预前置要求。
 
 ## 已执行的验证

@@ -21,7 +21,8 @@ if [[ -e "$output_dir" ]]; then
   exit 2
 fi
 
-python -u -m control_graph.cli onset-audit \
+repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+"${PYTHON_BIN:-python}" -u "$repo_root/main.py" onset-audit \
   --audit "$audit_root" \
   --output "$output_dir" \
   --pre-window "$pre_window" \

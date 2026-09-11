@@ -57,7 +57,7 @@ python main.py evaluate \
 
 输出包含 `residual`、`observed`、`null`、`signal`、对应 kNN、entropy、negative-margin 和 position。评价保留全部响应 token，包含首 token；报告全流、span onset、response first error、continuation 的来源平衡 AUROC/AP，以及配对来源 bootstrap AUROC 差。生成 token 的候选覆盖率不等于正确答案覆盖率，后者当前未知。未实施报警阈值选择。
 
-## 文件职责和基线
+## 文件职责
 
 | 文件 | 职责 |
 |---|---|
@@ -67,12 +67,26 @@ python main.py evaluate \
 | `route_graph/operator.py` | 强条件零模型与有序路径读出 |
 | `route_graph/detector.py` | 参考拟合、同条件评分与对照 |
 | `route_graph/evaluation.py` | 标签连接、完整覆盖与统计 |
+| `route_graph/metrics.py` | 来源平衡二分类指标与 bootstrap |
+| `onset_analysis/analysis.py` | 错误起点和正常位置匹配、回看与选择的联合观测 |
+| `onset_analysis/traces.py` | 读取已有 attention-audit v3 与独立标签 |
+| `onset_analysis/statistics.py` | 首错／后续起点分组、事件相关性与不确定性 |
 
-旧四边 factorial 和 retrospective onset 审计从 `python -m control_graph.cli` 运行，见[历史基线说明](docs/BASELINES.md)。旧 `attention_audit_v3` 只有角色聚合值，无法恢复新算子需要的 token 连接。
+已删除旧 `control_graph`、四边 factorial 和分摊 whole-head margin 的评分代码。旧会话中有用的 onset 联合分析保留为 `python main.py onset-audit`，不再依赖旧图。已有 attention-audit v3 的主 NPZ 可用于这项低成本统计；它不能替代新路径算子所需的完整 token 连接。
+
+```bash
+bash scripts/run_onset_choice_audit.sh \
+  experiments/reanchor_flow/outputs/attention_audit_v3 \
+  "outputs/onsets_$(date +%Y%m%d_%H%M%S)"
+```
+
+这是利用已有标签做事件匹配的事后分析，不是无标签在线检测。输出 `events.jsonl` 和 `summary.json`，包括真正的首次标注错误、后续 span 起点、覆盖率、span 续写比例，以及事件级的选择兼容性—回看相关性。只跳过尚未采集的 trace，并报告数量；已有 trace 缺标签或格式损坏时失败。`word/number/alphanumeric` 只用于粗粒度匹配，不是实体识别。
+
+新提取流程有样本／token 进度条，显示前向阶段、token 数；评分和 bootstrap 评价也显示进度。原始单次模型前向期间不会伪造层进度。[恢复的研究主线与旧结果](docs/ONSET_RESEARCH.md)说明图聚合、首错分析和当前测量边界。
 
 ```bash
 python -m pytest -q
-python -m ruff check main.py route_graph control_graph tests
+python -m ruff check main.py route_graph onset_analysis tests
 ```
 
 安装 `requirements-model.txt` 后执行真实 tiny Llama CPU 集成测试。它使用随机权重，只验证软件。只安装基础依赖时模型测试跳过，不能据此声称模型提取已验证。

@@ -306,6 +306,14 @@ def test_remote_script_runs_all_stages_from_another_directory(tiny_model, tmp_pa
         check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    log = output.with_suffix(".log").read_text()
+    for stage in (
+        "capture responses",
+        "route tokens",
+        "score tokens",
+        "evaluate subsets",
+    ):
+        assert stage in log
     report = json.loads((output / "evaluation.json").read_text())
     assert report["subsets"]["all_tokens"]["tokens"] == 28
     assert (output / "COMPLETE").is_file()

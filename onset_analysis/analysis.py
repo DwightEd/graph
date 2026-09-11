@@ -9,10 +9,15 @@ from pathlib import Path
 import numpy as np
 from tqdm.auto import tqdm
 
-from control_graph.audit import REQUIRED_GROUPS, load_audit_manifest
-from control_graph.onset_statistics import summarize_onsets
+from onset_analysis.statistics import summarize_onsets
+from onset_analysis.traces import (
+    load_audit_manifest,
+    load_labels,
+    load_trace,
+    trace_path,
+)
 
-PAIR_SCHEMA = "control-graph/onset-choice-pair@1"
+PAIR_SCHEMA = "onset-analysis/pair@1"
 
 
 @dataclass(frozen=True)
@@ -26,7 +31,9 @@ class OnsetChoiceConfig:
 
     def __post_init__(self) -> None:
         if min(self.pre_window, self.match_window) < 1 or self.bootstrap < 0:
-            raise ValueError("windows must be positive and bootstrap must be non-negative")
+            raise ValueError(
+                "windows must be positive and bootstrap must be non-negative"
+            )
 
 
 class OnsetChoiceAudit:
@@ -46,31 +53,59 @@ class OnsetChoiceAudit:
 
         pairs = []
         processed = skipped = spans = content_onsets = 0
-        iterator = tqdm(entries, desc="audit factual onsets", unit="sample", disable=not self.progress)
+        coverage = {
+            "first_error_spans": 0,
+            "first_errors_without_content": 0,
+            "first_errors_without_prior_predictor": 0,
+            "unknown_label_tokens": 0,
+        }
+        hallucination_tokens = 0
+        iterator = tqdm(
+            entries,
+            desc="audit factual onsets",
+            unit="sample",
+            disable=not self.progress,
+        )
         for entry in iterator:
-            trace_path = _inside(root, entry["path"])
-            label_path = trace_path.with_suffix(".labels.npz")
-            if not trace_path.is_file():
+            sample_path = trace_path(root, entry["path"])
+            label_path = sample_path.with_suffix(".labels.npz")
+            if not sample_path.is_file():
                 skipped += 1
                 continue
             if not label_path.is_file():
                 raise FileNotFoundError(f"label sidecar does not exist: {label_path}")
-            trace = _load_trace(trace_path, entry)
-            labels = _load_labels(label_path, entry["response_tokens"])
+            trace = load_trace(sample_path, entry)
+            labels = load_labels(label_path, entry["response_tokens"])
             candidates, sample_spans = _content_onsets(
                 labels, trace["token_text"], trace["special_targets"]
             )
             spans += sample_spans
             content_onsets += len(candidates)
+            hallucination_tokens += int((labels == 1).sum())
+            coverage["unknown_label_tokens"] += int((labels == -1).sum())
+            if sample_spans:
+                first_error = int(np.flatnonzero(labels == 1)[0])
+                coverage["first_error_spans"] += 1
+                first_content = next(
+                    (index for start, index, _ in candidates if start == first_error),
+                    None,
+                )
+                coverage["first_errors_without_content"] += first_content is None
+                coverage["first_errors_without_prior_predictor"] += first_content == 0
             pairs.extend(self._match_sample(entry, trace, labels, candidates))
             processed += 1
             iterator.set_postfix(onsets=content_onsets, pairs=len(pairs))
 
         if not pairs:
-            raise ValueError("no measurable hallucination onset has a matched normal control")
+            raise ValueError(
+                "no measurable hallucination onset has a matched normal control"
+            )
         event_path = output / "events.jsonl"
         event_path.write_text(
-            "".join(json.dumps(pair, sort_keys=True, allow_nan=False) + "\n" for pair in pairs),
+            "".join(
+                json.dumps(pair, sort_keys=True, allow_nan=False) + "\n"
+                for pair in pairs
+            ),
             encoding="utf-8",
         )
         report = summarize_onsets(
@@ -84,6 +119,8 @@ class OnsetChoiceAudit:
             bootstrap=self.config.bootstrap,
             seed=self.config.seed,
             event_path=event_path,
+            coverage=coverage,
+            hallucination_tokens=hallucination_tokens,
         )
         (output / "summary.json").write_text(
             json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -99,6 +136,9 @@ class OnsetChoiceAudit:
     ) -> list[dict]:
         used_controls: set[int] = set()
         pairs = []
+        first_error = (
+            int(np.flatnonzero(labels == 1)[0]) if np.any(labels == 1) else None
+        )
         for span_start, response_index, span_length in onsets:
             onset = _measure(trace, response_index, self.config.pre_window)
             if onset is None:
@@ -112,7 +152,8 @@ class OnsetChoiceAudit:
                 and 0 < index
                 and abs(index - response_index) <= self.config.match_window
                 and np.all(
-                    labels[max(0, index - self.config.pre_window + 1) : index + 1] == 0
+                    # The preceding predictor supplies the baseline for the first delta.
+                    labels[max(0, index - self.config.pre_window) : index + 1] == 0
                 )
                 and _token_class(trace["token_text"][index]) == token_class
                 and not trace["special_targets"][index]
@@ -141,95 +182,13 @@ class OnsetChoiceAudit:
                     "split": entry["split"],
                     "task_type": entry["task_type"],
                     "span_start": span_start,
+                    "is_first_error": span_start == first_error,
                     "match_distance": abs(control_index - response_index),
                     "onset": onset,
                     "control": control,
                 }
             )
         return pairs
-
-
-def _inside(root: Path, relative: str) -> Path:
-    path = (root / relative).resolve()
-    if not path.is_relative_to(root):
-        raise ValueError(f"attention trace escapes the audit root: {relative}")
-    return path
-
-
-def _load_trace(path: Path, entry: dict) -> dict:
-    fields = {
-        "sample_id",
-        "source_id",
-        "task_type",
-        "response_start",
-        "token_ids",
-        "token_text",
-        "special_mask",
-        "group_names",
-        "mass",
-        "ordinary_mass",
-        "entropy_normalized",
-        "top1",
-        "observed_margin",
-        "predictor_entropy",
-    }
-    with np.load(path, allow_pickle=False) as archive:
-        missing = fields.difference(archive.files)
-        if missing:
-            raise ValueError(f"{path} is missing onset-choice arrays: {sorted(missing)}")
-        arrays = {name: np.asarray(archive[name]) for name in fields}
-    for name in ("sample_id", "source_id", "task_type"):
-        if str(arrays[name]) != entry[name]:
-            raise ValueError(f"{path} {name} does not match index.json")
-    start, count = int(arrays["response_start"]), entry["response_tokens"]
-    if start != entry["response_start"]:
-        raise ValueError(f"{path} response_start does not match index.json")
-    groups = tuple(str(value) for value in arrays["group_names"])
-    mass = arrays["mass"]
-    head_shape = mass.shape[:3]
-    if (
-        set(groups) != set(REQUIRED_GROUPS)
-        or mass.ndim != 4
-        or mass.shape[2] != count + 1
-        or mass.shape[-1] != len(groups)
-        or arrays["ordinary_mass"].shape != head_shape
-        or arrays["entropy_normalized"].shape != head_shape
-        or arrays["top1"].shape != head_shape
-        or arrays["observed_margin"].shape != (count + 1,)
-        or arrays["predictor_entropy"].shape != (count + 1,)
-        or arrays["token_ids"].shape != (start + count,)
-        or arrays["token_text"].shape != (start + count,)
-        or arrays["special_mask"].shape != (start + count,)
-    ):
-        raise ValueError(f"{path} has inconsistent onset-choice array shapes")
-    share = np.full(mass.shape, np.nan, dtype=np.float64)
-    np.divide(
-        mass,
-        arrays["ordinary_mass"][..., None],
-        out=share,
-        where=arrays["ordinary_mass"][..., None] > 0,
-    )
-    return {
-        "token_ids": arrays["token_ids"][start:],
-        "token_text": arrays["token_text"][start:],
-        "special_targets": arrays["special_mask"][start:],
-        "group_index": {name: index for index, name in enumerate(groups)},
-        "share": share,
-        "attention_entropy": arrays["entropy_normalized"],
-        "top1": arrays["top1"],
-        "observed_margin": arrays["observed_margin"],
-        "predictor_entropy": arrays["predictor_entropy"],
-    }
-
-
-def _load_labels(path: Path, response_tokens: int) -> np.ndarray:
-    with np.load(path, allow_pickle=False) as archive:
-        if "labels" not in archive.files:
-            raise ValueError(f"label sidecar has no labels array: {path}")
-        labels = np.asarray(archive["labels"])
-    if labels.shape != (response_tokens,) or not np.isin(labels, (-1, 0, 1)).all():
-        raise ValueError(f"labels must cover the response and use -1/0/1: {path}")
-    return labels.astype(np.int8, copy=False)
 
 
 def _content_onsets(
@@ -250,7 +209,8 @@ def _content_onsets(
             (
                 position
                 for position in range(index, stop)
-                if not special[position] and _token_class(token_text[position]) is not None
+                if not special[position]
+                and _token_class(token_text[position]) is not None
             ),
             None,
         )
@@ -283,12 +243,14 @@ def _measure(trace: dict, response_index: int, pre_window: int) -> dict | None:
     first = max(1, response_index - pre_window + 1)
     best = None
     for query in range(first, response_index + 1):
-        evidence = share[..., query, groups["evidence"]] - share[
-            ..., query - 1, groups["evidence"]
-        ]
-        far = share[..., query, groups["history_far"]] - share[
-            ..., query - 1, groups["history_far"]
-        ]
+        evidence = (
+            share[..., query, groups["evidence"]]
+            - share[..., query - 1, groups["evidence"]]
+        )
+        far = (
+            share[..., query, groups["history_far"]]
+            - share[..., query - 1, groups["history_far"]]
+        )
         remote = evidence + far
         if not np.isfinite(remote).any():
             continue
@@ -303,9 +265,10 @@ def _measure(trace: dict, response_index: int, pre_window: int) -> dict | None:
         share[..., query - 1, groups[name]] - share[..., query, groups[name]]
         for name in local_names
     )
-    entropy_gain = trace["attention_entropy"][..., query] - trace["attention_entropy"][
-        ..., query - 1
-    ]
+    entropy_gain = (
+        trace["attention_entropy"][..., query]
+        - trace["attention_entropy"][..., query - 1]
+    )
     concentration_gain = trace["top1"][..., query] - trace["top1"][..., query - 1]
     evidence_gain = float(np.nanmean(evidence))
     far_gain = float(np.nanmean(far))
@@ -317,7 +280,7 @@ def _measure(trace: dict, response_index: int, pre_window: int) -> dict | None:
     elif evidence_gain >= far_gain:
         mode = "focused_evidence"
     else:
-        mode = "focused_far_relay"
+        mode = "focused_far_history"
     return {
         "response_index": response_index,
         "token_id": int(trace["token_ids"][response_index]),

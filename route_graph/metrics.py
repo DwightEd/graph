@@ -15,7 +15,11 @@ def binary_detection_metrics(
     seed: int,
     source_balanced: bool = False,
 ) -> dict:
-    if labels.ndim != 1 or scores.shape != labels.shape or source_ids.shape != labels.shape:
+    if (
+        labels.ndim != 1
+        or scores.shape != labels.shape
+        or source_ids.shape != labels.shape
+    ):
         raise ValueError("labels, scores, and source IDs must be aligned vectors")
     if len(np.unique(labels)) != 2:
         raise ValueError("evaluation requires both normal and hallucination labels")

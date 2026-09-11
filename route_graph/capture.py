@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
+from tqdm.auto import tqdm
 
 from route_graph.data import read_responses, write_jsonl
 from route_graph.operator import PathEncoder
@@ -94,8 +95,12 @@ class FrozenGraphCapture:
 
         def features():
             nonlocal count, names
-            with torch.inference_mode():
-                for record in records:
+            with (
+                torch.inference_mode(),
+                tqdm(records, desc="capture responses", unit="response") as samples,
+            ):
+                for record in samples:
+                    samples.set_postfix(sample=record["id"], phase="tokenize")
                     prompt = tokenizer(
                         record["prompt"],
                         add_special_tokens=False,
@@ -171,6 +176,9 @@ class FrozenGraphCapture:
                         3 if token in special else 2 for token in response_ids[:-1]
                     )
                     source_units.extend([-1] * (len(response_ids) - 1))
+                    samples.set_postfix(
+                        sample=record["id"], phase="forward", tokens=len(ids)
+                    )
                     outputs = model(
                         torch.tensor([ids], device=config.device),
                         use_cache=False,
@@ -194,8 +202,12 @@ class FrozenGraphCapture:
                     del outputs
                     states = torch.nn.functional.normalize(states, dim=-1)
                     output_weights = model.get_output_embeddings().weight
-                    for token_index, (left, right) in enumerate(
-                        response["offset_mapping"]
+                    for token_index, (left, right) in tqdm(
+                        enumerate(response["offset_mapping"]),
+                        total=len(response_ids),
+                        desc="route tokens",
+                        unit="token",
+                        leave=False,
                     ):
                         query = len(prompt_ids) + token_index - 1
                         logits = all_logits[query].float()
@@ -260,8 +272,15 @@ class FrozenGraphCapture:
             "features_sha256": file_digest(feature_path),
             "checkpoint_sha256": {
                 path.name: file_digest(path)
-                for path in sorted(config.model_path.iterdir())
-                if path.suffix in {".json", ".safetensors", ".bin", ".model"}
+                for path in tqdm(
+                    [
+                        path
+                        for path in sorted(config.model_path.iterdir())
+                        if path.suffix in {".json", ".safetensors", ".bin", ".model"}
+                    ],
+                    desc="record checkpoint",
+                    unit="file",
+                )
             },
         }
         (config.output_dir / "manifest.json").write_text(

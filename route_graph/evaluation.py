@@ -8,9 +8,10 @@ from pathlib import Path
 
 import numpy as np
 from sklearn.metrics import roc_auc_score
+from tqdm.auto import tqdm
 
-from control_graph.metrics import binary_detection_metrics
 from route_graph.data import read_jsonl, text_digest
+from route_graph.metrics import binary_detection_metrics
 
 
 class RouteEvaluator:
@@ -112,9 +113,11 @@ class RouteEvaluator:
             "continuations": (y == 0) | continuations,
         }
         subsets = {}
-        for name, mask in masks.items():
+        for name, mask in tqdm(masks.items(), desc="evaluate subsets", unit="subset"):
             metrics = {}
-            for score_name, values in scores.items():
+            for score_name, values in tqdm(
+                scores.items(), desc=f"{name} bootstrap", unit="score", leave=False
+            ):
                 metrics[score_name] = (
                     binary_detection_metrics(
                         y[mask],
