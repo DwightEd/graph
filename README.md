@@ -1,5 +1,10 @@
 # Candidate-conditioned path residuals
 
+本仓库承载主线检测方法。相关机制和候选算子在
+[reanchor 项目](https://github.com/DwightEd/reanchor) 中做具体样本验证；
+主线采用的算法在本仓库集成到提取、图计算、评分和评价流程。
+reanchor 新增的回看定位、多跳来源与表征关系残差目前是实验原型，尚未接入下面的默认流程。
+
 当前方法用固定图算子读取**候选状态与真实 attention 端点的条件对齐**，用于无监督幻觉检测。不训练新神经网络，也不需要先进行模型消融。
 
 先固定每行 attention 在角色、来源段落、距离区间中的质量以及 self edge，再比较真实路径与组内端点置换期望对候选状态的作用。保留路径、候选排名、层和最终 head 通道。二步 source-through-history residual 包含一阶偏离，不解释成纯二阶交互或真实因果贡献。
