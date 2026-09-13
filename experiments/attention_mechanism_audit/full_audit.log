@@ -1,0 +1,224 @@
+[1/2] Capture chunked A/V functional-message traces
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:00<00:00, 16.34it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00, 20.10it/s]
+capture 1: 11907
+We detected that you are passing `past_key_values` as a tuple of tuples. This is deprecated and will be removed in v4.47. Please convert your cache or use an appropriate `Cache` class (https://huggingface.co/docs/transformers/kv_cache#legacy-cache-format)
+capture 2: 12015
+capture 3: 12021
+capture 4: 12045
+capture 5: 12069
+capture 6: 12105
+capture 7: 12135
+capture 8: 12183
+capture 9: 12219
+capture 10: 12231
+capture 11: 12243
+capture 12: 12261
+capture 13: 12297
+capture 14: 12333
+capture 15: 12345
+capture 16: 12435
+capture 17: 12441
+capture 18: 12447
+capture 19: 12459
+capture 20: 12471
+capture 21: 12519
+capture 22: 12525
+capture 23: 12555
+capture 24: 12603
+capture 25: 12621
+capture 26: 12693
+capture 27: 12705
+capture 28: 12765
+capture 29: 12843
+capture 30: 12903
+capture 31: 12915
+capture 32: 13041
+capture 33: 13071
+capture 34: 13107
+capture 35: 13131
+capture 36: 13137
+capture 37: 13155
+capture 38: 13161
+capture 39: 13209
+capture 40: 13233
+capture 41: 13263
+capture 42: 13293
+capture 43: 13311
+capture 44: 13341
+capture 45: 13365
+capture 46: 13377
+capture 47: 13431
+capture 48: 13443
+capture 49: 13467
+capture 50: 13491
+capture 51: 13533
+capture 52: 13563
+capture 53: 13719
+capture 54: 13743
+capture 55: 13911
+capture 56: 13917
+capture 57: 13941
+capture 58: 14007
+capture 59: 14055
+capture 60: 14097
+capture 61: 14133
+capture 62: 14199
+capture 63: 14211
+capture 64: 14283
+capture 65: 14289
+capture 66: 14295
+capture 67: 14325
+capture 68: 14355
+capture 69: 14367
+capture 70: 14379
+capture 71: 14397
+capture 72: 14469
+capture 73: 14505
+capture 74: 14511
+capture 75: 14691
+capture 76: 14703
+capture 77: 14715
+capture 78: 14745
+capture 79: 14751
+capture 80: 14763
+capture 81: 14775
+capture 82: 14805
+capture 83: 14817
+capture 84: 14847
+capture 85: 14859
+capture 86: 14889
+capture 87: 14997
+capture 88: 15009
+capture 89: 15105
+capture 90: 15129
+capture 91: 15177
+capture 92: 15195
+capture 93: 15201
+capture 94: 15207
+capture 95: 15273
+capture 96: 15345
+capture 97: 15459
+capture 98: 15465
+capture 99: 15483
+capture 100: 15555
+capture 101: 15627
+capture 102: 15651
+capture 103: 15675
+capture 104: 15687
+capture 105: 15711
+capture 106: 15717
+capture 107: 15729
+capture 108: 15735
+capture 109: 15753
+capture 110: 15777
+capture 111: 15789
+capture 112: 15903
+capture 113: 15927
+capture 114: 15933
+capture 115: 15969
+capture 116: 16059
+capture 117: 16119
+capture 118: 16149
+capture 119: 16155
+capture 120: 16359
+capture 121: 16419
+capture 122: 16455
+capture 123: 16467
+capture 124: 16509
+capture 125: 16563
+capture 126: 16635
+capture 127: 16665
+capture 128: 16689
+capture 129: 16773
+capture 130: 16797
+capture 131: 16851
+capture 132: 16881
+capture 133: 16893
+capture 134: 16899
+capture 135: 16905
+capture 136: 16935
+capture 137: 17055
+capture 138: 17061
+capture 139: 17103
+capture 140: 17115
+capture 141: 17199
+capture 142: 17235
+capture 143: 17253
+capture 144: 17283
+capture 145: 17397
+capture 146: 17517
+capture 147: 17565
+capture 148: 17571
+capture 149: 17757
+{
+  "generator_models": [
+    "llama-2-7b-chat"
+  ],
+  "index": "/share/home/tm902089733300000/a903202310/lys/research/graph/experiments/attention_mechanism_audit/outputs/qa/Meta-Llama-3.1-8B-Instruct_teacher_forced_seed20260828/traces/index.jsonl",
+  "intervention_batch": 3,
+  "labels_used": false,
+  "max_cuda_reserved_bytes": 17668505600,
+  "model_dtype": "torch.bfloat16",
+  "observer_checkpoint": "/share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct",
+  "predictor_chunk": 128,
+  "samples": 149,
+  "schema": "ragtruth-functional-message-audit",
+  "source_info": "/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/source_info.jsonl",
+  "split_root": "/share/home/tm902089733300000/a903202310/lys/research/Unsupervised-hypergraph/outputs/attention_cache/fresh_attention_c8847872bedf_20260731T074520Z_p876/test",
+  "top_k_message_sources": 8,
+  "version": 2
+}
+
+[2/2] Read labels only now and run position-matched mechanism tests
+
+=== Three-mechanism audit ===
+message_evidence_share_mean            correct=0.256597 hallucinated=0.195661 delta=-0.007879328481757488 CI=[-0.02408827615979438, 0.006006646411290438]
+message_evidence_share_early           correct=0.200093 hallucinated=0.153536 delta=-0.009204086559848525 CI=[-0.01829823625479968, -0.0007868668242680087]
+message_evidence_share_late            correct=0.255976 hallucinated=0.196380 delta=-0.001650746978628329 CI=[-0.01875221498746377, 0.014940348396507595]
+message_evidence_share_layer_shift     correct=0.055884 hallucinated=0.042844 delta=0.0075533392200341975 CI=[-0.006811386416516959, 0.021830136358755855]
+message_response_share_mean            correct=0.511567 hallucinated=0.594547 delta=0.02788602265600975 CI=[0.014720556256003105, 0.04175818401412704]
+message_response_share_early           correct=0.553220 hallucinated=0.620237 delta=0.02002629940517438 CI=[0.012002271082108983, 0.02798791581120055]
+message_response_share_late            correct=0.487490 hallucinated=0.569177 delta=0.025467740887632737 CI=[0.006413011182195102, 0.044786314431768955]
+message_response_share_layer_shift     correct=-0.065730 hallucinated=-0.051060 delta=0.005441442715266768 CI=[-0.009713149903377948, 0.02062218274562978]
+message_routing_drift_mean             correct=0.254970 hallucinated=0.398887 delta=0.03576536486044717 CI=[0.013020783466472027, 0.0592048939051202]
+message_routing_drift_early            correct=0.353127 hallucinated=0.466701 delta=0.029230389851503648 CI=[0.01532246114513001, 0.04299563651002992]
+message_routing_drift_late             correct=0.231514 hallucinated=0.372797 delta=0.027118486580319512 CI=[-0.003560394347131922, 0.05764163863015336]
+message_routing_drift_layer_shift      correct=-0.121614 hallucinated=-0.093904 delta=-0.002111903069397578 CI=[-0.029671673550306317, 0.0233276184998566]
+attention_evidence_share_mean          correct=0.127017 hallucinated=0.092535 delta=-0.006379036015520493 CI=[-0.012919403132027349, 0.0005339357248232807]
+attention_evidence_share_early         correct=0.111415 hallucinated=0.082364 delta=-0.006334316470206548 CI=[-0.010882632629229472, -0.0017408906059482926]
+attention_evidence_share_late          correct=0.078815 hallucinated=0.058899 delta=-0.0008503830540949139 CI=[-0.006024409377789244, 0.0047535909442171335]
+attention_evidence_share_layer_shift   correct=-0.032600 hallucinated=-0.023465 delta=0.005483933847893077 CI=[0.0004684641127152229, 0.011185340331673312]
+attention_response_share_mean          correct=0.260368 hallucinated=0.288630 delta=0.005348622851455823 CI=[-0.0016928633257078057, 0.012912931526676774]
+attention_response_share_early         correct=0.271846 hallucinated=0.298528 delta=0.0032696779578542104 CI=[-0.002887372116271693, 0.009516121175569981]
+attention_response_share_late          correct=0.191690 hallucinated=0.208424 delta=0.00032694796339059485 CI=[-0.006192366471991707, 0.006797045032995251]
+attention_response_share_layer_shift   correct=-0.080156 hallucinated=-0.090105 delta=-0.0029427309747403247 CI=[-0.010194882210523176, 0.0034154096751127573]
+attention_routing_drift_mean           correct=0.133351 hallucinated=0.196095 delta=0.011727656271810142 CI=[-0.00044129144892884593, 0.023965248057964992]
+attention_routing_drift_early          correct=0.160430 hallucinated=0.216165 delta=0.009603995317593216 CI=[0.00018084943196019896, 0.01892848324129143]
+attention_routing_drift_late           correct=0.112875 hallucinated=0.149524 delta=0.0011773313574779498 CI=[-0.008510034530131052, 0.010931895203464546]
+attention_routing_drift_layer_shift    correct=-0.047555 hallucinated=-0.066640 delta=-0.00842666433712181 CI=[-0.0184352965780104, 0.0011188665280067768]
+message_source_dispersion_mean         correct=0.690140 hallucinated=0.683454 delta=-0.00332481991022061 CI=[-0.009922473250577846, 0.00317703814460681]
+message_source_dispersion_early        correct=0.696921 hallucinated=0.686230 delta=-0.007125096156811103 CI=[-0.013869702436794074, -0.0008148143550333302]
+message_source_dispersion_late         correct=0.658100 hallucinated=0.655230 delta=-0.0004068314456022703 CI=[-0.008011977084172077, 0.006599205019286809]
+message_source_dispersion_layer_shift  correct=-0.038822 hallucinated=-0.031000 delta=0.006718271279047864 CI=[-2.2251160767970633e-05, 0.013716469256206227]
+head_role_disagreement_mean            correct=0.227552 hallucinated=0.194795 delta=-0.014181296083216484 CI=[-0.01937637919583955, -0.00860107707325369]
+head_role_disagreement_early           correct=0.192351 hallucinated=0.164059 delta=-0.014027587214532573 CI=[-0.019067447611297934, -0.00876538390114617]
+head_role_disagreement_late            correct=0.208555 hallucinated=0.187150 delta=-0.0100991185181416 CI=[-0.017223813317310162, -0.002538619291705963]
+head_role_disagreement_layer_shift     correct=0.016204 hallucinated=0.023091 delta=0.003928468696092469 CI=[-0.003482071951095863, 0.012143330610893031]
+message_coherence_mean                 correct=0.099711 hallucinated=0.097677 delta=-0.00081113409012174 CI=[-0.0021453054517937393, 0.0005412025940126906]
+message_coherence_early                correct=0.095497 hallucinated=0.094733 delta=-0.0006154788132661428 CI=[-0.001939987604303333, 0.0006843185233167159]
+message_coherence_late                 correct=0.127541 hallucinated=0.123606 delta=-0.0012677490591811826 CI=[-0.0034911495801777793, 0.0008558915807411838]
+message_coherence_layer_shift          correct=0.032044 hallucinated=0.028873 delta=-0.0006522689456454453 CI=[-0.002483697944523719, 0.0010519448827910356]
+evidence_message_effect                correct=0.609770 hallucinated=-0.093596 delta=-0.7004033739547222 CI=[-1.0135764104682201, -0.4023958138129913]
+response_message_effect                correct=4.749311 hallucinated=5.038054 delta=-0.06784870074345514 CI=[-0.508698833804482, 0.41653188924949885]
+evidence_message_effect_without_response correct=1.060731 hallucinated=0.613050 delta=-0.28902521314911356 CI=[-0.5652957599698446, -0.01837238968875362]
+response_message_effect_without_evidence correct=5.200273 hallucinated=5.744700 delta=0.3435295073649822 CI=[-0.0854838662307996, 0.7772415471554567]
+evidence_response_message_interaction  correct=-0.450961 hallucinated=-0.706645 delta=-0.4113781619434937 CI=[-0.7483718324349955, -0.08549344946415383]
+evidence_response_removed_logprob      correct=-6.536697 hallucinated=-6.791349 delta=-0.15082472027876437 CI=[-0.5091847107387506, 0.20130862333071536]
+evidence_response_removed_margin       correct=-2.722490 hallucinated=-2.947114 delta=-0.3063097107868928 CI=[-0.664583952633234, 0.06318897264126018]
+full_margin                            correct=4.302747 hallucinated=2.331735 delta=-1.9702426668352042 CI=[-2.8484882286663815, -1.1219395203472904]
+message_independent_capture_signature  correct=0.017802 hallucinated=0.040312 delta=0.03188723710676035 CI=[0.007211141004465902, 0.05889789474405681]
+
+Full report: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/attention_mechanism_audit/outputs/qa/Meta-Llama-3.1-8B-Instruct_teacher_forced_seed20260828/report.json
+
+traces: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/attention_mechanism_audit/outputs/qa/Meta-Llama-3.1-8B-Instruct_teacher_forced_seed20260828/traces
+report: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/attention_mechanism_audit/outputs/qa/Meta-Llama-3.1-8B-Instruct_teacher_forced_seed20260828/report.json

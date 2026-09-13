@@ -1,0 +1,201 @@
+{
+  "schema": "constraint-inventory-independent-doc-witness@1",
+  "status": "passed_execution_and_artifact_integrity_only",
+  "runtime": {
+    "session_id": 72797,
+    "pid": 172144,
+    "start_epoch_from_proc": 1789277211.53,
+    "start_local_ps": "2026-09-13 13:26:51 Asia/Shanghai",
+    "observed_epoch": 1789277288.378365,
+    "documented_command_executions": 1,
+    "code_edits": 0,
+    "gpu_model_calls": 0,
+    "exit_code": 0,
+    "completion_artifact_epoch": 1789277550.747256,
+    "compilation_elapsed_seconds_from_proc_and_manifest": 339.21725606918335
+  },
+  "document": "docs/CONSTRAINT_INVENTORY_RUN_20260913.md",
+  "document_sha256": "4472aea012b7189445fefa9c7a2af3cc57f5adf6bf9896c400d30388571037f8",
+  "input_sha256": "be388df51e83f60beafbcb4075bde85da11a40f0941279e715f0f334e28d67bb",
+  "settings_object_digest": "3ff9424d7ce4c67d666bdd67d7b774eebb1a5ec47cfea7c385eb41c4594b115c",
+  "settings_file_sha256": "b7a5579a668d78a2dfc29bf17016fafb4a17f07185422238479dbce596a1e958",
+  "manifest_sha256": "b4766185732788d9c96452b185e12b952a70f45dd4e95a36378b7c5a56573b09",
+  "summary_sha256": "ef5224b171bac5352627fcc00f4cf7cb747d60e8847b410259001d0426cecded",
+  "code_live_and_snapshot_files_verified_each": 49,
+  "manifest_artifacts_verified": 2967,
+  "all_output_files_accounted": 3018,
+  "responses": 17790,
+  "response_tasks": {
+    "QA": 5934,
+    "Summary": 5658,
+    "Data2txt": 6198
+  },
+  "response_splits": {
+    "train": 15090,
+    "test": 2700
+  },
+  "response_generators": {
+    "llama-2-7b-chat": 2965,
+    "gpt-3.5-turbo-0613": 2965,
+    "gpt-4-0613": 2965,
+    "llama-2-13b-chat": 2965,
+    "llama-2-70b-chat": 2965,
+    "mistral-7B-instruct": 2965
+  },
+  "counts": {
+    "sources": 2965,
+    "task:Summary": 943,
+    "fields": 41729,
+    "contexts": 78158,
+    "components": 1241059,
+    "bundles": 90781,
+    "edges": 2722375,
+    "mapping_failures": 0,
+    "unknown_value_owners": 3049,
+    "long_text_fields_over_40words": 4083,
+    "weekday_key_inventories": 621,
+    "task:QA": 989,
+    "task:Data2txt": 1033
+  },
+  "audit_counts": {
+    "raw_spans": 1360946,
+    "decoded_components_and_contexts": 1319217,
+    "decoded_characters": 13775443,
+    "word_spans_retained": 1079618,
+    "literal_node_spans": 48609,
+    "independently_decoded_fields": 17896
+  },
+  "examples": {
+    "13717": {
+      "fields": 34,
+      "unknown_paths": [
+        [
+          "attributes",
+          "RestaurantsReservations"
+        ],
+        [
+          "attributes",
+          "OutdoorSeating"
+        ],
+        [
+          "attributes",
+          "WiFi"
+        ],
+        [
+          "attributes",
+          "RestaurantsGoodForGroups"
+        ],
+        [
+          "attributes",
+          "Music"
+        ],
+        [
+          "attributes",
+          "Ambience"
+        ]
+      ],
+      "long_text_fields": [
+        {
+          "field_path": [
+            "review_info",
+            0,
+            "review_text"
+          ],
+          "words": 90,
+          "raw_span": [
+            716,
+            1222
+          ]
+        },
+        {
+          "field_path": [
+            "review_info",
+            1,
+            "review_text"
+          ],
+          "words": 187,
+          "raw_span": [
+            1300,
+            2374
+          ]
+        },
+        {
+          "field_path": [
+            "review_info",
+            2,
+            "review_text"
+          ],
+          "words": 99,
+          "raw_span": [
+            2452,
+            2991
+          ]
+        }
+      ],
+      "address_components_220_or_1": [
+        {
+          "display_text": "220",
+          "field_path": [
+            "address"
+          ],
+          "decoded_span": [
+            0,
+            3
+          ],
+          "raw_span": [
+            40,
+            43
+          ]
+        },
+        {
+          "display_text": "1",
+          "field_path": [
+            "address"
+          ],
+          "decoded_span": [
+            23,
+            24
+          ],
+          "raw_span": [
+            63,
+            64
+          ]
+        }
+      ],
+      "weekday_key_inventories": 1,
+      "all_query_requirement_verified_false": true
+    },
+    "14637": {
+      "fields": 42,
+      "unknown_paths": [
+        [
+          "attributes",
+          "Music"
+        ]
+      ],
+      "long_text_fields": [
+        {
+          "field_path": [
+            "review_info",
+            0,
+            "review_text"
+          ],
+          "words": 44,
+          "raw_span": [
+            926,
+            1145
+          ]
+        }
+      ],
+      "address_components_220_or_1": [],
+      "weekday_key_inventories": 1,
+      "all_query_requirement_verified_false": true
+    }
+  },
+  "labels_read": false,
+  "model_forwards": 0,
+  "semantic_certificate_count": 0,
+  "semantic_fact_completeness_claimed": false,
+  "audit_seconds": 119.58213567733765,
+  "independent_audit_script_sha256": "b44d3de28bf865bf0196fa89d81ee4742ab60cd356219651b11a7a62362b3892"
+}

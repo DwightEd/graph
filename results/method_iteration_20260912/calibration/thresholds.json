@@ -1,0 +1,39 @@
+{
+  "schema": "route-graph/alarm-thresholds@1",
+  "labels_used": false,
+  "archive_index_sha256": "1d065548ece1a6d20019f55d63b2eed3a949f7537c0364bcdf94bb23773a1293",
+  "scores_sha256": "e935c0527fbe7b2da11d81a7b0b588996f84539e3c93bddc86d872961ef6bc47",
+  "quantile": 0.95,
+  "threshold_comparison": "strictly_greater",
+  "weighting": "equal_total_weight_per_source",
+  "calibration": "leave-one-fit-source-out",
+  "sources": 106,
+  "tokens": 22951,
+  "excluded_sources": [
+    {
+      "source_id": "12175",
+      "tokens": 272,
+      "strata": [
+        [
+          "QA",
+          "llama-2-7b-chat",
+          7,
+          8
+        ]
+      ]
+    }
+  ],
+  "thresholds": {
+    "residual": 0.011152414414411045,
+    "residual_knn": 0.09386065959032448,
+    "observed": 0.9264705810838597,
+    "observed_knn": 0.5977018385940945,
+    "null": 0.8983227112145704,
+    "null_knn": 0.5812086345485181,
+    "signal": 2.144578446817047,
+    "signal_knn": 0.9616946470154534,
+    "entropy": 2.1585328578948975,
+    "negative_margin": -0.25,
+    "position": 254.0
+  }
+}

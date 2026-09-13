@@ -1,0 +1,343 @@
+{
+  "phase": "typed_semantic_provider_and_native_localization",
+  "date": "2026-09-13",
+  "round": 7,
+  "status": "in_progress",
+  "claim_supported": "no",
+  "scientific_review": "REVIEW_UNAVAILABLE",
+  "main_method_validated": false,
+  "next_action": "review typed hours; freeze all17790 CPU predictions; native localization on predetermined train contrasts; general semantic provider unresolved",
+  "report": "docs/SURFACE_OWNER_METHOD_20260913.md",
+  "engineering_review": "O4/O5 scoped engineering and independent raw CPU reanalysis: no Required; not scientific approval",
+  "final_mechanism_results": "../reanchor/results/relation_analysis_20260913",
+  "proposal": "refine-logs/FINAL_PROPOSAL.md",
+  "protocol": "refine-logs/EXPERIMENT_PLAN.md",
+  "latest_user_scope": "Stop trivial relation experiments; deeply read methods and converge a complete model for applicability, automatic lookback and route-derived hallucination spans.",
+  "inventory": "docs/REAL_WINDOW_CONSTRAINT_INVENTORY_20260912.md",
+  "graph_protocol": "docs/ATTRIBUTED_SAMPLE_GRAPH_20260912.md",
+  "graph_results": "../reanchor/outputs/attributed_samples_20260912",
+  "user_clarification_received": true,
+  "graph_capture_checks": "2 tiny tests passed; independent literal invocation exit0; 33 hashes verified; all-layer bf16 rounded residual addition exact",
+  "graph_engineering_review": "No Required/Critical findings; three documented optional validator/provenance improvements",
+  "protocols": [
+    "docs/OWNERSHIP_FACTORIAL_PLAN_20260912.md",
+    "docs/OWNERSHIP_MULTILAYER_PLAN_20260912.md",
+    "docs/OWNERSHIP_SOURCE_LAYER_PLAN_20260912.md",
+    "docs/RELATION_ONLY_PLAN_20260913.md",
+    "docs/RELATION_ROUTING_PLAN_20260913.md"
+  ],
+  "latest_mechanism_observations": {
+    "source_scope": "one source, four existing generation seeds, one incorrect numeric window",
+    "joint_final_query_x_and_endpoint_swap": "native choices flipped in both studied windows",
+    "single_layer_x": "all 32 individually tested; no native choice flips in either window",
+    "automatic_ownership_validity": "not validated"
+  },
+  "gpu_jobs_running": true,
+  "latest_verification": "independent surface witness exit0; population actual14883to14961;55live/snapshot hashes unchanged",
+  "evidence_precheck": ".aris/ownership_evidence_precheck_20260912.json",
+  "latest_audit_artifacts": ".aris/relation_population_audit_artifacts_20260913.json",
+  "mainline_executable_status": {
+    "surface_owner": "complete36;1619targets;145checkedpairs;0validcontrasts",
+    "native": "not_run_no_valid_contrasts",
+    "full_detector": "not_converged"
+  },
+  "ragtruth_readiness_report": "docs/LOCAL_DATASETS_AND_RUN_STATUS_20260912.md",
+  "ragtruth_qa_prepared": "outputs/qa_full_preflight_20260912/input.jsonl (989 sources; 494 reference/495 test; legacy hash split)",
+  "population_run": {
+    "status": "running",
+    "pid": 162289,
+    "total": 17790,
+    "completed": 15020,
+    "failed": 0,
+    "remaining": 2770,
+    "current_response": "7636",
+    "condition": "base",
+    "last_response_seconds": 2.7548866644501686,
+    "elapsed_seconds_this_process": 538.3674206845462,
+    "updated_unix": 1789267367.954897,
+    "by_task": {
+      "QA": 5934,
+      "Summary": 5658,
+      "Data2txt": 6198
+    },
+    "journal": "../reanchor/runs/surface_owner_v1_20260913.json"
+  },
+  "O4": {
+    "status": "complete",
+    "worlds": 4,
+    "patches": 160,
+    "native_relation_choices": "4/4 controlled worlds",
+    "X_final_flips": 0,
+    "E_final_flips": 4,
+    "node_attention_graph_choices": [
+      3,
+      2,
+      2
+    ],
+    "single_query_X_scan_flips": 0,
+    "scope": "one source, natural after prefix and constructed before control; added stage rules"
+  },
+  "O5": {
+    "status": "complete",
+    "protocol": "docs/RELATION_ROUTING_PLAN_20260913.md",
+    "planned_conditions": 167,
+    "conditions": 167,
+    "single_query_E_unique_flips": [
+      131
+    ],
+    "single_layer_E_unique_flips": [],
+    "without_final_native": "12",
+    "without_final_margin": -0.25,
+    "top8_recall": 0.0,
+    "top8_target_count": 1,
+    "interpretation": "t131 sufficient, not required as a patch in the joint-donor condition; no universal lookback guarantee",
+    "output": "../reanchor/outputs/relation_routing_20260913",
+    "report": "docs/RELATION_MECHANISM_RESULTS_20260913.md"
+  },
+  "O6": {
+    "status": "superseded_by_user_method_first_scope_not_run",
+    "plan": "docs/MISSING_CONSTRAINT_PLAN_20260913.md",
+    "code_implemented": false
+  },
+  "population_partial_evaluation": {
+    "snapshot_responses": 4077,
+    "complete_QA_generator_groups": 4,
+    "file": "../reanchor/results/ragtruth_population_partial_20260913.json",
+    "scope": "observer replay; QA official test inspected for exploratory design; not full population"
+  },
+  "timestamp": "2026-09-13T10:42:48.137386+08:00",
+  "active_proposal": "refine-logs/FINAL_PROPOSAL.md",
+  "method_reviewer": "GPT-5.5 collaboration agent /root/architecture_review",
+  "method_review_backend": "collaboration fallback; requested Codex MCP unavailable",
+  "last_score": 8.3,
+  "last_verdict": "REVISE",
+  "architecture_round": 5,
+  "method_reviews": [
+    {
+      "round": 1,
+      "score": 6.22,
+      "verdict": "REVISE",
+      "path": "refine-logs/architecture_round1_review_20260913.md",
+      "backend": "GPT-5.5 collaboration fallback; not Codex MCP"
+    },
+    {
+      "round": 2,
+      "score": 6.9,
+      "verdict": "REVISE",
+      "path": "refine-logs/architecture_round2_review_20260913.md",
+      "backend": "GPT-5.5 collaboration fallback; not Codex MCP"
+    },
+    {
+      "round": 3,
+      "score": 7.12,
+      "verdict": "REVISE",
+      "path": "refine-logs/architecture_round3_review_20260913.md",
+      "backend": "GPT-5.5 collaboration fallback; not Codex MCP"
+    },
+    {
+      "round": 4,
+      "score": 7.79,
+      "verdict": "REVISE",
+      "path": "refine-logs/architecture_round4_review_20260913.md",
+      "backend": "GPT-5.5 collaboration fallback; not Codex MCP"
+    },
+    {
+      "round": 5,
+      "score": 8.3,
+      "verdict": "REVISE",
+      "path": "refine-logs/architecture_round5_review_20260913.md",
+      "backend": "GPT-5.5 collaboration fallback; not Codex MCP"
+    }
+  ],
+  "method_specification": "READY_TO_IMPLEMENT",
+  "research_task_status": "factor_scope_and_semantic_readout_redesign",
+  "paper_status": "NOT_READY",
+  "native_run_status": "surface_features_and_finite_complete_zero_valid_contrasts",
+  "native_run_document": "docs/SURFACE_OWNER_V1_RUN_20260913.md",
+  "updated_at": "2026-09-13T10:42:48.137386+08:00",
+  "native_output": "outputs/surface_owner_v1_20260913",
+  "native_settings_sha256": "51e2ff407e2b34dfe880820ec040554791864f1fe2808279e4b183502ce11973",
+  "native_engineering_review": "Critical0 Required0 across native validation/pipeline/scheduler/evaluation",
+  "native_pid": null,
+  "native_scheduler_journal": "../reanchor/runs/surface_owner_v1_20260913.json",
+  "native_log": "../reanchor/runs/native_audit_v3_20260913.audit.log",
+  "atomic_anchor_prototype": {
+    "status": "integrated_v2_review_closed",
+    "cpu_related_tests_passed": 25,
+    "empirical_validation": "v2 full36 failed: 0 coverage, 0 native forwards",
+    "review": "refine-logs/atomic_anchor_v2_integration_review_20260913.md"
+  },
+  "native_v1": {
+    "run": "outputs/native_audit_v1_20260913",
+    "status": "complete_negative",
+    "semantic_word_coverage": 0.0606380731037397,
+    "error_recall": 0,
+    "native_forwards": 0,
+    "claim_supported": "no",
+    "integrity_status": "warn",
+    "audit_report": "refine-logs/native_v1_integrity_20260913.md",
+    "wrapper_exit": 1,
+    "population_subsequently_restored": true
+  },
+  "population_status": {
+    "status": "running",
+    "pid": 162289,
+    "total": 17790,
+    "completed": 15020,
+    "failed": 0,
+    "remaining": 2770,
+    "current_response": "7636",
+    "condition": "base",
+    "last_response_seconds": 2.7548866644501686,
+    "elapsed_seconds_this_process": 538.3674206845462,
+    "updated_unix": 1789267367.954897,
+    "by_task": {
+      "QA": 5934,
+      "Summary": 5658,
+      "Data2txt": 6198
+    }
+  },
+  "population_pid": 162289,
+  "native_v2": {
+    "run": "outputs/native_audit_v2_20260913",
+    "status": "complete_negative",
+    "semantic_coverage": 0,
+    "error_recall": 0,
+    "native_forwards": 0,
+    "wrapper_exit": 0,
+    "witness": "refine-logs/native_v2_doc_witness_20260913.md"
+  },
+  "population_completed": 15020,
+  "native_v3": {
+    "status": "complete_negative",
+    "run": "outputs/native_audit_v3_20260913",
+    "pid": 147669,
+    "witness_session": 65424,
+    "settings_sha256": "dc65b638757d1acb4c18bf1913f9836aa14ccc44ee1662a50d53ec2047c2ca67",
+    "engineering": "Critical0 Required0;47 related tests;27 independent tests",
+    "claim_supported": "not_evaluated",
+    "native_forwards": 0,
+    "semantic_coverage": 0
+  },
+  "research_updated_at": "2026-09-13T10:42:48.137386+08:00",
+  "source_event_inventory_output": "outputs/source_event_inventory_20260913",
+  "source_event_cpu_status": "26_tests_passed_independent_review_C0_R0; no_model_or_alignment_results",
+  "native_A_last_snapshot": {
+    "status": "running",
+    "stage": "A",
+    "current_response": "2914",
+    "completed_stage": 18,
+    "total": 36,
+    "pid": 147669,
+    "updated_unix": 1789254513.6021643
+  },
+  "method_convergence": "not_empirically_converged",
+  "event_matcher_cpu_status": "44_tests_passed_independent_review_C0_R0; GPU_features_and_detector_not_executed",
+  "event_matcher_model_document": "docs/EVENT_MATCHER_MODEL_20260913.md",
+  "method_next_decision": "fact_incidence_graph_and_reliable_semantic_query_interface",
+  "v3_results": "docs/NATIVE_AUDIT_V3_RESULTS_20260913.md",
+  "method_document": "docs/SOFT_GRAPH_METHOD_20260913.md",
+  "native_wrapper_session": null,
+  "next_iteration": {
+    "surface_graph": "implemented_CPU15_passed_citation_revision",
+    "surface_owner": "implemented_CPU_capture_integrity_review_C0_R0",
+    "source_pointer_prepare": "completed_1704_attempts_10_unverified_candidates",
+    "source_pointer_tests": 22,
+    "source_pointer_review": "C0_R0",
+    "boundaries_tests": 15,
+    "boundaries_review": "C0_R0",
+    "gpu_experiments": "surface_owner_v1_complete_negative",
+    "design": "refine-logs/surface_slot_owner_matcher_revision_20260913.md",
+    "surface_verifier": "implemented_CPU12_passed_review_C0_R0",
+    "preflight": "outputs/surface_owner_preflight_v2_20260913",
+    "preflight_counts": {
+      "responses": 36,
+      "base_units": 237,
+      "surface_slots": 1619,
+      "source_topk": 1618,
+      "lexical_owner_ambiguous": 749,
+      "unverified_edit_candidates": 5799,
+      "masked_documents": 2377,
+      "masked_max_tokens": 812
+    },
+    "runner": "complete; zero_valid_contrasts; not_accuracy_evaluation"
+  },
+  "soft_graph_v1_status": {
+    "status": "design_invalid_early_stop",
+    "A": 36,
+    "B": 36,
+    "C": 27,
+    "D": 0,
+    "merge": 0,
+    "native_forwards": 0,
+    "labels_evaluated": false,
+    "population_resume_pid": 159091,
+    "population_progress_growth": "verified_13669_to_13711_and_now14502_failed0"
+  },
+  "surface_owner_v1": {
+    "status": "complete_negative",
+    "run": "outputs/surface_owner_v1_20260913",
+    "feature_documents": 2377,
+    "feature_forwards": 595,
+    "B": 36,
+    "C": 36,
+    "targets": 1619,
+    "target_CN_gate_passed": 44,
+    "finite_pairs": 145,
+    "valid_contrasts": 0,
+    "reader_forwards": 2199,
+    "native_forwards": 0,
+    "labels_evaluated": false,
+    "first_rejections": {
+      "edited_full_base": 124,
+      "preservation": 16,
+      "edit_kind": 3,
+      "selected_owner": 2
+    },
+    "nonexclusive_gate_failures": {
+      "edited_full_base": 124,
+      "preservation": 125,
+      "edit_kind": 145,
+      "selected_owner": 51
+    },
+    "witness": "refine-logs/surface_owner_v1_doc_witness_20260913.md"
+  },
+  "last_updated": "2026-09-13T11:27:21+08:00",
+  "main_method_converged": false,
+  "population_current": {
+    "status": "running",
+    "pid": 162289,
+    "total": 17790,
+    "completed": 16281,
+    "failed": 0,
+    "remaining": 1509,
+    "current_response": "9005",
+    "condition": "history_1",
+    "last_response_seconds": 2.6690729912370443,
+    "elapsed_seconds_this_process": 3212.2262921370566,
+    "updated_unix": 1789270041.8137684,
+    "by_task": {
+      "QA": 5934,
+      "Summary": 5658,
+      "Data2txt": 6198
+    }
+  },
+  "reader_output_diagnostic": {
+    "completed": 10,
+    "model_forwards": 30,
+    "valid_label_mass_min": 0.998963296,
+    "argmax_cpu_gpu_agreement": 10,
+    "semantic_success_claim": false
+  },
+  "fact_scope": {
+    "cpu_tests": 23,
+    "independent_engineering_required": 0,
+    "semantic_certification": false
+  },
+  "typed_hours": {
+    "scope": "explicit Data2txt all-week hours",
+    "real_development_contrasts": 1,
+    "full_prepare_launched": false,
+    "native_forward_calls": 0
+  }
+}

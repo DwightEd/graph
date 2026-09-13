@@ -1,0 +1,9 @@
+{
+  "command_number": 1,
+  "command_verbatim": "cd /share/home/tm902089733300000/a903202310/lys/research/graph\nOMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false CUDA_VISIBLE_DEVICES=0 /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python -u -m next_iteration.grounded_graph_restoration_features --original outputs/grounded_graph_features_v1_20260913 --output outputs/grounded_graph_restoration_features_v2_20260913",
+  "doc_sha256": "18068ad7d95fb83bcaa8401bc89da8dfa9b1824a3e88030158c1ed591a02f6b2",
+  "wrapper_pid": 179413,
+  "command_pid": 179414,
+  "started_utc": "2026-09-13T07:46:13.598805+00:00",
+  "log": "graph/refine-logs/restoration_v2_doc_witness_20260913_cmd1.log"
+}

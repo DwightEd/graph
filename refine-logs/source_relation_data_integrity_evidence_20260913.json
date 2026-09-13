@@ -1,0 +1,66 @@
+{
+  "verified_at_utc": "2026-09-13T04:43:06.767218+00:00",
+  "session_id": 7762,
+  "exit_code": 0,
+  "invocations": 1,
+  "status": "complete_and_independently_verified",
+  "output": "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/source_relation_data_v1_20260913",
+  "input_sha256": "be388df51e83f60beafbcb4075bde85da11a40f0941279e715f0f334e28d67bb",
+  "settings_object_digest": "ae68860d95ca3e4aa66ac730af2d01826268556ed2dc86a5d5104e0f7167d6bf",
+  "settings_file_sha256": "7777c6c4dff422c7d60278594ec0e598ab43eae61d7ad8ae4f95972e27975220",
+  "summary_file_sha256": "dd5647a0b2a2fc4966f300c18ec8dd2e3317861e9a2f942134903246a7aab00b",
+  "manifest_file_sha256": "821ce51544c44462bc2521e85fe808809c0c6b7fa2d0282e4fb6248027d40ec6",
+  "counts": {
+    "sources": 883,
+    "compiled": 883,
+    "source_train:sources": 720,
+    "source_train:queries": 5760,
+    "candidates": 32167,
+    "queries_with_homograph_negatives": 4309,
+    "queries_with_other_record_same_field": 1429,
+    "source_validation:sources": 163,
+    "source_validation:queries": 1304
+  },
+  "input_counts": {
+    "rows": 17790,
+    "official_train_Data2txt_rows": 5298
+  },
+  "candidate_counts_by_split": {
+    "source_train": 26203,
+    "source_validation": 5964
+  },
+  "query_value_types": {
+    "time_range": 1132,
+    "date": 665,
+    "number": 888,
+    "text": 1533,
+    "boolean": 2846
+  },
+  "queries_per_source_distribution": {
+    "8": 883
+  },
+  "query_total": 7064,
+  "raw_feature_texts": 39231,
+  "unique_feature_texts": 38541,
+  "max_text_characters": {
+    "query": 4213,
+    "candidate": 5183
+  },
+  "source_ids_disjoint": true,
+  "source_texts_disjoint": true,
+  "all_selected_source_ids_official_train_only": true,
+  "hash_checks": {
+    "input_files": 1,
+    "live_code": 49,
+    "snapshot_code": 49,
+    "manifest_artifacts": 884,
+    "output_inventory": 935,
+    "unaccounted_output_files": 0
+  },
+  "source_seals_and_graph_seals_verified": 883,
+  "model_forwards": 0,
+  "reader_calls": 0,
+  "labels_read": false,
+  "scope": "source-field pointer reconstruction data; no natural ownership or hallucination accuracy measured",
+  "tokenizer_length_preflight": "not performed; required before encoding"
+}

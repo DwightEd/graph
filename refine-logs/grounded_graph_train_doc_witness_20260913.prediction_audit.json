@@ -1,0 +1,54 @@
+{
+  "session_id": 17335,
+  "python_pid": 177766,
+  "shell_pid": 177763,
+  "exit_code": 0,
+  "prediction_manifest_sha256": "9f4d53423de3f30352199b03a52845cc6944a55056d446948885766c4b440be3",
+  "artifacts_verified": 73,
+  "counts": {
+    "responses": 36,
+    "tokens": 5840,
+    "words": 4733,
+    "unavailable_words": 0,
+    "pointer_rows_per_arm": 5840
+  },
+  "source_training_overlap_responses": {
+    "unseen": 30,
+    "train": 6
+  },
+  "full_token_arrays_finite": true,
+  "full_pointer_traces_per_arm_verified": true,
+  "max_pointer_row_sum_error": 5.960464477539062e-07,
+  "max_word_aggregation_error": 0.0,
+  "fixed_difference_equals_adapter_nll_minus_base_nll": true,
+  "gate_range": {
+    "graph": [
+      0.02813062071800232,
+      0.9829797744750977
+    ],
+    "no_edges": [
+      0.06274069845676422,
+      0.9386154413223267
+    ]
+  },
+  "residual_norm_range": {
+    "graph": [
+      0.37345167994499207,
+      60.352657318115234
+    ],
+    "no_edges": [
+      0.21092407405376434,
+      43.7759895324707
+    ]
+  },
+  "summary": {
+    "status": "complete",
+    "responses": 36,
+    "words": 4733,
+    "unavailable_words": 0,
+    "adapter_forwards": 108,
+    "observer_forwards": 0,
+    "labels_read": false,
+    "seconds": 33.427697179839015
+  }
+}

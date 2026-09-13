@@ -1,0 +1,32 @@
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:01<00:03,  1.03s/it]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.01it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.03it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.51it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:03<00:00,  1.28it/s]
+{"pid": 179414, "unix_time": 1789285631.9616356, "status": "running", "done": 8, "total": 240, "actual_forwards": 8, "seconds": 3.1178550459444523}
+{"pid": 179414, "unix_time": 1789285634.5650754, "status": "running", "done": 16, "total": 240, "actual_forwards": 16, "seconds": 5.721295470371842}
+{"pid": 179414, "unix_time": 1789285637.4317157, "status": "running", "done": 24, "total": 240, "actual_forwards": 24, "seconds": 8.587936591356993}
+{"pid": 179414, "unix_time": 1789285640.83856, "status": "running", "done": 32, "total": 240, "actual_forwards": 32, "seconds": 11.994776342064142}
+{"pid": 179414, "unix_time": 1789285643.8866227, "status": "running", "done": 40, "total": 240, "actual_forwards": 40, "seconds": 15.042839849367738}
+{"pid": 179414, "unix_time": 1789285646.5148356, "status": "running", "done": 48, "total": 240, "actual_forwards": 48, "seconds": 17.671051854267716}
+{"pid": 179414, "unix_time": 1789285649.3746111, "status": "running", "done": 56, "total": 240, "actual_forwards": 56, "seconds": 20.530827909708023}
+{"pid": 179414, "unix_time": 1789285652.1520133, "status": "running", "done": 64, "total": 240, "actual_forwards": 64, "seconds": 23.308232052251697}
+{"pid": 179414, "unix_time": 1789285655.1661346, "status": "running", "done": 72, "total": 240, "actual_forwards": 72, "seconds": 26.3223545383662}
+{"pid": 179414, "unix_time": 1789285657.6668727, "status": "running", "done": 80, "total": 240, "actual_forwards": 80, "seconds": 28.823094645515084}
+{"pid": 179414, "unix_time": 1789285662.4098568, "status": "running", "done": 88, "total": 240, "actual_forwards": 88, "seconds": 33.566077794879675}
+{"pid": 179414, "unix_time": 1789285667.4538448, "status": "running", "done": 96, "total": 240, "actual_forwards": 96, "seconds": 38.610065741464496}
+{"pid": 179414, "unix_time": 1789285671.4874885, "status": "running", "done": 104, "total": 240, "actual_forwards": 104, "seconds": 42.64371085353196}
+{"pid": 179414, "unix_time": 1789285679.1388335, "status": "running", "done": 112, "total": 240, "actual_forwards": 112, "seconds": 50.29505369067192}
+{"pid": 179414, "unix_time": 1789285685.2753453, "status": "running", "done": 120, "total": 240, "actual_forwards": 120, "seconds": 56.431564681231976}
+{"pid": 179414, "unix_time": 1789285690.6133018, "status": "running", "done": 128, "total": 240, "actual_forwards": 128, "seconds": 61.769519314169884}
+{"pid": 179414, "unix_time": 1789285697.014575, "status": "running", "done": 136, "total": 240, "actual_forwards": 136, "seconds": 68.17079699411988}
+{"pid": 179414, "unix_time": 1789285703.9515846, "status": "running", "done": 144, "total": 240, "actual_forwards": 144, "seconds": 75.10780733637512}
+{"pid": 179414, "unix_time": 1789285708.6126108, "status": "running", "done": 152, "total": 240, "actual_forwards": 152, "seconds": 79.76883325725794}
+{"pid": 179414, "unix_time": 1789285713.8195815, "status": "running", "done": 160, "total": 240, "actual_forwards": 160, "seconds": 84.97580243088305}
+{"pid": 179414, "unix_time": 1789285718.919671, "status": "running", "done": 168, "total": 240, "actual_forwards": 168, "seconds": 90.07589306868613}
+{"pid": 179414, "unix_time": 1789285723.3204143, "status": "running", "done": 176, "total": 240, "actual_forwards": 176, "seconds": 94.47663569822907}
+{"pid": 179414, "unix_time": 1789285728.0396373, "status": "running", "done": 184, "total": 240, "actual_forwards": 184, "seconds": 99.19585646130145}
+{"pid": 179414, "unix_time": 1789285732.4280946, "status": "running", "done": 192, "total": 240, "actual_forwards": 192, "seconds": 103.58431394957006}
+{"pid": 179414, "unix_time": 1789285737.5990205, "status": "running", "done": 200, "total": 240, "actual_forwards": 200, "seconds": 108.75524089485407}
+{"pid": 179414, "unix_time": 1789285742.3953667, "status": "running", "done": 208, "total": 240, "actual_forwards": 208, "seconds": 113.55158824659884}
+{"pid": 179414, "unix_time": 1789285746.714285, "status": "running", "done": 216, "total": 240, "actual_forwards": 216, "seconds": 117.87050726823509}
+{"pid": 179414, "unix_time": 1789285751.600295, "status": "running", "done": 224, "total": 240, "actual_forwards": 224, "seconds": 122.75651506520808}
+{"pid": 179414, "unix_time": 1789285756.6851501, "status": "running", "done": 232, "total": 240, "actual_forwards": 232, "seconds": 127.84137171320617}
+{"pid": 179414, "unix_time": 1789285761.056284, "status": "running", "done": 240, "total": 240, "actual_forwards": 240, "seconds": 132.21250452660024}
+{"pid": 179414, "unix_time": 1789285828.4320326, "status": "complete", "examples": 240, "actual_forwards": 240, "tokens": 135519, "counts": {"available": 240}, "seconds": 167.4234653878957, "cuda_peak_bytes": 16610850816, "labels_read": false}

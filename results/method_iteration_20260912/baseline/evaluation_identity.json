@@ -1,0 +1,8 @@
+{
+  "stage": "post-hoc file identity verification; original evaluation output remains unchanged",
+  "evaluation_sha256": "d74e77d3eedc9b51b17196deca7a059c8f5a46c2d0f1d15613cdabb5a3720a14",
+  "scores_sha256": "c2ebe62478e6d1e56bbc63d306fb780f6be5940df4deb7bf784461a19a37f1ed",
+  "archive_index_sha256": "1d065548ece1a6d20019f55d63b2eed3a949f7537c0364bcdf94bb23773a1293",
+  "labels_sha256": "e4c2e4ac24fff676d8984cc61c35d791612fadc58015335d97dd632375e18073",
+  "evaluation_script_sha256": "ccfe35eef48de4aa40b5455962d160bd0be2dc6fa321324576533fce93272bee"
+}

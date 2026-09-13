@@ -1,0 +1,38 @@
+{
+  "verified_at": "2026-09-13T01:47:51+08:00",
+  "frozen_code_entries_checked": {
+    "ragtruth_population_20260912": 8,
+    "relation_only_20260913": 9,
+    "relation_routing_20260913": 5
+  },
+  "ruff_new_graph_files": "passed",
+  "ruff_new_reanchor_files": "passed",
+  "launcher_bash_syntax": "passed",
+  "analysis_manifest_files": 8,
+  "independent_reports": [
+    "relation_only_engineering_20260913.md",
+    "relation_routing_engineering_20260913.md",
+    "relation_analysis_engineering_20260913.md",
+    "relation_only_witness_20260913.md",
+    "relation_routing_witness_20260913.md"
+  ],
+  "scientific_review": "REVIEW_UNAVAILABLE",
+  "population": {
+    "status": "running",
+    "pid": 20383,
+    "total": 17790,
+    "completed": 5583,
+    "failed": 0,
+    "remaining": 12207,
+    "current_response": "15686",
+    "condition": "sham",
+    "last_response_seconds": 1.3199163023382425,
+    "elapsed_seconds_this_process": 810.8745849020779,
+    "updated_unix": 1789235270.949935,
+    "by_task": {
+      "QA": 5934,
+      "Summary": 5658,
+      "Data2txt": 6198
+    }
+  }
+}

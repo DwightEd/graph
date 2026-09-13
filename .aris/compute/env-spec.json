@@ -1,0 +1,38 @@
+{
+  "base": "existing research conda environment",
+  "python": "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python",
+  "pip_phases": [],
+  "packages": {
+    "torch": "2.8.0+cu126",
+    "transformers": "4.57.1"
+  },
+  "env": {
+    "OMP_NUM_THREADS": "4",
+    "OPENBLAS_NUM_THREADS": "4",
+    "MKL_NUM_THREADS": "4",
+    "HF_HUB_OFFLINE": "1",
+    "TOKENIZERS_PARALLELISM": "false"
+  },
+  "resource": {
+    "gpus": 1,
+    "gpu": "NVIDIA GeForce RTX 4090",
+    "gpu_memory_gib": 24
+  },
+  "weight_dirs": {
+    "llama": {
+      "path": "/share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct",
+      "source": "existing local Hugging Face model"
+    },
+    "qwen3_reader": {
+      "path": "/share/home/tm902089733300000/a903202310/lys/models/Qwen3-8B",
+      "source": "existing local Hugging Face model; no download"
+    }
+  },
+  "run_commands": [
+    "cd reanchor && LIMIT_TEMPLATES=1 OUTPUT_DIR=outputs/new_binding_smoke bash scripts/run_binding_validation.sh",
+    "See graph/docs/NATIVE_AUDIT_RUN_20260913.md for immutable 36-response native audit prepare and exclusive interleave invocation.",
+    "See graph/docs/NATIVE_AUDIT_V2_RUN_20260913.md for atomic-role v2 complete 36-response development batch and exclusive interleave invocation.",
+    "See graph/docs/NATIVE_AUDIT_V3_RUN_20260913.md for verbatim-cloze v3 full36 and exclusive interleave invocation.",
+    "See graph/docs/SOFT_GRAPH_V1_RUN_20260913.md for full36 soft graph detector with exclusive population interleave."
+  ]
+}

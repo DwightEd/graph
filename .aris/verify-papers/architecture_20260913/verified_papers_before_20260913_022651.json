@@ -1,0 +1,79 @@
+{
+  "verdict": "WARN",
+  "reason_code": "verify_papers_unavailable",
+  "summary": "Deterministic arxiv/crossref/s2 helper unavailable at canonical paths; manual primary-page reading tracked separately, not a forged verifier result.",
+  "papers": [
+    {
+      "id": "minicheck",
+      "title": "MiniCheck: Efficient Fact-Checking of LLMs on Grounding Documents",
+      "arxiv_id": "2404.10774",
+      "doi": "10.18653/v1/2024.emnlp-main.499",
+      "status": "unverified",
+      "method": "none"
+    },
+    {
+      "id": "graphcheck",
+      "title": "GraphCheck: Breaking Long-Term Text Barriers with Extracted Knowledge Graph-Powered Fact-Checking",
+      "arxiv_id": null,
+      "doi": "10.18653/v1/2025.acl-long.729",
+      "status": "unverified",
+      "method": "none"
+    },
+    {
+      "id": "alti_llm",
+      "title": "Analyzing Context Contributions in LLM-based Machine Translation",
+      "arxiv_id": null,
+      "doi": "10.18653/v1/2024.findings-emnlp.876",
+      "status": "unverified",
+      "method": "none"
+    },
+    {
+      "id": "iris",
+      "title": "Unsupervised Hallucination Detection by Inspecting Reasoning Processes",
+      "arxiv_id": "2509.10004",
+      "doi": null,
+      "status": "unverified",
+      "method": "none"
+    },
+    {
+      "id": "rauq",
+      "title": "Uncertainty-Aware Attention Heads: Efficient Unsupervised Uncertainty Quantification for LLMs",
+      "arxiv_id": "2505.20045",
+      "doi": null,
+      "status": "unverified",
+      "method": "none"
+    },
+    {
+      "id": "structscore",
+      "title": "Discourse-Driven Evaluation: Unveiling Factual Inconsistency in Long Document Summarization",
+      "arxiv_id": "2502.06185",
+      "doi": "10.18653/v1/2025.naacl-long.103",
+      "status": "unverified",
+      "method": "none"
+    },
+    {
+      "id": "structured_attention",
+      "title": "Structured Attention Networks",
+      "arxiv_id": "1702.00887",
+      "doi": null,
+      "status": "unverified",
+      "method": "none"
+    },
+    {
+      "id": "segmental",
+      "title": "Segmental Recurrent Neural Networks",
+      "arxiv_id": "1511.06018",
+      "doi": null,
+      "status": "unverified",
+      "method": "none"
+    },
+    {
+      "id": "lookback_lens",
+      "title": "Lookback Lens: Detecting and Mitigating Contextual Hallucinations in Large Language Models Using Only Attention Maps",
+      "arxiv_id": "2407.07071",
+      "doi": "10.18653/v1/2024.emnlp-main.84",
+      "status": "unverified",
+      "method": "none"
+    }
+  ]
+}

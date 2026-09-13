@@ -1,0 +1,58 @@
+{
+  "source_split_counts": {
+    "train": 192,
+    "validation": 48
+  },
+  "distinct_sha_counts": {
+    "train": 192,
+    "validation": 48
+  },
+  "task_split_counts": {
+    "Data2txt/train": 64,
+    "Data2txt/validation": 16,
+    "QA/train": 64,
+    "QA/validation": 16,
+    "Summary/train": 64,
+    "Summary/validation": 16
+  },
+  "source_text_overlap": 0,
+  "tokens_by_split": {
+    "train": 108945,
+    "validation": 26574
+  },
+  "natural_sources": {
+    "11951": {
+      "responses": 6,
+      "source_fold": "unseen"
+    },
+    "13514": {
+      "responses": 6,
+      "source_fold": "unseen"
+    },
+    "13717": {
+      "responses": 6,
+      "source_fold": "train"
+    },
+    "14637": {
+      "responses": 6,
+      "source_fold": "unseen"
+    },
+    "15220": {
+      "responses": 6,
+      "source_fold": "unseen"
+    },
+    "15475": {
+      "responses": 6,
+      "source_fold": "unseen"
+    }
+  },
+  "eligible_candidate_pointers_by_split": {
+    "train": 8996,
+    "validation": 2114
+  },
+  "actual_supervised_pointer_positions_by_split": {
+    "train": 7359,
+    "validation": 1861
+  },
+  "count_correction": "Initial witness summary incorrectly called entry eligible_pointers counts actual anchors. Packet pointer_supervision gives 7359 train/1861 validation; corrected before final report."
+}

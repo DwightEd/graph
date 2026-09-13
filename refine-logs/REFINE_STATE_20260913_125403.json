@@ -1,0 +1,72 @@
+{
+  "updated_at": "2026-09-13T12:54:03+08:00",
+  "phase": "SourceRel-Mini M1 full features; M2 natural transfer implementation",
+  "main_method_converged": false,
+  "main_method_validated": false,
+  "claim_supported": "no complete method claim",
+  "scientific_review": "external reviewer MCP unavailable; bounded independent engineering reviews only",
+  "historical_state_snapshot": "refine-logs/REFINE_STATE_before_sourcerel_20260913_125403.json",
+  "method_document": "docs/CURRENT_METHOD_20260913.md",
+  "active_plan": "refine-logs/SOURCEREL_EXPERIMENT_PLAN.md",
+  "population_run": {
+    "status": "complete",
+    "completed": 17790,
+    "total": 17790,
+    "failed": 0,
+    "pid": null,
+    "review": "refine-logs/ragtruth_full_evaluation_review_20260913.md",
+    "tokens": 2903263,
+    "error_tokens": 156478,
+    "post_first_metrics": "not emitted",
+    "scope": "observer replay sensitivity, not detector validation"
+  },
+  "typed_hours": {
+    "status": "complete",
+    "rows": 17790,
+    "Data2txt": 6198,
+    "contrasts": 2,
+    "train_contrasts": 1,
+    "test_contrasts": 1,
+    "native_inputs": 2,
+    "report": "docs/TYPED_HOURS_RESULTS_20260913.md",
+    "owner_metadata_correction": "outputs/typed_hours_owner_metadata_correction_20260913.json"
+  },
+  "typed_native": {
+    "status": "complete_raw_only",
+    "output": "outputs/typed_native_v2_20260913",
+    "train_candidates": 1,
+    "native_forwards": 90,
+    "strong_certificates": 0,
+    "observer_already_A_preferred": true,
+    "report": "docs/TYPED_NATIVE_RESULTS_20260913.md"
+  },
+  "source_rel_mini": {
+    "data": "outputs/source_relation_data_v1_20260913",
+    "sources": 883,
+    "train_sources": 720,
+    "validation_sources": 163,
+    "queries": 7064,
+    "candidate_occurrences": 32167,
+    "feature_documents": 38541,
+    "feature_tokens": 3954619,
+    "max_feature_tokens": 1200,
+    "unavailable_documents": 0,
+    "full_feature_status": "launch_authorized_after_real_sanity",
+    "sanity_feature_forwards": 21,
+    "sanity_train_epochs": 2,
+    "sanity_train_exit": 0,
+    "lexical_validation_top1": 0.8059815950920245,
+    "lexical_validation_recall5": 0.9900306748466258,
+    "full_training": "pending full features",
+    "natural_transfer": "code implemented; engineering review running",
+    "task": "source-field pointer reconstruction; not natural ownership ground truth"
+  },
+  "unresolved": [
+    "accurate automatic lookback localization",
+    "applicable evidence/constraint ownership in natural answers",
+    "wrong routing vs correct arrival but aggregation/adoption failure",
+    "continuous hallucination extent with graph-adaptive boundaries"
+  ],
+  "next_action": "finish full frozen features and source-heldout head; compare identical-pool baselines; run natural candidate transfer before any stronger claim",
+  "preservation": "both branches and dirty/untracked files retained; frozen old code and outputs unchanged"
+}

@@ -1,0 +1,22 @@
+{
+  "phase": "real_window_constraint_identifiability",
+  "date": "2026-09-12",
+  "round": 2,
+  "status": "full_attributed_real_pair_graphs_captured",
+  "claim_supported": "no",
+  "scientific_review": "REVIEW_UNAVAILABLE; pending Codex review",
+  "main_method_validated": false,
+  "next_action": "ownership-identifiability evaluation: X only, E only, X+E with relation controls; no classifier trained yet",
+  "report": "docs/EVIDENCE_ADOPTION_RESULTS_20260912.md",
+  "engineering_review": "Independent scoped review; no Required/Critical; scientific review unavailable",
+  "final_mechanism_results": "../reanchor/results/adoption_pilot_v2_20260912",
+  "proposal": "docs/EVIDENCE_ADOPTION_METHOD_20260912.md",
+  "protocol": "docs/EVIDENCE_ADOPTION_PLAN_20260912.md",
+  "latest_user_scope": "First resolve whether internals distinguish constraint ownership in real correct/incorrect decision windows; adaptive windows partition spans without removing other information.",
+  "inventory": "docs/REAL_WINDOW_CONSTRAINT_INVENTORY_20260912.md",
+  "graph_protocol": "docs/ATTRIBUTED_SAMPLE_GRAPH_20260912.md",
+  "graph_results": "../reanchor/outputs/attributed_samples_20260912",
+  "user_clarification_received": true,
+  "graph_capture_checks": "2 tiny tests passed; independent literal invocation exit0; 33 hashes verified; all-layer bf16 rounded residual addition exact",
+  "graph_engineering_review": "No Required/Critical findings; three documented optional validator/provenance improvements"
+}

@@ -1,0 +1,94 @@
+{
+  "date": "2026-09-13",
+  "auditor": "real-collaboration-gpt-5.5-fallback-no-codex-mcp",
+  "run": "outputs/native_audit_v2_20260913",
+  "overall_claim_supported": "no",
+  "integrity_status": "warn",
+  "overall_verdict": "valid_negative_diagnostic_run_not_method_success",
+  "checks": {
+    "ground_truth_provenance": {
+      "status": "pass",
+      "details": "RAGTruth labels are loaded only by the evaluator after progress complete; manifest/input/label hashes and row identity are checked. Reader predictions are explicitly not GT. Scope remains six train sources."
+    },
+    "score_normalization": {
+      "status": "pass",
+      "details": "Final metrics use sklearn AUROC/AUPRC and source-balanced weights, not prediction self-normalization. E/C/N/U reader probabilities are conditional reader estimates, not ground truth. Because all words abstain, ranking values are constant-score diagnostics."
+    },
+    "result_file_existence": {
+      "status": "pass",
+      "details": "36 artifacts exist in each A/B/C/D/merge stage; recomputed content and upstream hashes matched; settings/evaluation/manifest hashes matched."
+    },
+    "dead_code_actual_calls": {
+      "status": "warn",
+      "details": "Native validation code was present but not exercised because A selected zero questions. B/C/D phase artifacts are empty by design; causal oracle forward calls and native tokens are both zero."
+    },
+    "scope": {
+      "status": "warn",
+      "details": "36 train responses over six sources; no confidence intervals; no unique lookback GT. Coverage and certificate gates were completely unmet, so broad method claims fail."
+    },
+    "evaluation_type": {
+      "dataset_labels": "real_gt",
+      "semantic_A": "frozen_reader_proxy_not_gold",
+      "native_mechanism": "causal_replay_proxy_not_executed_on_any_claim",
+      "unique_lookback": "no_independent_node_ground_truth"
+    }
+  },
+  "mechanical_summary": {
+    "responses": 36,
+    "sources": 6,
+    "tasks": {"QA": 12, "Summary": 12, "Data2txt": 12},
+    "official_split": "train",
+    "all_words": 4733,
+    "annotated_error_words": 260,
+    "semantic_scored_words": 0,
+    "mechanism_scored_words": 0,
+    "semantic_coverage": 0.0,
+    "mechanism_coverage": 0.0,
+    "detected_words_at_threshold": 0,
+    "recall_including_abstentions": 0.0,
+    "A_questions_total": 119,
+    "A_question_status": {"invalid_question": 93, "uncertain": 26, "supported": 0, "unsupported": 0},
+    "native_selected_question_ids_distribution": {"0": 36},
+    "B_items_total": 0,
+    "C_items_total": 0,
+    "D_items_total": 0,
+    "reader_requests_executed": 274,
+    "reader_request_types": {"SELF": 119, "FRAME": 86, "SOURCE": 26, "VERIFY": 17, "COMPARE": 26},
+    "reader_errors": {"invalid_json": 58},
+    "native_forward_calls": 0,
+    "native_tokens_processed": 0,
+    "native_status": {"not_selected_or_contrast_unavailable": 119},
+    "mechanisms": {}
+  },
+  "claims": [
+    {
+      "id": "C0_execution_integrity",
+      "claim_supported": "yes_with_witness_caveat",
+      "supported_by": "progress complete, 36 artifacts per stage, matching hashes, labels joined after prediction completion",
+      "caveat": "native_v2_doc_witness_20260913.md and reanchor/runs/native_audit_v2_20260913.json were absent at audit time"
+    },
+    {
+      "id": "C1_semantic_anchor_usable_on_natural_batch",
+      "claim_supported": "no",
+      "reason": "119 A questions yielded 93 invalid and 26 uncertain, with 0 supported/unsupported valid semantic anchors and 0 semantic scored words"
+    },
+    {
+      "id": "C2_native_mechanism_certificates",
+      "claim_supported": "no",
+      "reason": "A selected zero questions; B/C/D contain zero entries; native forward calls were zero"
+    },
+    {
+      "id": "C3_end_to_end_detection_lookback_condition_attribution",
+      "claim_supported": "no",
+      "reason": "0 scored words, 0 detected words, 0 recall, 0 mechanism certificates, no unique lookback ground truth"
+    }
+  ],
+  "permitted_claim_revision": "Frozen v2 exposed an A-stage atomic-role JSON/self-answer interface failure on the 36-response exploratory batch; downstream native mechanism claims remain untested in this run.",
+  "blocked_claims": [
+    "v2 validates hallucination detection",
+    "v2 validates native route-derived lookback or continuous spans",
+    "v2 validates condition attribution through internal messages",
+    "zero native calls imply lack of internal information",
+    "B/C/D phase completion implies causal interventions were measured"
+  ]
+}

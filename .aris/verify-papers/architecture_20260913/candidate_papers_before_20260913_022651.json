@@ -1,0 +1,56 @@
+[
+  {
+    "id": "minicheck",
+    "title": "MiniCheck: Efficient Fact-Checking of LLMs on Grounding Documents",
+    "arxiv_id": "2404.10774",
+    "doi": "10.18653/v1/2024.emnlp-main.499"
+  },
+  {
+    "id": "graphcheck",
+    "title": "GraphCheck: Breaking Long-Term Text Barriers with Extracted Knowledge Graph-Powered Fact-Checking",
+    "arxiv_id": null,
+    "doi": "10.18653/v1/2025.acl-long.729"
+  },
+  {
+    "id": "alti_llm",
+    "title": "Analyzing Context Contributions in LLM-based Machine Translation",
+    "arxiv_id": null,
+    "doi": "10.18653/v1/2024.findings-emnlp.876"
+  },
+  {
+    "id": "iris",
+    "title": "Unsupervised Hallucination Detection by Inspecting Reasoning Processes",
+    "arxiv_id": "2509.10004",
+    "doi": null
+  },
+  {
+    "id": "rauq",
+    "title": "Uncertainty-Aware Attention Heads: Efficient Unsupervised Uncertainty Quantification for LLMs",
+    "arxiv_id": "2505.20045",
+    "doi": null
+  },
+  {
+    "id": "structscore",
+    "title": "Discourse-Driven Evaluation: Unveiling Factual Inconsistency in Long Document Summarization",
+    "arxiv_id": "2502.06185",
+    "doi": "10.18653/v1/2025.naacl-long.103"
+  },
+  {
+    "id": "structured_attention",
+    "title": "Structured Attention Networks",
+    "arxiv_id": "1702.00887",
+    "doi": null
+  },
+  {
+    "id": "segmental",
+    "title": "Segmental Recurrent Neural Networks",
+    "arxiv_id": "1511.06018",
+    "doi": null
+  },
+  {
+    "id": "lookback_lens",
+    "title": "Lookback Lens: Detecting and Mitigating Contextual Hallucinations in Large Language Models Using Only Attention Maps",
+    "arxiv_id": "2407.07071",
+    "doi": "10.18653/v1/2024.emnlp-main.84"
+  }
+]

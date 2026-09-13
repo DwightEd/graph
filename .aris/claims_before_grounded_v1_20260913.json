@@ -1,0 +1,53 @@
+[
+  {
+    "id": "v1_semantic_coverage",
+    "value": 0.0606380731037397,
+    "source": "outputs/native_audit_v1_20260913/evaluation.json"
+  },
+  {
+    "id": "v1_recall",
+    "value": 0.0,
+    "source": "outputs/native_audit_v1_20260913/evaluation.json"
+  },
+  {
+    "id": "v1_native_coverage",
+    "value": 0.0,
+    "source": "outputs/native_audit_v1_20260913/evaluation.json"
+  },
+  {
+    "id": "v2_semantic_coverage",
+    "value": 0.0,
+    "source": "outputs/native_audit_v2_20260913/evaluation.json",
+    "claim_supported": "no_detection_or_mechanism_claim"
+  },
+  {
+    "id": "v2_recall",
+    "value": 0.0,
+    "source": "outputs/native_audit_v2_20260913/evaluation.json",
+    "claim_supported": "no_detection_or_mechanism_claim"
+  },
+  {
+    "id": "v2_native_coverage",
+    "value": 0.0,
+    "source": "outputs/native_audit_v2_20260913/evaluation.json",
+    "claim_supported": "no_detection_or_mechanism_claim"
+  },
+  {
+    "id": "v3_semantic_coverage",
+    "value": 0.0,
+    "source": "outputs/native_audit_v3_20260913/evaluation.json",
+    "claim_supported": "no_detection_or_mechanism_claim"
+  },
+  {
+    "id": "v3_recall",
+    "value": 0.0,
+    "source": "outputs/native_audit_v3_20260913/evaluation.json",
+    "claim_supported": "no_detection_or_mechanism_claim"
+  },
+  {
+    "id": "v3_native_coverage",
+    "value": 0.0,
+    "source": "outputs/native_audit_v3_20260913/evaluation.json",
+    "claim_supported": "no_detection_or_mechanism_claim"
+  }
+]

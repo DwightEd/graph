@@ -1,0 +1,1898 @@
+{
+  "kind": "sampled_actual_stdout_records_not_exhaustive",
+  "session": 62985,
+  "pid": 169859,
+  "exit_code": 0,
+  "records": [
+    {
+      "pid": 169859,
+      "unix_time": 1789275197.6573663,
+      "status": "loading_model",
+      "documents": 38541
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275212.834937,
+      "status": "encoding",
+      "completed": 1400,
+      "total": 38541,
+      "forwards": 350,
+      "seconds": 11.060168858617544,
+      "encoded_tokens": 80440
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275214.2872126,
+      "status": "encoding",
+      "completed": 1600,
+      "total": 38541,
+      "forwards": 400,
+      "seconds": 12.512441458180547,
+      "encoded_tokens": 92114
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275215.7409568,
+      "status": "encoding",
+      "completed": 1800,
+      "total": 38541,
+      "forwards": 450,
+      "seconds": 13.966193538159132,
+      "encoded_tokens": 103914
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275217.1892588,
+      "status": "encoding",
+      "completed": 2000,
+      "total": 38541,
+      "forwards": 500,
+      "seconds": 15.414496388286352,
+      "encoded_tokens": 115714
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275218.6384919,
+      "status": "encoding",
+      "completed": 2200,
+      "total": 38541,
+      "forwards": 550,
+      "seconds": 16.863727128133178,
+      "encoded_tokens": 127514
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275220.0882392,
+      "status": "encoding",
+      "completed": 2400,
+      "total": 38541,
+      "forwards": 600,
+      "seconds": 18.313476899638772,
+      "encoded_tokens": 139314
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275221.5491803,
+      "status": "encoding",
+      "completed": 2600,
+      "total": 38541,
+      "forwards": 650,
+      "seconds": 19.774417961016297,
+      "encoded_tokens": 151156
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275223.0036163,
+      "status": "encoding",
+      "completed": 2800,
+      "total": 38541,
+      "forwards": 700,
+      "seconds": 21.22885396145284,
+      "encoded_tokens": 163156
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275224.4584885,
+      "status": "encoding",
+      "completed": 3000,
+      "total": 38541,
+      "forwards": 750,
+      "seconds": 22.68372635357082,
+      "encoded_tokens": 175156
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275225.911808,
+      "status": "encoding",
+      "completed": 3200,
+      "total": 38541,
+      "forwards": 800,
+      "seconds": 24.137045666575432,
+      "encoded_tokens": 187156
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275227.4116256,
+      "status": "encoding",
+      "completed": 3400,
+      "total": 38541,
+      "forwards": 850,
+      "seconds": 25.63686270453036,
+      "encoded_tokens": 199239
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275228.8802435,
+      "status": "encoding",
+      "completed": 3600,
+      "total": 38541,
+      "forwards": 900,
+      "seconds": 27.105481205508113,
+      "encoded_tokens": 211439
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275230.348582,
+      "status": "encoding",
+      "completed": 3800,
+      "total": 38541,
+      "forwards": 950,
+      "seconds": 28.573819799348712,
+      "encoded_tokens": 223639
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275231.818052,
+      "status": "encoding",
+      "completed": 4000,
+      "total": 38541,
+      "forwards": 1000,
+      "seconds": 30.04329019971192,
+      "encoded_tokens": 235968
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275233.284164,
+      "status": "encoding",
+      "completed": 4200,
+      "total": 38541,
+      "forwards": 1050,
+      "seconds": 31.509399389848113,
+      "encoded_tokens": 248368
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275234.7590532,
+      "status": "encoding",
+      "completed": 4400,
+      "total": 38541,
+      "forwards": 1100,
+      "seconds": 32.98429134488106,
+      "encoded_tokens": 260943
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275236.240569,
+      "status": "encoding",
+      "completed": 4600,
+      "total": 38541,
+      "forwards": 1150,
+      "seconds": 34.46580730378628,
+      "encoded_tokens": 273681
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275237.9758818,
+      "status": "encoding",
+      "completed": 4800,
+      "total": 38541,
+      "forwards": 1200,
+      "seconds": 36.20111918449402,
+      "encoded_tokens": 286679
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275240.0001907,
+      "status": "encoding",
+      "completed": 5000,
+      "total": 38541,
+      "forwards": 1250,
+      "seconds": 38.22542793303728,
+      "encoded_tokens": 300066
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275242.0626333,
+      "status": "encoding",
+      "completed": 5200,
+      "total": 38541,
+      "forwards": 1300,
+      "seconds": 40.287864960730076,
+      "encoded_tokens": 313666
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275244.1537173,
+      "status": "encoding",
+      "completed": 5400,
+      "total": 38541,
+      "forwards": 1350,
+      "seconds": 42.378953237086535,
+      "encoded_tokens": 327442
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275246.2215166,
+      "status": "encoding",
+      "completed": 5600,
+      "total": 38541,
+      "forwards": 1400,
+      "seconds": 44.44675258733332,
+      "encoded_tokens": 341242
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275248.2930207,
+      "status": "encoding",
+      "completed": 5800,
+      "total": 38541,
+      "forwards": 1450,
+      "seconds": 46.518257135525346,
+      "encoded_tokens": 355115
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275250.3672702,
+      "status": "encoding",
+      "completed": 6000,
+      "total": 38541,
+      "forwards": 1500,
+      "seconds": 48.5925073325634,
+      "encoded_tokens": 369115
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275252.4427497,
+      "status": "encoding",
+      "completed": 6200,
+      "total": 38541,
+      "forwards": 1550,
+      "seconds": 50.6679867003113,
+      "encoded_tokens": 383115
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275254.523453,
+      "status": "encoding",
+      "completed": 6400,
+      "total": 38541,
+      "forwards": 1600,
+      "seconds": 52.74868912436068,
+      "encoded_tokens": 397115
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275256.6046298,
+      "status": "encoding",
+      "completed": 6600,
+      "total": 38541,
+      "forwards": 1650,
+      "seconds": 54.829867200925946,
+      "encoded_tokens": 411217
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275258.6864583,
+      "status": "encoding",
+      "completed": 6800,
+      "total": 38541,
+      "forwards": 1700,
+      "seconds": 56.91169578768313,
+      "encoded_tokens": 425417
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275260.7643876,
+      "status": "encoding",
+      "completed": 7000,
+      "total": 38541,
+      "forwards": 1750,
+      "seconds": 58.98962530680001,
+      "encoded_tokens": 439617
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275262.8407683,
+      "status": "encoding",
+      "completed": 7200,
+      "total": 38541,
+      "forwards": 1800,
+      "seconds": 61.066006479784846,
+      "encoded_tokens": 453817
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275264.9252896,
+      "status": "encoding",
+      "completed": 7400,
+      "total": 38541,
+      "forwards": 1850,
+      "seconds": 63.1505268458277,
+      "encoded_tokens": 468026
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275267.0112174,
+      "status": "encoding",
+      "completed": 7600,
+      "total": 38541,
+      "forwards": 1900,
+      "seconds": 65.23645489662886,
+      "encoded_tokens": 482426
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275269.0981433,
+      "status": "encoding",
+      "completed": 7800,
+      "total": 38541,
+      "forwards": 1950,
+      "seconds": 67.3233803641051,
+      "encoded_tokens": 496826
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275271.1874197,
+      "status": "encoding",
+      "completed": 8000,
+      "total": 38541,
+      "forwards": 2000,
+      "seconds": 69.41265641152859,
+      "encoded_tokens": 511226
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275273.279116,
+      "status": "encoding",
+      "completed": 8200,
+      "total": 38541,
+      "forwards": 2050,
+      "seconds": 71.50434613972902,
+      "encoded_tokens": 525686
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275275.3802075,
+      "status": "encoding",
+      "completed": 8400,
+      "total": 38541,
+      "forwards": 2100,
+      "seconds": 73.60544002056122,
+      "encoded_tokens": 540286
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275277.4711258,
+      "status": "encoding",
+      "completed": 8600,
+      "total": 38541,
+      "forwards": 2150,
+      "seconds": 75.69636291265488,
+      "encoded_tokens": 554886
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275279.565665,
+      "status": "encoding",
+      "completed": 8800,
+      "total": 38541,
+      "forwards": 2200,
+      "seconds": 77.7909024450928,
+      "encoded_tokens": 569552
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275281.659846,
+      "status": "encoding",
+      "completed": 9000,
+      "total": 38541,
+      "forwards": 2250,
+      "seconds": 79.88508299551904,
+      "encoded_tokens": 584352
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275283.7545586,
+      "status": "encoding",
+      "completed": 9200,
+      "total": 38541,
+      "forwards": 2300,
+      "seconds": 81.97979633137584,
+      "encoded_tokens": 599152
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275285.857354,
+      "status": "encoding",
+      "completed": 9400,
+      "total": 38541,
+      "forwards": 2350,
+      "seconds": 84.08259063027799,
+      "encoded_tokens": 614125
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275287.9568663,
+      "status": "encoding",
+      "completed": 9600,
+      "total": 38541,
+      "forwards": 2400,
+      "seconds": 86.18210350349545,
+      "encoded_tokens": 629125
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275290.1224668,
+      "status": "encoding",
+      "completed": 9800,
+      "total": 38541,
+      "forwards": 2450,
+      "seconds": 88.34770381450653,
+      "encoded_tokens": 644209
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275292.2312553,
+      "status": "encoding",
+      "completed": 10000,
+      "total": 38541,
+      "forwards": 2500,
+      "seconds": 90.45649099349976,
+      "encoded_tokens": 659409
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275294.3392706,
+      "status": "encoding",
+      "completed": 10200,
+      "total": 38541,
+      "forwards": 2550,
+      "seconds": 92.56450810469687,
+      "encoded_tokens": 674630
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275296.4468088,
+      "status": "encoding",
+      "completed": 10400,
+      "total": 38541,
+      "forwards": 2600,
+      "seconds": 94.67204626649618,
+      "encoded_tokens": 690030
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275298.5576186,
+      "status": "encoding",
+      "completed": 10600,
+      "total": 38541,
+      "forwards": 2650,
+      "seconds": 96.78285600803792,
+      "encoded_tokens": 705457
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275300.6737943,
+      "status": "encoding",
+      "completed": 10800,
+      "total": 38541,
+      "forwards": 2700,
+      "seconds": 98.89903100766242,
+      "encoded_tokens": 721057
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275302.7983654,
+      "status": "encoding",
+      "completed": 11000,
+      "total": 38541,
+      "forwards": 2750,
+      "seconds": 101.02360260114074,
+      "encoded_tokens": 736723
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275304.9255292,
+      "status": "encoding",
+      "completed": 11200,
+      "total": 38541,
+      "forwards": 2800,
+      "seconds": 103.15076623857021,
+      "encoded_tokens": 752523
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275307.0560691,
+      "status": "encoding",
+      "completed": 11400,
+      "total": 38541,
+      "forwards": 2850,
+      "seconds": 105.28130600042641,
+      "encoded_tokens": 768429
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275309.2286367,
+      "status": "encoding",
+      "completed": 11600,
+      "total": 38541,
+      "forwards": 2900,
+      "seconds": 107.45387359708548,
+      "encoded_tokens": 784429
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275311.3112392,
+      "status": "encoding",
+      "completed": 11800,
+      "total": 38541,
+      "forwards": 2950,
+      "seconds": 109.5364766009152,
+      "encoded_tokens": 800570
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275313.38642,
+      "status": "encoding",
+      "completed": 12000,
+      "total": 38541,
+      "forwards": 3000,
+      "seconds": 111.61165042594075,
+      "encoded_tokens": 816770
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275315.4536808,
+      "status": "encoding",
+      "completed": 12200,
+      "total": 38541,
+      "forwards": 3050,
+      "seconds": 113.67891563661397,
+      "encoded_tokens": 833099
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275317.5204918,
+      "status": "encoding",
+      "completed": 12400,
+      "total": 38541,
+      "forwards": 3100,
+      "seconds": 115.74572706408799,
+      "encoded_tokens": 849499
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275319.5908546,
+      "status": "encoding",
+      "completed": 12600,
+      "total": 38541,
+      "forwards": 3150,
+      "seconds": 117.81609155982733,
+      "encoded_tokens": 865992
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275321.6618686,
+      "status": "encoding",
+      "completed": 12800,
+      "total": 38541,
+      "forwards": 3200,
+      "seconds": 119.88710460811853,
+      "encoded_tokens": 882592
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275323.736549,
+      "status": "encoding",
+      "completed": 13000,
+      "total": 38541,
+      "forwards": 3250,
+      "seconds": 121.96178583987057,
+      "encoded_tokens": 899241
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275325.8105834,
+      "status": "encoding",
+      "completed": 13200,
+      "total": 38541,
+      "forwards": 3300,
+      "seconds": 124.03581994771957,
+      "encoded_tokens": 916041
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275327.8843517,
+      "status": "encoding",
+      "completed": 13400,
+      "total": 38541,
+      "forwards": 3350,
+      "seconds": 126.10958851128817,
+      "encoded_tokens": 932841
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275329.9628344,
+      "status": "encoding",
+      "completed": 13600,
+      "total": 38541,
+      "forwards": 3400,
+      "seconds": 128.18807097151875,
+      "encoded_tokens": 949813
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275332.0407946,
+      "status": "encoding",
+      "completed": 13800,
+      "total": 38541,
+      "forwards": 3450,
+      "seconds": 130.26603170856833,
+      "encoded_tokens": 966813
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275334.1180708,
+      "status": "encoding",
+      "completed": 14000,
+      "total": 38541,
+      "forwards": 3500,
+      "seconds": 132.3433084078133,
+      "encoded_tokens": 983813
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275336.1917017,
+      "status": "encoding",
+      "completed": 14200,
+      "total": 38541,
+      "forwards": 3550,
+      "seconds": 134.41693722642958,
+      "encoded_tokens": 1000813
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275338.2660995,
+      "status": "encoding",
+      "completed": 14400,
+      "total": 38541,
+      "forwards": 3600,
+      "seconds": 136.4913362674415,
+      "encoded_tokens": 1017813
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275340.352576,
+      "status": "encoding",
+      "completed": 14600,
+      "total": 38541,
+      "forwards": 3650,
+      "seconds": 138.57781286910176,
+      "encoded_tokens": 1034914
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275342.436244,
+      "status": "encoding",
+      "completed": 14800,
+      "total": 38541,
+      "forwards": 3700,
+      "seconds": 140.66148043237627,
+      "encoded_tokens": 1052114
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275344.5223246,
+      "status": "encoding",
+      "completed": 15000,
+      "total": 38541,
+      "forwards": 3750,
+      "seconds": 142.74756104312837,
+      "encoded_tokens": 1069314
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275346.6114788,
+      "status": "encoding",
+      "completed": 15200,
+      "total": 38541,
+      "forwards": 3800,
+      "seconds": 144.83671422675252,
+      "encoded_tokens": 1086514
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275348.6927185,
+      "status": "encoding",
+      "completed": 15400,
+      "total": 38541,
+      "forwards": 3850,
+      "seconds": 146.9179517570883,
+      "encoded_tokens": 1103714
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275350.7720284,
+      "status": "encoding",
+      "completed": 15600,
+      "total": 38541,
+      "forwards": 3900,
+      "seconds": 148.9972655531019,
+      "encoded_tokens": 1120914
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275352.8606718,
+      "status": "encoding",
+      "completed": 15800,
+      "total": 38541,
+      "forwards": 3950,
+      "seconds": 151.08590880036354,
+      "encoded_tokens": 1138114
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275354.9442053,
+      "status": "encoding",
+      "completed": 16000,
+      "total": 38541,
+      "forwards": 4000,
+      "seconds": 153.16944211535156,
+      "encoded_tokens": 1155314
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275357.0244744,
+      "status": "encoding",
+      "completed": 16200,
+      "total": 38541,
+      "forwards": 4050,
+      "seconds": 155.2497118730098,
+      "encoded_tokens": 1172514
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275359.1218734,
+      "status": "encoding",
+      "completed": 16400,
+      "total": 38541,
+      "forwards": 4100,
+      "seconds": 157.3471080996096,
+      "encoded_tokens": 1189727
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275361.215359,
+      "status": "encoding",
+      "completed": 16600,
+      "total": 38541,
+      "forwards": 4150,
+      "seconds": 159.44059599004686,
+      "encoded_tokens": 1207127
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275363.3007803,
+      "status": "encoding",
+      "completed": 16800,
+      "total": 38541,
+      "forwards": 4200,
+      "seconds": 161.52601646073163,
+      "encoded_tokens": 1224527
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275365.3856885,
+      "status": "encoding",
+      "completed": 17000,
+      "total": 38541,
+      "forwards": 4250,
+      "seconds": 163.6109255682677,
+      "encoded_tokens": 1241927
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275367.4759324,
+      "status": "encoding",
+      "completed": 17200,
+      "total": 38541,
+      "forwards": 4300,
+      "seconds": 165.7011695690453,
+      "encoded_tokens": 1259327
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275369.5639617,
+      "status": "encoding",
+      "completed": 17400,
+      "total": 38541,
+      "forwards": 4350,
+      "seconds": 167.78919891640544,
+      "encoded_tokens": 1276727
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275371.652861,
+      "status": "encoding",
+      "completed": 17600,
+      "total": 38541,
+      "forwards": 4400,
+      "seconds": 169.8780980501324,
+      "encoded_tokens": 1294127
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275373.7431717,
+      "status": "encoding",
+      "completed": 17800,
+      "total": 38541,
+      "forwards": 4450,
+      "seconds": 171.96840570494533,
+      "encoded_tokens": 1311527
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275375.8318005,
+      "status": "encoding",
+      "completed": 18000,
+      "total": 38541,
+      "forwards": 4500,
+      "seconds": 174.05703777074814,
+      "encoded_tokens": 1328927
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275377.9195235,
+      "status": "encoding",
+      "completed": 18200,
+      "total": 38541,
+      "forwards": 4550,
+      "seconds": 176.1447609104216,
+      "encoded_tokens": 1346327
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275380.0139122,
+      "status": "encoding",
+      "completed": 18400,
+      "total": 38541,
+      "forwards": 4600,
+      "seconds": 178.23914951644838,
+      "encoded_tokens": 1363727
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275382.123735,
+      "status": "encoding",
+      "completed": 18600,
+      "total": 38541,
+      "forwards": 4650,
+      "seconds": 180.34897020086646,
+      "encoded_tokens": 1381322
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275384.237924,
+      "status": "encoding",
+      "completed": 18800,
+      "total": 38541,
+      "forwards": 4700,
+      "seconds": 182.46316044777632,
+      "encoded_tokens": 1398922
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275386.332592,
+      "status": "encoding",
+      "completed": 19000,
+      "total": 38541,
+      "forwards": 4750,
+      "seconds": 184.55782410502434,
+      "encoded_tokens": 1416522
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275388.4272075,
+      "status": "encoding",
+      "completed": 19200,
+      "total": 38541,
+      "forwards": 4800,
+      "seconds": 186.65244449861348,
+      "encoded_tokens": 1434122
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275390.5235662,
+      "status": "encoding",
+      "completed": 19400,
+      "total": 38541,
+      "forwards": 4850,
+      "seconds": 188.74880268611014,
+      "encoded_tokens": 1451722
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275392.619644,
+      "status": "encoding",
+      "completed": 19600,
+      "total": 38541,
+      "forwards": 4900,
+      "seconds": 190.84487968310714,
+      "encoded_tokens": 1469322
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275394.7106764,
+      "status": "encoding",
+      "completed": 19800,
+      "total": 38541,
+      "forwards": 4950,
+      "seconds": 192.93591375276446,
+      "encoded_tokens": 1486922
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275396.8118746,
+      "status": "encoding",
+      "completed": 20000,
+      "total": 38541,
+      "forwards": 5000,
+      "seconds": 195.0371106620878,
+      "encoded_tokens": 1504568
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275398.9141917,
+      "status": "encoding",
+      "completed": 20200,
+      "total": 38541,
+      "forwards": 5050,
+      "seconds": 197.13942934013903,
+      "encoded_tokens": 1522368
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275401.0179331,
+      "status": "encoding",
+      "completed": 20400,
+      "total": 38541,
+      "forwards": 5100,
+      "seconds": 199.243170324713,
+      "encoded_tokens": 1540168
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275403.1164567,
+      "status": "encoding",
+      "completed": 20600,
+      "total": 38541,
+      "forwards": 5150,
+      "seconds": 201.34169439412653,
+      "encoded_tokens": 1557968
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275405.2122643,
+      "status": "encoding",
+      "completed": 20800,
+      "total": 38541,
+      "forwards": 5200,
+      "seconds": 203.43750178441405,
+      "encoded_tokens": 1575768
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275407.3151643,
+      "status": "encoding",
+      "completed": 21000,
+      "total": 38541,
+      "forwards": 5250,
+      "seconds": 205.540401449427,
+      "encoded_tokens": 1593568
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275409.4202883,
+      "status": "encoding",
+      "completed": 21200,
+      "total": 38541,
+      "forwards": 5300,
+      "seconds": 207.64552278071642,
+      "encoded_tokens": 1611459
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275411.52643,
+      "status": "encoding",
+      "completed": 21400,
+      "total": 38541,
+      "forwards": 5350,
+      "seconds": 209.7516667265445,
+      "encoded_tokens": 1629459
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275413.6302118,
+      "status": "encoding",
+      "completed": 21600,
+      "total": 38541,
+      "forwards": 5400,
+      "seconds": 211.85544830188155,
+      "encoded_tokens": 1647459
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275415.7314095,
+      "status": "encoding",
+      "completed": 21800,
+      "total": 38541,
+      "forwards": 5450,
+      "seconds": 213.95664725080132,
+      "encoded_tokens": 1665459
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275417.8361175,
+      "status": "encoding",
+      "completed": 22000,
+      "total": 38541,
+      "forwards": 5500,
+      "seconds": 216.06135491654277,
+      "encoded_tokens": 1683517
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275419.9464822,
+      "status": "encoding",
+      "completed": 22200,
+      "total": 38541,
+      "forwards": 5550,
+      "seconds": 218.17171939648688,
+      "encoded_tokens": 1701717
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275422.060206,
+      "status": "encoding",
+      "completed": 22400,
+      "total": 38541,
+      "forwards": 5600,
+      "seconds": 220.28543795272708,
+      "encoded_tokens": 1719917
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275424.1706924,
+      "status": "encoding",
+      "completed": 22600,
+      "total": 38541,
+      "forwards": 5650,
+      "seconds": 222.39592935703695,
+      "encoded_tokens": 1738157
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275426.2910335,
+      "status": "encoding",
+      "completed": 22800,
+      "total": 38541,
+      "forwards": 5700,
+      "seconds": 224.51627068780363,
+      "encoded_tokens": 1756557
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275428.4130337,
+      "status": "encoding",
+      "completed": 23000,
+      "total": 38541,
+      "forwards": 5750,
+      "seconds": 226.63826998881996,
+      "encoded_tokens": 1774957
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275430.5370312,
+      "status": "encoding",
+      "completed": 23200,
+      "total": 38541,
+      "forwards": 5800,
+      "seconds": 228.76226807571948,
+      "encoded_tokens": 1793517
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275432.665067,
+      "status": "encoding",
+      "completed": 23400,
+      "total": 38541,
+      "forwards": 5850,
+      "seconds": 230.8903036918491,
+      "encoded_tokens": 1812117
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275434.7942684,
+      "status": "encoding",
+      "completed": 23600,
+      "total": 38541,
+      "forwards": 5900,
+      "seconds": 233.01950551196933,
+      "encoded_tokens": 1830788
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275436.9251263,
+      "status": "encoding",
+      "completed": 23800,
+      "total": 38541,
+      "forwards": 5950,
+      "seconds": 235.15036276355386,
+      "encoded_tokens": 1849588
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275439.0587814,
+      "status": "encoding",
+      "completed": 24000,
+      "total": 38541,
+      "forwards": 6000,
+      "seconds": 237.2840185444802,
+      "encoded_tokens": 1868479
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275441.1969194,
+      "status": "encoding",
+      "completed": 24200,
+      "total": 38541,
+      "forwards": 6050,
+      "seconds": 239.42215673997998,
+      "encoded_tokens": 1887479
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275443.3350997,
+      "status": "encoding",
+      "completed": 24400,
+      "total": 38541,
+      "forwards": 6100,
+      "seconds": 241.56033640354872,
+      "encoded_tokens": 1906644
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275445.5883987,
+      "status": "encoding",
+      "completed": 24600,
+      "total": 38541,
+      "forwards": 6150,
+      "seconds": 243.81363545171916,
+      "encoded_tokens": 1925917
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275448.0362806,
+      "status": "encoding",
+      "completed": 24800,
+      "total": 38541,
+      "forwards": 6200,
+      "seconds": 246.2615174446255,
+      "encoded_tokens": 1945343
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275450.4900963,
+      "status": "encoding",
+      "completed": 25000,
+      "total": 38541,
+      "forwards": 6250,
+      "seconds": 248.71533278375864,
+      "encoded_tokens": 1964943
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275452.9474938,
+      "status": "encoding",
+      "completed": 25200,
+      "total": 38541,
+      "forwards": 6300,
+      "seconds": 251.17272926680744,
+      "encoded_tokens": 1984704
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275455.411978,
+      "status": "encoding",
+      "completed": 25400,
+      "total": 38541,
+      "forwards": 6350,
+      "seconds": 253.63721494749188,
+      "encoded_tokens": 2004658
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275458.030336,
+      "status": "encoding",
+      "completed": 25600,
+      "total": 38541,
+      "forwards": 6400,
+      "seconds": 256.2555676754564,
+      "encoded_tokens": 2024834
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275460.6831913,
+      "status": "encoding",
+      "completed": 25800,
+      "total": 38541,
+      "forwards": 6450,
+      "seconds": 258.9084275048226,
+      "encoded_tokens": 2045234
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275463.3286407,
+      "status": "encoding",
+      "completed": 26000,
+      "total": 38541,
+      "forwards": 6500,
+      "seconds": 261.5538765285164,
+      "encoded_tokens": 2065862
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275465.961439,
+      "status": "encoding",
+      "completed": 26200,
+      "total": 38541,
+      "forwards": 6550,
+      "seconds": 264.18667487055063,
+      "encoded_tokens": 2086662
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275468.604347,
+      "status": "encoding",
+      "completed": 26400,
+      "total": 38541,
+      "forwards": 6600,
+      "seconds": 266.82958376035094,
+      "encoded_tokens": 2107631
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275471.2454264,
+      "status": "encoding",
+      "completed": 26600,
+      "total": 38541,
+      "forwards": 6650,
+      "seconds": 269.47066324576735,
+      "encoded_tokens": 2128631
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275473.8881667,
+      "status": "encoding",
+      "completed": 26800,
+      "total": 38541,
+      "forwards": 6700,
+      "seconds": 272.11340403184295,
+      "encoded_tokens": 2149756
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275476.5331898,
+      "status": "encoding",
+      "completed": 27000,
+      "total": 38541,
+      "forwards": 6750,
+      "seconds": 274.75842659547925,
+      "encoded_tokens": 2170956
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275479.1777647,
+      "status": "encoding",
+      "completed": 27200,
+      "total": 38541,
+      "forwards": 6800,
+      "seconds": 277.4029997885227,
+      "encoded_tokens": 2192156
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275481.8342075,
+      "status": "encoding",
+      "completed": 27400,
+      "total": 38541,
+      "forwards": 6850,
+      "seconds": 280.05944462679327,
+      "encoded_tokens": 2213542
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275484.4879012,
+      "status": "encoding",
+      "completed": 27600,
+      "total": 38541,
+      "forwards": 6900,
+      "seconds": 282.71313767135143,
+      "encoded_tokens": 2234942
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275487.142169,
+      "status": "encoding",
+      "completed": 27800,
+      "total": 38541,
+      "forwards": 6950,
+      "seconds": 285.3674059715122,
+      "encoded_tokens": 2256495
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275489.8097162,
+      "status": "encoding",
+      "completed": 28000,
+      "total": 38541,
+      "forwards": 7000,
+      "seconds": 288.0349515005946,
+      "encoded_tokens": 2278095
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275492.4807756,
+      "status": "encoding",
+      "completed": 28200,
+      "total": 38541,
+      "forwards": 7050,
+      "seconds": 290.7060126364231,
+      "encoded_tokens": 2299889
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275495.151411,
+      "status": "encoding",
+      "completed": 28400,
+      "total": 38541,
+      "forwards": 7100,
+      "seconds": 293.37664370052516,
+      "encoded_tokens": 2321773
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275497.8282502,
+      "status": "encoding",
+      "completed": 28600,
+      "total": 38541,
+      "forwards": 7150,
+      "seconds": 296.0534878447652,
+      "encoded_tokens": 2343848
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275500.5172467,
+      "status": "encoding",
+      "completed": 28800,
+      "total": 38541,
+      "forwards": 7200,
+      "seconds": 298.7424827069044,
+      "encoded_tokens": 2366149
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275503.1509137,
+      "status": "encoding",
+      "completed": 29000,
+      "total": 38541,
+      "forwards": 7250,
+      "seconds": 301.37615010142326,
+      "encoded_tokens": 2388712
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275505.7595603,
+      "status": "encoding",
+      "completed": 29200,
+      "total": 38541,
+      "forwards": 7300,
+      "seconds": 303.9847979210317,
+      "encoded_tokens": 2411622
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275508.3645983,
+      "status": "encoding",
+      "completed": 29400,
+      "total": 38541,
+      "forwards": 7350,
+      "seconds": 306.58983532339334,
+      "encoded_tokens": 2434718
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275510.979927,
+      "status": "encoding",
+      "completed": 29600,
+      "total": 38541,
+      "forwards": 7400,
+      "seconds": 309.20516327396035,
+      "encoded_tokens": 2457918
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275513.5952566,
+      "status": "encoding",
+      "completed": 29800,
+      "total": 38541,
+      "forwards": 7450,
+      "seconds": 311.8204923886806,
+      "encoded_tokens": 2481118
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275516.2063072,
+      "status": "encoding",
+      "completed": 30000,
+      "total": 38541,
+      "forwards": 7500,
+      "seconds": 314.43154362402856,
+      "encoded_tokens": 2504318
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275518.8333592,
+      "status": "encoding",
+      "completed": 30200,
+      "total": 38541,
+      "forwards": 7550,
+      "seconds": 317.0585944149643,
+      "encoded_tokens": 2527718
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275521.4512165,
+      "status": "encoding",
+      "completed": 30400,
+      "total": 38541,
+      "forwards": 7600,
+      "seconds": 319.67645331285894,
+      "encoded_tokens": 2551118
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275524.0720987,
+      "status": "encoding",
+      "completed": 30600,
+      "total": 38541,
+      "forwards": 7650,
+      "seconds": 322.2973357476294,
+      "encoded_tokens": 2574518
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275526.685377,
+      "status": "encoding",
+      "completed": 30800,
+      "total": 38541,
+      "forwards": 7700,
+      "seconds": 324.9106132145971,
+      "encoded_tokens": 2597918
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275529.3072605,
+      "status": "encoding",
+      "completed": 31000,
+      "total": 38541,
+      "forwards": 7750,
+      "seconds": 327.53249710053205,
+      "encoded_tokens": 2621458
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275531.9258206,
+      "status": "encoding",
+      "completed": 31200,
+      "total": 38541,
+      "forwards": 7800,
+      "seconds": 330.15105238743126,
+      "encoded_tokens": 2645058
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275534.5455148,
+      "status": "encoding",
+      "completed": 31400,
+      "total": 38541,
+      "forwards": 7850,
+      "seconds": 332.77075093612075,
+      "encoded_tokens": 2668658
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275537.1681943,
+      "status": "encoding",
+      "completed": 31600,
+      "total": 38541,
+      "forwards": 7900,
+      "seconds": 335.3934301175177,
+      "encoded_tokens": 2692258
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275539.7928987,
+      "status": "encoding",
+      "completed": 31800,
+      "total": 38541,
+      "forwards": 7950,
+      "seconds": 338.01813500374556,
+      "encoded_tokens": 2715961
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275542.4307632,
+      "status": "encoding",
+      "completed": 32000,
+      "total": 38541,
+      "forwards": 8000,
+      "seconds": 340.655998962,
+      "encoded_tokens": 2739761
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275545.0639348,
+      "status": "encoding",
+      "completed": 32200,
+      "total": 38541,
+      "forwards": 8050,
+      "seconds": 343.28917118906975,
+      "encoded_tokens": 2763561
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275547.6935039,
+      "status": "encoding",
+      "completed": 32400,
+      "total": 38541,
+      "forwards": 8100,
+      "seconds": 345.91874028369784,
+      "encoded_tokens": 2787396
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275550.319828,
+      "status": "encoding",
+      "completed": 32600,
+      "total": 38541,
+      "forwards": 8150,
+      "seconds": 348.5450652651489,
+      "encoded_tokens": 2811396
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275552.9473238,
+      "status": "encoding",
+      "completed": 32800,
+      "total": 38541,
+      "forwards": 8200,
+      "seconds": 351.17255987226963,
+      "encoded_tokens": 2835396
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275555.5778697,
+      "status": "encoding",
+      "completed": 33000,
+      "total": 38541,
+      "forwards": 8250,
+      "seconds": 353.80310440808535,
+      "encoded_tokens": 2859529
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275558.2156842,
+      "status": "encoding",
+      "completed": 33200,
+      "total": 38541,
+      "forwards": 8300,
+      "seconds": 356.440920971334,
+      "encoded_tokens": 2883820
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275560.857363,
+      "status": "encoding",
+      "completed": 33400,
+      "total": 38541,
+      "forwards": 8350,
+      "seconds": 359.0825986582786,
+      "encoded_tokens": 2908287
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275563.5052917,
+      "status": "encoding",
+      "completed": 33600,
+      "total": 38541,
+      "forwards": 8400,
+      "seconds": 361.73052828013897,
+      "encoded_tokens": 2933004
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275566.1681557,
+      "status": "encoding",
+      "completed": 33800,
+      "total": 38541,
+      "forwards": 8450,
+      "seconds": 364.39339212700725,
+      "encoded_tokens": 2958201
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275569.1525404,
+      "status": "encoding",
+      "completed": 34000,
+      "total": 38541,
+      "forwards": 8500,
+      "seconds": 367.37777105905116,
+      "encoded_tokens": 2983962
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275572.3287034,
+      "status": "encoding",
+      "completed": 34200,
+      "total": 38541,
+      "forwards": 8550,
+      "seconds": 370.55393964610994,
+      "encoded_tokens": 3010322
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275575.5202982,
+      "status": "encoding",
+      "completed": 34400,
+      "total": 38541,
+      "forwards": 8600,
+      "seconds": 373.7455338127911,
+      "encoded_tokens": 3037343
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275578.7290862,
+      "status": "encoding",
+      "completed": 34600,
+      "total": 38541,
+      "forwards": 8650,
+      "seconds": 376.9543219488114,
+      "encoded_tokens": 3064957
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275581.9535644,
+      "status": "encoding",
+      "completed": 34800,
+      "total": 38541,
+      "forwards": 8700,
+      "seconds": 380.17880154028535,
+      "encoded_tokens": 3093148
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275585.2501638,
+      "status": "encoding",
+      "completed": 35000,
+      "total": 38541,
+      "forwards": 8750,
+      "seconds": 383.4754008240998,
+      "encoded_tokens": 3122013
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275588.6340446,
+      "status": "encoding",
+      "completed": 35200,
+      "total": 38541,
+      "forwards": 8800,
+      "seconds": 386.8592816796154,
+      "encoded_tokens": 3151619
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275592.0317986,
+      "status": "encoding",
+      "completed": 35400,
+      "total": 38541,
+      "forwards": 8850,
+      "seconds": 390.25703313574195,
+      "encoded_tokens": 3181884
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275595.4533043,
+      "status": "encoding",
+      "completed": 35600,
+      "total": 38541,
+      "forwards": 8900,
+      "seconds": 393.67854101769626,
+      "encoded_tokens": 3212923
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275598.9865937,
+      "status": "encoding",
+      "completed": 35800,
+      "total": 38541,
+      "forwards": 8950,
+      "seconds": 397.211831279099,
+      "encoded_tokens": 3244828
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275602.7640507,
+      "status": "encoding",
+      "completed": 36000,
+      "total": 38541,
+      "forwards": 9000,
+      "seconds": 400.9892801139504,
+      "encoded_tokens": 3277737
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275606.6287458,
+      "status": "encoding",
+      "completed": 36200,
+      "total": 38541,
+      "forwards": 9050,
+      "seconds": 404.85398276150227,
+      "encoded_tokens": 3311882
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275610.566218,
+      "status": "encoding",
+      "completed": 36400,
+      "total": 38541,
+      "forwards": 9100,
+      "seconds": 408.7914535384625,
+      "encoded_tokens": 3347415
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275614.5734034,
+      "status": "encoding",
+      "completed": 36600,
+      "total": 38541,
+      "forwards": 9150,
+      "seconds": 412.79863991588354,
+      "encoded_tokens": 3384596
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275618.940725,
+      "status": "encoding",
+      "completed": 36800,
+      "total": 38541,
+      "forwards": 9200,
+      "seconds": 417.1659612841904,
+      "encoded_tokens": 3423789
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275623.5074854,
+      "status": "encoding",
+      "completed": 37000,
+      "total": 38541,
+      "forwards": 9250,
+      "seconds": 421.73272089101374,
+      "encoded_tokens": 3465256
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275628.1948266,
+      "status": "encoding",
+      "completed": 37200,
+      "total": 38541,
+      "forwards": 9300,
+      "seconds": 426.42006082087755,
+      "encoded_tokens": 3509157
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275633.153366,
+      "status": "encoding",
+      "completed": 37400,
+      "total": 38541,
+      "forwards": 9350,
+      "seconds": 431.37860219553113,
+      "encoded_tokens": 3555715
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275638.3632295,
+      "status": "encoding",
+      "completed": 37600,
+      "total": 38541,
+      "forwards": 9400,
+      "seconds": 436.5884662922472,
+      "encoded_tokens": 3605666
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275644.230076,
+      "status": "encoding",
+      "completed": 37800,
+      "total": 38541,
+      "forwards": 9450,
+      "seconds": 442.45530663989484,
+      "encoded_tokens": 3659924
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275650.7354898,
+      "status": "encoding",
+      "completed": 38000,
+      "total": 38541,
+      "forwards": 9500,
+      "seconds": 448.9607251919806,
+      "encoded_tokens": 3720224
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275658.105985,
+      "status": "encoding",
+      "completed": 38200,
+      "total": 38541,
+      "forwards": 9550,
+      "seconds": 456.33122124150395,
+      "encoded_tokens": 3789166
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275666.847135,
+      "status": "encoding",
+      "completed": 38400,
+      "total": 38541,
+      "forwards": 9600,
+      "seconds": 465.07236911542714,
+      "encoded_tokens": 3871856
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275675.829679,
+      "status": "encoding",
+      "completed": 38541,
+      "total": 38541,
+      "forwards": 9636,
+      "seconds": 474.0549100935459,
+      "encoded_tokens": 3954619
+    },
+    {
+      "pid": 169859,
+      "unix_time": 1789275700.494907,
+      "status": "complete",
+      "feature_forwards": 9636,
+      "encoded_documents": 38541,
+      "unavailable_documents": 0,
+      "encoded_tokens": 3954619,
+      "seconds_excluding_model_load": 497.9294861834496,
+      "hidden_size": 4096,
+      "peak_cuda_allocated_bytes": 16642519040,
+      "labels_read": false,
+      "representation": "auxiliary canonical-view causal final-layer last-nonpad-token"
+    }
+  ]
+}

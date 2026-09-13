@@ -1,0 +1,66 @@
+{"pid": 175021, "unix_time": 1789281280.224307, "status": "loading_model", "total_sources": 240}
+Loading checkpoint shards:   0%|          | 0/5 [00:00<?, ?it/s]Loading checkpoint shards:  20%|██        | 1/5 [00:03<00:13,  3.31s/it]Loading checkpoint shards:  40%|████      | 2/5 [00:06<00:09,  3.11s/it]Loading checkpoint shards:  60%|██████    | 3/5 [00:09<00:06,  3.10s/it]Loading checkpoint shards:  80%|████████  | 4/5 [00:11<00:02,  2.73s/it]Loading checkpoint shards: 100%|██████████| 5/5 [00:12<00:00,  2.15s/it]Loading checkpoint shards: 100%|██████████| 5/5 [00:12<00:00,  2.53s/it]
+`generation_config` default values have been modified to match model-specific defaults: {'bos_token_id': 151643}. If this is not desired, please set these values explicitly.
+{"pid": 175021, "unix_time": 1789281373.366379, "status": "running", "done_sources": 2, "total_sources": 240, "actual_forwards": 2355, "generation_batches": 1, "counts": {"QA:train:sources": 2, "QA:train:selected_targets": 16, "QA:train:usable_weak_examples": 6, "QA:train:failures": 10, "status:complete": 2}, "seconds": 80.07030179724097}
+{"pid": 175021, "unix_time": 1789281442.3429286, "status": "running", "done_sources": 4, "total_sources": 240, "actual_forwards": 4463, "generation_batches": 2, "counts": {"QA:train:sources": 4, "QA:train:selected_targets": 32, "QA:train:usable_weak_examples": 7, "QA:train:failures": 25, "status:complete": 4}, "seconds": 149.0468531511724}
+{"pid": 175021, "unix_time": 1789281538.2479053, "status": "running", "done_sources": 6, "total_sources": 240, "actual_forwards": 7298, "generation_batches": 3, "counts": {"QA:train:sources": 6, "QA:train:selected_targets": 48, "QA:train:usable_weak_examples": 19, "QA:train:failures": 29, "status:complete": 6}, "seconds": 244.9518303964287}
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/share/home/tm902089733300000/a903202310/lys/research/graph/next_iteration/grounded_graph_synthesize.py", line 167, in <module>
+    run(args)
+  File "/share/home/tm902089733300000/a903202310/lys/research/graph/next_iteration/grounded_graph_synthesize.py", line 121, in run
+    output = model.generate(input_ids=ids, attention_mask=attention, generation_config=config)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/transformers/generation/utils.py", line 2564, in generate
+    result = decoding_method(
+             ^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/transformers/generation/utils.py", line 2787, in _sample
+    outputs = model_forward(**model_inputs, return_dict=True)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1879, in _call_impl
+    return inner()
+           ^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1827, in inner
+    result = forward_call(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/transformers/utils/generic.py", line 918, in wrapper
+    output = func(self, *args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/transformers/models/qwen3/modeling_qwen3.py", line 480, in forward
+    outputs: BaseModelOutputWithPast = self.model(
+                                       ^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/transformers/utils/generic.py", line 1064, in wrapper
+    outputs = func(self, *args, **kwargs)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/transformers/models/qwen3/modeling_qwen3.py", line 407, in forward
+    position_embeddings = self.rotary_emb(hidden_states, position_ids)
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1773, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1784, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/transformers/modeling_rope_utils.py", line 87, in wrapper
+    return rope_forward(self, x, position_ids)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/transformers/models/qwen3/modeling_qwen3.py", line 330, in forward
+    sin = emb.sin() * self.attention_scaling
+          ^^^^^^^^^
+KeyboardInterrupt

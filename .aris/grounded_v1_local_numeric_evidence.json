@@ -1,0 +1,210 @@
+{
+  "mechanism": "local exact JSON scalar existence check; unavailable ARIS helper explicitly skipped; does not judge scientific claims",
+  "helper_status": "unresolved Policy B skipped",
+  "external_codex_review": "unavailable",
+  "claims": [
+    {
+      "id": "all_words/base_nll/auroc",
+      "value": 0.5354768274827701,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "all_words/base_entropy/auroc",
+      "value": 0.523665249983887,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "all_words/graph_nll/auroc",
+      "value": 0.533458282542432,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "all_words/graph_difference/auroc",
+      "value": 0.5059267612647237,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "all_words/no_edges_nll/auroc",
+      "value": 0.5326379433752018,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "all_words/no_edges_difference/auroc",
+      "value": 0.4916901101774871,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "all_words/permuted_graph_difference/auroc",
+      "value": 0.5103903592376181,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "through_first_error/base_nll/auroc",
+      "value": 0.5521052524766581,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "through_first_error/base_entropy/auroc",
+      "value": 0.6213636964947005,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "through_first_error/graph_nll/auroc",
+      "value": 0.5374981212890992,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "through_first_error/graph_difference/auroc",
+      "value": 0.39046710330065676,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "through_first_error/no_edges_nll/auroc",
+      "value": 0.5291455594317325,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "through_first_error/no_edges_difference/auroc",
+      "value": 0.2897866032275364,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "through_first_error/permuted_graph_difference/auroc",
+      "value": 0.4061230199802378,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "post_first_error/base_nll/auroc",
+      "value": 0.5165446327622046,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "post_first_error/base_entropy/auroc",
+      "value": 0.486351305680777,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "post_first_error/graph_nll/auroc",
+      "value": 0.5169613959484443,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "post_first_error/graph_difference/auroc",
+      "value": 0.5120727094102464,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "post_first_error/no_edges_nll/auroc",
+      "value": 0.5147928508330784,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "post_first_error/no_edges_difference/auroc",
+      "value": 0.5024976671339378,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "post_first_error/permuted_graph_difference/auroc",
+      "value": 0.5299888314653157,
+      "source": "outputs/grounded_graph_evaluation_v1_20260913/evaluation.json",
+      "status": "verified",
+      "file_sha256": "e72af462d58b75ec03366f1ab0861e1097cf41f378b3268085b53b6cb132020e"
+    },
+    {
+      "id": "graph_source_erased/graph/source_mean_adapter_gain_drop",
+      "value": -0.0006572022309037105,
+      "source": "outputs/grounded_graph_erasure_v1_20260913/summary.json",
+      "status": "verified",
+      "file_sha256": "49e1ec36e8eaa13f4ffdb6332d5083cc7790956ec8d6df13c6e1e23e7bb8dcc5"
+    },
+    {
+      "id": "graph_source_erased/graph/source_mean_coordinate_probability_drop",
+      "value": 0.39927560656932554,
+      "source": "outputs/grounded_graph_erasure_v1_20260913/summary.json",
+      "status": "verified",
+      "file_sha256": "49e1ec36e8eaa13f4ffdb6332d5083cc7790956ec8d6df13c6e1e23e7bb8dcc5"
+    },
+    {
+      "id": "graph_source_erased/no_edges/source_mean_adapter_gain_drop",
+      "value": -0.001100661295034505,
+      "source": "outputs/grounded_graph_erasure_v1_20260913/summary.json",
+      "status": "verified",
+      "file_sha256": "49e1ec36e8eaa13f4ffdb6332d5083cc7790956ec8d6df13c6e1e23e7bb8dcc5"
+    },
+    {
+      "id": "graph_source_erased/no_edges/source_mean_coordinate_probability_drop",
+      "value": 0.3525802390458927,
+      "source": "outputs/grounded_graph_erasure_v1_20260913/summary.json",
+      "status": "verified",
+      "file_sha256": "49e1ec36e8eaa13f4ffdb6332d5083cc7790956ec8d6df13c6e1e23e7bb8dcc5"
+    },
+    {
+      "id": "full_source_erased/graph/source_mean_adapter_gain_drop",
+      "value": 0.041304924926081225,
+      "source": "outputs/grounded_graph_erasure_v1_20260913/summary.json",
+      "status": "verified",
+      "file_sha256": "49e1ec36e8eaa13f4ffdb6332d5083cc7790956ec8d6df13c6e1e23e7bb8dcc5"
+    },
+    {
+      "id": "full_source_erased/graph/source_mean_coordinate_probability_drop",
+      "value": 0.4668006713784278,
+      "source": "outputs/grounded_graph_erasure_v1_20260913/summary.json",
+      "status": "verified",
+      "file_sha256": "49e1ec36e8eaa13f4ffdb6332d5083cc7790956ec8d6df13c6e1e23e7bb8dcc5"
+    },
+    {
+      "id": "full_source_erased/no_edges/source_mean_adapter_gain_drop",
+      "value": 0.013513799714711311,
+      "source": "outputs/grounded_graph_erasure_v1_20260913/summary.json",
+      "status": "verified",
+      "file_sha256": "49e1ec36e8eaa13f4ffdb6332d5083cc7790956ec8d6df13c6e1e23e7bb8dcc5"
+    },
+    {
+      "id": "full_source_erased/no_edges/source_mean_coordinate_probability_drop",
+      "value": 0.40933254994229396,
+      "source": "outputs/grounded_graph_erasure_v1_20260913/summary.json",
+      "status": "verified",
+      "file_sha256": "49e1ec36e8eaa13f4ffdb6332d5083cc7790956ec8d6df13c6e1e23e7bb8dcc5"
+    }
+  ]
+}

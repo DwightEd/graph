@@ -1,0 +1,128 @@
+{
+  "updated_at": "2026-09-13T14:00:27.286414+08:00",
+  "phase": "complete inventory audited; semantic reference implemented, internal graph model design under review",
+  "main_method_converged": false,
+  "main_method_validated": false,
+  "claim_supported": "no complete method claim",
+  "scientific_review": "external reviewer MCP unavailable; bounded independent engineering reviews only",
+  "historical_state_snapshot": "refine-logs/REFINE_STATE_before_sourcerel_20260913_125403.json",
+  "method_document": "docs/CURRENT_METHOD_20260913.md",
+  "active_plan": "docs/REASONED_GRAPH_METHOD_20260913.md",
+  "population_run": {
+    "status": "complete",
+    "completed": 17790,
+    "total": 17790,
+    "failed": 0,
+    "pid": null,
+    "review": "refine-logs/ragtruth_full_evaluation_review_20260913.md",
+    "tokens": 2903263,
+    "error_tokens": 156478,
+    "post_first_metrics": "completed separately; see post_first_analysis",
+    "scope": "observer replay sensitivity, not detector validation"
+  },
+  "typed_hours": {
+    "status": "complete",
+    "rows": 17790,
+    "Data2txt": 6198,
+    "contrasts": 2,
+    "train_contrasts": 1,
+    "test_contrasts": 1,
+    "native_inputs": 2,
+    "report": "docs/TYPED_HOURS_RESULTS_20260913.md",
+    "owner_metadata_correction": "outputs/typed_hours_owner_metadata_correction_20260913.json"
+  },
+  "typed_native": {
+    "status": "complete_raw_only",
+    "output": "outputs/typed_native_v2_20260913",
+    "train_candidates": 1,
+    "native_forwards": 90,
+    "strong_certificates": 0,
+    "observer_already_A_preferred": true,
+    "report": "docs/TYPED_NATIVE_RESULTS_20260913.md"
+  },
+  "source_rel_mini": {
+    "data": "outputs/source_relation_data_v1_20260913",
+    "sources": 883,
+    "train_sources": 720,
+    "validation_sources": 163,
+    "queries": 7064,
+    "candidate_occurrences": 32167,
+    "feature_documents": 38541,
+    "feature_tokens": 3954619,
+    "max_feature_tokens": 1200,
+    "unavailable_documents": 0,
+    "full_feature_status": "complete",
+    "sanity_feature_forwards": 21,
+    "sanity_train_epochs": 2,
+    "sanity_train_exit": 0,
+    "lexical_validation_top1": 0.8059815950920245,
+    "lexical_validation_recall5": 0.9900306748466258,
+    "full_training": "complete20epochs",
+    "natural_transfer": "complete; structural negative; not reliable owner model",
+    "task": "source-field pointer reconstruction; not natural ownership ground truth",
+    "full_feature_forwards": 9636,
+    "checkpoint": "outputs/source_relation_train_v1_20260913/checkpoint.pt",
+    "validation_top1": 0.9539877300613497,
+    "same_field_other_record_top1": 0.7727272727272727,
+    "errors_in_same_field_group": 55,
+    "total_validation_errors": 60,
+    "natural_candidate_queries": 622,
+    "natural_slots": 1619,
+    "natural_outtask_slots": 997,
+    "natural_ground_truth": null,
+    "results": "docs/SOURCEREL_RESULTS_20260913.md"
+  },
+  "unresolved": [
+    "accurate automatic lookback localization",
+    "applicable evidence/constraint ownership in natural answers",
+    "wrong routing vs correct arrival but aggregation/adoption failure",
+    "continuous hallucination extent with graph-adaptive boundaries"
+  ],
+  "next_action": "Resolve end-to-end native graph model objective before allocating another candidate/reader-only GPU experiment; finish bounded semantic-reference engineering.",
+  "preservation": "both branches and dirty/untracked files retained; frozen old code and outputs unchanged",
+  "post_first_analysis": {
+    "status": "complete",
+    "responses": 17790,
+    "tokens": 810750,
+    "error_tokens": 148814,
+    "legacy_metric_pairs_verified": 504,
+    "group_weighted_auroc": {
+      "entropy": 0.548,
+      "history_small_js": 0.5127,
+      "source_small_js": 0.5533,
+      "history_minus_source_support": 0.5222
+    },
+    "report": "refine-logs/population_postfirst_results_review_20260913.md",
+    "scope": "descriptive source-balanced group-AUROC weighted by token counts; not pooled, no detector claim"
+  },
+  "complete_constraint_inventory": {
+    "code": "next_iteration/constraint_inventory.py",
+    "status": "complete and independently audited",
+    "plan": "refine-logs/CONSTRAINT_INVENTORY_PLAN_20260913.md",
+    "query_scorer": "SourceRel and untrained MaxSim not promoted; semantic reference is not internal-only ownership",
+    "output": "outputs/constraint_inventory_v1_20260913",
+    "sources": 2965,
+    "components": 1241059,
+    "unknown_value_owners": 3049,
+    "long_text_fields_over_40words": 4083,
+    "mapping_failures": 0,
+    "execution_session": 72797,
+    "exit_code": 0,
+    "review": "refine-logs/constraint_inventory_doc_witness_20260913.md"
+  },
+  "reasoned_graph_reference": {
+    "code": [
+      "next_iteration/reasoned_graph.py",
+      "next_iteration/reasoned_graph_runner.py"
+    ],
+    "status": "implemented; review pending; no prepare or GPU run",
+    "role": "external semantic reference, cannot resolve internal-only ownership by itself",
+    "review": "refine-logs/reasoned_graph_engineering_20260913.md",
+    "known_review_issue": "coarse field/record renderer is not full component topology; scope made explicit",
+    "model_results": null
+  },
+  "internal_graph_model": {
+    "status": "joint grounded pointer/payload architecture under review; not implemented or trained",
+    "review_requested": "refine-logs/grounded_graph_adapter_review_20260913.md"
+  }
+}

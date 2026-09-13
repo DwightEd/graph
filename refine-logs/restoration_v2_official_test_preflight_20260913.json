@@ -1,0 +1,16 @@
+{
+  "annotation_free": true,
+  "test_responses": 2700,
+  "test_sources": 450,
+  "task_responses": {
+    "QA": 900,
+    "Summary": 900,
+    "Data2txt": 900
+  },
+  "observer_input_tokens": 2071822,
+  "max_input_tokens": 2347,
+  "exceeds16384": 0,
+  "training_source_id_overlap": [],
+  "source_graph_rows_with_repeated_generators": 1324914,
+  "original_source_array_float32_bytes": 21707390976
+}

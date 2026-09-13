@@ -1,0 +1,495 @@
+{
+  "status": "deliberately_stopped_partial",
+  "verified_at": "2026-09-13T14:41:12.320847+08:00",
+  "observed_wrapper_exit": 130,
+  "stopped_python_pid": 175021,
+  "prepared_artifact_hashes_verified": 242,
+  "live_and_snapshot_code_files_verified": 50,
+  "selected_inventory_artifacts_verified": 240,
+  "model_files_verified": 16,
+  "model_bytes_verified": 16397461896,
+  "identities": {
+    "settings": "e6539da0a60e5d76d07de5ed22f7335e55239d21f8e30217266e3bc2b099e280",
+    "input": "be388df51e83f60beafbcb4075bde85da11a40f0941279e715f0f334e28d67bb",
+    "inventory_manifest": "b4766185732788d9c96452b185e12b952a70f45dd4e95a36378b7c5a56573b09",
+    "inventory_settings": "b7a5579a668d78a2dfc29bf17016fafb4a17f07185422238479dbce596a1e958"
+  },
+  "partial_result_hashes": {
+    "results/12457.json": "5a9d234596bb262862051ef6225b32559816445abdd844601c3e9642c9004d07",
+    "results/14308.json": "c41ee4ca75b2a449c2b6b9563ca7d244a27b446c9a66efc56e38fe4bfa9dd889",
+    "results/15267.json": "ec48ca363af564af47b8501f931dcf799361003f3fde7afffc36ece4eca38946",
+    "results/15387.json": "fc28cc11f5158065fc217162afc14cfdb19306f93a6873195692322c6389ac4f",
+    "results/15407.json": "7bc45efb9fede6f386311938d433789c29136a852b1529fec1464160dc2d1c16",
+    "results/15496.json": "239b89f65fc2262b3ba55edd7b56e7f2b6c520e9aa633f228a8185bac100c3a6"
+  },
+  "execution_sha256": "4fc7ebbeca65bd7d56e0da1dbe81ef5ce62d79feccf0d6adbf47c603af542e13",
+  "prepare_manifest_sha256": "6568598fdc16073e60cddedfe5748646d6816cc3a3dec0d53c8d34bda05204b5",
+  "progress_sha256": "e0f89e3cb3d55fa0e4f41578929131de1b7c7accaa2816675b3d236b7896f773",
+  "logs_sha256": {
+    "refine-logs/grounded_graph_data_prepare_20260913.log": "3236ea3a3de9e4b97dcfb2bd9435bdcc5b7d0c98e02e49ff5e5a863c91df23e1",
+    "refine-logs/grounded_graph_data_synthesis_20260913.log": "7d5a04f515643b7f374e5b5c610899f1a206f2fc6abe1cc7eff27730206e9143"
+  },
+  "durable_progress": {
+    "pid": 175021,
+    "unix_time": 1789281538.2479053,
+    "status": "running",
+    "done_sources": 6,
+    "total_sources": 240,
+    "actual_forwards": 7298,
+    "generation_batches": 3,
+    "counts": {
+      "QA:train:sources": 6,
+      "QA:train:selected_targets": 48,
+      "QA:train:usable_weak_examples": 19,
+      "QA:train:failures": 29,
+      "status:complete": 6
+    },
+    "seconds": 244.9518303964287
+  },
+  "recounted_counts": {
+    "QA:train:sources": 6,
+    "QA:train:selected_targets": 48,
+    "QA:train:usable_weak_examples": 19,
+    "QA:train:failures": 29,
+    "status:complete": 6
+  },
+  "failure_reasons": {
+    "exact target value appears outside placeholder": 11,
+    "template must have exactly one placeholder": 18
+  },
+  "prepared_target_kind_counts": {
+    "QA:text_occurrence": 640,
+    "Summary:text_occurrence": 640,
+    "Data2txt:literal_payload": 493,
+    "Data2txt:text_occurrence": 126,
+    "Data2txt:identical_weekday_bundle": 21
+  },
+  "prepared_bundle_selected": 21,
+  "completed_batch_unique_forwards": 7298,
+  "interrupted_batch_forward_count": null,
+  "full_execution_forward_count": null,
+  "final_summary_present": false,
+  "final_result_manifest_present": false,
+  "labels_accessed": false,
+  "semantic_ground_truth": false,
+  "accepted_examples": [
+    {
+      "source_id": "12457",
+      "target_id": "t0",
+      "text": "The passage discusses the survival time with ALS.",
+      "target_span": [
+        4,
+        11
+      ],
+      "template": "The <VALUE> discusses the survival time with ALS.",
+      "source_owner_id": "3fe46742c210ce0d8c8fed62283f537b1d77414d9fd48a0ad388553a2ed316ee",
+      "source_member_ids": [
+        "3fe46742c210ce0d8c8fed62283f537b1d77414d9fd48a0ad388553a2ed316ee"
+      ],
+      "source_spans": [
+        [
+          710,
+          717
+        ]
+      ],
+      "value": "passage",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "12457",
+      "target_id": "t2",
+      "text": "The second point in the list mentions no single words by 16 months or two-word phrases by age 2.",
+      "target_span": [
+        57,
+        66
+      ],
+      "template": "The second point in the list mentions no single words by <VALUE> or two-word phrases by age 2.",
+      "source_owner_id": "75f50c8f7e546b9f74c2852c1721f980cb2f432293939418281a5fd2e74ab5dc",
+      "source_member_ids": [
+        "75f50c8f7e546b9f74c2852c1721f980cb2f432293939418281a5fd2e74ab5dc"
+      ],
+      "source_spans": [
+        [
+          1128,
+          1137
+        ]
+      ],
+      "value": "16 months",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "12457",
+      "target_id": "t3",
+      "text": "The first point in the list includes no babbling or pointing by age 1.",
+      "target_span": [
+        40,
+        48
+      ],
+      "template": "The first point in the list includes no <VALUE> or pointing by age 1.",
+      "source_owner_id": "bd8feb28e16aa0ce53411704e820bd49f0e3e8e9e17f4e1188ff2ddcf4847606",
+      "source_member_ids": [
+        "bd8feb28e16aa0ce53411704e820bd49f0e3e8e9e17f4e1188ff2ddcf4847606"
+      ],
+      "source_spans": [
+        [
+          1075,
+          1083
+        ]
+      ],
+      "value": "babbling",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "12457",
+      "target_id": "t5",
+      "text": "Not all people with ALS experience the same symptoms or the same same sequences or patterns of progression.",
+      "target_span": [
+        65,
+        79
+      ],
+      "template": "Not all people with ALS experience the same symptoms or the same <VALUE> or patterns of progression.",
+      "source_owner_id": "03a9124be1201a3e638ff029c60187a8bcf745fd29f35bd24a3a921076480740",
+      "source_member_ids": [
+        "03a9124be1201a3e638ff029c60187a8bcf745fd29f35bd24a3a921076480740"
+      ],
+      "source_spans": [
+        [
+          282,
+          296
+        ]
+      ],
+      "value": "same sequences",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "12457",
+      "target_id": "t6",
+      "text": "The list includes no smiling or social responsiveness.",
+      "target_span": [
+        32,
+        53
+      ],
+      "template": "The list includes no smiling or <VALUE>.",
+      "source_owner_id": "3fc9eb0b29d2675f223ad2b3477f86e5f448ee49209050a9b1c6b5da5c4cf051",
+      "source_member_ids": [
+        "3fc9eb0b29d2675f223ad2b3477f86e5f448ee49209050a9b1c6b5da5c4cf051"
+      ],
+      "source_spans": [
+        [
+          1307,
+          1328
+        ]
+      ],
+      "value": "social responsiveness",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "12457",
+      "target_id": "t7",
+      "text": "Symptoms can begin in the muscles that control speech and swallowing or in the hands, arms, legs or feet.",
+      "target_span": [
+        26,
+        33
+      ],
+      "template": "Symptoms can begin in the <VALUE> that control speech and swallowing or in the hands, arms, legs or feet.",
+      "source_owner_id": "5252cb663c8ceab017bbc28b297120df3382ceb35816ac38638c02823a59c678",
+      "source_member_ids": [
+        "5252cb663c8ceab017bbc28b297120df3382ceb35816ac38638c02823a59c678"
+      ],
+      "source_spans": [
+        [
+          142,
+          149
+        ]
+      ],
+      "value": "muscles",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "14308",
+      "target_id": "t4",
+      "text": "In passage 1, step 4, the fries are tossed to ensure even coating. Toss",
+      "target_span": [
+        67,
+        71
+      ],
+      "template": "In passage 1, step 4, the fries are tossed to ensure even coating. <VALUE>",
+      "source_owner_id": "8aaac691d1a995b77dadd8c0e7b8f40354430775ea8c2700f7564009d38bacb3",
+      "source_member_ids": [
+        "8aaac691d1a995b77dadd8c0e7b8f40354430775ea8c2700f7564009d38bacb3"
+      ],
+      "source_spans": [
+        [
+          762,
+          766
+        ]
+      ],
+      "value": "Toss",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "15267",
+      "target_id": "t1",
+      "text": "The speed mentioned in the text is 60 mph.",
+      "target_span": [
+        35,
+        37
+      ],
+      "template": "The speed mentioned in the text is <VALUE> mph.",
+      "source_owner_id": "fffed804e30d61ac3e44e49948ad263e58963179062ece63c33ec08f5617e571",
+      "source_member_ids": [
+        "fffed804e30d61ac3e44e49948ad263e58963179062ece63c33ec08f5617e571"
+      ],
+      "source_spans": [
+        [
+          200,
+          202
+        ]
+      ],
+      "value": "60",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "15267",
+      "target_id": "t2",
+      "text": "The system offers an option to avoid a specific portion of the route.",
+      "target_span": [
+        48,
+        55
+      ],
+      "template": "The system offers an option to avoid a specific <VALUE> of the route.",
+      "source_owner_id": "9e435b6492fd8d2ae8cc45af84240f6d58ac964f686e86d2e8949ed7091002ae",
+      "source_member_ids": [
+        "9e435b6492fd8d2ae8cc45af84240f6d58ac964f686e86d2e8949ed7091002ae"
+      ],
+      "source_spans": [
+        [
+          671,
+          678
+        ]
+      ],
+      "value": "portion",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "15267",
+      "target_id": "t3",
+      "text": "The monthly charge can be stop by canceling the subscription.",
+      "target_span": [
+        26,
+        30
+      ],
+      "template": "The monthly charge can be <VALUE> by canceling the subscription.",
+      "source_owner_id": "debfd9a3a63cc618179300398ceeb66771a2311afb3b8046c6eb53e9bba0ab97",
+      "source_member_ids": [
+        "debfd9a3a63cc618179300398ceeb66771a2311afb3b8046c6eb53e9bba0ab97"
+      ],
+      "source_spans": [
+        [
+          913,
+          917
+        ]
+      ],
+      "value": "stop",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "15267",
+      "target_id": "t4",
+      "text": "The traffic updates occur up to every 30 seconds.",
+      "target_span": [
+        38,
+        40
+      ],
+      "template": "The traffic updates occur up to every <VALUE> seconds.",
+      "source_owner_id": "366679584682c224f7ddfdcbc530ac12815c7c5302eccccafdac85b81ac83ef1",
+      "source_member_ids": [
+        "366679584682c224f7ddfdcbc530ac12815c7c5302eccccafdac85b81ac83ef1"
+      ],
+      "source_spans": [
+        [
+          108,
+          110
+        ]
+      ],
+      "value": "30",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "15267",
+      "target_id": "t7",
+      "text": "The system is up to 10 times faster than other traffic systems.",
+      "target_span": [
+        20,
+        22
+      ],
+      "template": "The system is up to <VALUE> times faster than other traffic systems.",
+      "source_owner_id": "3917d4ee5c427722bf7e925e63145f10396ab5e3c9a6d6e8e38cb24bd7f447d8",
+      "source_member_ids": [
+        "3917d4ee5c427722bf7e925e63145f10396ab5e3c9a6d6e8e38cb24bd7f447d8"
+      ],
+      "source_spans": [
+        [
+          136,
+          138
+        ]
+      ],
+      "value": "10",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "15407",
+      "target_id": "t1",
+      "text": "In passage 2, diarrhea is listed as a symptom.",
+      "target_span": [
+        14,
+        22
+      ],
+      "template": "In passage 2, <VALUE> is listed as a symptom.",
+      "source_owner_id": "ee9e3ec65b4507283b0215359528b3b60ade8ad0468c77b922f63816935a2d17",
+      "source_member_ids": [
+        "ee9e3ec65b4507283b0215359528b3b60ade8ad0468c77b922f63816935a2d17"
+      ],
+      "source_spans": [
+        [
+          408,
+          416
+        ]
+      ],
+      "value": "diarrhea",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "15407",
+      "target_id": "t2",
+      "text": "In passage 2, vomiting is listed as a symptom.",
+      "target_span": [
+        14,
+        22
+      ],
+      "template": "In passage 2, <VALUE> is listed as a symptom.",
+      "source_owner_id": "4a8b8af3057ad564573935913f827e4912c13502f01e01b1c1796741697b3e5b",
+      "source_member_ids": [
+        "4a8b8af3057ad564573935913f827e4912c13502f01e01b1c1796741697b3e5b"
+      ],
+      "source_spans": [
+        [
+          394,
+          402
+        ]
+      ],
+      "value": "vomiting",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "15407",
+      "target_id": "t3",
+      "text": "In passage 3, fatigue is listed as a symptom.",
+      "target_span": [
+        14,
+        21
+      ],
+      "template": "In passage 3, <VALUE> is listed as a symptom.",
+      "source_owner_id": "4d35c7b56143cd1f559e51ef40606cd0dfad7efd66de49c6e7f374e6057a4ce2",
+      "source_member_ids": [
+        "4d35c7b56143cd1f559e51ef40606cd0dfad7efd66de49c6e7f374e6057a4ce2"
+      ],
+      "source_spans": [
+        [
+          749,
+          756
+        ]
+      ],
+      "value": "fatigue",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "15407",
+      "target_id": "t4",
+      "text": "In passage 1, the illness is known as primary or acute HIV infection.",
+      "target_span": [
+        29,
+        34
+      ],
+      "template": "In passage 1, the illness is <VALUE> as primary or acute HIV infection.",
+      "source_owner_id": "e5be5329aa2c24460c793418e27619741f0b02605358912cd2c11b86d6a89eea",
+      "source_member_ids": [
+        "e5be5329aa2c24460c793418e27619741f0b02605358912cd2c11b86d6a89eea"
+      ],
+      "source_spans": [
+        [
+          24,
+          29
+        ]
+      ],
+      "value": "known",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "15407",
+      "target_id": "t5",
+      "text": "In passage 1, Fever is listed as a symptom.",
+      "target_span": [
+        14,
+        19
+      ],
+      "template": "In passage 1, <VALUE> is listed as a symptom.",
+      "source_owner_id": "c8f5e6636a5438cd7dbba5d62a95cffcd6a6f7cf17406458b991ee65aa799c11",
+      "source_member_ids": [
+        "c8f5e6636a5438cd7dbba5d62a95cffcd6a6f7cf17406458b991ee65aa799c11"
+      ],
+      "source_spans": [
+        [
+          131,
+          136
+        ]
+      ],
+      "value": "Fever",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "15407",
+      "target_id": "t6",
+      "text": "In passage 3, the eighth listed symptom is 8.",
+      "target_span": [
+        43,
+        44
+      ],
+      "template": "In passage 3, the eighth listed symptom is <VALUE>.",
+      "source_owner_id": "ae28859f9065a20ecf32d1771448e6c2c4397abbf1882704562e112b6dff186b",
+      "source_member_ids": [
+        "ae28859f9065a20ecf32d1771448e6c2c4397abbf1882704562e112b6dff186b"
+      ],
+      "source_spans": [
+        [
+          530,
+          531
+        ]
+      ],
+      "value": "8",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    },
+    {
+      "source_id": "15407",
+      "target_id": "t7",
+      "text": "In passage 1, the term symptoms is used to describe the illness's manifestations.",
+      "target_span": [
+        23,
+        31
+      ],
+      "template": "In passage 1, the term <VALUE> is used to describe the illness's manifestations.",
+      "source_owner_id": "722f4a92b2dd366103bfdfe0c8b020377ff487cfe7377c5140c34c35980e8023",
+      "source_member_ids": [
+        "722f4a92b2dd366103bfdfe0c8b020377ff487cfe7377c5140c34c35980e8023"
+      ],
+      "source_spans": [
+        [
+          110,
+          118
+        ]
+      ],
+      "value": "symptoms",
+      "supervision": "weak_source_template; semantic_relation_unverified"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:02,  1.18it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:01<00:01,  1.26it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:02<00:00,  1.30it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.87it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:02<00:00,  1.59it/s]
+{"pid": 179827, "unix_time": 1789285881.4449732, "status": "running", "done": 8, "total": 36, "actual_forwards": 8, "seconds": 2.7219885233789682}
+{"pid": 179827, "unix_time": 1789285885.0641859, "status": "running", "done": 16, "total": 36, "actual_forwards": 16, "seconds": 6.341201877221465}
+{"pid": 179827, "unix_time": 1789285889.9365633, "status": "running", "done": 24, "total": 36, "actual_forwards": 24, "seconds": 11.213583623990417}
+{"pid": 179827, "unix_time": 1789285892.8499296, "status": "running", "done": 32, "total": 36, "actual_forwards": 32, "seconds": 14.126947427168489}
+{"pid": 179827, "unix_time": 1789285894.294898, "status": "running", "done": 36, "total": 36, "actual_forwards": 36, "seconds": 15.571915516629815}
+{"pid": 179827, "unix_time": 1789285912.6545572, "status": "complete", "examples": 36, "actual_forwards": 36, "tokens": 5840, "counts": {"available": 36}, "seconds": 31.459462581202388, "cuda_peak_bytes": 16282228736, "labels_read": false}

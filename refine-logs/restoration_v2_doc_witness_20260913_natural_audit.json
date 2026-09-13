@@ -1,0 +1,37 @@
+{
+  "status": "passed",
+  "pid": 180034,
+  "output": "outputs/grounded_graph_restoration_natural_features_v2_20260913",
+  "manifest_sha256": "4cd8b49cc217b2f081b19ce87437900fa49e1a0036a4c3ae7139da045eab691a",
+  "manifest_artifacts": 110,
+  "original_parent_manifest_sha256": "16d22d079b01c23513587d431374c29e4d754fec39f008cbec16e26b68467cfa",
+  "original_parent_artifacts": 73,
+  "model_files_verified": 16,
+  "source_inventory_artifacts_verified": 6,
+  "code_live_snapshot_files_verified": 54,
+  "counts": {
+    "examples": 36,
+    "tokens": 5840,
+    "nodes": 20844,
+    "edges": 78960,
+    "anchors": 0,
+    "erased_tokens": 23724,
+    "boundary_crossing_tokens": 36,
+    "examples_with_boundary_crossing": 36,
+    "observer_forwards": 36,
+    "changed_query_elements": 23830591,
+    "query_elements": 23920640
+  },
+  "split": {
+    "train": 36
+  },
+  "observer_dtype": {
+    "torch.bfloat16": 36
+  },
+  "attention_implementation": {
+    "sdpa": 36
+  },
+  "checks": "complete recursive parent, model files, source/node/packet rebuild, all finite float32 arrays, original source/full query bytes, final-norm hook census, dtype/backend, pretoken timing, all positive-overlap whole source tokens, exact boundary receipts, unchanged non-source and response history",
+  "labels_read": false,
+  "seconds": 21.668994465842843
+}

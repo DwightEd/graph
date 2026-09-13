@@ -1,4 +1,30 @@
+当前进展（2026-09-13T15:46:56.948789+08:00）：A2-v1完成且自然检测无改善；A2-v2实际来源擦除恢复版已实现，正在启动特征采集。见[完整结果](docs/GROUNDED_GRAPH_V1_RESULTS_20260913.md)、[当前方法](docs/CURRENT_METHOD_20260913.md)、[新版命令](docs/GROUNDED_GRAPH_RESTORATION_V2_RUN_20260913.md)。以下旧状态保留为历史。
+
+当前进展（2026-09-13T15:07:49.713783+08:00）：完整source图与真实pretoken特征已跑完；联合图适配器训练/自然评价正在启动，尚无本版效果。当前实现见 [CURRENT_METHOD](docs/CURRENT_METHOD_20260913.md)，不要把旧SourceRel95.4%字段成绩当自然检测结果。
+
+## 当前方法与运行入口（2026-09-13T12:54:03+08:00）
+
+最新结构及已验证边界见 [当前方法](docs/CURRENT_METHOD_20260913.md)。当前在实现和验证 SourceRel-Mini 约束归属候选模块；[数据运行](docs/SOURCEREL_DATA_RUN_20260913.md)、[冻结特征](docs/SOURCEREL_FEATURE_RUN_20260913.md)、[小头训练](docs/SOURCEREL_TRAIN_RUN_20260913.md)均有具体命令。它尚不是已验证有效的完整检测器；下方soft_graph入口是已早停的历史版本。
+
+RAGTruth全量机制已完成17790/17790；typed native90forward未通过强证书。不要将辅助source-pointer准确率、raw干预效应或旧全量运行等同于回看/路由问题已解决。
+
+---
+
+## 当前主线：证据约束的消息依赖图（2026-09-13）
+
+新入口 `python -m route_graph.soft_graph_runner` 已接通结构、高维特征、有限关系判断、原始输入介导干预及全词风险。软件仍在自然验证前检查，尚无本版有效性结论。模型结构见 [SOFT_GRAPH_METHOD_20260913.md](docs/SOFT_GRAPH_METHOD_20260913.md)。
+
+v1/v2/v3严格审计均未产生native干预，v3全部4733词弃权；旧负结果完整保留。`route_graph.audit_runner`是单独的严格A/B证据层，默认`main.py`仍是历史基线。以下旧“当前”和PID属于历史记录。
+
+---
+
 # Candidate-conditioned path residuals
+
+**当前主线在迭代，尚未验证有效性。** 默认 main.py 仍运行旧路径残差基线；新增完整离线方法入口是 `python -m route_graph.audit_runner`。
+原生图 v1 的36条自然开发样本已全部执行，语义覆盖6.06%、错误召回0、实际native干预0；问题构造失败使它尚不能检验内部归属。
+原子事件槽位 v2 同一清单也已全部完成，语义覆盖0、native干预0。v3 保留原句的槽位 mask 已实现、复审关闭，正在同一清单上运行完整 A–D 验证（PID147669）。
+[当前模型结构](docs/NATIVE_METHOD_MODEL_20260913.md)、[v1真实结果](docs/NATIVE_AUDIT_V1_RESULTS_20260913.md)、[v2运行与评价指令](docs/NATIVE_AUDIT_V2_RUN_20260913.md)给出实现与限制。
+[本地数据盘点](docs/LOCAL_DATASETS_AND_RUN_STATUS_20260912.md)保留RAGTruth/HaluEval/BoolQ/CBUD的支持范围。
 
 本仓库承载主线检测方法。相关机制和候选算子在
 [reanchor 项目](https://github.com/DwightEd/reanchor) 中做具体样本验证；
@@ -9,7 +35,7 @@ reanchor 新增的回看定位、多跳来源与表征关系残差目前是实�
 
 先固定每行 attention 在角色、来源段落、距离区间中的质量以及 self edge，再比较真实路径与组内端点置换期望对候选状态的作用。保留路径、候选排名、层和最终 head 通道。二步 source-through-history residual 包含一阶偏离，不解释成纯二阶交互或真实因果贡献。
 
-**状态：已实现并验证软件流程；尚无新方法在自然数据上的检测有效性结果。** CHARM、TOHA、graph scattering、attention rollout 都是邻近已有工作，“固定图算子替代 AE”本身不是充分创新。[完整研究方案](refine-logs/FINAL_PROPOSAL.md)给出一手文献、精确公式和可证伪条件。[历史正负结果](docs/EXPERIMENT_HISTORY.md)继续保留。
+**状态：软件流程已实现，本轮自然旧捕获与机制验证均未支持检测有效性。** [2026-09-12迭代报告](docs/METHOD_ITERATION_20260912.md)记录数据恢复、冻结报警阈值和128条件机制复跑：residual首错AUROC 0.4361，entropy 0.8442；新上下文读出保留为诊断，未接入默认流程。 CHARM、TOHA、graph scattering、attention rollout 都是邻近已有工作，“固定图算子替代 AE”本身不是充分创新。[完整研究方案](refine-logs/FINAL_PROPOSAL.md)给出一手文献、精确公式和可证伪条件。[历史正负结果](docs/EXPERIMENT_HISTORY.md)继续保留。
 
 ## 默认执行路径
 
@@ -60,7 +86,7 @@ python main.py evaluate \
 
 恒定坐标不参与距离；整组无有效坐标时输出零分和 `reference_active_features=0`，表示参考没有辨别力，不表示正常。参考组不足所需来源数时失败，不跨组回退。
 
-输出包含 `residual`、`observed`、`null`、`signal`、对应 kNN、entropy、negative-margin 和 position。评价保留全部响应 token，包含首 token；报告全流、span onset、response first error、continuation 的来源平衡 AUROC/AP，以及配对来源 bootstrap AUROC 差。生成 token 的候选覆盖率不等于正确答案覆盖率，后者当前未知。未实施报警阈值选择。
+输出包含 `residual`、`observed`、`null`、`signal`、对应 kNN、entropy、negative-margin 和 position。评价保留全部响应 token，包含首 token；报告全流、span onset、response first error、continuation 的来源平衡 AUROC/AP，以及配对来源 bootstrap AUROC 差。生成 token 的候选覆盖率不等于正确答案覆盖率，后者当前未知。默认 evaluator 不选择报警阈值；本轮新增独立 `route_graph.alarms` 入口，用无标签fit来源留一评分校准阈值，并在首错处截断评价。它不保证测试中的相同实际报警预算。
 
 ## 文件职责
 
@@ -73,6 +99,9 @@ python main.py evaluate \
 | `route_graph/detector.py` | 参考拟合、同条件评分与对照 |
 | `route_graph/evaluation.py` | 标签连接、完整覆盖与统计 |
 | `route_graph/metrics.py` | 来源平衡二分类指标与 bootstrap |
+| `route_graph/archive.py`、`archive_evaluation.py` | 不完整旧捕获的严格恢复与探索性评分 |
+| `route_graph/alarms.py` | 来源留一校准、首错截断报警与配对来源评价 |
+| `route_graph/context.py` | 候选来源上下文诊断；未证有效，不进入默认检测 |
 | `onset_analysis/analysis.py` | 错误起点和正常位置匹配、回看与选择的联合观测 |
 | `onset_analysis/traces.py` | 读取已有 attention-audit v3 与独立标签 |
 | `onset_analysis/statistics.py` | 首错／后续起点分组、事件相关性与不确定性 |

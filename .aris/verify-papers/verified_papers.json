@@ -1,0 +1,120 @@
+{
+  "verdict": "WARN",
+  "reason_code": "verify_papers_unavailable",
+  "summary": "Helper unresolved after project and skill directory search; primary paper pages were opened manually, not automated arXiv/CrossRef/S2 cross-verified.",
+  "contributing_sources": [
+    "web"
+  ],
+  "papers": [
+    {
+      "title": "Measuring the Mixing of Contextual Information in the Transformer",
+      "arxiv": "2203.04212",
+      "doi": null,
+      "url": "https://aclanthology.org/2022.emnlp-main.595.pdf",
+      "source": "web",
+      "status": "unverified",
+      "method": "none",
+      "manual_primary_page_read": true
+    },
+    {
+      "title": "DecompX: Explaining Transformers Decisions by Propagating Token Decomposition",
+      "arxiv": "2306.02873",
+      "doi": null,
+      "url": "https://aclanthology.org/2023.acl-long.149/",
+      "source": "web",
+      "status": "unverified",
+      "method": "none",
+      "manual_primary_page_read": true
+    },
+    {
+      "title": "Information Flow Routes: Automatically Interpreting Language Models at Scale",
+      "arxiv": "2403.00824",
+      "doi": null,
+      "url": "https://arxiv.org/html/2403.00824v2",
+      "source": "web",
+      "status": "unverified",
+      "method": "none",
+      "manual_primary_page_read": true
+    },
+    {
+      "title": "ReDeEP: Detecting Hallucination in Retrieval-Augmented Generation via Mechanistic Interpretability",
+      "arxiv": "2410.11414",
+      "doi": null,
+      "url": "https://arxiv.org/html/2410.11414",
+      "source": "web",
+      "status": "unverified",
+      "method": "none",
+      "manual_primary_page_read": true
+    },
+    {
+      "title": "Learning on Large-scale Text-attributed Graphs via Variational Inference",
+      "arxiv": "2210.14709",
+      "doi": null,
+      "url": "https://arxiv.org/html/2210.14709",
+      "source": "web",
+      "status": "unverified",
+      "method": "none",
+      "manual_primary_page_read": true
+    },
+    {
+      "title": "Can GNN be Good Adapter for LLMs?",
+      "arxiv": "2402.12984",
+      "doi": null,
+      "url": "https://arxiv.org/html/2402.12984",
+      "source": "web",
+      "status": "unverified",
+      "method": "none",
+      "manual_primary_page_read": true
+    },
+    {
+      "title": "GraphPrompt: Unifying Pre-Training and Downstream Tasks for Graph Neural Networks",
+      "arxiv": "2302.08043",
+      "doi": null,
+      "url": "https://arxiv.org/html/2302.08043v2",
+      "source": "web",
+      "status": "unverified",
+      "method": "none",
+      "manual_primary_page_read": true
+    },
+    {
+      "title": "GraphCLIP: Enhancing Transferability in Graph Foundation Models for Text-Attributed Graphs",
+      "arxiv": "2410.10329",
+      "doi": null,
+      "url": "https://arxiv.org/html/2410.10329v4",
+      "source": "web",
+      "status": "unverified",
+      "method": "none",
+      "manual_primary_page_read": true
+    },
+    {
+      "title": "Semantic Entropy Probes: Robust and Cheap Hallucination Detection in LLMs",
+      "arxiv": "2406.15927",
+      "doi": null,
+      "url": "https://arxiv.org/abs/2406.15927",
+      "source": "web",
+      "status": "unverified",
+      "method": "none",
+      "manual_primary_page_read": true
+    },
+    {
+      "title": "SemEval-2025 Task 3: Mu-SHROOM, the Multilingual Shared-task on Hallucinations and Related Observable Overgeneration Mistakes",
+      "arxiv": null,
+      "doi": null,
+      "url": "https://aclanthology.org/2025.semeval-1.322/",
+      "source": "web",
+      "status": "unverified",
+      "method": "none",
+      "manual_primary_page_read": true
+    },
+    {
+      "title": "Neural Message-Passing on Attention Graphs for Hallucination Detection",
+      "arxiv": "2509.24770",
+      "doi": null,
+      "url": "https://arxiv.org/html/2509.24770",
+      "source": "web",
+      "status": "unverified",
+      "method": "none",
+      "manual_primary_page_read": true
+    }
+  ]
+}

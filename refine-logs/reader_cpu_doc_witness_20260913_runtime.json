@@ -1,0 +1,31 @@
+{
+  "start": "2026-09-13 02:49:08 UTC",
+  "finish": "2026-09-13 02:57:42 UTC",
+  "session": 29651,
+  "pid": 163204,
+  "exit_code": 0,
+  "monitor": [
+    {
+      "utc": "2026-09-13T02:49:40.330508+00:00",
+      "pid": 163204,
+      "gpu_device_fds": [],
+      "files": [
+        "settings.json"
+      ]
+    },
+    {
+      "chunk_id": "27f00a",
+      "wall_time_seconds": 0.008776317,
+      "exit_code": 0,
+      "original_token_count": 59,
+      "output": "utc 2026-09-13T02:50:11.113747+00:00\nstatus State:\tR (running)\nNSpid:\t163204\nVmHWM:\t16159172 kB\nVmRSS:\t15747360 kB\nThreads:\t14\ngpu_device_fds []\noutput_files ['00.json', 'settings.json']\ngpu_processes 3598631, [Not Found], 20002 MiB\n"
+    },
+    {
+      "chunk_id": "9b16f0",
+      "wall_time_seconds": 0.000009286,
+      "exit_code": 0,
+      "original_token_count": 62,
+      "output": "{\"utc\": \"2026-09-13T02:55:50.885781+00:00\", \"count\": 7, \"gpu_processes\": \"3598631, [Not Found], 20002 MiB\", \"status\": [\"State:\\tR (running)\", \"NSpid:\\t163204\", \"VmHWM:\\t18012736 kB\", \"VmRSS:\\t16075104 kB\", \"Threads:\\t14\"], \"gpu_device_fds\": []}\n"
+    }
+  ]
+}

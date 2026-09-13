@@ -1,0 +1,103 @@
+{
+  "phase": "missing_constraint_design_after_relation_localization",
+  "date": "2026-09-13",
+  "round": 7,
+  "status": "O4_O5_complete_population_running",
+  "claim_supported": "no",
+  "scientific_review": "REVIEW_UNAVAILABLE",
+  "main_method_validated": false,
+  "next_action": "Prepare O6 missing-constraint and pre-specificity behavior protocol; then independent-source readout and joint-query candidate validation. Keep frozen population running.",
+  "report": "docs/MECHANISM_ITERATION_20260913.md",
+  "engineering_review": "O4/O5 scoped engineering and independent raw CPU reanalysis: no Required; not scientific approval",
+  "final_mechanism_results": "../reanchor/results/relation_analysis_20260913",
+  "proposal": "refine-logs/FINAL_PROPOSAL.md",
+  "protocol": "refine-logs/EXPERIMENT_PLAN.md",
+  "latest_user_scope": "Validate the unresolved mechanisms individually and iterate toward a usable method.",
+  "inventory": "docs/REAL_WINDOW_CONSTRAINT_INVENTORY_20260912.md",
+  "graph_protocol": "docs/ATTRIBUTED_SAMPLE_GRAPH_20260912.md",
+  "graph_results": "../reanchor/outputs/attributed_samples_20260912",
+  "user_clarification_received": true,
+  "graph_capture_checks": "2 tiny tests passed; independent literal invocation exit0; 33 hashes verified; all-layer bf16 rounded residual addition exact",
+  "graph_engineering_review": "No Required/Critical findings; three documented optional validator/provenance improvements",
+  "protocols": [
+    "docs/OWNERSHIP_FACTORIAL_PLAN_20260912.md",
+    "docs/OWNERSHIP_MULTILAYER_PLAN_20260912.md",
+    "docs/OWNERSHIP_SOURCE_LAYER_PLAN_20260912.md",
+    "docs/RELATION_ONLY_PLAN_20260913.md",
+    "docs/RELATION_ROUTING_PLAN_20260913.md"
+  ],
+  "latest_mechanism_observations": {
+    "source_scope": "one source, four existing generation seeds, one incorrect numeric window",
+    "joint_final_query_x_and_endpoint_swap": "native choices flipped in both studied windows",
+    "single_layer_x": "all 32 individually tested; no native choice flips in either window",
+    "automatic_ownership_validity": "not validated"
+  },
+  "gpu_jobs_running": true,
+  "latest_verification": "O4/O5 independent executions exit0; 190/175 hashes; exact sham/prefix and O5 baseline/final-E reproduction. Independent CPU analysis has no Required. Population resume verified with new manifests.",
+  "evidence_precheck": ".aris/ownership_evidence_precheck_20260912.json",
+  "latest_audit_artifacts": ".aris/relation_population_audit_artifacts_20260913.json",
+  "mainline_executable_status": {
+    "legacy_path_residual": "runnable for RAGTruth QA; not the new ownership method",
+    "attributed_graph_and_ownership": "capture/intervention implemented; automatic graph-to-risk readout and end-to-end evaluation not implemented"
+  },
+  "ragtruth_readiness_report": "docs/LOCAL_DATASETS_AND_RUN_STATUS_20260912.md",
+  "ragtruth_qa_prepared": "outputs/qa_full_preflight_20260912/input.jsonl (989 sources; 494 reference/495 test; legacy hash split)",
+  "population_run": {
+    "pid": 20383,
+    "expected_responses": 17790,
+    "output": "../reanchor/outputs/ragtruth_population_20260912",
+    "log": "../reanchor/runs/ragtruth_population_resume_relation_routing_20260913.log",
+    "status": "running",
+    "protocol": "docs/RAGTRUTH_POPULATION_MECHANISM_PLAN_20260912.md",
+    "status_report": "docs/RAGTRUTH_POPULATION_RUN_STATUS_20260912.md",
+    "smoke": "6/6 responses, 48 conditions, 1491 tokens, exact sham/prefix, two resumes reused unchanged artifacts",
+    "scientific_review": "REVIEW_UNAVAILABLE",
+    "last_verified_completed": 5514,
+    "last_verified_failed": 0,
+    "last_verified_at": "2026-09-13T01:46:22+08:00",
+    "launch_snapshot": "results/ragtruth_population_launch_20260912.json"
+  },
+  "O4": {
+    "status": "complete",
+    "worlds": 4,
+    "patches": 160,
+    "native_relation_choices": "4/4 controlled worlds",
+    "X_final_flips": 0,
+    "E_final_flips": 4,
+    "node_attention_graph_choices": [
+      3,
+      2,
+      2
+    ],
+    "single_query_X_scan_flips": 0,
+    "scope": "one source, natural after prefix and constructed before control; added stage rules"
+  },
+  "O5": {
+    "status": "complete",
+    "protocol": "docs/RELATION_ROUTING_PLAN_20260913.md",
+    "planned_conditions": 167,
+    "conditions": 167,
+    "single_query_E_unique_flips": [
+      131
+    ],
+    "single_layer_E_unique_flips": [],
+    "without_final_native": "12",
+    "without_final_margin": -0.25,
+    "top8_recall": 0.0,
+    "top8_target_count": 1,
+    "interpretation": "t131 sufficient, not required as a patch in the joint-donor condition; no universal lookback guarantee",
+    "output": "../reanchor/outputs/relation_routing_20260913",
+    "report": "docs/RELATION_MECHANISM_RESULTS_20260913.md"
+  },
+  "O6": {
+    "status": "design_not_run",
+    "plan": "docs/MISSING_CONSTRAINT_PLAN_20260913.md",
+    "code_implemented": false
+  },
+  "population_partial_evaluation": {
+    "snapshot_responses": 4077,
+    "complete_QA_generator_groups": 4,
+    "file": "../reanchor/results/ragtruth_population_partial_20260913.json",
+    "scope": "observer replay; QA official test inspected for exploratory design; not full population"
+  }
+}

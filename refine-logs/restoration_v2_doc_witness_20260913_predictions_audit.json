@@ -1,0 +1,28 @@
+{
+  "status": "passed",
+  "pid": 180502,
+  "manifest_sha256": "0f8a9b506e9a960c47ddf5d8bdf013091625bb7b5ba886775e7605679c57f69f",
+  "artifacts_verified": 73,
+  "v1_artifacts_verified": 73,
+  "code_live_snapshot_verified": 58,
+  "counts": {
+    "responses": 36,
+    "tokens": 5840,
+    "words": 4733,
+    "unavailable_words": 0
+  },
+  "source_training_overlap": {
+    "unseen": 30,
+    "train": 6
+  },
+  "v1_baseline_token_values_exact": 11680,
+  "v1_baseline_word_values_exact": 9466,
+  "source_node_order_exact": 36,
+  "full_risk_definition": "logp_full - logp_restore = restore_nll - full_nll",
+  "restoration_risk_definition": "logp_empty - logp_restore = restore_nll - empty_nll",
+  "max_score_family_arithmetic_residual": 9.5367431640625e-07,
+  "adapter_forwards": 108,
+  "observer_forwards": 0,
+  "labels_read": false,
+  "seconds": 2.098757691681385
+}

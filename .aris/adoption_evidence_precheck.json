@@ -1,0 +1,22 @@
+{
+  "artifact_files_verified": 19,
+  "code_and_execution_snapshots_match": true,
+  "query_count": 7,
+  "source_count": 1,
+  "first_affected_prediction": 134,
+  "small_attenuation_error_range": [
+    0.007994893938302994,
+    0.03369273245334625
+  ],
+  "claim_supported": "no",
+  "instrumentation_only": true,
+  "scientific_review": "REVIEW_UNAVAILABLE",
+  "known_limitations": [
+    "hand-selected seed/case",
+    "no factual span labels for this pilot",
+    "fixed continuation access cut not total generation effect",
+    "terminal suffix only",
+    "native candidate contrast not necessarily semantic alternative",
+    "model weights identified by file metadata, not full weight hashes"
+  ]
+}

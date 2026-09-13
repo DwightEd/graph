@@ -1,0 +1,53 @@
+{
+  "checked_at": "2026-09-12T23:35:58+08:00",
+  "progress": {
+    "status": "running",
+    "pid": 16928,
+    "total": 17790,
+    "completed": 54,
+    "failed": 0,
+    "remaining": 17736,
+    "current_response": "12183",
+    "condition": "history_01",
+    "last_response_seconds": 1.7271215673536062,
+    "elapsed_seconds_this_process": 106.17777964659035,
+    "updated_unix": 1789227358.4209776,
+    "by_task": {
+      "QA": 5934,
+      "Summary": 5658,
+      "Data2txt": 6198
+    }
+  },
+  "input_manifest": {
+    "sha256": "be388df51e83f60beafbcb4075bde85da11a40f0941279e715f0f334e28d67bb",
+    "responses": 17790,
+    "sources": 2965,
+    "by_task": {
+      "QA": 5934,
+      "Summary": 5658,
+      "Data2txt": 6198
+    },
+    "by_generator": {
+      "llama-2-7b-chat": 2965,
+      "gpt-3.5-turbo-0613": 2965,
+      "gpt-4-0613": 2965,
+      "llama-2-13b-chat": 2965,
+      "llama-2-70b-chat": 2965,
+      "mistral-7B-instruct": 2965
+    },
+    "max_input_tokens": 2616,
+    "response_tokens": 2903263
+  },
+  "length_preflight": {
+    "configured_limit": 8192,
+    "max_input_tokens": 2616,
+    "oversized": []
+  },
+  "verified_published_files": 12,
+  "code_hashes_verified": 8,
+  "process_namespace": [
+    "NSpid:\t16928"
+  ],
+  "output": "/share/home/tm902089733300000/a903202310/lys/research/reanchor/outputs/ragtruth_population_20260912",
+  "scientific_review": "REVIEW_UNAVAILABLE"
+}

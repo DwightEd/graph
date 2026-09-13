@@ -1,0 +1,55 @@
+{
+  "status": "passed",
+  "pid": 180322,
+  "manifest_sha256": "060204b81200704abe3d8384aebcafe57d0f7d5bc2f87a3ee5562f6c35040e32",
+  "artifacts_verified": 45,
+  "code_live_snapshot_verified": 57,
+  "initial_state_dicts_identical_to_v1": [
+    "outputs/grounded_graph_train_v1_20260913/graph/initial.pt",
+    "outputs/grounded_graph_train_v1_20260913/no_edges/initial.pt",
+    "outputs/grounded_graph_restoration_train_v2_20260913/graph/initial.pt",
+    "outputs/grounded_graph_restoration_train_v2_20260913/no_edges/initial.pt"
+  ],
+  "parameters_per_arm": 1641089,
+  "source_split": {
+    "train": 192,
+    "validation": 48
+  },
+  "total_tokens": 135519,
+  "total_anchors": 9220,
+  "optimizer_updates": 480,
+  "adapter_forwards": 612,
+  "observer_forwards": 0,
+  "selected": {
+    "graph": {
+      "epoch": 7,
+      "objective": 3.4438358740064925,
+      "checkpoint_sha256": "3e06e186887e1ec3a98bd0c86743808162c3457e6d0fa603d685346650e65e00",
+      "validation": {
+        "token_ce": 2.1420560357326073,
+        "pointer_nll": 1.3017798382738852,
+        "objective": 3.4438358740064925,
+        "pointer_top1": 0.6029016657710908,
+        "tokens": 26574,
+        "pointers": 1861,
+        "adapter_forwards": 6
+      }
+    },
+    "no_edges": {
+      "epoch": 7,
+      "objective": 3.3548133491658705,
+      "checkpoint_sha256": "9e9e5bb793f77fd04f03cf6d135a499d565f673a38833187f25ed0ea99f5840f",
+      "validation": {
+        "token_ce": 2.1432387979733827,
+        "pointer_nll": 1.211574551192488,
+        "objective": 3.3548133491658705,
+        "pointer_top1": 0.629768941429339,
+        "tokens": 26574,
+        "pointers": 1861,
+        "adapter_forwards": 6
+      }
+    }
+  },
+  "labels_read": false,
+  "seconds": 33.664803801104426
+}

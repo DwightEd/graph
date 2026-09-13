@@ -1,0 +1,14 @@
+{
+  "responses": 217,
+  "tokens": 47880,
+  "widths": [
+    1920
+  ],
+  "candidate_counts": [
+    4
+  ],
+  "strict_validation_passed": true,
+  "archive_index_sha256": "1d065548ece1a6d20019f55d63b2eed3a949f7537c0364bcdf94bb23773a1293",
+  "input_sha256": "ef0c87e42df956a82d062486685aeb17ea643e5198d52f10379b02d1d831aaa6",
+  "validator_sha256": "5d23a35601978d5dc9ba583415958d92a5209a473cff48d46fd7a51bcfd2f4a4"
+}

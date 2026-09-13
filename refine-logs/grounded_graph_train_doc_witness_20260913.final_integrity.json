@@ -1,0 +1,24 @@
+{
+  "frozen_code_files_verified": 57,
+  "outputs": {
+    "grounded_graph_train_v1_20260913": {
+      "manifest_sha256": "899c8b7da2049e01ae487bf2c72b03cd581064021db7149bffb3fecb5f286c6a",
+      "artifacts_verified": 45
+    },
+    "grounded_graph_predictions_v1_20260913": {
+      "manifest_sha256": "9f4d53423de3f30352199b03a52845cc6944a55056d446948885766c4b440be3",
+      "artifacts_verified": 73
+    },
+    "grounded_graph_evaluation_v1_20260913": {
+      "manifest_sha256": "7cdb074730827bff9acdf4dfaa1d91da92d1bbe20e3942b49b26192661f87542",
+      "artifacts_verified": 2
+    }
+  },
+  "gpu_final_observation": "0, 1 MiB, 24564 MiB",
+  "documented_commands_exit_codes": [
+    0,
+    0,
+    0
+  ],
+  "documented_commands_executed_once": true
+}

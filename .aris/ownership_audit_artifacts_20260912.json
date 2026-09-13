@@ -1,0 +1,31 @@
+{
+  "date": "2026-09-12",
+  "scientific_reviewer": null,
+  "overall_verdict": "NOT_RUN",
+  "reason": "Codex/manual scientific reviewer backend not callable; no independent verdict fabricated",
+  "protocols": [
+    "docs/OWNERSHIP_FACTORIAL_PLAN_20260912.md",
+    "docs/OWNERSHIP_MULTILAYER_PLAN_20260912.md",
+    "docs/OWNERSHIP_SOURCE_LAYER_PLAN_20260912.md"
+  ],
+  "report": "docs/OWNERSHIP_MECHANISM_RESULTS_20260912.md",
+  "code": [
+    "route_graph/ownership.py",
+    "tests/test_ownership.py",
+    "../reanchor/src/decoding/ownership_factorial.py",
+    "../reanchor/src/decoding/ownership_multilayer.py",
+    "../reanchor/src/decoding/ownership_source_layer.py"
+  ],
+  "raw_runs": [
+    "../reanchor/outputs/ownership_factorial_20260912",
+    "../reanchor/outputs/ownership_multilayer_20260912",
+    "../reanchor/outputs/ownership_source_layer_20260912"
+  ],
+  "analyses": [
+    "../reanchor/results/ownership_analysis_20260912",
+    "../reanchor/results/ownership_source_layer_analysis_v2_20260912"
+  ],
+  "ground_truth": "No detector labels or fitted truth. Manual source/action inventory; counterfactual inputs do not repair unsupported onion duration.",
+  "evidence_precheck": ".aris/ownership_evidence_precheck_20260912.json",
+  "engineering_review": "refine-logs/ownership_engineering_review_round4_20260912.md"
+}

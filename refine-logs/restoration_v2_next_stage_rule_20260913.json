@@ -1,0 +1,37 @@
+{
+  "created_at": "2026-09-13T15:57:11.983749+08:00",
+  "evaluation_results_exist_at_freeze": false,
+  "development_population": "same reused36responses; not independent",
+  "prespecified_risk_families": [
+    "full-source logp minus restored logp",
+    "empty-source logp minus restored logp"
+  ],
+  "arms": [
+    "graph",
+    "no_edges"
+  ],
+  "advance_to_official_test_if": "at least one prespecified family in one arm exceeds base_nll source-balanced AUROC in BOTH all_words and post_first_error on development AND that arm passes positive source48 anchor restoration gain and fixed-query payload erasure drop gate",
+  "interpretation": "exploratory development-based score choice must be named; does not change source-val checkpoint selection or claim test success",
+  "if_no_qualifying_family": "no blind scaling/extra epochs; diagnose representation/domain gap using completed outputs, mark failed gates explicitly",
+  "official_test_if_advanced": {
+    "responses": 2700,
+    "sources": 450,
+    "tasks": [
+      "QA",
+      "Summary",
+      "Data2txt"
+    ],
+    "report_all_frozen_scores": true,
+    "drop_unavailable": false,
+    "read_test_labels_only_after_prediction_freeze": true,
+    "choose_checkpoint_using_test": false,
+    "fit_direction_using_test": false,
+    "graph_claim_requires_graph_increment_over_no_edges": true
+  },
+  "unresolved_claims": [
+    "natural semantic owner truth",
+    "accurate native lookback",
+    "native wrong route versus aggregation",
+    "continuous causal range"
+  ]
+}

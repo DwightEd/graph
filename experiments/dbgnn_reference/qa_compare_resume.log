@@ -1,0 +1,28 @@
+Starting gcn from stage 4
+[4/5] Fit PCA-kNN on node embeddings and freeze scores
+detect completed
+reference: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/dbgnn_reference/outputs/qa_compare/gcn/detector.npz
+scores: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/dbgnn_reference/outputs/qa_compare/gcn/scores.npz
+samples: 149
+nodes: 30619
+[5/5] Keep labels closed
+Finished: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/dbgnn_reference/outputs/qa_compare/gcn
+Starting dbgnn from stage 4
+[4/5] Fit PCA-kNN on node embeddings and freeze scores
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/share/home/tm902089733300000/a903202310/lys/research/graph/experiments/dbgnn_reference/run.py", line 143, in <module>
+    main()
+  File "/share/home/tm902089733300000/a903202310/lys/research/graph/experiments/dbgnn_reference/run.py", line 98, in main
+    report = detect(
+             ^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/research/graph/experiments/dbgnn_reference/pipeline.py", line 384, in detect
+    reference = fit_detector(calibration.embedding, detector_config)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/research/graph/experiments/grounded_route/detection.py", line 132, in fit
+    return PCAWhitenedKNN.fit(embedding, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/research/graph/experiments/grounded_route/detection.py", line 71, in fit
+    raise ValueError("PCA-kNN reference embeddings have no varying direction")
+ValueError: PCA-kNN reference embeddings have no varying direction

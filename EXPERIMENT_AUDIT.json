@@ -1,0 +1,10 @@
+{
+  "date": "2026-09-12",
+  "auditor": null,
+  "overall_verdict": "not_run",
+  "integrity_status": "unavailable",
+  "reason": "Required independent scientific reviewer backend is not callable; no audit verdict fabricated.",
+  "artifacts": ".aris/audit_artifacts.json",
+  "deterministic_evidence_precheck": ".aris/evidence_precheck.json",
+  "scope": "evidence precheck and engineering review are not an independent integrity audit"
+}

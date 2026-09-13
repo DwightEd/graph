@@ -1,0 +1,63 @@
+
+[1/7] Build train graph spec
+build completed
+spec: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/grounded_route/outputs/qa_attention_row_smoke/train_graph.json
+samples: 30
+
+[2/7] Fit GroundedRoute encoder
+fit epoch 1:   0%|          | 0/20 [00:00<?, ?sample/s]fit epoch 1:   5%|▌         | 1/20 [00:02<00:52,  2.75s/sample]fit epoch 1:  10%|█         | 2/20 [00:04<00:38,  2.13s/sample]fit epoch 1:  15%|█▌        | 3/20 [00:05<00:27,  1.61s/sample]fit epoch 1:  20%|██        | 4/20 [00:06<00:23,  1.45s/sample]fit epoch 1:  25%|██▌       | 5/20 [00:07<00:18,  1.20s/sample]fit epoch 1:  30%|███       | 6/20 [00:08<00:15,  1.14s/sample]fit epoch 1:  35%|███▌      | 7/20 [00:09<00:14,  1.09s/sample]fit epoch 1:  40%|████      | 8/20 [00:10<00:12,  1.04s/sample]fit epoch 1:  45%|████▌     | 9/20 [00:11<00:11,  1.01s/sample]fit epoch 1:  50%|█████     | 10/20 [00:12<00:09,  1.01sample/s]fit epoch 1:  55%|█████▌    | 11/20 [00:13<00:10,  1.11s/sample]fit epoch 1:  60%|██████    | 12/20 [00:14<00:08,  1.06s/sample]fit epoch 1:  65%|██████▌   | 13/20 [00:15<00:07,  1.08s/sample]fit epoch 1:  70%|███████   | 14/20 [00:16<00:06,  1.06s/sample]fit epoch 1:  75%|███████▌  | 15/20 [00:17<00:04,  1.07sample/s]fit epoch 1:  80%|████████  | 16/20 [00:18<00:03,  1.06sample/s]fit epoch 1:  85%|████████▌ | 17/20 [00:19<00:03,  1.01s/sample]fit epoch 1:  90%|█████████ | 18/20 [00:20<00:02,  1.08s/sample]fit epoch 1:  95%|█████████▌| 19/20 [00:21<00:01,  1.13s/sample]fit epoch 1: 100%|██████████| 20/20 [00:22<00:00,  1.09s/sample]fit epoch 1: 100%|██████████| 20/20 [00:22<00:00,  1.15s/sample]
+fit completed
+checkpoint: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/grounded_route/outputs/qa_attention_row_smoke/model.pt
+samples: 20
+train_loss: 2.7567479729652407
+best_validation_loss: 2.5515047311782837
+parameter_count: 1011204
+variant: real
+message_mode: neighbor
+changed_fraction: 0.0
+
+[3/7] Encode calibration nodes
+encode calibration:   0%|          | 0/6 [00:00<?, ?sample/s]encode calibration:  17%|█▋        | 1/6 [00:01<00:05,  1.06s/sample]encode calibration:  33%|███▎      | 2/6 [00:01<00:03,  1.15sample/s]encode calibration:  50%|█████     | 3/6 [00:02<00:02,  1.38sample/s]encode calibration:  67%|██████▋   | 4/6 [00:02<00:01,  1.46sample/s]encode calibration:  83%|████████▎ | 5/6 [00:03<00:00,  1.71sample/s]encode calibration: 100%|██████████| 6/6 [00:04<00:00,  1.63sample/s]encode calibration: 100%|██████████| 6/6 [00:04<00:00,  1.48sample/s]
+encode completed
+embeddings: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/grounded_route/outputs/qa_attention_row_smoke/calibration/index.npz
+samples: 6
+nodes: 1192
+variant: real
+message_mode: neighbor
+changed_fraction: 0.0
+
+[4/7] Build test graph spec
+build completed
+spec: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/grounded_route/outputs/qa_attention_row_smoke/test_graph.json
+samples: 10
+
+[5/7] Encode test nodes
+encode all:   0%|          | 0/10 [00:00<?, ?sample/s]encode all:  10%|█         | 1/10 [00:01<00:09,  1.10s/sample]encode all:  20%|██        | 2/10 [00:01<00:06,  1.28sample/s]encode all:  30%|███       | 3/10 [00:02<00:04,  1.49sample/s]encode all:  40%|████      | 4/10 [00:02<00:03,  1.54sample/s]encode all:  50%|█████     | 5/10 [00:03<00:03,  1.63sample/s]encode all:  60%|██████    | 6/10 [00:04<00:02,  1.58sample/s]encode all:  70%|███████   | 7/10 [00:04<00:02,  1.44sample/s]encode all:  80%|████████  | 8/10 [00:05<00:01,  1.52sample/s]encode all:  90%|█████████ | 9/10 [00:06<00:00,  1.47sample/s]encode all: 100%|██████████| 10/10 [00:06<00:00,  1.64sample/s]encode all: 100%|██████████| 10/10 [00:06<00:00,  1.51sample/s]
+encode completed
+embeddings: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/grounded_route/outputs/qa_attention_row_smoke/test/index.npz
+samples: 10
+nodes: 2076
+variant: real
+message_mode: neighbor
+changed_fraction: 0.0
+
+[6/7] Fit PCA-kNN and score test nodes
+detect completed
+reference: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/grounded_route/outputs/qa_attention_row_smoke/detector.npz
+scores: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/grounded_route/outputs/qa_attention_row_smoke/scores.npz
+samples: 10
+nodes: 2076
+variant: real
+message_mode: neighbor
+changed_fraction: 0.0
+
+[7/7] Evaluate frozen scores
+evaluate completed
+evaluation: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/grounded_route/outputs/qa_attention_row_smoke/evaluation.json
+samples: 10
+variant: real
+changed_fraction: 0.0
+auroc: 0.5687552213868003
+auprc: 0.04132327795780495
+
+Finished: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/grounded_route/outputs/qa_attention_row_smoke

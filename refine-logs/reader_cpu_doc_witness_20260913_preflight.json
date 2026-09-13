@@ -1,0 +1,150 @@
+{
+  "utc": "2026-09-13T02:49:07.818141+00:00",
+  "candidate_counts": {
+    "edit_kind": 145,
+    "edited_base": 145,
+    "preservation": 145,
+    "selected_occurrence": 145,
+    "target_original": 42
+  },
+  "selected": [
+    {
+      "kind": "edit_kind",
+      "digest": "0230ca6e17f22ea430818ca4062b50a5422b31deed47f4f1dd6c955b369618b4",
+      "receipt": {
+        "path": "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/0230ca6e17f22ea430818ca4062b50a5422b31deed47f4f1dd6c955b369618b4.json",
+        "sha256": "7f86b7948870b80d1b3e6995c6bc1c966f07b89d3aaa7944cfcffdae797a4e6a"
+      }
+    },
+    {
+      "kind": "edit_kind",
+      "digest": "029ea33395ef1a7de671d4586e6f35c8f21669e978d162caa38ad8db78d6088b",
+      "receipt": {
+        "path": "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/029ea33395ef1a7de671d4586e6f35c8f21669e978d162caa38ad8db78d6088b.json",
+        "sha256": "65bdcda9f9202537cc1471d5df49c5eacd86bc66fadf4f1c00cb9fb3cc93b7fd"
+      }
+    },
+    {
+      "kind": "edited_base",
+      "digest": "01744ba05d4e8d5da3f390397cf03362441a327ca868928ce4a41ea6ee10809c",
+      "receipt": {
+        "path": "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/01744ba05d4e8d5da3f390397cf03362441a327ca868928ce4a41ea6ee10809c.json",
+        "sha256": "08a947a748477bad9440d97ca06731947b62abc29bdcfac90b9b4884c79e0b4e"
+      }
+    },
+    {
+      "kind": "edited_base",
+      "digest": "01a62edce93ab4d87604cc72859aa97e5fded864070522546616d6941d96cf76",
+      "receipt": {
+        "path": "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/01a62edce93ab4d87604cc72859aa97e5fded864070522546616d6941d96cf76.json",
+        "sha256": "331d22c5a1d2267fd622f55edce64e0793c2f644b3f8f12fddaf5a6062be5dc4"
+      }
+    },
+    {
+      "kind": "preservation",
+      "digest": "0128f1a13b36841afa827f9508a9a05a3971d8d5a78332e4caa57e283b26e670",
+      "receipt": {
+        "path": "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/0128f1a13b36841afa827f9508a9a05a3971d8d5a78332e4caa57e283b26e670.json",
+        "sha256": "77e7f31aaa3b572b80f170286408eb630a3c4370622f4e11b0ca5d10a2ecebdb"
+      }
+    },
+    {
+      "kind": "preservation",
+      "digest": "044c7673b400eec1ddc066ceba615e7eb769b326b3a6248ef17508b81edcbec9",
+      "receipt": {
+        "path": "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/044c7673b400eec1ddc066ceba615e7eb769b326b3a6248ef17508b81edcbec9.json",
+        "sha256": "0ce971c79d7ba68534ead9c30b3386873dc6c21d528e2617bf2256716cdf480a"
+      }
+    },
+    {
+      "kind": "selected_occurrence",
+      "digest": "0088e7116bdca373c1ffbb09ff8a62dca6a104244218c557321859e2d6e85422",
+      "receipt": {
+        "path": "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/0088e7116bdca373c1ffbb09ff8a62dca6a104244218c557321859e2d6e85422.json",
+        "sha256": "e60059383e1b4a7bb668b77f59ee4dbde19339519fb30cfddd246691888efc04"
+      }
+    },
+    {
+      "kind": "selected_occurrence",
+      "digest": "014d489edf12e08e19971eb18cada95fe26def950ca7fbc717d03d586cff0420",
+      "receipt": {
+        "path": "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/014d489edf12e08e19971eb18cada95fe26def950ca7fbc717d03d586cff0420.json",
+        "sha256": "9c8f7a358a7fdd0fb4b1a8587d8bafdfb4043af9186543decaf6f4a871e32a81"
+      }
+    },
+    {
+      "kind": "target_original",
+      "digest": "03edcd2fd04ddbcd9f54404045aa08e7a1a8fb0c6d4d48bbcf8fbd703a0b2c95",
+      "receipt": {
+        "path": "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/03edcd2fd04ddbcd9f54404045aa08e7a1a8fb0c6d4d48bbcf8fbd703a0b2c95.json",
+        "sha256": "a882aa2fb5e47cfe8862f72635d501463e16a4f795668cc8bf3431dd3f386ad9"
+      }
+    },
+    {
+      "kind": "target_original",
+      "digest": "04c0009c478771e0172805b4dda3012d58e27743ac4eaa57ac3fbc0d0e68605c",
+      "receipt": {
+        "path": "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/04c0009c478771e0172805b4dda3012d58e27743ac4eaa57ac3fbc0d0e68605c.json",
+        "sha256": "1ba317c0c65496e5d4667d5e35e2a9d69d4e7b3595b89dabc759553d1a13b58c"
+      }
+    }
+  ],
+  "hashes": {
+    "outputs/surface_owner_v1_20260913/settings.json": "3b268fa460dad8540d3ba7998956e92a0adf53b4e9947870ffe8faf8d6492e9d",
+    "outputs/surface_owner_v1_20260913/C/13800.json": "c8770545ebb3099615286fc93affa61574194c7961832bd35dfe2ac210e22367",
+    "outputs/surface_owner_v1_20260913/C/13801.json": "052810360c07a9a1b8b78cc96b77299454254d50f5ce281a3b116de18838a80b",
+    "outputs/surface_owner_v1_20260913/C/13802.json": "2bc0bc9e1323e1965e37454a5d1516a1f3f99b45673883973cf37f102a9664e8",
+    "outputs/surface_owner_v1_20260913/C/13803.json": "3d15687ace3b6a644668a10a555bc6bbb5373650c45cf6949f12a564b75b8803",
+    "outputs/surface_owner_v1_20260913/C/13804.json": "4b38bd179c60714ca541459928f5dcee408829ca45e41bd33125d6e49cf60081",
+    "outputs/surface_owner_v1_20260913/C/13805.json": "2c7e358638d9c279aada8823033a248309c04f63d4361939e359c23e2a1d9f77",
+    "outputs/surface_owner_v1_20260913/C/15324.json": "7192f40c542af5abae7df3f3bf37231864455a9f96044c4f3a785bae964c2ca2",
+    "outputs/surface_owner_v1_20260913/C/15325.json": "9fb84bf318a328aeb08f3e708d0140abde8ab9639db2c5b1963fb3961675dadf",
+    "outputs/surface_owner_v1_20260913/C/15326.json": "fc555ba79832fa1a6d3b4fdc978c936a9d58430e3ac4391f68ab7f68493663da",
+    "outputs/surface_owner_v1_20260913/C/15327.json": "482061ab32942b11f08f11551af1e6f11a2c0a78fe4c8dd4b26c64e8d80a2176",
+    "outputs/surface_owner_v1_20260913/C/15328.json": "89b37346dd9d416219df4f8a3ae2eb1b9016fbc15eb12c2100675cd9d39c315e",
+    "outputs/surface_owner_v1_20260913/C/15329.json": "356fc14c6098dc8fbc229f586d28bb7204750b12903fb146b1bb379224658cae",
+    "outputs/surface_owner_v1_20260913/C/2910.json": "3cbee329a7412a018c29cb729a32f7ac049bedbc1528553a7c2849aa20abf63b",
+    "outputs/surface_owner_v1_20260913/C/2911.json": "b7968787ac5d607991a3b4018224faa35a2f62c3dc308cd1ccc0f59f81fa1ec3",
+    "outputs/surface_owner_v1_20260913/C/2912.json": "8f2abedc03b424f93e3264d5103c918e30ff806e31e839c31db751ecda573905",
+    "outputs/surface_owner_v1_20260913/C/2913.json": "a15d2228b05d0bbd013b3db6968a7f07cb87e6952138601eebacfd37c8af9153",
+    "outputs/surface_owner_v1_20260913/C/2914.json": "ac9ef4bf4f2d30ad273c071ef7de2b4a55c78e04103c489451dd7c0a910d6f62",
+    "outputs/surface_owner_v1_20260913/C/2915.json": "7c18b0e7ec29f9ebec9ce1a7f1abc56ffbdda6be69954c5c5be0200a5fe8b799",
+    "outputs/surface_owner_v1_20260913/C/5148.json": "a0941f94e488d59fb4a41806a802825d809852ee705d502d7910c22914f7c1cd",
+    "outputs/surface_owner_v1_20260913/C/5149.json": "674f02ad1c69a1161ed1dfafb9e630d8abc22534cbe2c86cfb5771a18d5d4e87",
+    "outputs/surface_owner_v1_20260913/C/5150.json": "23bb3926cb620b64d6dba053beee443db53df4f532e65b2c569260d3120ba888",
+    "outputs/surface_owner_v1_20260913/C/5151.json": "83adbbed9f3450edffdd87978d1f740a0666139173bd1b05fb47721099a12839",
+    "outputs/surface_owner_v1_20260913/C/5152.json": "d56f14c01bd9e5f1028702a15d2711194b60026527b2303174e72a56eafac1ad",
+    "outputs/surface_owner_v1_20260913/C/5153.json": "77ce564fa74eb95f756cc1ea8a30584e3352789737246c06d8319e7db07eda17",
+    "outputs/surface_owner_v1_20260913/C/6300.json": "9071723901bd21fafe884018061d11201525e5676bfcce041f1636d20ebb5f4e",
+    "outputs/surface_owner_v1_20260913/C/6301.json": "5957a7a95774a4bb9ce6f7e035f25fc2fe4a6069ca4739ed6b65a28674589e6c",
+    "outputs/surface_owner_v1_20260913/C/6302.json": "36fe59cd2b6ce6c36e407bcfaf7654ce26ad14e59aaf2e2544e185a90389cd83",
+    "outputs/surface_owner_v1_20260913/C/6303.json": "0e30e1c1660b3585499f6aa0557edc623c1aef1e018efc35c91749e0829a1678",
+    "outputs/surface_owner_v1_20260913/C/6304.json": "b007645e427b594c406d2141050eb37772e4b9b9cfceb4f9df42472076b8aaac",
+    "outputs/surface_owner_v1_20260913/C/6305.json": "68de04b86dcf7f37b3b06d0fbd71e4ea5083ffcbc3ccabb4e89ff8d60ee08598",
+    "outputs/surface_owner_v1_20260913/C/9270.json": "9802ae400c9ad95818df3a2733c8ea56737404d8600f2ba555d5e47251b6a6e0",
+    "outputs/surface_owner_v1_20260913/C/9271.json": "12cd4c0a69732e8fd969c4505d44544b4d26a2ab7b76a18c6f65f321f7959346",
+    "outputs/surface_owner_v1_20260913/C/9272.json": "ecf9b62271c11a5494b650e125d92d74048eb2a6abc326f4af4eb2ede09bdc1e",
+    "outputs/surface_owner_v1_20260913/C/9273.json": "44355ce1c85a04534e9a05169e89da7b0f9e8c9444e94c7f7431e41f205d00cf",
+    "outputs/surface_owner_v1_20260913/C/9274.json": "ae41990090f01c31de62eac0e6a52176e4a0505594886c65d993f4d94fef827e",
+    "outputs/surface_owner_v1_20260913/C/9275.json": "a3762cdf65a3e1b42745d16a12fbb7d53836c2690271a839e9c12f6abf6ff563",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/0230ca6e17f22ea430818ca4062b50a5422b31deed47f4f1dd6c955b369618b4.json": "7f86b7948870b80d1b3e6995c6bc1c966f07b89d3aaa7944cfcffdae797a4e6a",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/029ea33395ef1a7de671d4586e6f35c8f21669e978d162caa38ad8db78d6088b.json": "65bdcda9f9202537cc1471d5df49c5eacd86bc66fadf4f1c00cb9fb3cc93b7fd",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/01744ba05d4e8d5da3f390397cf03362441a327ca868928ce4a41ea6ee10809c.json": "08a947a748477bad9440d97ca06731947b62abc29bdcfac90b9b4884c79e0b4e",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/01a62edce93ab4d87604cc72859aa97e5fded864070522546616d6941d96cf76.json": "331d22c5a1d2267fd622f55edce64e0793c2f644b3f8f12fddaf5a6062be5dc4",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/0128f1a13b36841afa827f9508a9a05a3971d8d5a78332e4caa57e283b26e670.json": "77e7f31aaa3b572b80f170286408eb630a3c4370622f4e11b0ca5d10a2ecebdb",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/044c7673b400eec1ddc066ceba615e7eb769b326b3a6248ef17508b81edcbec9.json": "0ce971c79d7ba68534ead9c30b3386873dc6c21d528e2617bf2256716cdf480a",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/0088e7116bdca373c1ffbb09ff8a62dca6a104244218c557321859e2d6e85422.json": "e60059383e1b4a7bb668b77f59ee4dbde19339519fb30cfddd246691888efc04",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/014d489edf12e08e19971eb18cada95fe26def950ca7fbc717d03d586cff0420.json": "9c8f7a358a7fdd0fb4b1a8587d8bafdfb4043af9186543decaf6f4a871e32a81",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/03edcd2fd04ddbcd9f54404045aa08e7a1a8fb0c6d4d48bbcf8fbd703a0b2c95.json": "a882aa2fb5e47cfe8862f72635d501463e16a4f795668cc8bf3431dd3f386ad9",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/surface_owner_v1_20260913/reader_cache/04c0009c478771e0172805b4dda3012d58e27743ac4eaa57ac3fbc0d0e68605c.json": "1ba317c0c65496e5d4667d5e35e2a9d69d4e7b3595b89dabc759553d1a13b58c",
+    "next_iteration/reader_output_audit.py": "4f620a24e98ba590161c53a50cd71e541ee1b801dd365391dda3c377be2e33c4",
+    "route_graph/frozen_reader.py": "72897d0f290594d4143027d3dabb6c18b239a458ee2506ee5e33eddcaf0601de",
+    "route_graph/audit_artifacts.py": "2bbe08d6258f5e33a90671c7c5e5f735af19722e73690ad22f5899844378b43c",
+    "docs/READER_OUTPUT_AUDIT_20260913.md": "5c7cffe0497ded19e26b09e7acd8544ae3cee2c0dd6939159a3113ea148708be",
+    ".aris/compute/env-spec.json": "f3203164ff2c0938c39f4b7ac5d1cbc230f6f22571416130b9ebb66781409132"
+  },
+  "branch": "agent/graph-structure-audit",
+  "git_status": " M README.md\n M docs/RESEARCH_STATUS.md\n M refine-logs/FINAL_PROPOSAL.md\n M refine-logs/MANIFEST.md\n M refine-logs/REFINEMENT_REPORT.md\n M refine-logs/REFINE_STATE.json\n M refine-logs/REVIEW_SUMMARY.md\n?? .aris/\n?? EXPERIMENT_AUDIT.json\n?? EXPERIMENT_AUDIT.md\n?? MANIFEST.md\n?? docs/ATTRIBUTED_SAMPLE_GRAPH_20260912.md\n?? docs/EVENT_MATCHER_MODEL_20260913.md\n?? docs/EVIDENCE_ADOPTION_METHOD_20260912.md\n?? docs/EVIDENCE_ADOPTION_PLAN_20260912.md\n?? docs/EVIDENCE_ADOPTION_RESULTS_20260912.md\n?? docs/LOCAL_DATASETS_AND_RUN_STATUS_20260912.md\n?? docs/MECHANISM_ITERATION_20260913.md\n?? docs/MECHANISM_ITERATION_20260913_20260913_014622.md\n?? docs/MECHANISM_ITERATION_20260913_before_20260913_014622.md\n?? docs/METHOD_ITERATION_20260912.md\n?? docs/MISSING_CONSTRAINT_PLAN_20260913.md\n?? docs/NATIVE_AUDIT_RUN_20260913.md\n?? docs/NATIVE_AUDIT_V1_RESULTS_20260913.md\n?? docs/NATIVE_AUDIT_V2_RESULTS_20260913.md\n?? docs/NATIVE_AUDIT_V2_RUN_20260913.md\n?? docs/NATIVE_AUDIT_V3_RESULTS_20260913.md\n?? docs/NATIVE_AUDIT_V3_RUN_20260913.md\n?? docs/NATIVE_METHOD_MODEL_20260913.md\n?? docs/OWNERSHIP_FACTORIAL_PLAN_20260912.md\n?? docs/OWNERSHIP_MECHANISM_RESULTS_20260912.md\n?? docs/OWNERSHIP_MULTILAYER_PLAN_20260912.md\n?? docs/OWNERSHIP_SOURCE_LAYER_PLAN_20260912.md\n?? docs/RAGTRUTH_POPULATION_MECHANISM_PLAN_20260912.md\n?? docs/RAGTRUTH_POPULATION_RUN_STATUS_20260912.md\n?? docs/RAGTRUTH_POPULATION_RUN_STATUS_20260912_20260913_014622.md\n?? docs/RAGTRUTH_POPULATION_RUN_STATUS_20260912_before_20260913_014622.md\n?? docs/READER_OUTPUT_AUDIT_20260913.md\n?? docs/REAL_WINDOW_CONSTRAINT_INVENTORY_20260912.md\n?? docs/RELATION_MECHANISM_RESULTS_20260913.md\n?? docs/RELATION_ONLY_PLAN_20260913.md\n?? docs/RELATION_ROUTING_PLAN_20260913.md\n?? docs/RESEARCH_STATUS_20260913_014622.md\n?? docs/RESEARCH_STATUS_before_20260912.md\n?? docs/RESEARCH_STATUS_before_20260913_014622.md\n?? docs/RESEARCH_STATUS_before_architecture_20260913_023621.md\n?? docs/RESEARCH_STATUS_before_native_pipeline_20260913_042134.md\n?? docs/SOFT_GRAPH_METHOD_20260913.md\n?? docs/SOFT_GRAPH_V1_RUN_20260913.md\n?? docs/SOURCE_EVENT_GRAPH_DESIGN_20260913.md\n?? docs/SOURCE_POINTER_CONTRAST_20260913.md\n?? docs/SURFACE_OWNER_METHOD_20260913.md\n?? docs/SURFACE_OWNER_V1_RUN_20260913.md\n?? experiments/\n?? findings.md\n?? idea-stage/\n?? lookback_review_20260909_134838.tar.gz\n?? message_dag_review.tar\n?? message_dag_stats_review.tar\n?? next_iteration/\n?? reanchor_11871_token_data.tar.gz\n?? reanchor_results_20260908_114119.tar.gz\n?? refine-logs/2026_primary_diff_structural_review_20260913.md\n?? refine-logs/EXPERIMENT_PLAN.md\n?? refine-logs/EXPERIMENT_PLAN_20260912_115530.md\n?? refine-logs/EXPERIMENT_PLAN_20260913_011546.md\n?? refine-logs/EXPERIMENT_PLAN_20260913_014622.md\n?? refine-logs/EXPERIMENT_PLAN_20260913_030711.md\n?? refine-logs/EXPERIMENT_PLAN_before_20260913_014622.md\n?? refine-logs/EXPERIMENT_PLAN_before_20260913_030711.md\n?? refine-logs/EXPERIMENT_PLAN_before_adoption_20260912.md\n?? refine-logs/EXPERIMENT_PLAN_before_native_pipeline_20260913_042134.md\n?? refine-logs/EXPERIMENT_PLAN_before_relation_20260913.md\n?? refine-logs/EXPERIMENT_TRACKER.md\n?? refine-logs/EXPERIMENT_TRACKER_20260913_014622.md\n?? refine-logs/EXPERIMENT_TRACKER_before_20260913_014622.md\n?? refine-logs/EXPERIMENT_TRACKER_before_native_pipeline_20260913_042134.md\n?? refine-logs/FINAL_PROPOSAL_20260912_115530.md\n?? refine-logs/FINAL_PROPOSAL_20260913_014622.md\n?? refine-logs/FINAL_PROPOSAL_20260913_014751.md\n?? refine-logs/FINAL_PROPOSAL_20260913_030711.md\n?? refine-logs/FINAL_PROPOSAL_before_20260912_115530.md\n?? refine-logs/FINAL_PROPOSAL_before_20260913_014622.md\n?? refine-logs/FINAL_PROPOSAL_before_20260913_030711.md\n?? refine-logs/FINAL_PROPOSAL_before_adoption_20260912.md\n?? refine-logs/FINAL_PROPOSAL_before_native_pipeline_20260913_042134.md\n?? refine-logs/PIPELINE_SUMMARY.md\n?? refine-logs/REFINEMENT_REPORT_before_20260912_115530.md\n?? refine-logs/REFINE_STATE_20260913_014622.json\n?? refine-logs/REFINE_STATE_20260913_020922.json\n?? refine-logs/REFINE_STATE_before_20260912_115530.json\n?? refine-logs/REFINE_STATE_before_20260913_014622.json\n?? refine-logs/REFINE_STATE_before_adoption_20260912.json\n?? refine-logs/REFINE_STATE_before_architecture_20260913_020922.json\n?? refine-logs/REFINE_STATE_before_architecture_review_20260913_022651.json\n?? refine-logs/REFINE_STATE_before_ownership_20260912.json\n?? refine-logs/REFINE_STATE_before_relation_20260913.json\n?? refine-logs/REVIEW_SUMMARY_20260913_030711.md\n?? refine-logs/REVIEW_SUMMARY_before_20260912_115530.md\n?? refine-logs/REVIEW_SUMMARY_before_20260913_030711.md\n?? refine-logs/adoption_engineering_review_20260912.md\n?? refine-logs/adoption_smoke_20260912.md\n?? refine-logs/architecture_round0_20260913.md\n?? refine-logs/architecture_round1_20260913.md\n?? refine-logs/architecture_round1_review_20260913.md\n?? refine-logs/architecture_round2_20260913.md\n?? refine-logs/architecture_round2_review_20260913.md\n?? refine-logs/architecture_round3_20260913.md\n?? refine-logs/architecture_round3_review_20260913.md\n?? refine-logs/architecture_round4_20260913.md\n?? refine-logs/architecture_round4_implementation_addendum_20260913.md\n?? refine-logs/architecture_round4_review_20260913.md\n?? refine-logs/architecture_round5_review_20260913.md\n?? refine-logs/atomic_anchor_iteration_20260913.md\n?? refine-logs/atomic_anchor_v2_integration_review_20260913.md\n?? refine-logs/attribution_architecture_lit_20260913.md\n?? refine-logs/binding_pointer_payload_methods_20260913.md\n?? refine-logs/causal_contrast_engineering_20260913.md\n?? refine-logs/causal_search_engineering_20260913.md\n?? refine-logs/cloze_anchor_interface_review_20260913.md\n?? refine-logs/cloze_anchor_prototype_review_20260913.md\n?? refine-logs/cloze_anchor_v3_integration_review_20260913.md\n?? refine-logs/cloze_next_structural_review_20260913.md\n?? refine-logs/detector_vs_certificate_design_review_20260913.md\n?? refine-logs/engineering_review_round2.md\n?? refine-logs/engineering_review_round3.md\n?? refine-logs/event_graph_end_to_end_failure_review_20260913.md\n?? refine-logs/event_matcher_engineering_review_20260913.md\n?? refine-logs/event_matcher_minimal_spec_review_20260913.md\n?? refine-logs/evidence_adoption_graph_literature.md\n?? refine-logs/evidence_anchor_engineering_20260913.md\n?? refine-logs/graph_boundary_engineering_20260913.md\n?? refine-logs/graph_boundary_revision_review_20260913.md\n?? refine-logs/graph_segmentation_method_followup_20260913.md\n?? refine-logs/graph_tests_20260912.log\n?? refine-logs/graph_tests_v3_20260912.log\n?? refine-logs/grounding_architecture_lit_20260913.md\n?? refine-logs/grounding_qa_lit_20260913.md\n?? refine-logs/native_anchor_diagnostic_review_20260913.md\n?? refine-logs/native_audit_engineering_20260913.md\n?? refine-logs/native_batch_witness_20260913.md\n?? refine-logs/native_evaluation_engineering_20260913.md\n?? refine-logs/native_graph_literature_2026_followup_20260913.md\n?? refine-logs/native_pipeline_engineering_20260913.md\n?? refine-logs/native_scheduler_engineering_20260913.md\n?? refine-logs/native_scheduler_v2_review_20260913.md\n?? refine-logs/native_v1_integrity_20260913.json\n?? refine-logs/native_v1_integrity_20260913.md\n?? refine-logs/native_v2_doc_witness_20260913.md\n?? refine-logs/native_v2_integrity_20260913.json\n?? refine-logs/native_v2_integrity_20260913.md\n?? refine-logs/native_v3_doc_witness_20260913.md\n?? refine-logs/native_v3_integrity_20260913.json\n?? refine-logs/native_v3_integrity_20260913.md\n?? refine-logs/native_v3_source_reader_barriers_after_A_20260913.json\n?? refine-logs/native_validation_engineering_20260913.md\n?? refine-logs/native_validation_final_recheck_20260913.md\n?? refine-logs/native_validation_round2_engineering_20260913.md\n?? refine-logs/ownership_engineering_review_20260912.md\n?? refine-logs/ownership_engineering_review_round2_20260912.md\n?? refine-logs/ownership_engineering_review_round3_20260912.md\n?? refine-logs/ownership_engineering_review_round4_20260912.md\n?? refine-logs/ownership_multilayer_witness_20260912.md\n?? refine-logs/ownership_run_witness_20260912.md\n?? refine-logs/ownership_source_layer_witness_20260912.md\n?? refine-logs/ragtruth_population_engineering_review_20260912.md\n?? refine-logs/ragtruth_population_smoke_20260912.md\n?? refine-logs/reanchor_tests_20260912.log\n?? refine-logs/reanchor_tests_v3_20260912.log\n?? refine-logs/relation_analysis_engineering_20260913.md\n?? refine-logs/relation_only_engineering_20260913.md\n?? refine-logs/relation_only_witness_20260913.md\n?? refine-logs/relation_routing_engineering_20260913.md\n?? refine-logs/relation_routing_witness_20260913.md\n?? refine-logs/sample_graph_engineering_review_20260912.md\n?? refine-logs/sample_graph_witness_20260912.md\n?? refine-logs/segmentation_architecture_lit_20260913.md\n?? refine-logs/soft_graph_energy_engineering_20260913.md\n?? refine-logs/soft_graph_fixed_energy_review_20260913.md\n?? refine-logs/soft_graph_pipeline_design_review_20260913.md\n?? refine-logs/soft_graph_runner_engineering_20260913.md\n?? refine-logs/soft_graph_v1_doc_witness_20260913.md\n?? refine-logs/source_competitor_native_revision_20260913.md\n?? refine-logs/source_event_graph_design_review_20260913.md\n?? refine-logs/source_event_graph_engineering_review_20260913.md\n?? refine-logs/source_pointer_contrast_bridge_review_20260913.md\n?? refine-logs/source_pointer_contrast_engineering_20260913.md\n?? refine-logs/source_pointer_native_bridge_spec_20260913.md\n?? refine-logs/source_self_supervised_owner_review_20260913.md\n?? refine-logs/structured_alignment_followup_20260913.md\n?? refine-logs/surface_owner_architecture_followup_20260913.md\n?? refine-logs/surface_owner_engineering_20260913.md\n?? refine-logs/surface_owner_v1_doc_witness_20260913.md\n?? refine-logs/surface_reader_failure_review_20260913.md\n?? refine-logs/surface_runner_review_20260913.md\n?? refine-logs/surface_slot_owner_matcher_revision_20260913.md\n?? refine-logs/surface_verifier_engineering_20260913.md\n?? refine-logs/target_dependence_engineering_20260913.md\n?? refine-logs/target_dependence_integration_review_20260913.md\n?? refine-logs/unsupervised_alignment_structural_review_20260913.md\n?? refine-logs/unsupervised_detector_lit_20260913.md\n?? results/\n?? route_graph/adoption.py\n?? route_graph/alarms.py\n?? route_graph/archive.py\n?? route_graph/archive_evaluation.py\n?? route_graph/atomic_anchor.py\n?? route_graph/audit_alignment.py\n?? route_graph/audit_artifacts.py\n?? route_graph/audit_certificates.py\n?? route_graph/audit_interactions.py\n?? route_graph/audit_output.py\n?? route_graph/audit_phase_native.py\n?? route_graph/audit_pools.py\n?? route_graph/audit_prepare.py\n?? route_graph/audit_prompts.py\n?? route_graph/audit_protocol.py\n?? route_graph/audit_runner.py\n?? route_graph/audit_semantics.py\n?? route_graph/causal_contrast.py\n?? route_graph/causal_groups.py\n?? route_graph/cloze_anchor.py\n?? route_graph/cloze_prompts.py\n?? route_graph/context.py\n?? route_graph/event_matcher.py\n?? route_graph/evidence_anchor.py\n?? route_graph/frozen_reader.py\n?? route_graph/json_framing.py\n?? route_graph/native_audit.py\n?? route_graph/ownership.py\n?? route_graph/population_mechanism.py\n?? route_graph/relation_readout.py\n?? route_graph/sample_graph.py\n?? route_graph/soft_graph_energy.py\n?? route_graph/soft_graph_phases.py\n?? route_graph/soft_graph_runner.py\n?? route_graph/soft_graph_structure.py\n?? route_graph/source_event_graph.py\n?? route_graph/span_feature_capture.py\n?? route_graph/target_dependence.py\n?? tests/test_adoption.py\n?? tests/test_atomic_anchor.py\n?? tests/test_audit_alignment_review.py\n?? tests/test_audit_origin_windows.py\n?? tests/test_audit_pipeline_review.py\n?? tests/test_causal_contrast.py\n?? tests/test_causal_groups.py\n?? tests/test_cloze_anchor.py\n?? tests/test_evaluate_native_audit_review.py\n?? tests/test_event_matcher.py\n?? tests/test_evidence_anchor_review.py\n?? tests/test_frozen_reader_accounting.py\n?? tests/test_graph_boundaries.py\n?? tests/test_json_framing.py\n?? tests/test_native_anchor_diagnostic.py\n?? tests/test_native_audit.py\n?? tests/test_native_scheduler.py\n?? tests/test_ownership.py\n?? tests/test_population_mechanism.py\n?? tests/test_relation_readout.py\n?? tests/test_route_alarms.py\n?? tests/test_route_archive.py\n?? tests/test_sample_graph.py\n?? tests/test_soft_graph_energy.py\n?? tests/test_soft_graph_freeze.py\n?? tests/test_soft_graph_pipeline.py\n?? tests/test_source_context.py\n?? tests/test_source_event_graph.py\n?? tests/test_source_pointer_contrast.py\n?? tests/test_span_feature_capture.py\n?? tests/test_surface_graph.py\n?? tests/test_surface_owner.py\n?? tests/test_surface_verifier.py\n?? tests/test_target_dependence.py\n",
+  "cuda_processes_before": "3598631, [Not Found], 20002 MiB",
+  "output_existed": false
+}

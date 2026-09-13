@@ -1,0 +1,41 @@
+{
+  "schema": "route-graph/recovered-scores@1",
+  "archive_index_sha256": "1d065548ece1a6d20019f55d63b2eed3a949f7537c0364bcdf94bb23773a1293",
+  "labels_used": false,
+  "neighbors": 3,
+  "per_source": 8,
+  "fit_sources": 107,
+  "fit_tokens": 23223,
+  "complete_test_responses": 110,
+  "eligible_test_responses": 108,
+  "eligible_test_tokens": 23910,
+  "excluded_test_responses": [
+    {
+      "response_id": "16539",
+      "source_id": "12248",
+      "tokens": 410,
+      "unavailable_strata": [
+        [
+          "QA",
+          "llama-2-7b-chat",
+          7,
+          8
+        ]
+      ]
+    },
+    {
+      "response_id": "16617",
+      "source_id": "12261",
+      "tokens": 337,
+      "unavailable_strata": [
+        [
+          "QA",
+          "llama-2-7b-chat",
+          7,
+          8
+        ]
+      ]
+    }
+  ],
+  "original_capture_provenance": "unknown layout and checkpoint digests; exploratory only"
+}

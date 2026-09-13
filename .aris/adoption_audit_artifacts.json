@@ -1,0 +1,13 @@
+{
+  "review_status": "not_run",
+  "reason": "external scientific reviewer unavailable",
+  "artifacts": [
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/route_graph/adoption.py",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/tests/test_adoption.py",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/docs/EVIDENCE_ADOPTION_RESULTS_20260912.md",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/docs/EVIDENCE_ADOPTION_PLAN_20260912.md",
+    "/share/home/tm902089733300000/a903202310/lys/research/reanchor/src/decoding/adoption_probe.py",
+    "/share/home/tm902089733300000/a903202310/lys/research/reanchor/results/adoption_pilot_v2_20260912/manifest.json",
+    "/share/home/tm902089733300000/a903202310/lys/research/reanchor/results/adoption_analysis_v2_20260912/numbers.json"
+  ]
+}

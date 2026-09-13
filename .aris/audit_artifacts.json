@@ -1,0 +1,39 @@
+{
+  "evaluation_scripts": [
+    "route_graph/evaluation.py",
+    "route_graph/metrics.py",
+    "route_graph/alarms.py",
+    "route_graph/archive.py",
+    "route_graph/archive_evaluation.py",
+    "route_graph/context.py",
+    "../reanchor/src/decoding/binding_validation.py"
+  ],
+  "result_files": [
+    "results/method_iteration_20260912/recovery/index.json",
+    "results/method_iteration_20260912/recovery/strict_validation.json",
+    "results/method_iteration_20260912/baseline/evaluation.json",
+    "results/method_iteration_20260912/baseline/alarms_v3.json",
+    "../reanchor/results/binding_validation_v3_20260912/numbers.json",
+    "../reanchor/results/binding_validation_v3_20260912/*.json"
+  ],
+  "ground_truth": [
+    "/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/response.jsonl",
+    "../reanchor/examples/binding_cases.jsonl"
+  ],
+  "tracker": [
+    "refine-logs/EXPERIMENT_TRACKER.md"
+  ],
+  "claims": [
+    "docs/METHOD_ITERATION_20260912.md"
+  ],
+  "config": [
+    "results/method_iteration_20260912/baseline/complete.json",
+    "results/method_iteration_20260912/calibration/thresholds.json",
+    "../reanchor/results/binding_validation_v3_20260912/settings.json"
+  ],
+  "executed_code": [
+    "results/method_iteration_20260912/*/executed_source/*.py",
+    "results/method_iteration_20260912/baseline/alarms_evaluation_source.py",
+    "../reanchor/results/binding_validation_v3_20260912/source/*.py"
+  ]
+}

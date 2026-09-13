@@ -1,0 +1,16 @@
+Independent final-evaluation audit subprocess session 96604 exited 1 after all 441 metric-cell checks completed. Original partial JSON is preserved; experiment evaluation session 55390 exited 0.
+
+Traceback (most recent call last):
+  File "<stdin>", line 37, in <module>
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/json/__init__.py", line 179, in dump
+    for chunk in iterable:
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/json/encoder.py", line 432, in _iterencode
+    yield from _iterencode_dict(o, _current_indent_level)
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/json/encoder.py", line 406, in _iterencode_dict
+    yield from chunks
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/json/encoder.py", line 439, in _iterencode
+    o = _default(o)
+        ^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/json/encoder.py", line 180, in default
+    raise TypeError(f'Object of type {o.__class__.__name__} '
+TypeError: Object of type int64 is not JSON serializable

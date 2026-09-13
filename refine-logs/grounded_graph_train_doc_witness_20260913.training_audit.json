@@ -1,0 +1,159 @@
+{
+  "session_id": 84431,
+  "python_pid": 177478,
+  "shell_pid": 177475,
+  "exit_code": 0,
+  "training_manifest_sha256": "899c8b7da2049e01ae487bf2c72b03cd581064021db7149bffb3fecb5f286c6a",
+  "artifacts_verified": 45,
+  "checkpoint_count": 22,
+  "initial_parameters_bitwise_equal": true,
+  "parameter_count_per_arm": 1641089,
+  "actual_optimizer_steps": 480,
+  "actual_adapter_forwards": 612,
+  "observer_forwards": 0,
+  "source_validation_selection_verified": true,
+  "arms": {
+    "graph": {
+      "selected_epoch": 7,
+      "selected_checkpoint": {
+        "epoch": 7,
+        "checkpoint": "graph/epoch_07.pt",
+        "checkpoint_sha256": "c05e2112e43c92bea2a17e2bdde4785e5598dfd0defd22337ee9ce91fc5a1476",
+        "validation": {
+          "token_ce": 0.018860089835559632,
+          "pointer_nll": 1.3479818747704673,
+          "objective": 1.3668419646060268,
+          "pointer_top1": 0.5889306824288018,
+          "tokens": 26574,
+          "pointers": 1861,
+          "adapter_forwards": 6
+        }
+      },
+      "validation_objective_by_epoch0_to10": [
+        6.4910995741283015,
+        2.2479794467720913,
+        2.0644602837420245,
+        1.6474597891149199,
+        1.528022235965271,
+        1.5750131489318213,
+        1.4283712670517008,
+        1.3668419646060268,
+        1.460721973533405,
+        1.4995259762316713,
+        1.4346568526651624
+      ],
+      "all_checkpoint_tensors_finite": true
+    },
+    "no_edges": {
+      "selected_epoch": 4,
+      "selected_checkpoint": {
+        "epoch": 4,
+        "checkpoint": "no_edges/epoch_04.pt",
+        "checkpoint_sha256": "d0ce07fd00b05edbe303308b6745ecfb32347a13ffde3c6ceab5271a815105df",
+        "validation": {
+          "token_ce": 0.021559757733955666,
+          "pointer_nll": 1.331633696675877,
+          "objective": 1.3531934544098327,
+          "pointer_top1": 0.5738850080601827,
+          "tokens": 26574,
+          "pointers": 1861,
+          "adapter_forwards": 6
+        }
+      },
+      "validation_objective_by_epoch0_to10": [
+        6.66267946137905,
+        2.098776573297674,
+        1.6449700751545324,
+        1.5060654777386466,
+        1.3531934544098327,
+        1.365342498902448,
+        1.382979740210907,
+        1.3765583128617875,
+        1.5167202944130007,
+        1.4000386773241396,
+        1.412643281024729
+      ],
+      "all_checkpoint_tensors_finite": true
+    }
+  },
+  "lm_head": {
+    "model_path": "/share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct",
+    "shard": "model-00004-of-00004.safetensors",
+    "shard_sha256": "92ecfe1a2414458b4821ac8c13cf8cb70aed66b5eea8dc5ad9eeb4ff309d6d7b",
+    "tensor_header": {
+      "dtype": "BF16",
+      "shape": [
+        128256,
+        4096
+      ],
+      "data_offsets": [
+        0,
+        1050673152
+      ]
+    },
+    "frozen_by_code": true
+  },
+  "summary": {
+    "status": "complete",
+    "arms": {
+      "graph": {
+        "initial_validation": {
+          "token_ce": 0.043099802850251535,
+          "pointer_nll": 6.44799977127805,
+          "objective": 6.4910995741283015,
+          "pointer_top1": 0.0005373455131649651,
+          "tokens": 26574,
+          "pointers": 1861,
+          "adapter_forwards": 6
+        },
+        "selected": {
+          "epoch": 7,
+          "checkpoint": "graph/epoch_07.pt",
+          "checkpoint_sha256": "c05e2112e43c92bea2a17e2bdde4785e5598dfd0defd22337ee9ce91fc5a1476",
+          "validation": {
+            "token_ce": 0.018860089835559632,
+            "pointer_nll": 1.3479818747704673,
+            "objective": 1.3668419646060268,
+            "pointer_top1": 0.5889306824288018,
+            "tokens": 26574,
+            "pointers": 1861,
+            "adapter_forwards": 6
+          }
+        },
+        "parameters": 1641089
+      },
+      "no_edges": {
+        "initial_validation": {
+          "token_ce": 0.043099802850251535,
+          "pointer_nll": 6.6195796585287985,
+          "objective": 6.66267946137905,
+          "pointer_top1": 0.0,
+          "tokens": 26574,
+          "pointers": 1861,
+          "adapter_forwards": 6
+        },
+        "selected": {
+          "epoch": 4,
+          "checkpoint": "no_edges/epoch_04.pt",
+          "checkpoint_sha256": "d0ce07fd00b05edbe303308b6745ecfb32347a13ffde3c6ceab5271a815105df",
+          "validation": {
+            "token_ce": 0.021559757733955666,
+            "pointer_nll": 1.331633696675877,
+            "objective": 1.3531934544098327,
+            "pointer_top1": 0.5738850080601827,
+            "tokens": 26574,
+            "pointers": 1861,
+            "adapter_forwards": 6
+          }
+        },
+        "parameters": 1641089
+      }
+    },
+    "seconds": 247.05703001469374,
+    "cuda_peak_bytes": 3345410048,
+    "observer_forwards": 0,
+    "labels_read": false,
+    "natural_detection_validated": false
+  },
+  "gradient_evidence": "All480 optimization steps passed frozen runner nonfinite objective/gradient checks; clip threshold1.0. Raw gradient norms were not logged."
+}

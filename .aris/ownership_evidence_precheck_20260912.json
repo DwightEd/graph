@@ -1,0 +1,114 @@
+{
+  "kind": "local deterministic JSON path check, not scientific/integrity verdict",
+  "checks": [
+    {
+      "id": "factorial_grill_source",
+      "value": -13.125,
+      "source": "../reanchor/outputs/ownership_factorial_20260912/summary.json",
+      "json_path": [
+        "factorial_effects",
+        "grill",
+        "source_main_effect"
+      ],
+      "matched": true
+    },
+    {
+      "id": "factorial_onion_source",
+      "value": 17.75,
+      "source": "../reanchor/outputs/ownership_factorial_20260912/summary.json",
+      "json_path": [
+        "factorial_effects",
+        "onion",
+        "source_main_effect"
+      ],
+      "matched": true
+    },
+    {
+      "id": "multi_count",
+      "value": 98,
+      "source": "../reanchor/outputs/ownership_multilayer_20260912/summary.json",
+      "json_path": [
+        "conditions"
+      ],
+      "matched": true
+    },
+    {
+      "id": "independent_source_worlds",
+      "value": 32,
+      "source": "../reanchor/outputs/ownership_source_layer_20260912/summary.json",
+      "json_path": [
+        "source_worlds"
+      ],
+      "matched": true
+    },
+    {
+      "id": "all_single_layers",
+      "value": 64,
+      "source": "../reanchor/outputs/ownership_source_layer_20260912/summary.json",
+      "json_path": [
+        "layer_patches"
+      ],
+      "matched": true
+    },
+    {
+      "id": "onion_source_a_effect",
+      "value": 17.71875,
+      "source": "../reanchor/outputs/ownership_source_layer_20260912/summary.json",
+      "json_path": [
+        "source_main_effects",
+        "00012",
+        "onion",
+        "a_main"
+      ],
+      "matched": true
+    },
+    {
+      "id": "onion_source_b_effect",
+      "value": 0.03125,
+      "source": "../reanchor/outputs/ownership_source_layer_20260912/summary.json",
+      "json_path": [
+        "source_main_effects",
+        "00012",
+        "onion",
+        "b_main"
+      ],
+      "matched": true
+    },
+    {
+      "id": "onion_history_effect",
+      "value": -1.65625,
+      "source": "../reanchor/outputs/ownership_source_layer_20260912/summary.json",
+      "json_path": [
+        "source_main_effects",
+        "00012",
+        "onion",
+        "h_main"
+      ],
+      "matched": true
+    },
+    {
+      "id": "grill_no_single_layer_flip",
+      "value": 0,
+      "source": "../reanchor/results/ownership_source_layer_analysis_v2_20260912/numbers.json",
+      "json_path": [
+        "single_layer_summary",
+        "grill",
+        "native_argmax_flips"
+      ],
+      "matched": true
+    },
+    {
+      "id": "onion_no_single_layer_flip",
+      "value": 0,
+      "source": "../reanchor/results/ownership_source_layer_analysis_v2_20260912/numbers.json",
+      "json_path": [
+        "single_layer_summary",
+        "onion",
+        "native_argmax_flips"
+      ],
+      "matched": true
+    }
+  ],
+  "standard_helper": "unresolved; Policy B skip",
+  "scientific_review": "REVIEW_UNAVAILABLE"
+}

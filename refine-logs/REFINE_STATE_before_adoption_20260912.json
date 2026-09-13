@@ -1,0 +1,13 @@
+{
+  "phase": "experiment_iteration_complete",
+  "date": "2026-09-12",
+  "round": 1,
+  "status": "negative_result_recorded",
+  "claim_supported": "no",
+  "scientific_review": "REVIEW_UNAVAILABLE; pending Codex review",
+  "main_method_validated": false,
+  "next_action": "new held-out relation identifiability experiment before detector integration",
+  "report": "docs/METHOD_ITERATION_20260912.md",
+  "engineering_review": "APPROVE, round3, engineering scope only",
+  "final_mechanism_results": "../reanchor/results/binding_validation_v3_20260912"
+}

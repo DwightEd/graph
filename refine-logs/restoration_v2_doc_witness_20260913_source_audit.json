@@ -1,0 +1,38 @@
+{
+  "status": "passed",
+  "pid": 179872,
+  "output": "outputs/grounded_graph_restoration_features_v2_20260913",
+  "manifest_sha256": "4f0a0c2d0276efeca842e10656cec82f8502447772b19d5acffc32acded346c7",
+  "manifest_artifacts": 722,
+  "original_parent_manifest_sha256": "61bd0e2e217f88a6fb508d0b77cf1f4342f8d511ef16dd3ae67e41fc1d5fd967",
+  "original_parent_artifacts": 481,
+  "model_files_verified": 16,
+  "source_inventory_artifacts_verified": 240,
+  "code_live_snapshot_files_verified": 54,
+  "counts": {
+    "examples": 240,
+    "tokens": 135519,
+    "nodes": 117314,
+    "edges": 439996,
+    "anchors": 9220,
+    "erased_tokens": 135519,
+    "boundary_crossing_tokens": 237,
+    "examples_with_boundary_crossing": 237,
+    "observer_forwards": 240,
+    "changed_query_elements": 554045295,
+    "query_elements": 555085824
+  },
+  "split": {
+    "train": 192,
+    "validation": 48
+  },
+  "observer_dtype": {
+    "torch.bfloat16": 240
+  },
+  "attention_implementation": {
+    "sdpa": 240
+  },
+  "checks": "complete recursive parent, model files, source/node/packet rebuild, all finite float32 arrays, original source/full query bytes, final-norm hook census, dtype/backend, pretoken timing, all positive-overlap whole source tokens, exact boundary receipts, unchanged non-source and response history",
+  "labels_read": false,
+  "seconds": 117.59797844663262
+}

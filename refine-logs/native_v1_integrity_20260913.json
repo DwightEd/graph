@@ -1,0 +1,150 @@
+{
+  "date": "2026-09-13",
+  "auditor": "real-collaboration-gpt-5.5-fallback-xhigh-style",
+  "codex_mcp_available": false,
+  "external_backend_claimed": false,
+  "overall_verdict": "warn",
+  "integrity_status": "warn",
+  "claim_supported": "no",
+  "project": "graph/native_audit_v1_20260913",
+  "run_path": "outputs/native_audit_v1_20260913",
+  "summary": {
+    "responses": 36,
+    "sources": 6,
+    "all_words": 4733,
+    "annotated_error_words": 260,
+    "semantic_scored_words": 287,
+    "semantic_coverage": 0.0606380731037397,
+    "annotated_error_coverage": 0.011538461538461539,
+    "risk_claims": 0,
+    "risk_claims_with_valid_contrast": 0,
+    "risk_claims_with_internal_certificate": 0,
+    "risk_claims_with_resolved_mechanism": 0,
+    "native_forward_calls": 0,
+    "native_tokens_processed": 0,
+    "mechanism_scored_words": 0,
+    "resolved_mechanisms": 0,
+    "question_status": {
+      "invalid_question": 103,
+      "uncertain": 56,
+      "supported": 13,
+      "unsupported": 0
+    },
+    "native_status": {
+      "not_selected_or_contrast_unavailable": 148
+    }
+  },
+  "checks": {
+    "ground_truth_provenance": {
+      "status": "pass",
+      "details": "RAGTruth labels are loaded only by the evaluation script after progress.status == complete; the 36-row input roster contains no labels; settings and manifest bind input and label hashes.",
+      "evidence": [
+        "outputs/native_audit_design_20260913/evaluation_manifest.json:5-10",
+        "outputs/native_audit_v1_20260913/settings.json:64-69",
+        "outputs/native_audit_v1_20260913/executed_code/experiments/evaluate_native_audit.py:64-96",
+        "outputs/native_audit_v1_20260913/executed_code/experiments/evaluate_native_audit.py:116-125",
+        "outputs/native_audit_v1_20260913/evaluation.json:7"
+      ]
+    },
+    "score_normalization": {
+      "status": "warn",
+      "details": "No self-normalization denominator is visible in the frozen evaluator body; however evaluate_native_audit.py imports route_graph.metrics, and metrics.py is absent from the v1 executed_code/code_sha256 snapshot, so AUROC/AUPRC implementation is not fully sealed in the artifact set.",
+      "evidence": [
+        "outputs/native_audit_v1_20260913/executed_code/experiments/evaluate_native_audit.py:15",
+        "outputs/native_audit_v1_20260913/executed_code/experiments/evaluate_native_audit.py:18-61",
+        "outputs/native_audit_v1_20260913/settings.json:72-89",
+        "outputs/native_audit_v1_20260913/executed_code/route_graph/frozen_reader.py:108-123"
+      ]
+    },
+    "result_file_existence": {
+      "status": "pass_with_reproducibility_warning",
+      "details": "All 36 A/B/C/D/merge artifacts and evaluation files exist and wrapper hashes/upstream hashes were recomputed without mismatch. The reproducibility warning is the missing frozen metrics.py dependency and the external wrapper witness exit-code-1 recovery gate.",
+      "evidence": [
+        "outputs/native_audit_v1_20260913/progress.json:1-6",
+        "outputs/native_audit_v1_20260913/evaluation.json:1-10",
+        "outputs/native_audit_v1_20260913/B/13800.json:1-9",
+        "outputs/native_audit_v1_20260913/C/13800.json:1-10",
+        "outputs/native_audit_v1_20260913/D/13800.json:1-11",
+        "refine-logs/native_batch_witness_20260913.md:3",
+        "refine-logs/native_batch_witness_20260913.md:47-53"
+      ]
+    },
+    "dead_code_detection": {
+      "status": "pass_with_method_coverage_warning",
+      "details": "The evaluation metrics function is called for response and group metrics. Native search/validation code is present but not exercised because A selected zero risk questions.",
+      "evidence": [
+        "outputs/native_audit_v1_20260913/executed_code/experiments/evaluate_native_audit.py:18-61",
+        "outputs/native_audit_v1_20260913/executed_code/experiments/evaluate_native_audit.py:189-194",
+        "outputs/native_audit_v1_20260913/executed_code/experiments/evaluate_native_audit.py:205-210",
+        "outputs/native_audit_v1_20260913/executed_code/route_graph/audit_prepare.py:53-85",
+        "outputs/native_audit_v1_20260913/executed_code/route_graph/audit_runner.py:204-206",
+        "outputs/native_audit_v1_20260913/executed_code/route_graph/audit_runner.py:254-302"
+      ]
+    },
+    "scope": {
+      "status": "fail_for_efficacy_claims",
+      "details": "The run covers six train sources and 36 responses, and produced zero unsupported risk claims, zero selected native windows, zero native forwards, zero mechanism-scored words, and no mechanisms. It cannot support hallucination detection, automatic lookback, route-derived spans, graph gain, or cost claims.",
+      "evidence": [
+        "outputs/native_audit_v1_20260913/evaluation.json:8",
+        "outputs/native_audit_v1_20260913/evaluation.json:12-80",
+        "outputs/native_audit_v1_20260913/evaluation.json:301-313",
+        "outputs/native_audit_v1_20260913/A/13801.json:1711",
+        "outputs/native_audit_v1_20260913/merge/13800.json:1195-1218",
+        "docs/NATIVE_METHOD_MODEL_20260913.md:79-89"
+      ]
+    },
+    "evaluation_type": {
+      "word_detection": "real_gt",
+      "semantic_reader": "model_estimated_proxy_not_ground_truth",
+      "native_mechanism": "self_supervised_proxy_no_independent_mechanism_gt",
+      "observer_trace": "llama_replay_not_original_generator_internal_trace",
+      "evidence": [
+        "outputs/native_audit_v1_20260913/evaluation.json:10",
+        "outputs/native_audit_v1_20260913/settings.json:65-66",
+        "docs/NATIVE_METHOD_MODEL_20260913.md:24-30",
+        "docs/NATIVE_METHOD_MODEL_20260913.md:87-89"
+      ]
+    }
+  },
+  "claims": [
+    {
+      "id": "pipeline_completed_36",
+      "impact": "supported_with_wrapper_witness_caveat"
+    },
+    {
+      "id": "labels_joined_after_predictions",
+      "impact": "supported"
+    },
+    {
+      "id": "reader_predictions_are_ground_truth",
+      "impact": "unsupported_and_explicitly_disallowed"
+    },
+    {
+      "id": "semantic_detection_effective",
+      "impact": "not_supported"
+    },
+    {
+      "id": "native_mechanism_detection_or_localization",
+      "impact": "not_supported"
+    },
+    {
+      "id": "automatic_lookback_or_route_derived_spans",
+      "impact": "not_supported"
+    },
+    {
+      "id": "unique_node_localization_accuracy",
+      "impact": "not_supported_not_identifiable"
+    },
+    {
+      "id": "one_4090_native_budget_characterized",
+      "impact": "not_supported_zero_native_forwards"
+    }
+  ],
+  "required_actions_before_positive_claims": [
+    "Report native-v1 as a negative coverage result.",
+    "Freeze route_graph/metrics.py in executed_code/settings for sealed metric replay.",
+    "Do not cite AUROC/AUPRC without the zero-threshold-detection and low-coverage context.",
+    "Do not treat phase completion as actual native intervention.",
+    "Fix A-stage anchoring/short-slot question construction before expecting native windows."
+  ]
+}

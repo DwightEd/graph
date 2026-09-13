@@ -1,0 +1,78 @@
+{
+  "phase": "relation_routing_localization",
+  "date": "2026-09-13",
+  "round": 6,
+  "status": "O4_complete_O5_ready_population_running",
+  "claim_supported": "no",
+  "scientific_review": "REVIEW_UNAVAILABLE; pending Codex review",
+  "main_method_validated": false,
+  "next_action": "Execute O5 E-only localization from frozen O4 inputs; compare to X and frozen top8 candidates, resume population, update method. Missing-constraint specificity and directed adoption remain unresolved.",
+  "report": "docs/MECHANISM_ITERATION_20260913.md",
+  "engineering_review": "O1-O3 independent scoped engineering reviews; final Required closure recorded in round4; no independent scientific verdict",
+  "final_mechanism_results": "../reanchor/outputs/ownership_source_layer_20260912",
+  "proposal": "docs/EVIDENCE_ADOPTION_METHOD_20260912.md",
+  "protocol": "docs/EVIDENCE_ADOPTION_PLAN_20260912.md",
+  "latest_user_scope": "Validate the unresolved mechanisms individually and iterate toward a usable method.",
+  "inventory": "docs/REAL_WINDOW_CONSTRAINT_INVENTORY_20260912.md",
+  "graph_protocol": "docs/ATTRIBUTED_SAMPLE_GRAPH_20260912.md",
+  "graph_results": "../reanchor/outputs/attributed_samples_20260912",
+  "user_clarification_received": true,
+  "graph_capture_checks": "2 tiny tests passed; independent literal invocation exit0; 33 hashes verified; all-layer bf16 rounded residual addition exact",
+  "graph_engineering_review": "No Required/Critical findings; three documented optional validator/provenance improvements",
+  "protocols": [
+    "docs/OWNERSHIP_FACTORIAL_PLAN_20260912.md",
+    "docs/OWNERSHIP_MULTILAYER_PLAN_20260912.md",
+    "docs/OWNERSHIP_SOURCE_LAYER_PLAN_20260912.md"
+  ],
+  "latest_mechanism_observations": {
+    "source_scope": "one source, four existing generation seeds, one incorrect numeric window",
+    "joint_final_query_x_and_endpoint_swap": "native choices flipped in both studied windows",
+    "single_layer_x": "all 32 individually tested; no native choice flips in either window",
+    "automatic_ownership_validity": "not validated"
+  },
+  "gpu_jobs_running": true,
+  "latest_verification": "O4 independent exit0; 190 raw hashes, 160 prefix checks, 4 exact-logit shams; population resumed and new responses published. O5 engineering review pending.",
+  "evidence_precheck": ".aris/ownership_evidence_precheck_20260912.json",
+  "latest_audit_artifacts": ".aris/ownership_audit_artifacts_20260912.json",
+  "mainline_executable_status": {
+    "legacy_path_residual": "runnable for RAGTruth QA; not the new ownership method",
+    "attributed_graph_and_ownership": "capture/intervention implemented; automatic graph-to-risk readout and end-to-end evaluation not implemented"
+  },
+  "ragtruth_readiness_report": "docs/LOCAL_DATASETS_AND_RUN_STATUS_20260912.md",
+  "ragtruth_qa_prepared": "outputs/qa_full_preflight_20260912/input.jsonl (989 sources; 494 reference/495 test; legacy hash split)",
+  "population_run": {
+    "pid": 19668,
+    "expected_responses": 17790,
+    "output": "../reanchor/outputs/ragtruth_population_20260912",
+    "log": "../reanchor/runs/ragtruth_population_resume_20260913.log",
+    "status": "running",
+    "protocol": "docs/RAGTRUTH_POPULATION_MECHANISM_PLAN_20260912.md",
+    "status_report": "docs/RAGTRUTH_POPULATION_RUN_STATUS_20260912.md",
+    "smoke": "6/6 responses, 48 conditions, 1491 tokens, exact sham/prefix, two resumes reused unchanged artifacts",
+    "scientific_review": "REVIEW_UNAVAILABLE",
+    "last_verified_completed": 4960,
+    "last_verified_failed": 0,
+    "last_verified_at": "2026-09-13T01:30:28+08:00",
+    "launch_snapshot": "results/ragtruth_population_launch_20260912.json"
+  },
+  "O4": {
+    "status": "complete",
+    "worlds": 4,
+    "patches": 160,
+    "native_relation_choices": "4/4 controlled worlds",
+    "X_final_flips": 0,
+    "E_final_flips": 4,
+    "node_attention_graph_choices": [
+      3,
+      2,
+      2
+    ],
+    "single_query_X_scan_flips": 0,
+    "scope": "one source, natural after prefix and constructed before control; added stage rules"
+  },
+  "O5": {
+    "status": "ready_for_independent_witness",
+    "protocol": "docs/RELATION_ROUTING_PLAN_20260913.md",
+    "planned_conditions": 167
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "skill": "experiment-audit",
+  "reviewer_backend": "codex",
+  "status": "REVIEW_UNAVAILABLE",
+  "independent_verdict": null,
+  "artifacts": [
+    "/share/home/tm902089733300000/a903202310/lys/research/reanchor/src/decoding/ragtruth_population_evaluate.py",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/route_graph/metrics.py",
+    "/share/home/tm902089733300000/a903202310/lys/research/reanchor/results/ragtruth_population_partial_20260913.json",
+    "/share/home/tm902089733300000/a903202310/lys/research/reanchor/outputs/ragtruth_population_20260912/settings.json",
+    "/share/home/tm902089733300000/a903202310/lys/research/reanchor/src/decoding/relation_only.py",
+    "/share/home/tm902089733300000/a903202310/lys/research/reanchor/src/decoding/relation_inputs.py",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/docs/RELATION_ONLY_PLAN_20260913.md",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/refine-logs/EXPERIMENT_TRACKER.md",
+    "/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/response.jsonl",
+    "/share/home/tm902089733300000/a903202310/lys/research/reanchor/outputs/relation_only_20260913/manifest.json",
+    "/share/home/tm902089733300000/a903202310/lys/research/reanchor/outputs/relation_routing_20260913/manifest.json",
+    "/share/home/tm902089733300000/a903202310/lys/research/reanchor/results/relation_analysis_20260913/manifest.json",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/docs/RELATION_MECHANISM_RESULTS_20260913.md",
+    "/share/home/tm902089733300000/a903202310/lys/research/graph/refine-logs/relation_analysis_engineering_20260913.md"
+  ]
+}

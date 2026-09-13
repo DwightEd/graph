@@ -1,0 +1,150 @@
+{
+  "reconstruction": {
+    "summary": {
+      "sources": 240,
+      "census": {
+        "QA:train": {
+          "eligible_source_ids": 688,
+          "unique_texts": 688,
+          "selected": 64
+        },
+        "QA:validation": {
+          "eligible_source_ids": 151,
+          "unique_texts": 151,
+          "selected": 16
+        },
+        "Summary:train": {
+          "eligible_source_ids": 636,
+          "unique_texts": 635,
+          "selected": 64
+        },
+        "Summary:validation": {
+          "eligible_source_ids": 157,
+          "unique_texts": 157,
+          "selected": 16
+        },
+        "Data2txt:train": {
+          "eligible_source_ids": 730,
+          "unique_texts": 730,
+          "selected": 64
+        },
+        "Data2txt:validation": {
+          "eligible_source_ids": 153,
+          "unique_texts": 153,
+          "selected": 16
+        }
+      },
+      "pointers": 9220,
+      "sources_without_pointer": 0,
+      "labels_read": false,
+      "model_forwards": 0,
+      "semantic_ground_truth": false,
+      "status": "complete"
+    },
+    "manifest_sha256": "dfc569bd01fd8752f6c7e1cae106b31527e60c4e7489862eb57d88ceea9af916",
+    "code_files": 50,
+    "selected_roster_rederived_from_frozen_input": true,
+    "unique_train_sha": 192,
+    "unique_validation_sha": 48,
+    "source_sha_overlap": 0
+  },
+  "grounded_graph_features_v1_20260913": {
+    "summary": {
+      "status": "complete",
+      "examples": 240,
+      "actual_forwards": 240,
+      "counts": {
+        "available": 240
+      },
+      "tokens": 135519,
+      "seconds": 126.12791850417852,
+      "cuda_peak_bytes": 16610850816,
+      "labels_read": false
+    },
+    "manifest_sha256": "61bd0e2e217f88a6fb508d0b77cf1f4342f8d511ef16dd3ae67e41fc1d5fd967",
+    "prepare_manifest_sha256": "b72de791b5fcffb513bf0e046f3a9c4e347e1cb6fb5dc3be862202ae476f2e71",
+    "code_files": 53,
+    "prepare_artifacts": 241,
+    "capture_artifacts": 481,
+    "sources": 240,
+    "task_split_census": {
+      "QA:train": 64,
+      "QA:validation": 16,
+      "Summary:train": 64,
+      "Summary:validation": 16,
+      "Data2txt:train": 64,
+      "Data2txt:validation": 16
+    },
+    "source_nodes": 117314,
+    "directed_edges": 439996,
+    "unavailable_nodes": 0,
+    "all_nonwhitespace_words": 90670,
+    "source_row_range": [
+      157,
+      2078
+    ],
+    "query_row_range": [
+      160,
+      2172
+    ],
+    "array_bytes": 4142415872,
+    "all_arrays_float32_finite_sha_verified": true,
+    "prompt_only_source_pool_and_exact_node_edge_order_verified": true,
+    "exact_original_tokens_offsets_and_pretoken_queries_verified": true,
+    "actual_forwards": 240
+  },
+  "grounded_graph_natural_features_v1_20260913": {
+    "summary": {
+      "status": "complete",
+      "examples": 36,
+      "actual_forwards": 36,
+      "counts": {
+        "available": 36
+      },
+      "tokens": 5840,
+      "seconds": 29.84053441695869,
+      "cuda_peak_bytes": 16282228736,
+      "labels_read": false
+    },
+    "manifest_sha256": "16d22d079b01c23513587d431374c29e4d754fec39f008cbec16e26b68467cfa",
+    "prepare_manifest_sha256": "cd4474db71108a643439e12190401e34794a4a9633d449cfb79ca6d10e74fe81",
+    "code_files": 53,
+    "prepare_artifacts": 37,
+    "capture_artifacts": 73,
+    "sources": 6,
+    "task_split_census": {
+      "QA:train": 12,
+      "Summary:train": 12,
+      "Data2txt:train": 12
+    },
+    "source_nodes": 20844,
+    "directed_edges": 78960,
+    "unavailable_nodes": 0,
+    "all_nonwhitespace_words": 4733,
+    "source_row_range": [
+      209,
+      1495
+    ],
+    "query_row_range": [
+      81,
+      374
+    ],
+    "array_bytes": 437190656,
+    "all_arrays_float32_finite_sha_verified": true,
+    "prompt_only_source_pool_and_exact_node_edge_order_verified": true,
+    "exact_original_tokens_offsets_and_pretoken_queries_verified": true,
+    "actual_forwards": 36
+  },
+  "natural_source_overlap_with_selected_reconstruction": [
+    {
+      "source_id": "13717",
+      "task": "Data2txt",
+      "split": "train",
+      "source_text_sha256": "ed9d31beb2b9b17de1ab2686a850c6785bdf15feb851f5faa04f0a327be41fd4"
+    }
+  ],
+  "model_files_verified": 16,
+  "labels_read": false,
+  "model_forwards_in_independent_audit": 0,
+  "status": "pass"
+}

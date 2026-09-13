@@ -1,0 +1,98 @@
+{
+  "schema": "native-v3-integrity-audit@1",
+  "date": "2026-09-13",
+  "audit_backend": "local_collaboration_fallback_read_only",
+  "external_reviewer_backend": "not_invoked",
+  "integrity_status": "pass",
+  "claim_status": "negative_unsupported_except_operational_completion",
+  "run": "outputs/native_audit_v3_20260913",
+  "settings_sha256": "a248702782a0f5db9779c05d2172fe8c0b1e38ff332cc3b3f1c6a67c8c5681ac",
+  "labels_sha256": "e4c2e4ac24fff676d8984cc61c35d791612fadc58015335d97dd632375e18073",
+  "checks": {
+    "frozen_input_hash": "pass",
+    "pre_frozen_evaluation_manifest": "pass",
+    "full_label_bytes_hash": "pass",
+    "stage_artifacts": {
+      "stage_counts": {
+        "A": 36,
+        "B": 36,
+        "C": 36,
+        "D": 36,
+        "merge": 36
+      },
+      "artifact_checks": 180,
+      "mismatches": 0,
+      "status": "pass"
+    },
+    "annotation_join_after_complete": "pass",
+    "full_word_offsets": "pass",
+    "labels_excluded_from_method_stages": "pass",
+    "post_A_barrier_diagnostic_excluded": "pass",
+    "score_normalization": "pass_no_prediction_statistic_denominator",
+    "scope": "warn_exploratory_six_train_sources"
+  },
+  "denominators": {
+    "responses": 36,
+    "sources": 6,
+    "all_words": 4733,
+    "annotated_error_words": 260,
+    "word_coverage_states": {
+      "assertion": 1666,
+      "nonassertion": 135,
+      "coverage_unknown": 2932
+    },
+    "questions": 368,
+    "question_status": {
+      "uncertain": 271,
+      "invalid_question": 97
+    }
+  },
+  "execution": {
+    "A_reader_requests": 1064,
+    "selected_native_questions": 0,
+    "B_entries": 0,
+    "C_entries": 0,
+    "D_entries": 0,
+    "native_forward_calls": 0,
+    "native_tokens_processed": 0,
+    "native_certificates": 0,
+    "mechanisms": 0
+  },
+  "evaluation": {
+    "labels_used_stage": "evaluation_only_after_complete",
+    "scored_words": 0,
+    "abstained_words": 4733,
+    "error_word_coverage": 0.0,
+    "detected_words_at_threshold": 0,
+    "recall_including_abstentions": 0.0,
+    "confidence_intervals": "not_estimated_from_only_six_sources"
+  },
+  "claims": [
+    {
+      "id": "automatic_localization",
+      "claim_supported": "no",
+      "reason": "all words abstained"
+    },
+    {
+      "id": "source_attribution",
+      "claim_supported": "no",
+      "reason": "no E/C/N anchor"
+    },
+    {
+      "id": "native_causal_attribution",
+      "claim_supported": "no",
+      "reason": "no selected question or native forward"
+    },
+    {
+      "id": "error_continuation_attribution",
+      "claim_supported": "no",
+      "reason": "no eligible relation or certificate"
+    },
+    {
+      "id": "conservative_pipeline_completion",
+      "claim_supported": "yes_narrow_operational_only",
+      "reason": "all frozen artifacts and evaluation completed with zero eligible measurements"
+    }
+  ],
+  "wrapper_status": "pending_population_restore_at_audit_time"
+}

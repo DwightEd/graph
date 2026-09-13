@@ -1,0 +1,416 @@
+{
+  "session_id": 55390,
+  "python_pid": 177870,
+  "shell_pid": 177867,
+  "exit_code": 0,
+  "evaluation_manifest_sha256": "7cdb074730827bff9acdf4dfaa1d91da92d1bbe20e3942b49b26192661f87542",
+  "artifacts_verified": 2,
+  "population_parent_hashes_verified": 5,
+  "frozen_prediction_and_evaluator_before_label_join": true,
+  "independent_formula": "Source-balanced weighted pairwise AUROC with half-credit for ties; threshold-grouped weighted average precision. No sklearn or experiment-module imports. Original annotation words/spans joined only after completed frozen evaluation.",
+  "metric_cells_compared": 441,
+  "max_absolute_metric_error": 1.6209256159527285e-14,
+  "responses": 36,
+  "sources": 6,
+  "error_responses": 14,
+  "error_response_count_documentation_source": "Each first-inclusive error response contributes exactly one error word; copied from already-complete evaluator count, without reopening labels or rerunning metrics.",
+  "overall": {
+    "all_words": {
+      "words": 4733,
+      "error_words": 260,
+      "unavailable_words": 0,
+      "metrics": {
+        "base_nll": {
+          "auroc": 0.5354768274827701,
+          "auprc": 0.06000974820798913,
+          "error_prevalence": 0.05456346332274694
+        },
+        "base_entropy": {
+          "auroc": 0.523665249983887,
+          "auprc": 0.05658250935161832,
+          "error_prevalence": 0.05456346332274694
+        },
+        "graph_nll": {
+          "auroc": 0.533458282542432,
+          "auprc": 0.05961335108883806,
+          "error_prevalence": 0.05456346332274694
+        },
+        "graph_difference": {
+          "auroc": 0.5059267612647237,
+          "auprc": 0.05271379081308204,
+          "error_prevalence": 0.05456346332274694
+        },
+        "no_edges_nll": {
+          "auroc": 0.5326379433752018,
+          "auprc": 0.05984681730061611,
+          "error_prevalence": 0.05456346332274694
+        },
+        "no_edges_difference": {
+          "auroc": 0.4916901101774871,
+          "auprc": 0.0531281744714292,
+          "error_prevalence": 0.05456346332274694
+        },
+        "permuted_graph_difference": {
+          "auroc": 0.5103903592376181,
+          "auprc": 0.05433553238881111,
+          "error_prevalence": 0.05456346332274694
+        }
+      }
+    },
+    "through_first_error": {
+      "words": 3991,
+      "error_words": 14,
+      "unavailable_words": 0,
+      "metrics": {
+        "base_nll": {
+          "auroc": 0.5521052524766581,
+          "auprc": 0.005227522081279858,
+          "error_prevalence": 0.0038466330392453985
+        },
+        "base_entropy": {
+          "auroc": 0.6213636964947005,
+          "auprc": 0.008076633890964201,
+          "error_prevalence": 0.0038466330392453985
+        },
+        "graph_nll": {
+          "auroc": 0.5374981212890992,
+          "auprc": 0.005342930085677206,
+          "error_prevalence": 0.0038466330392453985
+        },
+        "graph_difference": {
+          "auroc": 0.39046710330065676,
+          "auprc": 0.006276452270560331,
+          "error_prevalence": 0.0038466330392453985
+        },
+        "no_edges_nll": {
+          "auroc": 0.5291455594317325,
+          "auprc": 0.005025055357943216,
+          "error_prevalence": 0.0038466330392453985
+        },
+        "no_edges_difference": {
+          "auroc": 0.2897866032275364,
+          "auprc": 0.0034727848605880705,
+          "error_prevalence": 0.0038466330392453985
+        },
+        "permuted_graph_difference": {
+          "auroc": 0.4061230199802378,
+          "auprc": 0.006264050034909996,
+          "error_prevalence": 0.0038466330392453985
+        }
+      }
+    },
+    "post_first_error": {
+      "words": 742,
+      "error_words": 246,
+      "unavailable_words": 0,
+      "metrics": {
+        "base_nll": {
+          "auroc": 0.5165446327622046,
+          "auprc": 0.42802323894413635,
+          "error_prevalence": 0.4166484649848743
+        },
+        "base_entropy": {
+          "auroc": 0.486351305680777,
+          "auprc": 0.4004638281955286,
+          "error_prevalence": 0.4166484649848743
+        },
+        "graph_nll": {
+          "auroc": 0.5169613959484443,
+          "auprc": 0.4260949605421209,
+          "error_prevalence": 0.4166484649848743
+        },
+        "graph_difference": {
+          "auroc": 0.5120727094102464,
+          "auprc": 0.4113459035479293,
+          "error_prevalence": 0.4166484649848743
+        },
+        "no_edges_nll": {
+          "auroc": 0.5147928508330784,
+          "auprc": 0.4273447064326461,
+          "error_prevalence": 0.4166484649848743
+        },
+        "no_edges_difference": {
+          "auroc": 0.5024976671339378,
+          "auprc": 0.41546868301443746,
+          "error_prevalence": 0.4166484649848743
+        },
+        "permuted_graph_difference": {
+          "auroc": 0.5299888314653157,
+          "auprc": 0.42753107302945115,
+          "error_prevalence": 0.4166484649848743
+        }
+      }
+    }
+  },
+  "source_training_overlap": {
+    "unseen": {
+      "responses": 30,
+      "subsets": {
+        "all_words": {
+          "words": 3816,
+          "error_words": 232,
+          "unavailable_words": 0,
+          "metrics": {
+            "base_nll": {
+              "auroc": 0.5377600808816506,
+              "auprc": 0.06430217039735271,
+              "error_prevalence": 0.05936928575828868
+            },
+            "base_entropy": {
+              "auroc": 0.5271695304431671,
+              "auprc": 0.06184069411855624,
+              "error_prevalence": 0.05936928575828868
+            },
+            "graph_nll": {
+              "auroc": 0.5358023530398885,
+              "auprc": 0.06380888721411551,
+              "error_prevalence": 0.05936928575828868
+            },
+            "graph_difference": {
+              "auroc": 0.50517367020672,
+              "auprc": 0.057052462102767584,
+              "error_prevalence": 0.05936928575828868
+            },
+            "no_edges_nll": {
+              "auroc": 0.5353127114320325,
+              "auprc": 0.0639521073227958,
+              "error_prevalence": 0.05936928575828868
+            },
+            "no_edges_difference": {
+              "auroc": 0.49175433844833516,
+              "auprc": 0.056173318547331846,
+              "error_prevalence": 0.05936928575828868
+            },
+            "permuted_graph_difference": {
+              "auroc": 0.5104717225667801,
+              "auprc": 0.05853409637661228,
+              "error_prevalence": 0.05936928575828868
+            }
+          }
+        },
+        "through_first_error": {
+          "words": 3290,
+          "error_words": 10,
+          "unavailable_words": 0,
+          "metrics": {
+            "base_nll": {
+              "auroc": 0.5721105531150086,
+              "auprc": 0.004776781162918365,
+              "error_prevalence": 0.003474732828264236
+            },
+            "base_entropy": {
+              "auroc": 0.6869695585711517,
+              "auprc": 0.009961149737067562,
+              "error_prevalence": 0.003474732828264236
+            },
+            "graph_nll": {
+              "auroc": 0.5588308307358016,
+              "auprc": 0.005010924642897431,
+              "error_prevalence": 0.003474732828264236
+            },
+            "graph_difference": {
+              "auroc": 0.40012782214827025,
+              "auprc": 0.007670264893918675,
+              "error_prevalence": 0.003474732828264236
+            },
+            "no_edges_nll": {
+              "auroc": 0.5554378192708261,
+              "auprc": 0.00465197003132849,
+              "error_prevalence": 0.003474732828264236
+            },
+            "no_edges_difference": {
+              "auroc": 0.32070036807786195,
+              "auprc": 0.0038670090921383337,
+              "error_prevalence": 0.003474732828264236
+            },
+            "permuted_graph_difference": {
+              "auroc": 0.42252533495844224,
+              "auprc": 0.007904425338072982,
+              "error_prevalence": 0.003474732828264236
+            }
+          }
+        },
+        "post_first_error": {
+          "words": 526,
+          "error_words": 222,
+          "unavailable_words": 0,
+          "metrics": {
+            "base_nll": {
+              "auroc": 0.5257527736679941,
+              "auprc": 0.4936494503852763,
+              "error_prevalence": 0.4777559357596268
+            },
+            "base_entropy": {
+              "auroc": 0.4992608103224415,
+              "auprc": 0.4712802510663026,
+              "error_prevalence": 0.4777559357596268
+            },
+            "graph_nll": {
+              "auroc": 0.5255523895482307,
+              "auprc": 0.49123864269407436,
+              "error_prevalence": 0.4777559357596268
+            },
+            "graph_difference": {
+              "auroc": 0.5049175457397743,
+              "auprc": 0.4687619415171974,
+              "error_prevalence": 0.4777559357596268
+            },
+            "no_edges_nll": {
+              "auroc": 0.5229962480940935,
+              "auprc": 0.4920338621892402,
+              "error_prevalence": 0.4777559357596268
+            },
+            "no_edges_difference": {
+              "auroc": 0.4952511807524808,
+              "auprc": 0.46947097290498135,
+              "error_prevalence": 0.4777559357596268
+            },
+            "permuted_graph_difference": {
+              "auroc": 0.5278493488320566,
+              "auprc": 0.48233402178630047,
+              "error_prevalence": 0.4777559357596268
+            }
+          }
+        }
+      }
+    },
+    "train": {
+      "responses": 6,
+      "subsets": {
+        "all_words": {
+          "words": 917,
+          "error_words": 28,
+          "unavailable_words": 0,
+          "metrics": {
+            "base_nll": {
+              "auroc": 0.5285232203117454,
+              "auprc": 0.05396701798050728,
+              "error_prevalence": 0.03053435114503817
+            },
+            "base_entropy": {
+              "auroc": 0.49168407520488344,
+              "auprc": 0.032113728321641916,
+              "error_prevalence": 0.03053435114503817
+            },
+            "graph_nll": {
+              "auroc": 0.5259119395789797,
+              "auprc": 0.05589788783690548,
+              "error_prevalence": 0.03053435114503817
+            },
+            "graph_difference": {
+              "auroc": 0.5022095452354152,
+              "auprc": 0.0403492088038943,
+              "error_prevalence": 0.03053435114503817
+            },
+            "no_edges_nll": {
+              "auroc": 0.5235818736943582,
+              "auprc": 0.05677821680098319,
+              "error_prevalence": 0.03053435114503817
+            },
+            "no_edges_difference": {
+              "auroc": 0.5061063795596963,
+              "auprc": 0.0721643347066692,
+              "error_prevalence": 0.03053435114503817
+            },
+            "permuted_graph_difference": {
+              "auroc": 0.5070705447533329,
+              "auprc": 0.05651548970279812,
+              "error_prevalence": 0.03053435114503817
+            }
+          }
+        },
+        "through_first_error": {
+          "words": 701,
+          "error_words": 4,
+          "unavailable_words": 0,
+          "metrics": {
+            "base_nll": {
+              "auroc": 0.4845767575322848,
+              "auprc": 0.016630679000781863,
+              "error_prevalence": 0.005706134094151212
+            },
+            "base_entropy": {
+              "auroc": 0.42144906743185484,
+              "auprc": 0.005937909639135729,
+              "error_prevalence": 0.005706134094151212
+            },
+            "graph_nll": {
+              "auroc": 0.4745337159253979,
+              "auprc": 0.01504490301111765,
+              "error_prevalence": 0.005706134094151212
+            },
+            "graph_difference": {
+              "auroc": 0.3654949784791993,
+              "auprc": 0.005750903192192718,
+              "error_prevalence": 0.005706134094151212
+            },
+            "no_edges_nll": {
+              "auroc": 0.4519368723099027,
+              "auprc": 0.016295079746758617,
+              "error_prevalence": 0.005706134094151212
+            },
+            "no_edges_difference": {
+              "auroc": 0.2005021520803473,
+              "auprc": 0.004266482185519238,
+              "error_prevalence": 0.005706134094151212
+            },
+            "permuted_graph_difference": {
+              "auroc": 0.35329985652797946,
+              "auprc": 0.005866610910890646,
+              "error_prevalence": 0.005706134094151212
+            }
+          }
+        },
+        "post_first_error": {
+          "words": 216,
+          "error_words": 24,
+          "unavailable_words": 0,
+          "metrics": {
+            "base_nll": {
+              "auroc": 0.5138888888888895,
+              "auprc": 0.15928756979493444,
+              "error_prevalence": 0.1111111111111111
+            },
+            "base_entropy": {
+              "auroc": 0.4628906250000007,
+              "auprc": 0.10790909932701975,
+              "error_prevalence": 0.1111111111111111
+            },
+            "graph_nll": {
+              "auroc": 0.5145399305555562,
+              "auprc": 0.1679802379500067,
+              "error_prevalence": 0.1111111111111111
+            },
+            "graph_difference": {
+              "auroc": 0.5321180555555562,
+              "auprc": 0.14828074531930227,
+              "error_prevalence": 0.1111111111111111
+            },
+            "no_edges_nll": {
+              "auroc": 0.5169270833333339,
+              "auprc": 0.1679358732351557,
+              "error_prevalence": 0.1111111111111111
+            },
+            "no_edges_difference": {
+              "auroc": 0.5770399305555562,
+              "auprc": 0.1976010297955887,
+              "error_prevalence": 0.1111111111111111
+            },
+            "permuted_graph_difference": {
+              "auroc": 0.5453559027777783,
+              "auprc": 0.2316693981509782,
+              "error_prevalence": 0.1111111111111111
+            }
+          }
+        }
+      }
+    }
+  },
+  "task_generator_split_groups": 18,
+  "independent_audit_subprocess_session": 96604,
+  "independent_audit_subprocess_exit": 1,
+  "independent_audit_numeric_assertions_completed": true,
+  "documentation_failure": "TypeError: Object of type int64 is not JSON serializable",
+  "partial_record_preserved": "refine-logs/grounded_graph_train_doc_witness_20260913.evaluation_audit.json",
+  "documentation_completion_only_no_rerun": true
+}

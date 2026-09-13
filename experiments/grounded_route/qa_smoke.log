@@ -1,0 +1,8 @@
+
+[1/7] Build train graph spec
+build completed
+spec: /share/home/tm902089733300000/a903202310/lys/research/graph/experiments/grounded_route/outputs/qa_smoke/train_graph.json
+samples: 30
+
+[2/7] Fit GroundedRoute encoder
+fit epoch 1:   0%|          | 0/20 [00:00<?, ?sample/s]

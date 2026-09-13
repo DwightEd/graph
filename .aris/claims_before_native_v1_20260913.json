@@ -1,0 +1,114 @@
+[
+  {
+    "id": "recovered_answers",
+    "value": 217,
+    "source": "results/method_iteration_20260912/recovery/index.json",
+    "json_path": [
+      "complete_responses"
+    ]
+  },
+  {
+    "id": "recovered_tokens",
+    "value": 47880,
+    "source": "results/method_iteration_20260912/recovery/index.json",
+    "json_path": [
+      "complete_tokens"
+    ]
+  },
+  {
+    "id": "residual_first_auroc",
+    "value": 0.43612177370179966,
+    "source": "results/method_iteration_20260912/baseline/evaluation.json",
+    "json_path": [
+      "subsets",
+      "first_error",
+      "metrics",
+      "residual",
+      "auroc"
+    ]
+  },
+  {
+    "id": "entropy_first_auroc",
+    "value": 0.8441948054579722,
+    "source": "results/method_iteration_20260912/baseline/evaluation.json",
+    "json_path": [
+      "subsets",
+      "first_error",
+      "metrics",
+      "entropy",
+      "auroc"
+    ]
+  },
+  {
+    "id": "residual_alarm_hits",
+    "value": 16,
+    "source": "results/method_iteration_20260912/baseline/alarms_v3.json",
+    "json_path": [
+      "methods",
+      "residual",
+      "hits"
+    ]
+  },
+  {
+    "id": "entropy_alarm_hits",
+    "value": 24,
+    "source": "results/method_iteration_20260912/baseline/alarms_v3.json",
+    "json_path": [
+      "methods",
+      "entropy",
+      "hits"
+    ]
+  },
+  {
+    "id": "binding_conditions",
+    "value": 128,
+    "source": "../reanchor/results/binding_validation_v3_20260912/numbers.json",
+    "json_path": [
+      "conditions"
+    ]
+  },
+  {
+    "id": "binding_actual_error_test",
+    "value": false,
+    "source": "../reanchor/results/binding_validation_v3_20260912/numbers.json",
+    "json_path": [
+      "error_detection_tested"
+    ]
+  },
+  {
+    "id": "binding_misbound_context",
+    "value": 26,
+    "source": "../reanchor/results/binding_validation_v3_20260912/numbers.json",
+    "json_path": [
+      "layouts",
+      "misbound",
+      "layers",
+      "16",
+      "methods",
+      "context",
+      "correct"
+    ]
+  },
+  {
+    "id": "binding_misbound_direct",
+    "value": 27,
+    "source": "../reanchor/results/binding_validation_v3_20260912/numbers.json",
+    "json_path": [
+      "layouts",
+      "misbound",
+      "layers",
+      "16",
+      "methods",
+      "direct",
+      "correct"
+    ]
+  },
+  {
+    "id": "binding_both_values",
+    "value": 62,
+    "source": "../reanchor/results/binding_validation_v3_20260912/constructed_value_coverage.json",
+    "json_path": [
+      "both_values_in_top4"
+    ]
+  }
+]

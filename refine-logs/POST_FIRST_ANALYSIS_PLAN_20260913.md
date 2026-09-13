@@ -1,0 +1,11 @@
+# 已完成全量观测的首错后信号分析
+
+这是对已经冻结完成的17790条observer replay的CPU分析，不增加GPU前向、不训练、不改变旧预测或评价器。直接补齐用户关心而旧evaluator未输出的post-first段，不能称新检测器或验证图路由。
+
+输入固定reanchor/outputs/ragtruth_population_20260912和其settings所绑定的原RAGTruth response.jsonl。代码、计划、输入/旧evaluation hashes先保存，标签仅用于已有预测的分段及评价。
+
+预定三掩码：all_tokens；through_first_error（包含首错）；post_first_error（严格首错之后，只在有错回答中非空）。逐回答三掩码分母满足all=first+post；额外记录error run starts/interiors和post-first正常token计数，用于清楚表达边界。
+
+预定9分数，高值方向固定，不在标签上翻转/归一化：entropy；negative_margin；source_small_JS；history_small_JS；source_saved_support=-source_01_saved_logp_change；history_saved_support=-history_01_saved_logp_change；history_minus_source_support=source_01_saved_logp_change-history_01_saved_logp_change；source_permute_JS；mlp_small_JS。这只是粗粒度全部来源/历史依赖，不能替代当前证据约束归属或具体值的复用边。
+
+完整报告36个task×generator×official split组、每组各子集token/error/source数、AUROC/AUPRC（两类不足时null）。先按actual frozen generator/record/text/offset/hash验证标签绑定。组AUROC加权汇总明确为weighted group summary，不冒称pooled。无bootstrap CI、无确认性新方法优越性结论。训练/测试均全量描述，不用官方test选择新模型超参。

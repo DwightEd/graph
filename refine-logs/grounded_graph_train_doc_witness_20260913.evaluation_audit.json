@@ -1,0 +1,15 @@
+{
+  "session_id": 55390,
+  "python_pid": 177870,
+  "shell_pid": 177867,
+  "exit_code": 0,
+  "evaluation_manifest_sha256": "7cdb074730827bff9acdf4dfaa1d91da92d1bbe20e3942b49b26192661f87542",
+  "artifacts_verified": 2,
+  "population_parent_hashes_verified": 5,
+  "frozen_prediction_and_evaluator_before_label_join": true,
+  "independent_formula": "Source-balanced weighted pairwise AUROC with half-credit for ties; threshold-grouped weighted average precision. No sklearn or experiment-module imports. Original annotation words/spans joined only after completed frozen evaluation.",
+  "metric_cells_compared": 441,
+  "max_absolute_metric_error": 1.6209256159527285e-14,
+  "responses": 36,
+  "sources": 6,
+  "error_responses": 

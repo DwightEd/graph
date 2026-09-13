@@ -1,0 +1,143 @@
+{
+  "engine": "local deterministic JSON-path equality; standard skill helper unresolved",
+  "scope": "evidence existence only; not scientific validation",
+  "results": [
+    {
+      "id": "recovered_answers",
+      "value": 217,
+      "source": "results/method_iteration_20260912/recovery/index.json",
+      "json_path": [
+        "complete_responses"
+      ],
+      "status": "verified",
+      "actual": 217
+    },
+    {
+      "id": "recovered_tokens",
+      "value": 47880,
+      "source": "results/method_iteration_20260912/recovery/index.json",
+      "json_path": [
+        "complete_tokens"
+      ],
+      "status": "verified",
+      "actual": 47880
+    },
+    {
+      "id": "residual_first_auroc",
+      "value": 0.43612177370179966,
+      "source": "results/method_iteration_20260912/baseline/evaluation.json",
+      "json_path": [
+        "subsets",
+        "first_error",
+        "metrics",
+        "residual",
+        "auroc"
+      ],
+      "status": "verified",
+      "actual": 0.43612177370179966
+    },
+    {
+      "id": "entropy_first_auroc",
+      "value": 0.8441948054579722,
+      "source": "results/method_iteration_20260912/baseline/evaluation.json",
+      "json_path": [
+        "subsets",
+        "first_error",
+        "metrics",
+        "entropy",
+        "auroc"
+      ],
+      "status": "verified",
+      "actual": 0.8441948054579722
+    },
+    {
+      "id": "residual_alarm_hits",
+      "value": 16,
+      "source": "results/method_iteration_20260912/baseline/alarms_v3.json",
+      "json_path": [
+        "methods",
+        "residual",
+        "hits"
+      ],
+      "status": "verified",
+      "actual": 16
+    },
+    {
+      "id": "entropy_alarm_hits",
+      "value": 24,
+      "source": "results/method_iteration_20260912/baseline/alarms_v3.json",
+      "json_path": [
+        "methods",
+        "entropy",
+        "hits"
+      ],
+      "status": "verified",
+      "actual": 24
+    },
+    {
+      "id": "binding_conditions",
+      "value": 128,
+      "source": "../reanchor/results/binding_validation_v3_20260912/numbers.json",
+      "json_path": [
+        "conditions"
+      ],
+      "status": "verified",
+      "actual": 128
+    },
+    {
+      "id": "binding_actual_error_test",
+      "value": false,
+      "source": "../reanchor/results/binding_validation_v3_20260912/numbers.json",
+      "json_path": [
+        "error_detection_tested"
+      ],
+      "status": "verified",
+      "actual": false
+    },
+    {
+      "id": "binding_misbound_context",
+      "value": 26,
+      "source": "../reanchor/results/binding_validation_v3_20260912/numbers.json",
+      "json_path": [
+        "layouts",
+        "misbound",
+        "layers",
+        "16",
+        "methods",
+        "context",
+        "correct"
+      ],
+      "status": "verified",
+      "actual": 26
+    },
+    {
+      "id": "binding_misbound_direct",
+      "value": 27,
+      "source": "../reanchor/results/binding_validation_v3_20260912/numbers.json",
+      "json_path": [
+        "layouts",
+        "misbound",
+        "layers",
+        "16",
+        "methods",
+        "direct",
+        "correct"
+      ],
+      "status": "verified",
+      "actual": 27
+    },
+    {
+      "id": "binding_both_values",
+      "value": 62,
+      "source": "../reanchor/results/binding_validation_v3_20260912/constructed_value_coverage.json",
+      "json_path": [
+        "both_values_in_top4"
+      ],
+      "status": "verified",
+      "actual": 62
+    }
+  ],
+  "summary": {
+    "verified": 11
+  }
+}

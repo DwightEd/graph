@@ -1,0 +1,2259 @@
+{
+  "schema": "population-postfirst-results-independent-review@1",
+  "date": "2026-09-13",
+  "review_backend": "Codex agent read-only results review; no external reviewer MCP was available",
+  "run": "/share/home/tm902089733300000/a903202310/lys/research/graph/outputs/population_postfirst_v1_20260913",
+  "integrity": {
+    "manifest_status": "complete",
+    "results_status": "complete",
+    "settings_hash_matches_manifest": true,
+    "artifact_hashes_match_manifest": {
+      "response_manifest_hashes.json": true,
+      "results.json": true
+    },
+    "live_and_snapshot_code_checks": [
+      {
+        "path": "/share/home/tm902089733300000/a903202310/lys/research/graph/next_iteration/population_postfirst.py",
+        "expected": "75fd4b79d8c5c9d40281d689e4a1cc8bb1fcdddd28a9f1ab56d77feaaa1002e0",
+        "live": "75fd4b79d8c5c9d40281d689e4a1cc8bb1fcdddd28a9f1ab56d77feaaa1002e0",
+        "snapshot": "75fd4b79d8c5c9d40281d689e4a1cc8bb1fcdddd28a9f1ab56d77feaaa1002e0",
+        "live_matches": true,
+        "snapshot_matches": true
+      },
+      {
+        "path": "/share/home/tm902089733300000/a903202310/lys/research/graph/refine-logs/POST_FIRST_ANALYSIS_PLAN_20260913.md",
+        "expected": "eb86eeaf1cb392f21c0c49f8bd1fd9cd9ef27e8f44dffe0595b90858e331676d",
+        "live": "eb86eeaf1cb392f21c0c49f8bd1fd9cd9ef27e8f44dffe0595b90858e331676d",
+        "snapshot": "eb86eeaf1cb392f21c0c49f8bd1fd9cd9ef27e8f44dffe0595b90858e331676d",
+        "live_matches": true,
+        "snapshot_matches": true
+      },
+      {
+        "path": "/share/home/tm902089733300000/a903202310/lys/research/reanchor/src/decoding/ragtruth_population_io.py",
+        "expected": "2a018c7197c5b8fff56b27829bb990a3f2f963174b509459d0e1ab787abdcdc8",
+        "live": "2a018c7197c5b8fff56b27829bb990a3f2f963174b509459d0e1ab787abdcdc8",
+        "snapshot": "2a018c7197c5b8fff56b27829bb990a3f2f963174b509459d0e1ab787abdcdc8",
+        "live_matches": true,
+        "snapshot_matches": true
+      }
+    ],
+    "parent_hashes_match": {
+      "/share/home/tm902089733300000/a903202310/lys/research/reanchor/outputs/ragtruth_population_20260912/settings.json": true,
+      "/share/home/tm902089733300000/a903202310/lys/research/reanchor/outputs/ragtruth_population_20260912/input_manifest.json": true,
+      "/share/home/tm902089733300000/a903202310/lys/research/reanchor/outputs/ragtruth_population_20260912/inputs.jsonl": true,
+      "/share/home/tm902089733300000/a903202310/lys/research/reanchor/outputs/ragtruth_population_20260912/COMPLETE": true,
+      "/share/home/tm902089733300000/a903202310/lys/research/reanchor/outputs/ragtruth_population_20260912/progress.json": true,
+      "/share/home/tm902089733300000/a903202310/lys/research/reanchor/outputs/ragtruth_population_20260912/evaluation_1789273472582766558.json": true
+    },
+    "label_hash_matches_settings": true,
+    "response_manifest_hash_count": 17790,
+    "complete_coverage_and_partitions": true,
+    "legacy_shared_metric_pairs_verified": 504,
+    "model_forwards": 0,
+    "protocol": {
+      "schema": "ragtruth-post-first-descriptive@1",
+      "subsets": [
+        "all_tokens",
+        "through_first_error",
+        "post_first_error"
+      ],
+      "score_direction": "fixed higher vs error; no label-based flipping/normalization",
+      "bootstrap": 0,
+      "source_balanced": true,
+      "labels_stage": "evaluation only; oracle boundaries not detector inputs",
+      "scope": "coarse observer replay dependence, not ownership/routing/continuous-span detector"
+    }
+  },
+  "census": {
+    "responses": 17790,
+    "tokens": 2903263,
+    "error_tokens": 156478,
+    "error_run_starts": 13664,
+    "error_run_interiors": 142814,
+    "all_tokens:tokens": 2903263,
+    "all_tokens:errors": 156478,
+    "through_first_error:tokens": 2092513,
+    "through_first_error:errors": 7664,
+    "post_first_error:tokens": 810750,
+    "post_first_error:errors": 148814
+  },
+  "post_first_aggregate": {
+    "entropy": {
+      "groups_with_two_classes": 35,
+      "token_weighted_group_auroc": 0.5480447964932943,
+      "unweighted_group_mean_auroc": 0.5537870568817379,
+      "range_auroc": [
+        0.3409846545060562,
+        0.6386355361082737
+      ]
+    },
+    "negative_margin": {
+      "groups_with_two_classes": 35,
+      "token_weighted_group_auroc": 0.5312228850797781,
+      "unweighted_group_mean_auroc": 0.537750134802699,
+      "range_auroc": [
+        0.3620806125676185,
+        0.6145682769126506
+      ]
+    },
+    "source_small_js": {
+      "groups_with_two_classes": 35,
+      "token_weighted_group_auroc": 0.5533424762936157,
+      "unweighted_group_mean_auroc": 0.545975015283763,
+      "range_auroc": [
+        0.3485722532126103,
+        0.6076610816949393
+      ]
+    },
+    "history_small_js": {
+      "groups_with_two_classes": 35,
+      "token_weighted_group_auroc": 0.512659512131135,
+      "unweighted_group_mean_auroc": 0.5243240490620891,
+      "range_auroc": [
+        0.4195103383474743,
+        0.6191948905547088
+      ]
+    },
+    "source_saved_support": {
+      "groups_with_two_classes": 35,
+      "token_weighted_group_auroc": 0.47063980592263627,
+      "unweighted_group_mean_auroc": 0.4726747685796038,
+      "range_auroc": [
+        0.41480278172736296,
+        0.5439246975513969
+      ]
+    },
+    "history_saved_support": {
+      "groups_with_two_classes": 35,
+      "token_weighted_group_auroc": 0.49239736967248393,
+      "unweighted_group_mean_auroc": 0.4914782895419915,
+      "range_auroc": [
+        0.4467224600815118,
+        0.5537800630747624
+      ]
+    },
+    "history_minus_source_support": {
+      "groups_with_two_classes": 35,
+      "token_weighted_group_auroc": 0.5222218401278776,
+      "unweighted_group_mean_auroc": 0.5182575738764664,
+      "range_auroc": [
+        0.4283100704652045,
+        0.5900347523390339
+      ]
+    },
+    "source_permute_js": {
+      "groups_with_two_classes": 35,
+      "token_weighted_group_auroc": 0.49424095092264647,
+      "unweighted_group_mean_auroc": 0.46883825587694067,
+      "range_auroc": [
+        0.3712744096709169,
+        0.5717634399221517
+      ]
+    },
+    "mlp_small_js": {
+      "groups_with_two_classes": 35,
+      "token_weighted_group_auroc": 0.539518829361375,
+      "unweighted_group_mean_auroc": 0.5444563492771645,
+      "range_auroc": [
+        0.3322455586081491,
+        0.6257896251629957
+      ]
+    }
+  },
+  "groups": [
+    {
+      "task": "Data2txt",
+      "generator": "gpt-3.5-turbo-0613",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 5560,
+        "errors": 465,
+        "sources": 37,
+        "error_rate": 0.08363309352517985,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.4627403545025349,
+            "auprc": 0.10523441005873266
+          },
+          "negative_margin": {
+            "auroc": 0.4448822799890144,
+            "auprc": 0.10006139237208292
+          },
+          "source_small_js": {
+            "auroc": 0.4733914497227448,
+            "auprc": 0.11455209778428524
+          },
+          "history_small_js": {
+            "auroc": 0.4498569976526517,
+            "auprc": 0.10045197755401415
+          },
+          "source_saved_support": {
+            "auroc": 0.488738286905561,
+            "auprc": 0.1095347355428401
+          },
+          "history_saved_support": {
+            "auroc": 0.47551599921836524,
+            "auprc": 0.10682397689008637
+          },
+          "history_minus_source_support": {
+            "auroc": 0.48345485039502395,
+            "auprc": 0.11374413697932997
+          },
+          "source_permute_js": {
+            "auroc": 0.45197494380416514,
+            "auprc": 0.10127392139194544
+          },
+          "mlp_small_js": {
+            "auroc": 0.4452493123136424,
+            "auprc": 0.09746848664959114
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 40335,
+        "errors": 502
+      },
+      "through_first_error": {
+        "tokens": 34775,
+        "errors": 37
+      }
+    },
+    {
+      "task": "Data2txt",
+      "generator": "gpt-3.5-turbo-0613",
+      "official_split": "train",
+      "responses": 883,
+      "post_first": {
+        "tokens": 33653,
+        "errors": 2613,
+        "sources": 235,
+        "error_rate": 0.07764538079814579,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.4877172225937253,
+            "auprc": 0.12956016900105
+          },
+          "negative_margin": {
+            "auroc": 0.48024426283981203,
+            "auprc": 0.12803172805173438
+          },
+          "source_small_js": {
+            "auroc": 0.48493822739294623,
+            "auprc": 0.13639864550845493
+          },
+          "history_small_js": {
+            "auroc": 0.49227359239359075,
+            "auprc": 0.13678222873381393
+          },
+          "source_saved_support": {
+            "auroc": 0.5014825681529671,
+            "auprc": 0.136883162812849
+          },
+          "history_saved_support": {
+            "auroc": 0.46651035978208966,
+            "auprc": 0.1254522874032724
+          },
+          "history_minus_source_support": {
+            "auroc": 0.4826204522122475,
+            "auprc": 0.13321871891803982
+          },
+          "source_permute_js": {
+            "auroc": 0.41111643731770375,
+            "auprc": 0.10906302330780575
+          },
+          "mlp_small_js": {
+            "auroc": 0.49802092397955056,
+            "auprc": 0.13930568533862764
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 236468,
+        "errors": 2848
+      },
+      "through_first_error": {
+        "tokens": 202815,
+        "errors": 235
+      }
+    },
+    {
+      "task": "Data2txt",
+      "generator": "gpt-4-0613",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 3079,
+        "errors": 181,
+        "sources": 35,
+        "error_rate": 0.058785319909061384,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.45255120261107534,
+            "auprc": 0.08127296457098293
+          },
+          "negative_margin": {
+            "auroc": 0.4535711980373651,
+            "auprc": 0.08467209035089514
+          },
+          "source_small_js": {
+            "auroc": 0.5303157283105325,
+            "auprc": 0.1486953388576844
+          },
+          "history_small_js": {
+            "auroc": 0.43812287512071096,
+            "auprc": 0.10065102402218976
+          },
+          "source_saved_support": {
+            "auroc": 0.49447454412048364,
+            "auprc": 0.13252115809048004
+          },
+          "history_saved_support": {
+            "auroc": 0.4990091237403909,
+            "auprc": 0.10069373231067348
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5050055683179442,
+            "auprc": 0.11329967421557632
+          },
+          "source_permute_js": {
+            "auroc": 0.527883627179301,
+            "auprc": 0.10633883044989882
+          },
+          "mlp_small_js": {
+            "auroc": 0.47298147945594027,
+            "auprc": 0.11173520981188023
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 25507,
+        "errors": 216
+      },
+      "through_first_error": {
+        "tokens": 22428,
+        "errors": 35
+      }
+    },
+    {
+      "task": "Data2txt",
+      "generator": "gpt-4-0613",
+      "official_split": "train",
+      "responses": 883,
+      "post_first": {
+        "tokens": 21435,
+        "errors": 1462,
+        "sources": 255,
+        "error_rate": 0.0682062048052251,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.4789038228628955,
+            "auprc": 0.12148384467462464
+          },
+          "negative_margin": {
+            "auroc": 0.46584332732511335,
+            "auprc": 0.1165485445829719
+          },
+          "source_small_js": {
+            "auroc": 0.4875537731151302,
+            "auprc": 0.12856809024595936
+          },
+          "history_small_js": {
+            "auroc": 0.49282486349414617,
+            "auprc": 0.12750160573554592
+          },
+          "source_saved_support": {
+            "auroc": 0.49560279557230474,
+            "auprc": 0.1305974492491047
+          },
+          "history_saved_support": {
+            "auroc": 0.5093308671787464,
+            "auprc": 0.1279090190028876
+          },
+          "history_minus_source_support": {
+            "auroc": 0.51455335107793,
+            "auprc": 0.13133887768976937
+          },
+          "source_permute_js": {
+            "auroc": 0.47996186753551157,
+            "auprc": 0.13186321581325544
+          },
+          "mlp_small_js": {
+            "auroc": 0.4878164480849069,
+            "auprc": 0.12660181682872595
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 149617,
+        "errors": 1717
+      },
+      "through_first_error": {
+        "tokens": 128182,
+        "errors": 255
+      }
+    },
+    {
+      "task": "Data2txt",
+      "generator": "llama-2-13b-chat",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 18447,
+        "errors": 2035,
+        "sources": 138,
+        "error_rate": 0.11031604054859868,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5497602099849599,
+            "auprc": 0.15982355503740076
+          },
+          "negative_margin": {
+            "auroc": 0.5335787564354371,
+            "auprc": 0.1437850835761869
+          },
+          "source_small_js": {
+            "auroc": 0.5694924259957208,
+            "auprc": 0.16671059163134405
+          },
+          "history_small_js": {
+            "auroc": 0.4958098774622489,
+            "auprc": 0.12285350699003059
+          },
+          "source_saved_support": {
+            "auroc": 0.48164586074650784,
+            "auprc": 0.13397783021989376
+          },
+          "history_saved_support": {
+            "auroc": 0.5004508768032339,
+            "auprc": 0.13048300859268253
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5239753582240596,
+            "auprc": 0.16070830077991188
+          },
+          "source_permute_js": {
+            "auroc": 0.5596438118764361,
+            "auprc": 0.15299599778768896
+          },
+          "mlp_small_js": {
+            "auroc": 0.5358430920053769,
+            "auprc": 0.14367893562054584
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 33221,
+        "errors": 2173
+      },
+      "through_first_error": {
+        "tokens": 14774,
+        "errors": 138
+      }
+    },
+    {
+      "task": "Data2txt",
+      "generator": "llama-2-13b-chat",
+      "official_split": "train",
+      "responses": 883,
+      "post_first": {
+        "tokens": 123742,
+        "errors": 14802,
+        "sources": 845,
+        "error_rate": 0.1196198542127976,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5399033614884132,
+            "auprc": 0.14923223925333565
+          },
+          "negative_margin": {
+            "auroc": 0.5209616989956825,
+            "auprc": 0.13359657936802122
+          },
+          "source_small_js": {
+            "auroc": 0.5655493102777985,
+            "auprc": 0.16600258145059707
+          },
+          "history_small_js": {
+            "auroc": 0.49354900345539765,
+            "auprc": 0.12151450942291617
+          },
+          "source_saved_support": {
+            "auroc": 0.4740453574833043,
+            "auprc": 0.13077252592611174
+          },
+          "history_saved_support": {
+            "auroc": 0.49023396966303556,
+            "auprc": 0.12662348691080366
+          },
+          "history_minus_source_support": {
+            "auroc": 0.520258765709001,
+            "auprc": 0.15492315142756397
+          },
+          "source_permute_js": {
+            "auroc": 0.5423194912842013,
+            "auprc": 0.14456102147295014
+          },
+          "mlp_small_js": {
+            "auroc": 0.5253194234930785,
+            "auprc": 0.13556046385721027
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 198223,
+        "errors": 15647
+      },
+      "through_first_error": {
+        "tokens": 74481,
+        "errors": 845
+      }
+    },
+    {
+      "task": "Data2txt",
+      "generator": "llama-2-70b-chat",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 13302,
+        "errors": 1177,
+        "sources": 112,
+        "error_rate": 0.08848293489700797,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5391375203278095,
+            "auprc": 0.14006133890055267
+          },
+          "negative_margin": {
+            "auroc": 0.5177329195380134,
+            "auprc": 0.11876501178463518
+          },
+          "source_small_js": {
+            "auroc": 0.5473855886191072,
+            "auprc": 0.14155519696766788
+          },
+          "history_small_js": {
+            "auroc": 0.5038777905226927,
+            "auprc": 0.11360673646769653
+          },
+          "source_saved_support": {
+            "auroc": 0.4552287573337992,
+            "auprc": 0.1043324973954814
+          },
+          "history_saved_support": {
+            "auroc": 0.4802752275128698,
+            "auprc": 0.10999653437626303
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5263987764033915,
+            "auprc": 0.14503816089076865
+          },
+          "source_permute_js": {
+            "auroc": 0.5197984924522885,
+            "auprc": 0.12167476405375406
+          },
+          "mlp_small_js": {
+            "auroc": 0.5265660081620072,
+            "auprc": 0.1252560500200692
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 28529,
+        "errors": 1289
+      },
+      "through_first_error": {
+        "tokens": 15227,
+        "errors": 112
+      }
+    },
+    {
+      "task": "Data2txt",
+      "generator": "llama-2-70b-chat",
+      "official_split": "train",
+      "responses": 883,
+      "post_first": {
+        "tokens": 97463,
+        "errors": 9698,
+        "sources": 751,
+        "error_rate": 0.09950442732113725,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5536592649973305,
+            "auprc": 0.14342609831325526
+          },
+          "negative_margin": {
+            "auroc": 0.5315265566315334,
+            "auprc": 0.129081302262907
+          },
+          "source_small_js": {
+            "auroc": 0.5645376925851991,
+            "auprc": 0.15452205141864725
+          },
+          "history_small_js": {
+            "auroc": 0.5100462443695074,
+            "auprc": 0.12335234044871493
+          },
+          "source_saved_support": {
+            "auroc": 0.45450694568245464,
+            "auprc": 0.11298320994400113
+          },
+          "history_saved_support": {
+            "auroc": 0.49147880774588104,
+            "auprc": 0.12124406442355005
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5329562668921655,
+            "auprc": 0.15112705002322507
+          },
+          "source_permute_js": {
+            "auroc": 0.5229639933872242,
+            "auprc": 0.12924949411802422
+          },
+          "mlp_small_js": {
+            "auroc": 0.5414259943010484,
+            "auprc": 0.13545457983945808
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 171496,
+        "errors": 10449
+      },
+      "through_first_error": {
+        "tokens": 74033,
+        "errors": 751
+      }
+    },
+    {
+      "task": "Data2txt",
+      "generator": "llama-2-7b-chat",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 10762,
+        "errors": 1350,
+        "sources": 123,
+        "error_rate": 0.1254413677755064,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5582580087757696,
+            "auprc": 0.18406905153612318
+          },
+          "negative_margin": {
+            "auroc": 0.5260741848308848,
+            "auprc": 0.15207179713955812
+          },
+          "source_small_js": {
+            "auroc": 0.5914625188017701,
+            "auprc": 0.2024430948828195
+          },
+          "history_small_js": {
+            "auroc": 0.5224042092314088,
+            "auprc": 0.15979859385590414
+          },
+          "source_saved_support": {
+            "auroc": 0.46860293895997174,
+            "auprc": 0.15844134445071856
+          },
+          "history_saved_support": {
+            "auroc": 0.46397769966603386,
+            "auprc": 0.13936567506758468
+          },
+          "history_minus_source_support": {
+            "auroc": 0.48669494262593027,
+            "auprc": 0.16611804332132432
+          },
+          "source_permute_js": {
+            "auroc": 0.5717634399221517,
+            "auprc": 0.18410341813126024
+          },
+          "mlp_small_js": {
+            "auroc": 0.5557895563896598,
+            "auprc": 0.1758391402865464
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 24941,
+        "errors": 1473
+      },
+      "through_first_error": {
+        "tokens": 14179,
+        "errors": 123
+      }
+    },
+    {
+      "task": "Data2txt",
+      "generator": "llama-2-7b-chat",
+      "official_split": "train",
+      "responses": 883,
+      "post_first": {
+        "tokens": 70350,
+        "errors": 9432,
+        "sources": 765,
+        "error_rate": 0.1340724946695096,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5379549467839189,
+            "auprc": 0.2006169623905435
+          },
+          "negative_margin": {
+            "auroc": 0.5220619800901769,
+            "auprc": 0.18729490741097304
+          },
+          "source_small_js": {
+            "auroc": 0.5723022876922377,
+            "auprc": 0.2366074970614217
+          },
+          "history_small_js": {
+            "auroc": 0.49994846975788615,
+            "auprc": 0.17814225232123687
+          },
+          "source_saved_support": {
+            "auroc": 0.46945249423899926,
+            "auprc": 0.17981467339571516
+          },
+          "history_saved_support": {
+            "auroc": 0.5055926705628143,
+            "auprc": 0.18209504529105064
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5339871713875988,
+            "auprc": 0.22303079083971436
+          },
+          "source_permute_js": {
+            "auroc": 0.5429111654777633,
+            "auprc": 0.20207914665035115
+          },
+          "mlp_small_js": {
+            "auroc": 0.5349443471716635,
+            "auprc": 0.19798990783056664
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 149709,
+        "errors": 10197
+      },
+      "through_first_error": {
+        "tokens": 79359,
+        "errors": 765
+      }
+    },
+    {
+      "task": "Data2txt",
+      "generator": "mistral-7B-instruct",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 15606,
+        "errors": 1620,
+        "sources": 134,
+        "error_rate": 0.10380622837370242,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5323495034086503,
+            "auprc": 0.13156999482814663
+          },
+          "negative_margin": {
+            "auroc": 0.5167795573230355,
+            "auprc": 0.1187978105756369
+          },
+          "source_small_js": {
+            "auroc": 0.5660025482902667,
+            "auprc": 0.1574550718807779
+          },
+          "history_small_js": {
+            "auroc": 0.46832496016248243,
+            "auprc": 0.10429018633291855
+          },
+          "source_saved_support": {
+            "auroc": 0.48709837676814116,
+            "auprc": 0.11887487339433953
+          },
+          "history_saved_support": {
+            "auroc": 0.49437747568131707,
+            "auprc": 0.11225108847949097
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5041222315581874,
+            "auprc": 0.13762507399368798
+          },
+          "source_permute_js": {
+            "auroc": 0.5318399373502105,
+            "auprc": 0.12220554478600243
+          },
+          "mlp_small_js": {
+            "auroc": 0.5172009203137807,
+            "auprc": 0.124939279685966
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 25810,
+        "errors": 1754
+      },
+      "through_first_error": {
+        "tokens": 10204,
+        "errors": 134
+      }
+    },
+    {
+      "task": "Data2txt",
+      "generator": "mistral-7B-instruct",
+      "official_split": "train",
+      "responses": 883,
+      "post_first": {
+        "tokens": 98941,
+        "errors": 11512,
+        "sources": 824,
+        "error_rate": 0.11635216947473746,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5303326127396295,
+            "auprc": 0.15180625374443027
+          },
+          "negative_margin": {
+            "auroc": 0.50511267679836,
+            "auprc": 0.13524853597644915
+          },
+          "source_small_js": {
+            "auroc": 0.5661668291547788,
+            "auprc": 0.17674522512500834
+          },
+          "history_small_js": {
+            "auroc": 0.4953412320269196,
+            "auprc": 0.13078323120999286
+          },
+          "source_saved_support": {
+            "auroc": 0.47013007144746827,
+            "auprc": 0.13144486527554855
+          },
+          "history_saved_support": {
+            "auroc": 0.49243989167535673,
+            "auprc": 0.13360222850403838
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5248738641582529,
+            "auprc": 0.16296876769507623
+          },
+          "source_permute_js": {
+            "auroc": 0.5183960261705841,
+            "auprc": 0.13761781828355255
+          },
+          "mlp_small_js": {
+            "auroc": 0.5261429708577637,
+            "auprc": 0.14614183828557242
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 154692,
+        "errors": 12336
+      },
+      "through_first_error": {
+        "tokens": 55751,
+        "errors": 824
+      }
+    },
+    {
+      "task": "QA",
+      "generator": "gpt-3.5-turbo-0613",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 265,
+        "errors": 137,
+        "sources": 5,
+        "error_rate": 0.5169811320754717,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5953509624433202,
+            "auprc": 0.70538524975348
+          },
+          "negative_margin": {
+            "auroc": 0.5662579665671829,
+            "auprc": 0.6676319378156484
+          },
+          "source_small_js": {
+            "auroc": 0.5820553364365525,
+            "auprc": 0.686252185286364
+          },
+          "history_small_js": {
+            "auroc": 0.5783354989667507,
+            "auprc": 0.688606212300254
+          },
+          "source_saved_support": {
+            "auroc": 0.43376070425944385,
+            "auprc": 0.5856104435048259
+          },
+          "history_saved_support": {
+            "auroc": 0.5277509227321604,
+            "auprc": 0.6726867447081262
+          },
+          "history_minus_source_support": {
+            "auroc": 0.543052649839815,
+            "auprc": 0.6848169452567041
+          },
+          "source_permute_js": {
+            "auroc": 0.5244428024504253,
+            "auprc": 0.617276096789127
+          },
+          "mlp_small_js": {
+            "auroc": 0.5752853073198693,
+            "auprc": 0.6883240960762215
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 12415,
+        "errors": 142
+      },
+      "through_first_error": {
+        "tokens": 12150,
+        "errors": 5
+      }
+    },
+    {
+      "task": "QA",
+      "generator": "gpt-3.5-turbo-0613",
+      "official_split": "train",
+      "responses": 839,
+      "post_first": {
+        "tokens": 4125,
+        "errors": 1399,
+        "sources": 70,
+        "error_rate": 0.33915151515151515,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.6017042683898433,
+            "auprc": 0.5374484353407143
+          },
+          "negative_margin": {
+            "auroc": 0.5842964724994242,
+            "auprc": 0.5184250996357861
+          },
+          "source_small_js": {
+            "auroc": 0.5696564742809082,
+            "auprc": 0.5074843785176126
+          },
+          "history_small_js": {
+            "auroc": 0.4998359730771025,
+            "auprc": 0.4612259997378219
+          },
+          "source_saved_support": {
+            "auroc": 0.4977081866775556,
+            "auprc": 0.4780749511702629
+          },
+          "history_saved_support": {
+            "auroc": 0.4990028545444313,
+            "auprc": 0.46765557313239625
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5282010110198282,
+            "auprc": 0.4962929520562507
+          },
+          "source_permute_js": {
+            "auroc": 0.451382536715893,
+            "auprc": 0.40849190504350796
+          },
+          "mlp_small_js": {
+            "auroc": 0.5751212350735697,
+            "auprc": 0.5087027704016964
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 75307,
+        "errors": 1469
+      },
+      "through_first_error": {
+        "tokens": 71182,
+        "errors": 70
+      }
+    },
+    {
+      "task": "QA",
+      "generator": "gpt-4-0613",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 18,
+        "errors": 18,
+        "sources": 1,
+        "error_rate": 1.0,
+        "metrics": {
+          "entropy": {
+            "auroc": null,
+            "auprc": null
+          },
+          "negative_margin": {
+            "auroc": null,
+            "auprc": null
+          },
+          "source_small_js": {
+            "auroc": null,
+            "auprc": null
+          },
+          "history_small_js": {
+            "auroc": null,
+            "auprc": null
+          },
+          "source_saved_support": {
+            "auroc": null,
+            "auprc": null
+          },
+          "history_saved_support": {
+            "auroc": null,
+            "auprc": null
+          },
+          "history_minus_source_support": {
+            "auroc": null,
+            "auprc": null
+          },
+          "source_permute_js": {
+            "auroc": null,
+            "auprc": null
+          },
+          "mlp_small_js": {
+            "auroc": null,
+            "auprc": null
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 17839,
+        "errors": 19
+      },
+      "through_first_error": {
+        "tokens": 17821,
+        "errors": 1
+      }
+    },
+    {
+      "task": "QA",
+      "generator": "gpt-4-0613",
+      "official_split": "train",
+      "responses": 839,
+      "post_first": {
+        "tokens": 2909,
+        "errors": 448,
+        "sources": 41,
+        "error_rate": 0.1540048126503953,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5950919597876689,
+            "auprc": 0.3038258380594334
+          },
+          "negative_margin": {
+            "auroc": 0.5790366145007945,
+            "auprc": 0.28797058349909416
+          },
+          "source_small_js": {
+            "auroc": 0.5610431891789278,
+            "auprc": 0.27867072300177875
+          },
+          "history_small_js": {
+            "auroc": 0.5185429086113584,
+            "auprc": 0.24729636629632681
+          },
+          "source_saved_support": {
+            "auroc": 0.45328413294108366,
+            "auprc": 0.23531928210287975
+          },
+          "history_saved_support": {
+            "auroc": 0.47986807105143214,
+            "auprc": 0.2370871005279665
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5370241288462637,
+            "auprc": 0.2780743761977066
+          },
+          "source_permute_js": {
+            "auroc": 0.3712744096709169,
+            "auprc": 0.1867335585415018
+          },
+          "mlp_small_js": {
+            "auroc": 0.5828903160144809,
+            "auprc": 0.3002559636063654
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 99950,
+        "errors": 489
+      },
+      "through_first_error": {
+        "tokens": 97041,
+        "errors": 41
+      }
+    },
+    {
+      "task": "QA",
+      "generator": "llama-2-13b-chat",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 3621,
+        "errors": 1523,
+        "sources": 36,
+        "error_rate": 0.42060204363435516,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5825341013526848,
+            "auprc": 0.5863804629987226
+          },
+          "negative_margin": {
+            "auroc": 0.5544299803307889,
+            "auprc": 0.5366379708375753
+          },
+          "source_small_js": {
+            "auroc": 0.548153999284599,
+            "auprc": 0.5269132705947568
+          },
+          "history_small_js": {
+            "auroc": 0.5473208629102895,
+            "auprc": 0.5241765799121149
+          },
+          "source_saved_support": {
+            "auroc": 0.4719596641477798,
+            "auprc": 0.4979889810883161
+          },
+          "history_saved_support": {
+            "auroc": 0.4665975112019881,
+            "auprc": 0.49001046774138657
+          },
+          "history_minus_source_support": {
+            "auroc": 0.4975818996485141,
+            "auprc": 0.5040404819743128
+          },
+          "source_permute_js": {
+            "auroc": 0.43597878476491336,
+            "auprc": 0.4345490931767775
+          },
+          "mlp_small_js": {
+            "auroc": 0.5546557217243075,
+            "auprc": 0.5343391980131904
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 25117,
+        "errors": 1559
+      },
+      "through_first_error": {
+        "tokens": 21496,
+        "errors": 36
+      }
+    },
+    {
+      "task": "QA",
+      "generator": "llama-2-13b-chat",
+      "official_split": "train",
+      "responses": 839,
+      "post_first": {
+        "tokens": 37700,
+        "errors": 14616,
+        "sources": 363,
+        "error_rate": 0.38769230769230767,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5650460273418505,
+            "auprc": 0.5303339154383016
+          },
+          "negative_margin": {
+            "auroc": 0.5580851044362509,
+            "auprc": 0.5183148879169344
+          },
+          "source_small_js": {
+            "auroc": 0.5397820109056282,
+            "auprc": 0.5069654655295119
+          },
+          "history_small_js": {
+            "auroc": 0.526240204214854,
+            "auprc": 0.49177648500748683
+          },
+          "source_saved_support": {
+            "auroc": 0.47375824427138624,
+            "auprc": 0.4778982228943197
+          },
+          "history_saved_support": {
+            "auroc": 0.4723424851945757,
+            "auprc": 0.471612178919799
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5052493303725762,
+            "auprc": 0.49318618756640087
+          },
+          "source_permute_js": {
+            "auroc": 0.44624537752247817,
+            "auprc": 0.42595809971229737
+          },
+          "mlp_small_js": {
+            "auroc": 0.5532783242755741,
+            "auprc": 0.5210165877214453
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 150831,
+        "errors": 14979
+      },
+      "through_first_error": {
+        "tokens": 113131,
+        "errors": 363
+      }
+    },
+    {
+      "task": "QA",
+      "generator": "llama-2-70b-chat",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 3374,
+        "errors": 1582,
+        "sources": 35,
+        "error_rate": 0.46887966804979253,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.6070659896020697,
+            "auprc": 0.6404190116306447
+          },
+          "negative_margin": {
+            "auroc": 0.6029629034484288,
+            "auprc": 0.6343828378821745
+          },
+          "source_small_js": {
+            "auroc": 0.5609612949608929,
+            "auprc": 0.5953558825038041
+          },
+          "history_small_js": {
+            "auroc": 0.5714987059606635,
+            "auprc": 0.6029378808400269
+          },
+          "source_saved_support": {
+            "auroc": 0.4800108958004031,
+            "auprc": 0.5628499960274922
+          },
+          "history_saved_support": {
+            "auroc": 0.4988039652270034,
+            "auprc": 0.5695943709689694
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5225885534534229,
+            "auprc": 0.5878628553886865
+          },
+          "source_permute_js": {
+            "auroc": 0.4135208280857251,
+            "auprc": 0.47720848356427303
+          },
+          "mlp_small_js": {
+            "auroc": 0.5973715794149903,
+            "auprc": 0.6269706027511138
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 22442,
+        "errors": 1617
+      },
+      "through_first_error": {
+        "tokens": 19068,
+        "errors": 35
+      }
+    },
+    {
+      "task": "QA",
+      "generator": "llama-2-70b-chat",
+      "official_split": "train",
+      "responses": 839,
+      "post_first": {
+        "tokens": 28950,
+        "errors": 12561,
+        "sources": 285,
+        "error_rate": 0.4338860103626943,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.570157741137018,
+            "auprc": 0.5624834505134294
+          },
+          "negative_margin": {
+            "auroc": 0.5615721027116327,
+            "auprc": 0.5523494563729707
+          },
+          "source_small_js": {
+            "auroc": 0.5395549031651137,
+            "auprc": 0.5323355303282863
+          },
+          "history_small_js": {
+            "auroc": 0.5276011721991306,
+            "auprc": 0.5299732699706139
+          },
+          "source_saved_support": {
+            "auroc": 0.46436742126917946,
+            "auprc": 0.498570729724079
+          },
+          "history_saved_support": {
+            "auroc": 0.4792863393033351,
+            "auprc": 0.5088027005370018
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5135546802731851,
+            "auprc": 0.5323246359317113
+          },
+          "source_permute_js": {
+            "auroc": 0.44903881002161117,
+            "auprc": 0.45857507860255164
+          },
+          "mlp_small_js": {
+            "auroc": 0.5564355170463983,
+            "auprc": 0.5555033929404888
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 139858,
+        "errors": 12846
+      },
+      "through_first_error": {
+        "tokens": 110908,
+        "errors": 285
+      }
+    },
+    {
+      "task": "QA",
+      "generator": "llama-2-7b-chat",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 6546,
+        "errors": 2255,
+        "sources": 52,
+        "error_rate": 0.3444851817904064,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5841494751819372,
+            "auprc": 0.48828660249924144
+          },
+          "negative_margin": {
+            "auroc": 0.5666414624065305,
+            "auprc": 0.4544979632562596
+          },
+          "source_small_js": {
+            "auroc": 0.5629797502722966,
+            "auprc": 0.4536016968277231
+          },
+          "history_small_js": {
+            "auroc": 0.5412391560822024,
+            "auprc": 0.4292735950529608
+          },
+          "source_saved_support": {
+            "auroc": 0.4492478728250233,
+            "auprc": 0.3853064903057605
+          },
+          "history_saved_support": {
+            "auroc": 0.4467224600815118,
+            "auprc": 0.37918950494332193
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5023466143047955,
+            "auprc": 0.4176283692708102
+          },
+          "source_permute_js": {
+            "auroc": 0.49275842046605256,
+            "auprc": 0.39577491246961016
+          },
+          "mlp_small_js": {
+            "auroc": 0.5670429046223868,
+            "auprc": 0.4651009973081254
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 30721,
+        "errors": 2307
+      },
+      "through_first_error": {
+        "tokens": 24175,
+        "errors": 52
+      }
+    },
+    {
+      "task": "QA",
+      "generator": "llama-2-7b-chat",
+      "official_split": "train",
+      "responses": 839,
+      "post_first": {
+        "tokens": 65913,
+        "errors": 23104,
+        "sources": 458,
+        "error_rate": 0.35052265865610727,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5733702814157405,
+            "auprc": 0.4458423846904893
+          },
+          "negative_margin": {
+            "auroc": 0.5685563432847169,
+            "auprc": 0.4390984306808691
+          },
+          "source_small_js": {
+            "auroc": 0.5486907245756458,
+            "auprc": 0.42516798074823053
+          },
+          "history_small_js": {
+            "auroc": 0.5475479220991644,
+            "auprc": 0.4199878744231698
+          },
+          "source_saved_support": {
+            "auroc": 0.4823102909396859,
+            "auprc": 0.397250410262146
+          },
+          "history_saved_support": {
+            "auroc": 0.5054725009957558,
+            "auprc": 0.4073446187856152
+          },
+          "history_minus_source_support": {
+            "auroc": 0.519826154860011,
+            "auprc": 0.416467196066189
+          },
+          "source_permute_js": {
+            "auroc": 0.4567789685751994,
+            "auprc": 0.35143731685218593
+          },
+          "mlp_small_js": {
+            "auroc": 0.5635284577308773,
+            "auprc": 0.43623952856829684
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 192020,
+        "errors": 23562
+      },
+      "through_first_error": {
+        "tokens": 126107,
+        "errors": 458
+      }
+    },
+    {
+      "task": "QA",
+      "generator": "mistral-7B-instruct",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 2361,
+        "errors": 1076,
+        "sources": 31,
+        "error_rate": 0.4557390936044049,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.6386355361082737,
+            "auprc": 0.6770443785845219
+          },
+          "negative_margin": {
+            "auroc": 0.6145682769126506,
+            "auprc": 0.6541404783412237
+          },
+          "source_small_js": {
+            "auroc": 0.5892300157361471,
+            "auprc": 0.6428065334082835
+          },
+          "history_small_js": {
+            "auroc": 0.5981074245637625,
+            "auprc": 0.6580123760233669
+          },
+          "source_saved_support": {
+            "auroc": 0.41480278172736296,
+            "auprc": 0.5538841003891802
+          },
+          "history_saved_support": {
+            "auroc": 0.45315098212912874,
+            "auprc": 0.583804303411191
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5389610667469055,
+            "auprc": 0.6411190932401807
+          },
+          "source_permute_js": {
+            "auroc": 0.38712164788332487,
+            "auprc": 0.4873665157407461
+          },
+          "mlp_small_js": {
+            "auroc": 0.6257896251629957,
+            "auprc": 0.677990092049872
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 16283,
+        "errors": 1107
+      },
+      "through_first_error": {
+        "tokens": 13922,
+        "errors": 31
+      }
+    },
+    {
+      "task": "QA",
+      "generator": "mistral-7B-instruct",
+      "official_split": "train",
+      "responses": 839,
+      "post_first": {
+        "tokens": 26195,
+        "errors": 11414,
+        "sources": 347,
+        "error_rate": 0.43573200992555833,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.590952199618817,
+            "auprc": 0.6194942534518488
+          },
+          "negative_margin": {
+            "auroc": 0.5794943225984704,
+            "auprc": 0.609283675490587
+          },
+          "source_small_js": {
+            "auroc": 0.5643139072591374,
+            "auprc": 0.6056354696470956
+          },
+          "history_small_js": {
+            "auroc": 0.5574625823693472,
+            "auprc": 0.5996742176794231
+          },
+          "source_saved_support": {
+            "auroc": 0.450367049883057,
+            "auprc": 0.5374984607292135
+          },
+          "history_saved_support": {
+            "auroc": 0.48373650313100136,
+            "auprc": 0.5584103891357286
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5322742101072394,
+            "auprc": 0.5967765182522111
+          },
+          "source_permute_js": {
+            "auroc": 0.4252529436348191,
+            "auprc": 0.48350170732985737
+          },
+          "mlp_small_js": {
+            "auroc": 0.5880421416768735,
+            "auprc": 0.6231898075051833
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 102098,
+        "errors": 11761
+      },
+      "through_first_error": {
+        "tokens": 75903,
+        "errors": 347
+      }
+    },
+    {
+      "task": "Summary",
+      "generator": "gpt-3.5-turbo-0613",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 271,
+        "errors": 174,
+        "sources": 4,
+        "error_rate": 0.6420664206642066,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5695397429985024,
+            "auprc": 0.6159743435987629
+          },
+          "negative_margin": {
+            "auroc": 0.5905687494684697,
+            "auprc": 0.638609095857248
+          },
+          "source_small_js": {
+            "auroc": 0.6076610816949393,
+            "auprc": 0.669319511657557
+          },
+          "history_small_js": {
+            "auroc": 0.6191948905547088,
+            "auprc": 0.6653229234077189
+          },
+          "source_saved_support": {
+            "auroc": 0.5439246975513969,
+            "auprc": 0.6186600673246043
+          },
+          "history_saved_support": {
+            "auroc": 0.452609109213032,
+            "auprc": 0.5570234901209123
+          },
+          "history_minus_source_support": {
+            "auroc": 0.4283100704652045,
+            "auprc": 0.5190874397902931
+          },
+          "source_permute_js": {
+            "auroc": 0.40214405035489575,
+            "auprc": 0.467209053702951
+          },
+          "mlp_small_js": {
+            "auroc": 0.574142960932443,
+            "auprc": 0.6098346082227066
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 25017,
+        "errors": 178
+      },
+      "through_first_error": {
+        "tokens": 24746,
+        "errors": 4
+      }
+    },
+    {
+      "task": "Summary",
+      "generator": "gpt-3.5-turbo-0613",
+      "official_split": "train",
+      "responses": 793,
+      "post_first": {
+        "tokens": 4989,
+        "errors": 522,
+        "sources": 50,
+        "error_rate": 0.10463018641010223,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5731871253095505,
+            "auprc": 0.3052219085309412
+          },
+          "negative_margin": {
+            "auroc": 0.5518259103050791,
+            "auprc": 0.2802592359179116
+          },
+          "source_small_js": {
+            "auroc": 0.5477263836661648,
+            "auprc": 0.2940054413697974
+          },
+          "history_small_js": {
+            "auroc": 0.5379285175031597,
+            "auprc": 0.26773548886359066
+          },
+          "source_saved_support": {
+            "auroc": 0.4862917685464344,
+            "auprc": 0.2583611970239244
+          },
+          "history_saved_support": {
+            "auroc": 0.5272162898138997,
+            "auprc": 0.2802850232239797
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5234943689544603,
+            "auprc": 0.283186272545001
+          },
+          "source_permute_js": {
+            "auroc": 0.45176793524903003,
+            "auprc": 0.23636883814017917
+          },
+          "mlp_small_js": {
+            "auroc": 0.5585038951038479,
+            "auprc": 0.3045019156259893
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 137139,
+        "errors": 572
+      },
+      "through_first_error": {
+        "tokens": 132150,
+        "errors": 50
+      }
+    },
+    {
+      "task": "Summary",
+      "generator": "gpt-4-0613",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 538,
+        "errors": 123,
+        "sources": 6,
+        "error_rate": 0.22862453531598512,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.3409846545060562,
+            "auprc": 0.23708170726514444
+          },
+          "negative_margin": {
+            "auroc": 0.3620806125676185,
+            "auprc": 0.2245635624119363
+          },
+          "source_small_js": {
+            "auroc": 0.3485722532126103,
+            "auprc": 0.2261936395275838
+          },
+          "history_small_js": {
+            "auroc": 0.4195103383474743,
+            "auprc": 0.2581974392021046
+          },
+          "source_saved_support": {
+            "auroc": 0.4255932259019899,
+            "auprc": 0.2418315641617724
+          },
+          "history_saved_support": {
+            "auroc": 0.5537800630747624,
+            "auprc": 0.302901706064238
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5900347523390339,
+            "auprc": 0.3214946352409903
+          },
+          "source_permute_js": {
+            "auroc": 0.44794074978989795,
+            "auprc": 0.28366135723716945
+          },
+          "mlp_small_js": {
+            "auroc": 0.3322455586081491,
+            "auprc": 0.2075015929868117
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 20091,
+        "errors": 129
+      },
+      "through_first_error": {
+        "tokens": 19553,
+        "errors": 6
+      }
+    },
+    {
+      "task": "Summary",
+      "generator": "gpt-4-0613",
+      "official_split": "train",
+      "responses": 793,
+      "post_first": {
+        "tokens": 5863,
+        "errors": 706,
+        "sources": 68,
+        "error_rate": 0.120416169196657,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.552141506137571,
+            "auprc": 0.2519329503271305
+          },
+          "negative_margin": {
+            "auroc": 0.5389693540000062,
+            "auprc": 0.21956611603557735
+          },
+          "source_small_js": {
+            "auroc": 0.518442374842417,
+            "auprc": 0.2181182896428078
+          },
+          "history_small_js": {
+            "auroc": 0.5386202024400804,
+            "auprc": 0.23356575427776854
+          },
+          "source_saved_support": {
+            "auroc": 0.4813361425962005,
+            "auprc": 0.20572812432790666
+          },
+          "history_saved_support": {
+            "auroc": 0.5165409172052962,
+            "auprc": 0.23394298550023215
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5416771913110998,
+            "auprc": 0.24926149681903376
+          },
+          "source_permute_js": {
+            "auroc": 0.4133751571487397,
+            "auprc": 0.17471714795030152
+          },
+          "mlp_small_js": {
+            "auroc": 0.5484052971530098,
+            "auprc": 0.23229326905709724
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 107248,
+        "errors": 774
+      },
+      "through_first_error": {
+        "tokens": 101385,
+        "errors": 68
+      }
+    },
+    {
+      "task": "Summary",
+      "generator": "llama-2-13b-chat",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 1485,
+        "errors": 349,
+        "sources": 33,
+        "error_rate": 0.235016835016835,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.6016775595768905,
+            "auprc": 0.4770617810982297
+          },
+          "negative_margin": {
+            "auroc": 0.5577801136821666,
+            "auprc": 0.4037190891022236
+          },
+          "source_small_js": {
+            "auroc": 0.5496095902270838,
+            "auprc": 0.4086591931657588
+          },
+          "history_small_js": {
+            "auroc": 0.5456671598674031,
+            "auprc": 0.3988880543869691
+          },
+          "source_saved_support": {
+            "auroc": 0.48869639539492293,
+            "auprc": 0.37667426347255056
+          },
+          "history_saved_support": {
+            "auroc": 0.4709005240037723,
+            "auprc": 0.35263907106557724
+          },
+          "history_minus_source_support": {
+            "auroc": 0.4982410147107145,
+            "auprc": 0.3853317078450524
+          },
+          "source_permute_js": {
+            "auroc": 0.49084536439387816,
+            "auprc": 0.34015046377418323
+          },
+          "mlp_small_js": {
+            "auroc": 0.5796436037633879,
+            "auprc": 0.4300113004759558
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 17573,
+        "errors": 382
+      },
+      "through_first_error": {
+        "tokens": 16088,
+        "errors": 33
+      }
+    },
+    {
+      "task": "Summary",
+      "generator": "llama-2-13b-chat",
+      "official_split": "train",
+      "responses": 793,
+      "post_first": {
+        "tokens": 15531,
+        "errors": 2915,
+        "sources": 262,
+        "error_rate": 0.1876891378533256,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5579028434363045,
+            "auprc": 0.354317868127492
+          },
+          "negative_margin": {
+            "auroc": 0.5386592897823717,
+            "auprc": 0.31589166178316747
+          },
+          "source_small_js": {
+            "auroc": 0.5284651734042207,
+            "auprc": 0.3208965032665464
+          },
+          "history_small_js": {
+            "auroc": 0.5327000734173231,
+            "auprc": 0.3266198303649118
+          },
+          "source_saved_support": {
+            "auroc": 0.4783392903901145,
+            "auprc": 0.29931869678101597
+          },
+          "history_saved_support": {
+            "auroc": 0.5090454164109683,
+            "auprc": 0.3187273643957768
+          },
+          "history_minus_source_support": {
+            "auroc": 0.516295686837009,
+            "auprc": 0.3226754692987087
+          },
+          "source_permute_js": {
+            "auroc": 0.45705609044133155,
+            "auprc": 0.2721111872541067
+          },
+          "mlp_small_js": {
+            "auroc": 0.5495165291402089,
+            "auprc": 0.3407673902521611
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 96456,
+        "errors": 3177
+      },
+      "through_first_error": {
+        "tokens": 80925,
+        "errors": 262
+      }
+    },
+    {
+      "task": "Summary",
+      "generator": "llama-2-70b-chat",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 1760,
+        "errors": 507,
+        "sources": 24,
+        "error_rate": 0.28806818181818183,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5914277567719151,
+            "auprc": 0.5110952341178504
+          },
+          "negative_margin": {
+            "auroc": 0.5644020463735249,
+            "auprc": 0.45923130160305947
+          },
+          "source_small_js": {
+            "auroc": 0.5677933252901943,
+            "auprc": 0.47228793487162124
+          },
+          "history_small_js": {
+            "auroc": 0.5772798172857823,
+            "auprc": 0.46759352595555576
+          },
+          "source_saved_support": {
+            "auroc": 0.4960137895009746,
+            "auprc": 0.4505169854627234
+          },
+          "history_saved_support": {
+            "auroc": 0.5206049511813845,
+            "auprc": 0.4658762063522994
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5138328276607216,
+            "auprc": 0.44867648981120123
+          },
+          "source_permute_js": {
+            "auroc": 0.4460776615903046,
+            "auprc": 0.3718046094426054
+          },
+          "mlp_small_js": {
+            "auroc": 0.5875309450861318,
+            "auprc": 0.49629550227395125
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 19722,
+        "errors": 531
+      },
+      "through_first_error": {
+        "tokens": 17962,
+        "errors": 24
+      }
+    },
+    {
+      "task": "Summary",
+      "generator": "llama-2-70b-chat",
+      "official_split": "train",
+      "responses": 793,
+      "post_first": {
+        "tokens": 13019,
+        "errors": 2138,
+        "sources": 188,
+        "error_rate": 0.16422152239035256,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5518717160510112,
+            "auprc": 0.38233262267262413
+          },
+          "negative_margin": {
+            "auroc": 0.5365139584942307,
+            "auprc": 0.35524663653263033
+          },
+          "source_small_js": {
+            "auroc": 0.5283912432658171,
+            "auprc": 0.35101929013122357
+          },
+          "history_small_js": {
+            "auroc": 0.5176825804533219,
+            "auprc": 0.3388575827080611
+          },
+          "source_saved_support": {
+            "auroc": 0.45613169485073024,
+            "auprc": 0.3078387007717711
+          },
+          "history_saved_support": {
+            "auroc": 0.4865800917678266,
+            "auprc": 0.3273762256624907
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5380734795514515,
+            "auprc": 0.3738143908196444
+          },
+          "source_permute_js": {
+            "auroc": 0.4379809235086188,
+            "auprc": 0.29342949549662756
+          },
+          "mlp_small_js": {
+            "auroc": 0.5347854611913395,
+            "auprc": 0.36584370605121574
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 106649,
+        "errors": 2326
+      },
+      "through_first_error": {
+        "tokens": 93630,
+        "errors": 188
+      }
+    },
+    {
+      "task": "Summary",
+      "generator": "llama-2-7b-chat",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 2946,
+        "errors": 763,
+        "sources": 51,
+        "error_rate": 0.2589952477936185,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5876555631617331,
+            "auprc": 0.5073571892861585
+          },
+          "negative_margin": {
+            "auroc": 0.5674273850605428,
+            "auprc": 0.4679749002307378
+          },
+          "source_small_js": {
+            "auroc": 0.5585053833934532,
+            "auprc": 0.44551477701179715
+          },
+          "history_small_js": {
+            "auroc": 0.5671760617478091,
+            "auprc": 0.4564220903885302
+          },
+          "source_saved_support": {
+            "auroc": 0.49665966236140063,
+            "auprc": 0.434312604824728
+          },
+          "history_saved_support": {
+            "auroc": 0.47152846079356536,
+            "auprc": 0.39918957911781605
+          },
+          "history_minus_source_support": {
+            "auroc": 0.49105807952528313,
+            "auprc": 0.4118691953270667
+          },
+          "source_permute_js": {
+            "auroc": 0.48397356153897114,
+            "auprc": 0.3857649930668339
+          },
+          "mlp_small_js": {
+            "auroc": 0.5760712148789568,
+            "auprc": 0.47597319956794215
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 18434,
+        "errors": 814
+      },
+      "through_first_error": {
+        "tokens": 15488,
+        "errors": 51
+      }
+    },
+    {
+      "task": "Summary",
+      "generator": "llama-2-7b-chat",
+      "official_split": "train",
+      "responses": 793,
+      "post_first": {
+        "tokens": 25302,
+        "errors": 4784,
+        "sources": 383,
+        "error_rate": 0.18907596237451585,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5626622154068064,
+            "auprc": 0.3934734619099657
+          },
+          "negative_margin": {
+            "auroc": 0.5440843009821301,
+            "auprc": 0.35849255775790784
+          },
+          "source_small_js": {
+            "auroc": 0.553060823244012,
+            "auprc": 0.37821143302170523
+          },
+          "history_small_js": {
+            "auroc": 0.5321188115273663,
+            "auprc": 0.35051757444653114
+          },
+          "source_saved_support": {
+            "auroc": 0.4645786294076926,
+            "auprc": 0.32158603222463733
+          },
+          "history_saved_support": {
+            "auroc": 0.5058990538174313,
+            "auprc": 0.3488212914843465
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5341509022838571,
+            "auprc": 0.37872451316381606
+          },
+          "source_permute_js": {
+            "auroc": 0.4648635531236518,
+            "auprc": 0.3040059677217274
+          },
+          "mlp_small_js": {
+            "auroc": 0.5592372082093028,
+            "auprc": 0.38455409774250066
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 101477,
+        "errors": 5167
+      },
+      "through_first_error": {
+        "tokens": 76175,
+        "errors": 383
+      }
+    },
+    {
+      "task": "Summary",
+      "generator": "mistral-7B-instruct",
+      "official_split": "test",
+      "responses": 150,
+      "post_first": {
+        "tokens": 5807,
+        "errors": 1365,
+        "sources": 86,
+        "error_rate": 0.2350611331152058,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5906663871860848,
+            "auprc": 0.4385617219043766
+          },
+          "negative_margin": {
+            "auroc": 0.5565278734884884,
+            "auprc": 0.3817653455783162
+          },
+          "source_small_js": {
+            "auroc": 0.5670115872540269,
+            "auprc": 0.4156919064528204
+          },
+          "history_small_js": {
+            "auroc": 0.5441957184415649,
+            "auprc": 0.3794168476486095
+          },
+          "source_saved_support": {
+            "auroc": 0.4605087544326337,
+            "auprc": 0.34550012422300236
+          },
+          "history_saved_support": {
+            "auroc": 0.5029897841095903,
+            "auprc": 0.366548228763222
+          },
+          "history_minus_source_support": {
+            "auroc": 0.5408324703926741,
+            "auprc": 0.4000914651487155
+          },
+          "source_permute_js": {
+            "auroc": 0.4476110968887528,
+            "auprc": 0.32542825500083716
+          },
+          "mlp_small_js": {
+            "auroc": 0.5858066518485383,
+            "auprc": 0.4231511627235554
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 20411,
+        "errors": 1451
+      },
+      "through_first_error": {
+        "tokens": 14604,
+        "errors": 86
+      }
+    },
+    {
+      "task": "Summary",
+      "generator": "mistral-7B-instruct",
+      "official_split": "train",
+      "responses": 793,
+      "post_first": {
+        "tokens": 38922,
+        "errors": 7988,
+        "sources": 531,
+        "error_rate": 0.20523097477005292,
+        "metrics": {
+          "entropy": {
+            "auroc": 0.5755033468624645,
+            "auprc": 0.37857336501979033
+          },
+          "negative_margin": {
+            "auroc": 0.558144175358532,
+            "auprc": 0.35431409518549384
+          },
+          "source_small_js": {
+            "auroc": 0.5483663294226895,
+            "auprc": 0.3535627730058337
+          },
+          "history_small_js": {
+            "auroc": 0.5431550188828552,
+            "auprc": 0.3456351118755121
+          },
+          "source_saved_support": {
+            "auroc": 0.45295660719771824,
+            "auprc": 0.2995184140536807
+          },
+          "history_saved_support": {
+            "auroc": 0.5021179077557114,
+            "auprc": 0.334716863624851
+          },
+          "history_minus_source_support": {
+            "auroc": 0.543452343210521,
+            "auprc": 0.3682160856390088
+          },
+          "source_permute_js": {
+            "auroc": 0.4313340481159508,
+            "auprc": 0.27405558017613635
+          },
+          "mlp_small_js": {
+            "auroc": 0.5633412921946883,
+            "auprc": 0.36927815921272833
+          }
+        }
+      },
+      "all_tokens": {
+        "tokens": 109617,
+        "errors": 8519
+      },
+      "through_first_error": {
+        "tokens": 70695,
+        "errors": 531
+      }
+    }
+  ],
+  "interpretation_limits": [
+    "Each group AUROC/AUPRC is source-balanced; token-weighted group-AUROC is an aggregation of group estimates, not a pooled AUROC.",
+    "Post-first raw error prevalence is not the baseline for a source-balanced AUPRC and must not be compared as though it were.",
+    "bootstrap_replicates is zero; no confidence intervals or significance claims are available.",
+    "The analysis is observer replay sensitivity after the first annotation; it is not a detector, source owner, routing, continuous-span, or original-generator causal result."
+  ]
+}

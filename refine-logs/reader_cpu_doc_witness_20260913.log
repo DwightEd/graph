@@ -1,0 +1,23 @@
+Document command started: 2026-09-13 02:49:08 UTC
+Session: 29651
+PID: 163204
+{"status": "loading_cpu_model", "requests": 10, "pid": 163204}
+
+Loading checkpoint shards:   0%|          | 0/5 [00:00<?, ?it/s]
+Loading checkpoint shards: 100%|██████████| 5/5 [00:00<00:00, 111.48it/s]
+The following generation flags are not valid and may be ignored: ['temperature', 'top_p', 'top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+`generation_config` default values have been modified to match model-specific defaults: {'do_sample': True}. If this is not desired, please set these values explicitly.
+{"done": 1, "kind": "edit_kind", "label_mass": 0.9999971389770508, "continuation": "K<|im_end|>", "seconds": 24.036360826343298}
+{"done": 2, "kind": "edit_kind", "label_mass": 0.9999920725822449, "continuation": "K<|im_end|>", "seconds": 23.847531121224165}
+{"done": 3, "kind": "edited_base", "label_mass": 0.9999982714653015, "continuation": "S<|im_end|>", "seconds": 74.07100522331893}
+{"done": 4, "kind": "edited_base", "label_mass": 0.9989632964134216, "continuation": "C<|im_end|>", "seconds": 9.022994559258223}
+{"done": 5, "kind": "preservation", "label_mass": 0.9999990463256836, "continuation": "F<|im_end|>", "seconds": 96.47097594849765}
+{"done": 6, "kind": "preservation", "label_mass": 0.9999998211860657, "continuation": "F<|im_end|>", "seconds": 92.93542127870023}
+{"done": 7, "kind": "selected_occurrence", "label_mass": 0.9999986886978149, "continuation": "I<|im_end|>", "seconds": 17.407644603401423}
+{"done": 8, "kind": "selected_occurrence", "label_mass": 0.9998865127563477, "continuation": "S<|im_end|>", "seconds": 95.94805198162794}
+{"done": 9, "kind": "target_original", "label_mass": 0.9997073411941528, "continuation": "N<|im_end|>", "seconds": 12.345964392647147}
+{"done": 10, "kind": "target_original", "label_mass": 0.9997185468673706, "continuation": "N<|im_end|>", "seconds": 34.626046454533935}
+
+Document command completed: 2026-09-13 02:57:42 UTC
+Exit code: 0
+

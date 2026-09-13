@@ -1,0 +1,25 @@
+{
+  "helper_status": "unresolved_at_documented_paths; Policy B skip",
+  "direct_json_checks": [
+    {
+      "id": "v1_semantic_coverage",
+      "status": "verified",
+      "source": "outputs/native_audit_v1_20260913/evaluation.json",
+      "value": 0.0606380731037397
+    },
+    {
+      "id": "v1_recall",
+      "status": "verified",
+      "source": "outputs/native_audit_v1_20260913/evaluation.json",
+      "value": 0.0
+    },
+    {
+      "id": "v1_native_coverage",
+      "status": "verified",
+      "source": "outputs/native_audit_v1_20260913/evaluation.json",
+      "value": 0.0
+    }
+  ],
+  "external_codex_mcp": "unavailable",
+  "claim_supported": "no"
+}

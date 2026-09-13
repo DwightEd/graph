@@ -1,0 +1,105 @@
+[
+  {
+    "id": "minicheck",
+    "title": "MiniCheck: Efficient Fact-Checking of LLMs on Grounding Documents",
+    "arxiv_id": "2404.10774",
+    "doi": "10.18653/v1/2024.emnlp-main.499"
+  },
+  {
+    "id": "graphcheck",
+    "title": "GraphCheck: Breaking Long-Term Text Barriers with Extracted Knowledge Graph-Powered Fact-Checking",
+    "arxiv_id": null,
+    "doi": "10.18653/v1/2025.acl-long.729"
+  },
+  {
+    "id": "alti_llm",
+    "title": "Analyzing Context Contributions in LLM-based Machine Translation",
+    "arxiv_id": null,
+    "doi": "10.18653/v1/2024.findings-emnlp.876"
+  },
+  {
+    "id": "iris",
+    "title": "Unsupervised Hallucination Detection by Inspecting Reasoning Processes",
+    "arxiv_id": "2509.10004",
+    "doi": null
+  },
+  {
+    "id": "rauq",
+    "title": "Efficient Hallucination Detection for LLMs Using Uncertainty-Aware Attention Heads",
+    "arxiv_id": "2505.20045",
+    "doi": null,
+    "version_read": "v3 (2026-06-17)"
+  },
+  {
+    "id": "structscore",
+    "title": "Discourse-Driven Evaluation: Unveiling Factual Inconsistency in Long Document Summarization",
+    "arxiv_id": "2502.06185",
+    "doi": "10.18653/v1/2025.naacl-long.103"
+  },
+  {
+    "id": "structured_attention",
+    "title": "Structured Attention Networks",
+    "arxiv_id": "1702.00887",
+    "doi": null
+  },
+  {
+    "id": "segmental",
+    "title": "Segmental Recurrent Neural Networks",
+    "arxiv_id": "1511.06018",
+    "doi": null
+  },
+  {
+    "id": "lookback_lens",
+    "title": "Lookback Lens: Detecting and Mitigating Contextual Hallucinations in Large Language Models Using Only Attention Maps",
+    "arxiv_id": "2407.07071",
+    "doi": "10.18653/v1/2024.emnlp-main.84"
+  },
+  {
+    "id": "alti",
+    "title": "Measuring the Mixing of Contextual Information in the Transformer",
+    "arxiv_id": null,
+    "doi": "10.18653/v1/2022.emnlp-main.595"
+  },
+  {
+    "id": "decompx",
+    "title": "DecompX: Explaining Transformers Decisions by Propagating Token Decomposition",
+    "arxiv_id": null,
+    "doi": "10.18653/v1/2023.acl-long.149"
+  },
+  {
+    "id": "autoregressive_decomposition",
+    "title": "Token-wise Decomposition of Autoregressive Language Model Hidden States for Analyzing Model Predictions",
+    "arxiv_id": null,
+    "doi": "10.18653/v1/2023.acl-long.562"
+  },
+  {
+    "id": "eap_ig",
+    "title": "Have Faith in Faithfulness: Going Beyond Circuit Overlap When Finding Model Mechanisms",
+    "arxiv_id": "2403.17806",
+    "doi": null
+  },
+  {
+    "id": "circuit_tracing",
+    "title": "Circuit Tracing: Revealing Computational Graphs in Language Models",
+    "arxiv_id": null,
+    "doi": null
+  },
+  {
+    "id": "qk_tracing",
+    "title": "Tracing Attention Computation Through Feature Interactions",
+    "arxiv_id": null,
+    "doi": null
+  },
+  {
+    "id": "qafacteval",
+    "title": "QAFactEval: Improved QA-Based Factual Consistency Evaluation for Summarization",
+    "arxiv_id": "2112.08542",
+    "doi": "10.18653/v1/2022.naacl-main.187"
+  },
+  {
+    "id": "factgraph",
+    "title": "FactGraph: Evaluating Factuality in Summarization with Semantic Graph Representations",
+    "arxiv_id": "2204.06508",
+    "doi": "10.18653/v1/2022.naacl-main.236"
+  }
+]
