@@ -1,1 +1,1 @@
-"""Label-blind token-graph anomaly detection."""
+"""Label-free token graphs and source-routing diagnostics."""

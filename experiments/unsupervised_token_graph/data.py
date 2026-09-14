@@ -1,4 +1,4 @@
-"""Load label-free response attention caches."""
+"""Read one attention cache without reading hallucination annotations."""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,46 +18,54 @@ class ResponseRecord:
     hidden: np.ndarray | None = None
     metadata: dict | None = None
     sparse: dict | None = None
+    query_positions: np.ndarray | None = None
 
 
 class ResponseCache:
-    """Load one formal sparse-CSR or legacy dense response cache."""
+    """Canonical CSR uses q=P+r; compact legacy rows use q=P-1+r.
+
+    A compact cache may override the legacy convention with query_positions.
+    Only the explicitly listed metadata fields are read. Hidden states are not
+    needed by the source-flow method and are not materialized by this loader.
+    """
 
     def __init__(self, attention_key="attention"):
         self.attention_key = attention_key
 
     def load(self, path):
         path = Path(path)
-        with np.load(path, allow_pickle=False) as loaded:
-            names = set(loaded.files)
-            sparse = None
-            if {"response_row_ptr", "response_column_indices", "response_values", "attention_diagonal"}.issubset(names):
-                attention = None
-                sparse = {name: loaded[name].copy() for name in ("response_row_ptr", "response_column_indices", "response_values", "attention_diagonal")}
-            else:
-                attention = loaded[self.attention_key] if self.attention_key in names else loaded["data"]
-            response_idx = int(loaded["response_idx"]) if "response_idx" in names else 0
-            prompt_length = int(loaded["prompt_length"]) if "prompt_length" in names else None
-            token_ids = loaded["token_ids"] if "token_ids" in names else None
-            offsets = loaded["offsets"] if "offsets" in names else None
-            source_id = str(loaded["source_id"].item()) if "source_id" in names else path.stem
-            hidden = loaded["hidden"] if "hidden" in names else None
-            # Keep the loader label-blind and avoid deserializing unrelated NPZ members.
-            metadata = {name: loaded[name] for name in (
-                "cache_version", "num_attention_layers", "num_attention_heads",
-                "sample_id", "dataset_split", "original_idx", "prompt_length",
-            ) if name in names}
-        return ResponseRecord(path.stem, source_id, None if attention is None else np.asarray(attention), response_idx,
-                      prompt_length, token_ids, offsets, hidden, metadata, sparse)
+        fields = ("response_row_ptr", "response_column_indices", "response_values", "attention_diagonal")
+        with np.load(path, allow_pickle=False) as data:
+            names = set(data.files)
+            sparse = {k: data[k] for k in fields} if set(fields) <= names else None
+            attention = None if sparse is not None else data[self.attention_key if self.attention_key in names else "data"]
+            p = int(data["prompt_length"]) if "prompt_length" in names else int(data["response_idx"])
+            response_idx = int(data["response_idx"]) if "response_idx" in names else p
+            if response_idx != p:
+                raise ValueError("response_idx and prompt_length must identify the same prompt boundary")
+            token_ids = data["token_ids"] if "token_ids" in names else None
+            offsets = data["offsets"] if "offsets" in names else None
+            source_id = str(data["source_id"].item()) if "source_id" in names else path.stem
+            metadata = {k: data[k] for k in (
+                "cache_version", "sample_id", "dataset_split", "official_split", "task", "generator",
+                "response_sha256", "attention_floor",
+            ) if k in names}
+            queries = data["query_positions"] if "query_positions" in names else None
+        return ResponseRecord(path.stem, source_id, attention, response_idx, p,
+                              token_ids, offsets, None, metadata, sparse, queries)
 
 
 class CacheDataset:
-    """Iterate response caches without opening RAGTruth annotations."""
+    """Iterate files, not a list of all decoded attention tensors."""
 
     def __init__(self, root, pattern="*.npz", cache=None):
         self.root = Path(root)
         self.files = sorted(self.root.glob(pattern))
         self.cache = cache or ResponseCache()
 
+    def __len__(self):
+        return len(self.files)
+
     def __iter__(self):
-        return (self.cache.load(path) for path in self.files)
+        for path in self.files:
+            yield self.cache.load(path)
