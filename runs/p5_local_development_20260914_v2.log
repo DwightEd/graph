@@ -1,0 +1,18 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading checkpoint shards:   0%|          | 0/5 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 5/5 [00:00<00:00, 116.73it/s]
+{"id": "17019", "words": 235, "tokens": 277, "elapsed": 31.25277352333069, "completed": 1}
+{"id": "17020", "words": 179, "tokens": 220, "elapsed": 3.1361887454986572, "completed": 2}
+{"id": "13515", "words": 138, "tokens": 170, "elapsed": 2.5388801097869873, "completed": 3}
+{"id": "13516", "words": 54, "tokens": 63, "elapsed": 4.532309532165527, "completed": 4}
+{"id": "15939", "words": 131, "tokens": 160, "elapsed": 2.3826406002044678, "completed": 5}
+{"id": "15940", "words": 162, "tokens": 202, "elapsed": 2.7995686531066895, "completed": 6}
+{"id": "13857", "words": 151, "tokens": 194, "elapsed": 2.7277157306671143, "completed": 7}
+{"id": "13858", "words": 88, "tokens": 118, "elapsed": 8.660773515701294, "completed": 8}
+{"id": "15603", "words": 132, "tokens": 150, "elapsed": 2.2656352519989014, "completed": 9}
+{"id": "15604", "words": 90, "tokens": 111, "elapsed": 6.960675954818726, "completed": 10}
+{"id": "13083", "words": 195, "tokens": 269, "elapsed": 3.435640811920166, "completed": 11}
+{"id": "13084", "words": 85, "tokens": 110, "elapsed": 1.5834681987762451, "completed": 12}
+{"id": "741", "words": 108, "tokens": 124, "elapsed": 2.0739407539367676, "completed": 13}
+{"id": "742", "words": 109, "tokens": 124, "elapsed": 13.6474027633667, "completed": 14}
+{"id": "4707", "words": 81, "tokens": 112, "elapsed": 9.501530647277832, "completed": 15}
+{"id": "4708", "words": 92, "tokens": 122, "elapsed": 1.8016221523284912, "completed": 16}

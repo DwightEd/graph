@@ -153,3 +153,30 @@ v1训练/自然预测/评价/48来源实际擦除均完成。固定graph差分so
 
 以下均为保留的历史状态；当前以最新段落及实际manifest为准。
 
+## 2026-09-14 P3/P4，复用 research@03909e02
+
+无安装、无环境/权重变更。新鲜文档见证执行P3固定2答pilot一次，完整manifest、6文件hash、
+实际query/逐头统计/native-P2数值完全一致；44.94894秒，15.205GiB峰值。主线程完整32答
+P3执行91.49732秒，16676504576字节峰值；新增捕获/事件评价10测试通过。
+P3事件审计第一版CPU序列化失败留档，仅修int转换另写event_audit_v2，无GPU重跑。
+新鲜P4文档见证执行一次CPU变换，exit0，32答5170token，3测试通过，独立因果状态复算精确。
+P4模型前向0，0.57645秒。工程见证不代表科学有效；完整结果/稳健性见共享交接
+codex/research/refine-logs/P3_P4_RESULTS_20260914.md。validation未运行新评分。
+两项见证原文和metadata归档于codex/research/audit-archives/20260914_revisit_iterations。
+
+## 2026-09-14 P5/P6, unchanged research@03909e02
+
+No installs, packages, model weights or environment rebuild. P5 BF16 cache/batch
+discrepancies were discovered by actual fresh-document witnesses; v1 failure and
+v2 partial development16/32 are preserved without natural-label evaluation.
+Stable v3 uses unchanged resident BF16 weights with sequential per-layer FP32
+linear arithmetic, FP32 activations/KV, math SDPA, TF32 disabled. Pilot fresh
+document command exited0,45.366 runner seconds,20523572736 peak allocated bytes,
+2/2 responses and8/8 engineering canaries. P5 development32 completed319.202s;
+frozen validation32 completed336.472s, all-token AUROC0.747436, target FAILED.
+P6 fresh pilot command exited0,181.648 runner seconds,21139587072 peak bytes,
+2/2 responses and8/8 canaries. Natural draft truncation at384 tokens is explicit,
+preserved and not a sample rejection. Development is separately running; check
+outputs/P6_DEVELOPMENT_LAUNCH_20260914.json and live manifest, not historical PID.
+All cache checks use0.005 guard. These engineering witnesses do not establish
+scientific mechanism, clean-environment reproducibility or AUROC success.

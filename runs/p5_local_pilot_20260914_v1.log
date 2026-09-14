@@ -1,0 +1,16 @@
+`torch_dtype` is deprecated! Use `dtype` instead!
+Loading checkpoint shards:   0%|          | 0/5 [00:00<?, ?it/s]Loading checkpoint shards:  20%|██        | 1/5 [00:04<00:16,  4.01s/it]Loading checkpoint shards:  40%|████      | 2/5 [00:09<00:14,  4.85s/it]Loading checkpoint shards:  60%|██████    | 3/5 [00:12<00:08,  4.04s/it]Loading checkpoint shards:  80%|████████  | 4/5 [00:16<00:04,  4.01s/it]Loading checkpoint shards: 100%|██████████| 5/5 [00:16<00:00,  3.31s/it]
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/share/home/tm902089733300000/a903202310/lys/research/graph/next_iteration/local_grounding.py", line 243, in <module>
+    main()
+  File "/share/home/tm902089733300000/a903202310/lys/research/graph/next_iteration/local_grounding.py", line 203, in main
+    vals, audit = verify([messages(source, 'Report only source-supported facts.', response,
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/conda_envs/research/lib/python3.11/site-packages/torch/utils/_contextlib.py", line 120, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/share/home/tm902089733300000/a903202310/lys/research/graph/next_iteration/local_grounding.py", line 192, in verify
+    raise ValueError(f'cache/full-prefill mismatch: {deltas[-1]}')
+ValueError: cache/full-prefill mismatch: {'max_ab_delta': 0.75, 'odds_delta': 0.25, 'cached': {'logits': [39.5, 47.75], 'log_z': 47.75025939941406, 'label_mass': 1.0, 'top_id': 33}, 'uncached': {'logits': [40.25, 48.25], 'log_z': 48.250335693359375, 'label_mass': 1.0, 'top_id': 33}}
