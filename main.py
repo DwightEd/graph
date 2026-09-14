@@ -5,7 +5,10 @@ if __name__ == '__main__':
     command = sys.argv[1:2]
     if command == ['transport']:
         raise SystemExit('S11 transport is supervised. Use supervised-s11 explicitly; default main.py is unsupervised.')
-    if command == ['supervised-s11']:
+    if command == ['token-graph']:
+        from experiments.unsupervised_token_graph.flow_run import main
+        main(sys.argv[2:])
+    elif command == ['supervised-s11']:
         from structural_detector.transport_run import main
         main(sys.argv[2:])
     elif command == ['supervised-s10']:

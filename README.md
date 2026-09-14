@@ -1,5 +1,25 @@
 # Unsupervised entropy seeds → local token reuse
 
+## 单样本 token 图：无监督路由残差
+
+本轮新增 `python main.py token-graph`，完整方法、数学假设及信息论边界见
+[方法说明](docs/TOKEN_GRAPH_INFORMATION_FLOW.md)。主输入是完整 token hidden，
+用 prompt/history 实际连接预测当前节点属性，按无标签来源参考残差排异常。
+这是看到当前 token 后的路由条件异常，attention query 已受当前 token 影响。
+
+```bash
+python -m examples.token_flow_demo --output outputs/token_flow_demo_new
+python main.py token-graph score --roster /path/to/roster.json --output outputs/token_flow_new --attribute hidden
+python main.py token-graph evaluate --output outputs/token_flow_new --annotations /path/to/observer_token_labels.jsonl
+```
+
+包含 `graph`、同维同质量 `mass_matched_uniform`、`no_neighbors` 删除对照和
+`permuted_weights` 诊断。评分无幻觉标签，来源隔离，输入/代码/预测冻结；
+评价核对 observer token IDs，报告首错、首错后、回答内和覆盖指标。
+现有 attention-only 正式缓存缺 hidden，只可显式 `--attribute diagonal` 做工程对照。
+**自然幻觉检测效果尚未验证；图异常不等于事实错误。**
+默认 `main.py` 仍为下方已有的局部复用流程。
+
 默认 `main.py`：无标签参考熵 → 疑似入口 → 实际局部 attention 多跳复用。
 不训练入口/延续分类器，不加载 S10/S11 监督权重，不用正常样本标签校准。
 标签只在全部预测冻结之后用于评价。**尚无新自然 RAGTruth 检测成绩。**

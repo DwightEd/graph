@@ -1,5 +1,7 @@
 # Unsupervised Token Graph Detector
 
+> 2026-09-14 续做：可运行候选已收敛为隐藏状态的后验路由条件残差，见 [当前方法](TOKEN_GRAPH_INFORMATION_FLOW.md)。下方自编码器路线保留为历史原型，不能据其自重构损失声称信息流检测有效。
+
 ## Goal
 
 Model one complete prompt+response as one causal token graph and produce a
