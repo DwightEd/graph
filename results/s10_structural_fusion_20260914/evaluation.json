@@ -1,0 +1,295 @@
+{
+  "error": {
+    "metrics": {
+      "instant": {
+        "tokens": 30721,
+        "positives": 2307,
+        "auroc": 0.7404971767215859,
+        "ap": 0.16226719308485482,
+        "logloss": 0.2445154409072049,
+        "brier": 0.06674652683425661
+      },
+      "combined": {
+        "tokens": 30721,
+        "positives": 2307,
+        "auroc": 0.749239669486543,
+        "ap": 0.1661344589415447,
+        "logloss": 0.24211106176344763,
+        "brier": 0.06660426071753638
+      },
+      "without_entropy": {
+        "tokens": 30721,
+        "positives": 2307,
+        "auroc": 0.7290511899587098,
+        "ap": 0.15907572286537708,
+        "logloss": 0.24701585970980877,
+        "brier": 0.0670336819914275
+      },
+      "without_attention": {
+        "tokens": 30721,
+        "positives": 2307,
+        "auroc": 0.642598191108866,
+        "ap": 0.12426326487612592,
+        "logloss": 0.2613001877997535,
+        "brier": 0.06879153583885345
+      },
+      "raw_entropy": {
+        "tokens": 30721,
+        "positives": 2307,
+        "auroc": 0.600003260052181,
+        "ap": 0.107251075021985
+      },
+      "raw_remote_history_excl16_minus_source": {
+        "tokens": 30721,
+        "positives": 2307,
+        "auroc": 0.6639191840844528,
+        "ap": 0.1168736552992799
+      },
+      "raw_negative_margin": {
+        "tokens": 30721,
+        "positives": 2307,
+        "auroc": 0.5819926921742791,
+        "ap": 0.09244760396834775
+      },
+      "raw_position": {
+        "tokens": 30721,
+        "positives": 2307,
+        "auroc": 0.6179543781249858,
+        "ap": 0.11280441090275327
+      }
+    },
+    "threshold_metrics": {
+      "instant": {
+        "threshold": 0.2610601286980407,
+        "recall": 0.12873862158647595,
+        "negative_token_fpr": 0.045259379179277824,
+        "normal_response_any_alarm": 0.8571428571428571
+      },
+      "combined": {
+        "threshold": 0.27311349909654514,
+        "recall": 0.12570437798006068,
+        "negative_token_fpr": 0.04254944745547969,
+        "normal_response_any_alarm": 0.8673469387755102
+      },
+      "without_entropy": {
+        "threshold": 0.25875077077182196,
+        "recall": 0.1270047680970958,
+        "negative_token_fpr": 0.043323713662279155,
+        "normal_response_any_alarm": 0.8571428571428571
+      },
+      "without_attention": {
+        "threshold": 0.175228305801826,
+        "recall": 0.11920242739488514,
+        "negative_token_fpr": 0.04863799535440276,
+        "normal_response_any_alarm": 0.9591836734693877
+      }
+    },
+    "within_response_auroc": {
+      "instant": 0.6637421492125299,
+      "combined": 0.6805418284573238,
+      "without_entropy": 0.6378119992117299,
+      "without_attention": 0.6467387171199331,
+      "raw_entropy": 0.6160799349093704,
+      "raw_remote_history_excl16_minus_source": 0.5911942183837182,
+      "raw_negative_margin": 0.5983351884198971,
+      "raw_position": 0.6169504141397054
+    },
+    "source_bootstrap": {
+      "instant": {
+        "valid": 200,
+        "auroc_delta_ci95": [
+          0.003439571367483438,
+          0.017046431322190535
+        ],
+        "ap_delta_ci95": [
+          -0.005347484417186043,
+          0.012636162810864247
+        ]
+      },
+      "raw_entropy": {
+        "valid": 200,
+        "auroc_delta_ci95": [
+          0.09317012891667709,
+          0.20936331013879922
+        ],
+        "ap_delta_ci95": [
+          0.020503491665054732,
+          0.1185527177028346
+        ]
+      },
+      "raw_remote_history_excl16_minus_source": {
+        "valid": 200,
+        "auroc_delta_ci95": [
+          0.06451975619890411,
+          0.10624400099252888
+        ],
+        "ap_delta_ci95": [
+          0.028865981344757773,
+          0.08449994817866259
+        ]
+      },
+      "raw_negative_margin": {
+        "valid": 200,
+        "auroc_delta_ci95": [
+          0.11079071712686724,
+          0.22158100366919659
+        ],
+        "ap_delta_ci95": [
+          0.03158946352568844,
+          0.1351992939297323
+        ]
+      }
+    }
+  },
+  "onset": {
+    "metrics": {
+      "instant": {
+        "tokens": 30721,
+        "positives": 84,
+        "auroc": 0.7515169954785452,
+        "ap": 0.01574190813764861,
+        "logloss": 0.017830656697017236,
+        "brier": 0.0027295519639014536
+      },
+      "combined": {
+        "tokens": 30721,
+        "positives": 84,
+        "auroc": 0.7790782076449733,
+        "ap": 0.015880790429724147,
+        "logloss": 0.017462183106993937,
+        "brier": 0.0027263395042980234
+      },
+      "without_entropy": {
+        "tokens": 30721,
+        "positives": 84,
+        "auroc": 0.6679019455156153,
+        "ap": 0.013515006719623532,
+        "logloss": 0.018274860154343566,
+        "brier": 0.002720212035653767
+      },
+      "without_attention": {
+        "tokens": 30721,
+        "positives": 84,
+        "auroc": 0.6780969789097218,
+        "ap": 0.00891257869075694,
+        "logloss": 0.018451113675624263,
+        "brier": 0.0027316871986249394
+      },
+      "raw_entropy": {
+        "tokens": 30721,
+        "positives": 84,
+        "auroc": 0.7098796661988228,
+        "ap": 0.008583263935444927
+      },
+      "raw_remote_history_excl16_minus_source": {
+        "tokens": 30721,
+        "positives": 84,
+        "auroc": 0.6571153071993558,
+        "ap": 0.009465788154048166
+      },
+      "raw_negative_margin": {
+        "tokens": 30721,
+        "positives": 84,
+        "auroc": 0.6465493792908357,
+        "ap": 0.0041685686941299255
+      },
+      "raw_position": {
+        "tokens": 30721,
+        "positives": 84,
+        "auroc": 0.5255052636323648,
+        "ap": 0.003083936727886312
+      }
+    },
+    "threshold_metrics": {
+      "instant": {
+        "threshold": 0.012970537975463972,
+        "recall": 0.25,
+        "negative_token_fpr": 0.04478245259000555,
+        "normal_response_any_alarm": 1.0
+      },
+      "combined": {
+        "threshold": 0.014644298659588651,
+        "recall": 0.32142857142857145,
+        "negative_token_fpr": 0.044227567973365536,
+        "normal_response_any_alarm": 1.0
+      },
+      "without_entropy": {
+        "threshold": 0.01225878001096351,
+        "recall": 0.2619047619047619,
+        "negative_token_fpr": 0.04207331004993962,
+        "normal_response_any_alarm": 0.9693877551020408
+      },
+      "without_attention": {
+        "threshold": 0.009749782833599084,
+        "recall": 0.23809523809523808,
+        "negative_token_fpr": 0.048666644906485625,
+        "normal_response_any_alarm": 1.0
+      }
+    },
+    "within_response_auroc": {
+      "instant": 0.7716083307476457,
+      "combined": 0.806699118957861,
+      "without_entropy": 0.6965122136588143,
+      "without_attention": 0.7125849992433564,
+      "raw_entropy": 0.7327412249819516,
+      "raw_remote_history_excl16_minus_source": 0.6422989211334466,
+      "raw_negative_margin": 0.656746125499449,
+      "raw_position": 0.5189762097292456
+    },
+    "source_bootstrap": {
+      "instant": {
+        "valid": 200,
+        "auroc_delta_ci95": [
+          -0.008985479283827489,
+          0.05668705050507642
+        ],
+        "ap_delta_ci95": [
+          -0.019338020660290334,
+          0.008821444931232216
+        ]
+      },
+      "raw_entropy": {
+        "valid": 200,
+        "auroc_delta_ci95": [
+          0.016979715070629967,
+          0.13222321641311915
+        ],
+        "ap_delta_ci95": [
+          0.0018545528354292286,
+          0.022766249574725735
+        ]
+      },
+      "raw_remote_history_excl16_minus_source": {
+        "valid": 200,
+        "auroc_delta_ci95": [
+          0.040067462416264917,
+          0.20584148639987962
+        ],
+        "ap_delta_ci95": [
+          -0.010290087759402263,
+          0.02161115678593537
+        ]
+      },
+      "raw_negative_margin": {
+        "valid": 200,
+        "auroc_delta_ci95": [
+          0.08018403590148228,
+          0.2025565300489129
+        ],
+        "ap_delta_ci95": [
+          0.007259306626000549,
+          0.028866155967475632
+        ]
+      }
+    }
+  },
+  "scope": {
+    "train_responses": 671,
+    "calibration_responses": 168,
+    "test_responses": 150,
+    "test_sources": 150,
+    "observer": true,
+    "official_test_previously_used_by_historical_research": true,
+    "no_new_gpu_forwards": true
+  }
+}

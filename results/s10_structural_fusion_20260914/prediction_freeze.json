@@ -1,0 +1,10 @@
+{
+  "test_labels_read": false,
+  "hashes": {
+    "models.json": "cc6516ec5e579b148d1431d92987de0f2d884d7034a8aa2cf2d6ee9b5e2259d7",
+    "thresholds.json": "214f95d2a2e258e53c086d656a04d5c8e09e9d890ee5bcca1d7332c5f9a83cc8",
+    "predictions.npz": "5e7b1471145d49ed9068c2fef13f73e4e555fee092d67bbb2ea3e15c9756ac14",
+    "prediction_index.json": "d9287e827e115619deff244ffd4a236aff41dd1aa617737bacac3c563705bf03",
+    "protocol_freeze.json": "29d1f6ec081c4a800ec4ce5d225385db7e9f4a9178cb0e2dd1f7a52dc43390ff"
+  }
+}

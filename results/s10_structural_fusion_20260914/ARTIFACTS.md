@@ -1,0 +1,1 @@
+This directory contains the versioned summary and frozen model metadata. Full predictions and executed-code snapshots remain in ../../outputs/s10_structural_fusion_20260914_v1; complete.json hashes refer to those original artifacts, not this subset. No raw cache is duplicated here.

@@ -1,3 +1,9 @@
+# 当前实验审计：S10（2026-09-14）
+
+[完整审计](docs/S10_RESULT_AUDIT_20260914.md)：fresh同家族只读复算，完整性PASS、主张使用WARN/provisional。主/原始指标独立复算最大差0；20/20元数据哈希、989特征哈希及671/168/150来源划分核验通过；正常回答anyalarm限制已报告。可选200次bootstrap未独立重跑，不称跨家族外部科学验收。没有合并或发布阻断。
+
+## 下方为历史审计记录
+
 # 实验审计状态
 
 日期：2026-09-12。审计员：不可用。Overall verdict：NOT RUN；integrity_status：unavailable。

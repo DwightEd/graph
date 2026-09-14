@@ -1,3 +1,7 @@
+## 2026-09-14 当前入口已替换
+
+当前方法是[结构—熵组合](STRUCTURAL_METHOD.md)，[S10结果](S10_RESULTS_20260914.md)记录150来源测试及误报限制。下方为历史方法记录，其旧代码已移至archive/pre-structural-20260914。默认main.py现在运行structural_detector，不再运行旧图适配器或外部核验。
+
 # 当前方法与结果入口
 
 A2-v1 GroundedGraphAdapter 已完成，固定差分全词AUROC0.505927、首错后0.512073，均未超过base NLL。当前主线继续迭代A2-v2来源恢复模型，尚未收敛有效检测器。

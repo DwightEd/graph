@@ -1,0 +1,17 @@
+{
+  "complete": true,
+  "seconds": 65.5146059282124,
+  "models": 8,
+  "artifacts": {
+    "models.json": "cc6516ec5e579b148d1431d92987de0f2d884d7034a8aa2cf2d6ee9b5e2259d7",
+    "predictions.npz": "5e7b1471145d49ed9068c2fef13f73e4e555fee092d67bbb2ea3e15c9756ac14",
+    "evaluation.json": "58ada3132aaba59b3cb070df43abbccb9a60c78222ed2bf1fbfe5e35d50c0678",
+    "executed___init__.py": "f975362420d86c68ad1dbb6c86ffb99e902bee574612ec462089b67e30effe8a",
+    "prediction_index.json": "d9287e827e115619deff244ffd4a236aff41dd1aa617737bacac3c563705bf03",
+    "executed_experiment.py": "1cfe7a6ac99fe0d2fd2dce39d7c33653d25aa7a782ff6943226d7ac1662d55b6",
+    "protocol_freeze.json": "29d1f6ec081c4a800ec4ce5d225385db7e9f4a9178cb0e2dd1f7a52dc43390ff",
+    "prediction_freeze.json": "8c21c9466fe76451cc517cde9dfe72a592562880bf6edd71029942dfa1e0b277",
+    "thresholds.json": "214f95d2a2e258e53c086d656a04d5c8e09e9d890ee5bcca1d7332c5f9a83cc8",
+    "executed_features.py": "289998ae353d238f37cc826c02bf06655ed1784ec78950a9acb15e017d88ac13"
+  }
+}

@@ -1,3 +1,10 @@
+## 2026-09-14 S10 当前产物
+
+- 主实现：structural_detector/{features,experiment}.py；运行scripts/run_structural_fusion.sh。
+- 无标签采集：../reanchor/src/decoding/structural_export.py；原生依赖迁入../reanchor/src/route_graph。
+- 结果：docs/S10_RESULTS_20260914.md，results/s10_structural_fusion_20260914。
+- 历史代码归档：archive/pre-structural-20260914；清理清单docs/STRUCTURAL_REFACTOR_20260914.json。未跟踪的notebook自动checkpoint移至outputs/structural_refactor_preserved_checkpoints_20260914保留。
+
 # Research Output Manifest
 
 原始逐数组哈希索引保留在各实验输出的 manifest.json；本索引记录代码、方案、报告与入口，不复制数组清单。

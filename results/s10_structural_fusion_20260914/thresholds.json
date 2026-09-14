@@ -1,0 +1,14 @@
+{
+  "error": {
+    "instant": 0.2610601286980407,
+    "combined": 0.27311349909654514,
+    "without_entropy": 0.25875077077182196,
+    "without_attention": 0.175228305801826
+  },
+  "onset": {
+    "instant": 0.012970537975463972,
+    "combined": 0.014644298659588651,
+    "without_entropy": 0.01225878001096351,
+    "without_attention": 0.009749782833599084
+  }
+}
