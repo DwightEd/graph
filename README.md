@@ -1,3 +1,20 @@
+# Two-stage local-attention risk propagation
+
+当前新增 S11：**熵入口 → 逐物理 head 的真实历史端点继承 → 条件延续读出**。
+它替代“附近曾经高熵”这个弱代理，真正检查后续读取了哪些历史位置。实现与测试已完成，**尚未运行新的自然RAGTruth评估**；不保证优于S10。
+
+```bash
+python main.py transport --tasks QA --generator llama-2-7b-chat \
+  --features outputs/s11_local_attention_qa --output outputs/s11_two_stage_qa --resume
+python -m pytest tests/test_two_stage.py -q
+```
+
+[算法、诊断与完整命令](docs/S11_LOCAL_PROPAGATION.md)。现有五列缓存没有token端点，首次需每答补一次teacher-forced前向；之后CPU复用。支持 --tasks all / --generator all。分数含监督双阶段模型与单列的无标签排序对照；oracle真实起点诊断只在生产预测冻结后运行，不能作为检测成绩。
+
+旧 `main.py --features ... --annotations ... --output ...` 仍运行S10；默认入口未静默改变，历史输出不覆盖。S10与绑定投影代码继续保留。
+
+---
+
 # Structural attention–entropy detector
 
 主线是 RAGTruth 自然回答上的因果结构特征组合：当前预测熵、margin、来源/远历史注意力、跨头分歧及最近8步的衰减熵记忆。分别检测错误 token 与标注错误 span 的起点。标签不用于构造特征或定位输入节点。
