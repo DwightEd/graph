@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+from tqdm import tqdm
 
 from .data import CacheDataset
 from .reanchor import ReanchorAnalyzer
@@ -23,7 +24,8 @@ def run(cache_root, output, metadata=None, window=10, horizon_low=10, horizon_hi
     meta = read_metadata(metadata)
     analyzer = ReanchorAnalyzer(window, horizon_low, horizon_high)
     rows = []
-    for record in CacheDataset(cache_root):
+    records = list(CacheDataset(cache_root))
+    for record in tqdm(records, desc="reanchor", unit="sample"):
         result = analyzer.run(record.attention, record.prompt_length)
         identity = meta.get(record.response_id, {})
         np.savez_compressed(output / f"{record.response_id}.npz",
