@@ -28,7 +28,6 @@ class AttentionSample:
 
 
 class AttentionDataset:
-    """Load thresholded attention files and expose them as model samples."""
 
     def __init__(self, root, pattern="*.npz"):
         self.root = Path(root)
