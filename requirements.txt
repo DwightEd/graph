@@ -2,5 +2,3 @@ numpy
 scipy
 scikit-learn
 pytest
-torch
-tqdm

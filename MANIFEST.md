@@ -76,23 +76,3 @@
 新增route_graph/audit_*.py、causal_groups.py、frozen_reader.py、evidence_anchor.py及真实native后端。入口audit_runner，调度experiments/interleave_native_audit.py。自然36条清单outputs/native_audit_design_20260913；审查native_{validation,pipeline,scheduler}_engineering_20260913.md。此时未启动GPU，部署前复审尚未关闭。
 
 Native audit 2026-09-13T04:47:53+08:00: docs/NATIVE_METHOD_MODEL_20260913.md, docs/NATIVE_AUDIT_RUN_20260913.md, outputs/native_audit_v1_20260913/settings.json, experiments/evaluate_native_audit.py, experiments/summarize_native_audit.py; full36 launch preflight, no empirical result claimed.
-
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/ENGINEERING_RESULTS.md | implementation | RoutingResidual方法/独立评审/工程证据；自然效果未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/FINAL_PROPOSAL.md | implementation | RoutingResidual方法/独立评审/工程证据；自然效果未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/REFINEMENT_REPORT.md | implementation | RoutingResidual方法/独立评审/工程证据；自然效果未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/REVIEW_SUMMARY.md | implementation | RoutingResidual方法/独立评审/工程证据；自然效果未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/round-0-initial-proposal.md | implementation | RoutingResidual方法/独立评审/工程证据；自然效果未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/round-1-refinement.md | implementation | RoutingResidual方法/独立评审/工程证据；自然效果未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/round-1-review.md | implementation | RoutingResidual方法/独立评审/工程证据；自然效果未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/round-2-refinement.md | implementation | RoutingResidual方法/独立评审/工程证据；自然效果未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/round-2-review.md | implementation | RoutingResidual方法/独立评审/工程证据；自然效果未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/round-3-refinement.md | implementation | RoutingResidual方法/独立评审/工程证据；自然效果未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/round-3-review.md | implementation | RoutingResidual方法/独立评审/工程证据；自然效果未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/round-4-refinement.md | implementation | RoutingResidual方法/独立评审/工程证据；自然效果未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/round-4-review.md | implementation | RoutingResidual方法/独立评审/工程证据；自然效果未验证 |
-| 2026-09-14 | research-refine | docs/TOKEN_GRAPH_INFORMATION_FLOW.md | implementation | 当前路由残差方法、数学边界与执行接口 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/REFINE_STATE.json | implementation | RoutingResidual精炼与审查归档；科学未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/REFINE_STATE_20260914_final.json | implementation | RoutingResidual精炼与审查归档；科学未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/round-5-review.md | implementation | RoutingResidual精炼与审查归档；科学未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/score-history.md | implementation | RoutingResidual精炼与审查归档；科学未验证 |
-| 2026-09-14 | research-refine | refine-logs/token_flow_20260914/round-4-review.raw.json | implementation | 原始评审逐字保存；md仅规范化Markdown行末空格 |

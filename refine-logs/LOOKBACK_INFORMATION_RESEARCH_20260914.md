@@ -1,9 +1,5 @@
 # Reanchor Information Flow for Token Hallucination Analysis
 
-> Research plan, not an implementation guarantee. The current prototype averages
-> heads and uses a full-response event quantile and future-attention diagnostics.
-> Those measurements are retrospective, not prefix-causal.
-
 ## Problem Anchor
 
 We need a label-free, token-level diagnostic for RAGTruth prompt+response
@@ -12,7 +8,7 @@ structural reanchor event: a query shifts from local continuation toward an
 older prompt/source token or an earlier generated response token.
 
 The method must not define important tokens by a post-hoc high-throughput
-threshold. It must first define reanchor events from local-vs-distant routing,
+threshold. It must first define lookback events from local-vs-distant routing,
 then test whether hallucination onset is enriched at the event or within a
 short causal lag after it.
 
@@ -31,7 +27,7 @@ downstream influence are measurements, not labels.
 For a response token, the model's attention distribution over local history,
 remote response history, and prompt/source is a membership-like query. Correct
 tokens should, under the hypothesis, show a more concentrated and stable
-evidence distribution after reanchor; error tokens may show either diffuse
+evidence distribution after lookback; error tokens may show either diffuse
 evidence, a high-confidence source/history collision, or a distribution that
 looks like a known evidence state despite lacking the required source support.
 
@@ -65,7 +61,7 @@ For response query row `t`, with absolute query `q = prompt_length + t - 1`:
   and the preceding local window's distribution.
 
 The event is a predeclared causal rule: a robust quantile exceedance of
-reanchor ratio or positive change in clipped distance, with a cooldown. It does
+lookback ratio or positive change in clipped distance, with a cooldown. It does
 not use labels, future response length, or answer correctness.
 
 ## Information-theoretic analysis
@@ -80,7 +76,7 @@ overlap(P_correct, P_error)
 ```
 
 Use source-balanced histograms or fixed quantile bins. Report conditional
-versions for `reanchor_event`, `event + delta`, and `no_event`.
+versions for `lookback_event`, `event + delta`, and `no_event`.
 
 For a score interpreted as membership confidence `x_t`, report the empirical
 fact/non-fact log-loss pair `(epsilon_correct, epsilon_error)` and the
@@ -97,7 +93,7 @@ that it locates the causal source.
 
 ## Non-goals
 
-- no claim that attention is causal or that a reanchor node is a semantic
+- no claim that attention is causal or that a lookback node is a semantic
   evidence owner;
 - no hallucination classifier trained on RAGTruth labels;
 - no high-flow token definition;
