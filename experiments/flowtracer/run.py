@@ -2,8 +2,9 @@ import argparse
 import numpy as np
 
 from .attention import aggregate_attention
+from .data import AttentionDataset
 from .flow import compute_edge_flow, compute_node_throughput, extract_weighted_paths
-from .graph import build_token_dag
+from .graph import TokenGraph
 from .io import save_sample_graph
 
 
@@ -18,7 +19,8 @@ def parse_args(argv=None):
 
 def process_sample(attention, targets, token_ids=None, threshold=0.0):
     matrix = aggregate_attention(attention)
-    graph = build_token_dag(matrix, token_ids=token_ids, threshold=threshold)
+    graph_model = TokenGraph.from_attention(matrix, token_ids=token_ids, threshold=threshold)
+    graph = graph_model.as_dict()
     analysis = compute_edge_flow(graph, targets)
     analysis["throughput"] = compute_node_throughput(graph, analysis["edges"])
     analysis["paths"] = extract_weighted_paths(graph, targets)
@@ -27,8 +29,7 @@ def process_sample(attention, targets, token_ids=None, threshold=0.0):
 
 def main(argv=None):
     args = parse_args(argv)
-    loaded = np.load(args.attention)
-    attention = loaded["attention"] if isinstance(loaded, np.lib.npyio.NpzFile) else loaded
+    attention = AttentionDataset.load(args.attention).attention
     targets = [int(value) for value in args.targets.split(",") if value.strip()]
     graph, analysis = process_sample(attention, targets, threshold=args.threshold)
     save_sample_graph(args.output, graph, analysis)
