@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .lookback import InformationDiagnostics
+from .reanchor import InformationDiagnostics
 
 
 def _auc(labels, scores):
@@ -40,7 +40,7 @@ def evaluate(prediction_dir, metadata_path, annotations_path):
     for line in Path(annotations_path).read_text(encoding="utf-8").splitlines():
         row = json.loads(line)
         annotations[hashlib.sha256(row["response"].encode()).hexdigest()] = row
-    fields = {"event": [], "event_strength": [], "lookback_ratio": [], "waad": [], "fai": [], "distribution_shift": []}
+    fields = {"event": [], "event_strength": [], "reanchor_ratio": [], "waad": [], "fai": [], "distribution_shift": []}
     labels, source_ids, events = [], [], []
     for file in sorted(Path(prediction_dir).glob("*.npz")):
         meta = metadata[file.stem]

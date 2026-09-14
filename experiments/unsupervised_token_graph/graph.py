@@ -66,15 +66,15 @@ class TokenGraph:
         x = np.column_stack((position, segment, diagonal, incoming, outgoing,
                              in_degree / max(tokens, 1), out_degree / max(tokens, 1)))
         if cache.attention is not None and cache.prompt_length is not None:
-            lookback = ReanchorAnalyzer().run(cache.attention, cache.prompt_length)
+            reanchor = ReanchorAnalyzer().run(cache.attention, cache.prompt_length)
             structural = np.zeros((tokens, 5), dtype=np.float32)
             start = cache.prompt_length
-            stop = min(tokens, start + len(lookback.waad))
+            stop = min(tokens, start + len(reanchor.waad))
             structural[start:stop] = np.column_stack((
-                lookback.waad[:stop - start], lookback.fai[:stop - start],
-                lookback.lookback_ratio[:stop - start],
-                lookback.evidence_entropy[:stop - start],
-                lookback.distribution_shift[:stop - start],
+                reanchor.waad[:stop - start], reanchor.fai[:stop - start],
+                reanchor.reanchor_ratio[:stop - start],
+                reanchor.evidence_entropy[:stop - start],
+                reanchor.distribution_shift[:stop - start],
             ))
             x = np.column_stack((x, structural))
         return cls(cache.response_id, x, edge_index, edge_weight,
