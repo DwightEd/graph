@@ -15,10 +15,16 @@ from .score import calibrate_source_budget, score_graph
 
 def split_sources(records, fraction):
     sources = sorted({record.source_id for record in records}, key=lambda value: hashlib.sha256(value.encode()).hexdigest())
-    cut = max(1, min(len(sources) - 1, int(len(sources) * fraction)))
-    reference = set(sources[:cut])
+    if len(sources) < 3:
+        raise ValueError("at least three source IDs are required for reference/calibration/test splits")
+    reference_cut = max(1, min(len(sources) - 2, int(len(sources) * fraction)))
+    calibration_cut = max(reference_cut + 1, min(len(sources) - 1,
+                                                   reference_cut + max(1, int(len(sources) * .1))))
+    reference = set(sources[:reference_cut])
+    calibration = set(sources[reference_cut:calibration_cut])
     return [{"response_id": record.response_id, "source_id": record.source_id,
-             "split": "reference" if record.source_id in reference else "calibration"}
+             "split": "reference" if record.source_id in reference else
+             "calibration" if record.source_id in calibration else "test"}
             for record in records]
 
 
@@ -65,7 +71,9 @@ def main(argv=None):
         calibration = calibrate_source_budget(calibration_predictions, calibration_records, config.alarm_budget)
         (output / "calibration.json").write_text(json.dumps(calibration), encoding="utf-8")
     else:
-        result = evaluate_predictions(predictions, args.annotations)
+        test_ids = {split["response_id"] for split in splits if split["split"] == "test"}
+        result = evaluate_predictions([prediction for prediction in predictions
+                                       if prediction["response_id"] in test_ids], args.annotations)
         (output / "evaluation.json").write_text(json.dumps(result), encoding="utf-8")
 
 

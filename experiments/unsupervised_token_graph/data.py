@@ -42,7 +42,11 @@ class ResponseCache:
             offsets = loaded["offsets"] if "offsets" in names else None
             source_id = str(loaded["source_id"].item()) if "source_id" in names else path.stem
             hidden = loaded["hidden"] if "hidden" in names else None
-            metadata = {name: loaded[name] for name in names if name not in {self.attention_key, "data", "hidden", "token_ids"}}
+            # Keep the loader label-blind and avoid deserializing unrelated NPZ members.
+            metadata = {name: loaded[name] for name in (
+                "cache_version", "num_attention_layers", "num_attention_heads",
+                "sample_id", "dataset_split", "original_idx", "prompt_length",
+            ) if name in names}
         return ResponseRecord(path.stem, source_id, None if attention is None else np.asarray(attention), response_idx,
                       prompt_length, token_ids, offsets, hidden, metadata, sparse)
 

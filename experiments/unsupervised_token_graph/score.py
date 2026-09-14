@@ -8,7 +8,9 @@ def score_graph(model, graph):
     score = reconstruction["node_error"].copy()
     if len(graph.edge_index.T):
         target = graph.edge_index[1]
-        score += np.bincount(target, weights=reconstruction["edge_error"], minlength=len(score))
+        edge_count = np.bincount(target, minlength=len(score))
+        edge_sum = np.bincount(target, weights=reconstruction["edge_error"], minlength=len(score))
+        score += np.divide(edge_sum, edge_count, out=np.zeros_like(edge_sum), where=edge_count > 0)
     return {"response_id": graph.response_id, "score": score,
             "node_error": reconstruction["node_error"],
             "edge_error": reconstruction["edge_error"]}

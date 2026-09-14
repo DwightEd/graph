@@ -3,8 +3,8 @@
 from dataclasses import dataclass
 
 import numpy as np
+from scipy import sparse
 
-from .reanchor import ReanchorAnalyzer
 
 
 class TokenGraph:
@@ -30,53 +30,54 @@ class TokenGraph:
                 target, source = np.nonzero(np.tril(aggregate > attention_floor, -1))
                 edge_weight = aggregate[target, source]
             else:
-                query_count, tokens = attention.shape[-2:]
-                aggregate = attention.mean(axis=(0, 1))
-                diagonal = np.zeros(tokens, dtype=np.float32)
-                target_rows = np.arange(query_count) + cache.prompt_length - 1
-                query, source = np.nonzero(aggregate > attention_floor)
-                target = target_rows[query]
-                keep = source < target
-                edge_weight = aggregate[query[keep], source[keep]]
-                target, source = target[keep], source[keep]
+                raise ValueError(
+                    "rectangular response-query attention cannot form complete token nodes; "
+                    "use the formal CSR cache or a square dense cache"
+                )
         else:
             diagonal = cache.sparse["attention_diagonal"].mean(axis=(0, 1)).astype(np.float32)
             layers, heads, tokens = cache.sparse["attention_diagonal"].shape
             row_ptr = cache.sparse["response_row_ptr"]
             columns = cache.sparse["response_column_indices"]
             values = cache.sparse["response_values"]
-            aggregate = np.zeros((tokens, tokens), dtype=np.float32)
+            edge_rows, edge_cols, edge_values = [], [], []
             row = 0
             for layer in range(layers):
                 for head in range(heads):
                     for target in range(cache.response_idx, tokens):
                         begin, end = row_ptr[row], row_ptr[row + 1]
-                        aggregate[target, columns[begin:end]] += values[begin:end] / (layers * heads)
+                        source_row = columns[begin:end]
+                        value_row = values[begin:end] / (layers * heads)
+                        keep = (source_row < target) & (value_row > 0)
+                        edge_rows.append(np.full(int(keep.sum()), target, dtype=np.int64))
+                        edge_cols.append(source_row[keep].astype(np.int64))
+                        edge_values.append(value_row[keep].astype(np.float32))
                         row += 1
-            target, source = np.nonzero(np.tril(aggregate > attention_floor, -1))
-            edge_weight = aggregate[target, source]
+            if edge_rows:
+                target = np.concatenate(edge_rows)
+                source = np.concatenate(edge_cols)
+                aggregated = sparse.coo_matrix(
+                    (np.concatenate(edge_values), (target, source)), shape=(tokens, tokens)
+                ).tocsr()
+                aggregated.data[aggregated.data <= attention_floor] = 0.
+                aggregated.eliminate_zeros()
+                target, source = aggregated.nonzero()
+                edge_weight = aggregated.data.astype(np.float32, copy=True)
+            else:
+                target = source = np.empty(0, dtype=np.int64)
+                edge_weight = np.empty(0, dtype=np.float32)
         edge_index = np.stack((source, target))
         incoming = np.bincount(target, weights=edge_weight, minlength=tokens)
         outgoing = np.bincount(source, weights=edge_weight, minlength=tokens)
         in_degree = np.bincount(target, minlength=tokens)
         out_degree = np.bincount(source, minlength=tokens)
-        position = np.arange(tokens, dtype=np.float32) / max(tokens - 1, 1)
         split = cache.prompt_length if cache.prompt_length is not None else cache.response_idx
+        # Do not normalize by total response length: that exposes future tokens.
+        position = np.log1p(np.arange(tokens, dtype=np.float32)) / max(np.log1p(split), 1.)
         segment = (np.arange(tokens) >= split).astype(np.float32)
-        x = np.column_stack((position, segment, diagonal, incoming, outgoing,
-                             in_degree / max(tokens, 1), out_degree / max(tokens, 1)))
-        if cache.attention is not None and cache.prompt_length is not None:
-            lookback = ReanchorAnalyzer().run(cache.attention, cache.prompt_length)
-            structural = np.zeros((tokens, 5), dtype=np.float32)
-            start = cache.prompt_length
-            stop = min(tokens, start + len(lookback.waad))
-            structural[start:stop] = np.column_stack((
-                lookback.waad[:stop - start], lookback.fai[:stop - start],
-                lookback.lookback_ratio[:stop - start],
-                lookback.evidence_entropy[:stop - start],
-                lookback.distribution_shift[:stop - start],
-            ))
-            x = np.column_stack((x, structural))
+        # Outgoing mass/degree depends on later queries and is deliberately omitted.
+        x = np.column_stack((position, segment, diagonal, incoming,
+                             in_degree / max(tokens, 1)))
         return cls(cache.response_id, x, edge_index, edge_weight,
                    cache.response_idx, cache.token_ids)
 

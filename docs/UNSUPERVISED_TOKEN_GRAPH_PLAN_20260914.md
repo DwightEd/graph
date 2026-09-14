@@ -17,7 +17,8 @@ graph topology, or model weights.
    features contain position/segment information, attention diagonal, causal
    in/out statistics, and optional frozen hidden-state features.
 3. Fit a source-balanced graph autoencoder on unlabeled reference responses.
-   The encoder predicts each node from its local topology and node features;
+   The encoder masks target-local observables before message passing, then
+   predicts each node from its local topology and prefix context;
    the decoder reconstructs node features and edge-weight summaries. No
    hallucination labels or response annotations enter this phase.
 4. Convert reconstruction error plus topology surprise into a frozen token

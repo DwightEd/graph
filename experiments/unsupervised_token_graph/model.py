@@ -26,7 +26,11 @@ class GraphAutoencoder:
         x = torch.as_tensor(graph.x, dtype=torch.float32)
         source, target = torch.as_tensor(graph.edge_index, dtype=torch.long)
         weight = torch.as_tensor(graph.edge_weight, dtype=torch.float32)
-        z = self.encoder(x).relu()
+        # Mask target-local observables before encoding so reconstruction cannot
+        # collapse into an identity copy of the target node.
+        context = x.clone()
+        context[:, 2:] = 0.
+        z = self.encoder(context).relu()
         for _ in range(self.message_steps):
             messages = z[source] * weight[:, None]
             aggregated = torch.zeros_like(z).index_add_(0, target, messages)
