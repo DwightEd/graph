@@ -1,0 +1,21 @@
+{
+  "base_commit": "915c0bdf681a0da7e16315a7b696abd5b26b5a58",
+  "published_method": "unlabeled entropy seeds and local endpoint reuse",
+  "inference_labels_used": false,
+  "natural_gpu_experiment_run": false,
+  "test_command": "python -m pytest tests/test_unsupervised_reuse.py tests/test_binding_projection.py tests/test_two_stage.py -q",
+  "tests_passed": 98,
+  "tests_skipped": 2,
+  "skip_reason": "transformers unavailable locally; two optional real HF tiny-Llama integrations skipped",
+  "new_unsupervised_tests_passed": 37,
+  "new_unsupervised_tests_skipped": 1,
+  "legacy_tests_passed": 61,
+  "legacy_tests_skipped": 1,
+  "additional_checks": [
+    "All published program blobs equal the locally tested UTF-8 bytes",
+    "Ambiguous transport entry refuses supervised training",
+    "Default and explicit unsupervised entry share the same no-label pipeline",
+    "Contraction leaves per-answer max risk equal to per-answer max seed"
+  ],
+  "note": "The original 35-pass test count in the method note refers to the earlier patch snapshot; two new regressions are included in this publication. Unit tests do not establish natural hallucination detection efficacy."
+}

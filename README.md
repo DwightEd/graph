@@ -1,58 +1,59 @@
-# Two-stage local-attention risk propagation
+# Unsupervised entropy seeds → local token reuse
 
-当前新增 S11：**熵入口 → 逐物理 head 的真实历史端点继承 → 条件延续读出**。
-它替代“附近曾经高熵”这个弱代理，真正检查后续读取了哪些历史位置。实现与测试已完成，**尚未运行新的自然RAGTruth评估**；不保证优于S10。
+默认 `main.py`：无标签参考熵 → 疑似入口 → 实际局部 attention 多跳复用。
+不训练入口/延续分类器，不加载 S10/S11 监督权重，不用正常样本标签校准。
+标签只在全部预测冻结之后用于评价。**尚无新自然 RAGTruth 检测成绩。**
 
-```bash
-python main.py transport --tasks QA --generator llama-2-7b-chat \
-  --features outputs/s11_local_attention_qa --output outputs/s11_two_stage_qa --resume
-python -m pytest tests/test_two_stage.py -q
-```
+## 一键运行
 
-[算法、诊断与完整命令](docs/S11_LOCAL_PROPAGATION.md)。现有五列缓存没有token端点，首次需每答补一次teacher-forced前向；之后CPU复用。支持 --tasks all / --generator all。分数含监督双阶段模型与单列的无标签排序对照；oracle真实起点诊断只在生产预测冻结后运行，不能作为检测成绩。
-
-旧 `main.py --features ... --annotations ... --output ...` 仍运行S10；默认入口未静默改变，历史输出不覆盖。S10与绑定投影代码继续保留。
-
----
-
-# Structural attention–entropy detector
-
-主线是 RAGTruth 自然回答上的因果结构特征组合：当前预测熵、margin、来源/远历史注意力、跨头分歧及最近8步的衰减熵记忆。分别检测错误 token 与标注错误 span 的起点。标签不用于构造特征或定位输入节点。
-
-[本轮结果](docs/S10_RESULTS_20260914.md)：150个来源留出测试，组合全token AUROC **0.7492**、**span 起点 0.7791**（不是每答第一次错误），优于本批熵/远历史位移单项；回答级误报仍高，尚非可靠报警器。
-
-当前实现及数据边界见 [方法说明](docs/STRUCTURAL_METHOD.md)。本轮实验使用989条QA原始回答的既有 Llama3.1 observer 测量，按来源划分训练/校准/官方测试。它是有监督轻量读出，不是原生成器机制证明，也没有外部LLM核验。
+在 graph 根目录及 research 环境：
 
 ```bash
-# 在 reanchor 中从已完成的真实内部测量缓存导出无标签特征
-bash ../reanchor/scripts/export_structural_features.sh full
-# 在 graph 中一次训练、冻结预测、评价
-bash scripts/run_structural_fusion.sh
-# 单元测试
-python -m pytest tests -q
+python -m pytest tests/test_unsupervised_reuse.py -q
+python main.py unsupervised \
+  --population ../reanchor/outputs/ragtruth_population_20260912 \
+  --output outputs/unsupervised_local_reuse_v1 \
+  --tasks all --generators llama-2-7b-chat \
+  --device cuda:0 --query-chunk 16 --window 16 --resume
 ```
 
-新输出目录必须不存在；已有结果不得覆盖。参数化入口：
+首轮每答一次 teacher-forced backbone 前向，按层分块重建 response-query attention，
+保留全部物理 layer/head 的局部端点。模型与数据路径从 population/settings.json 读取。
+之后复用逐样本 NPZ。完整上下文不裁剪；局部窗口仅限制被保存的历史边，不重归一化。
+这是 observer 回放与 attention 依赖代理，不是原生成器的 WV/WO 因果消息追踪。
 
-```bash
-python main.py --features /path/to/export --annotations /path/to/RAGTruth/response.jsonl --output /new/output
-```
+阶段：`--phase capture` 仅采集；`--phase score` 无标签评分；`--phase evaluate` 补评；
+默认 all。无监督允许最后用金标检验效果，不允许金标参与种子、传播、选头或阈值。
+旧 S11 的 `outputs/s11_local_attention_all` 与本版缓存结构不同，保留但不混用。
 
-S10 核心仍为 `structural_detector/features.py` 和 `structural_detector/experiment.py`。
-新增 `structural_detector/audit.py` 对冻结分数补评整答首错、每段起点和延续，不重新训练。
-原始测量及原生机制工具由 [reanchor](https://github.com/DwightEd/reanchor) 提供，不依赖本项目的旧实验代码。
+| 文件 | 用途 |
+|---|---|
+| reuse_detector/core.py | 无标签参考、种子、端点继承及同质量/距离对照 |
+| reuse_detector/capture.py | SDPA 正常前向 + 只读 Q/K/RoPE 重放及数值核验 |
+| reuse_detector/run.py | 全任务 roster、缓存续跑、混合校准来源异常预算、冻结 |
+| reuse_detector/evaluation.py | 首错、span 起点、延续、停止评价，完整来源固定权重 |
 
-## 绑定投影实验（未验证自然检测效果）
+[完整方法与边界](docs/UNSUPERVISED_LOCAL_REUSE.md)。评价重点比较 reuse 与 seed_only、
+single_hop、mass_matched_uniform、lag_group_permuted；特别看 continuation_vs_normal、
+strict_post_first 和错误结束后正常 token 的误报。高 attention 可能是纠正而非沿用，
+该方法不具备语义否定/绑定判定。高置信首错没有熵种子时也会漏检。
 
-[方法、审查和完整命令](docs/BINDING_PROJECTION_20260914.md)。
-`binding_detector/projection.py` 固定节点匹配分布，计算合法关系的联合概率质量和最小 KL 修正量。
-支持未知关系上下界、关系身份置换、缓存向量匹配及与 S10 同队列比较。
-**它需要额外的来源对应与关系数据包，不能由 S10 五列标量自动构造事实图。**
-未实现通用自然文本事实抽取器；数学 demo 不是 RAGTruth 检测成绩，不替代当前 S10。
+## 旧监督基线保留，但必须显式选择
 
-```bash
-python -m pytest tests/test_binding_projection.py -q
-python -m binding_detector.run --demo --output outputs/binding_projection_demo_v1
-```
+- `python main.py supervised-s11 ...`：入口+延续的监督读出，原参数不变。
+- `python main.py supervised-s10 ...` 或 `python -m structural_detector.experiment ...`：S10。
+- `python -m structural_detector.audit ...`：对已经冻结的 S10 分数补评，不重训。
 
-被替代的检测、外部核验、临时编排及对应测试已移除。完整旧代码保存在 `archive/pre-structural-20260914`（远端提交 `5186c4f`，原本地提交 `c3d2aad` 另有保留），[清理清单](docs/STRUCTURAL_REFACTOR_20260914.json)记录每条路径；历史 `outputs/`、`results/`、文档与执行快照保留。旧文档里的运行入口属于该归档版本。
+旧命令 `main.py transport ...` 会停止并说明它是监督 S11，避免继续误运行。
+[S10 结果](docs/S10_RESULTS_20260914.md) 的 .7492 是全错误、.7791 是**所有 span 起点**，
+不是每答第一次错误；这两项都不是新版无监督成绩。
+
+## 信息论相关的另一个原型
+
+`binding_detector/projection.py` 实现显式关系下的 `-log Q(合法绑定)`，需要可靠来源匹配
+和关系数据包；它不参与本默认流程，不能从五列统计中自动恢复事实图。
+当前默认流程使用熵和经验尾部，不估计真假两类密度、条件互信息或贝叶斯幻觉后验。
+率失真定理解释高置信碰撞的可能性，不为当前 attention 传播提供有效性保证。
+
+历史结果与归档均不删除。原 S11 说明见 docs/S11_LOCAL_PROPAGATION.md；
+其中旧 transport 命令需改成 supervised-s11 才会运行。
