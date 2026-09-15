@@ -84,11 +84,14 @@ def iter_channels(record, layers=None, heads=None):
                 first = (layer * n_heads + head) * count
                 ptr = pointer[first:first + count + 1]
                 begin, end = ptr[0], ptr[-1]
-                matrix = sparse.csr_matrix((values[begin:end], columns[begin:end], ptr - begin), shape=(count, tokens))
+                # Promote only this channel before construction; SciPy sparse rejects float16.
+                matrix = sparse.csr_matrix((values[begin:end], columns[begin:end], ptr - begin),
+                                           shape=(count, tokens), dtype=np.float64)
                 matrix = matrix + sparse.csr_matrix((diagonal[layer, head, p:],
-                                                    (np.arange(count), queries)), shape=(count, tokens))
+                                                    (np.arange(count), queries)),
+                                                   shape=(count, tokens), dtype=np.float64)
             else:
-                matrix = sparse.csr_matrix(attention[layer, head])
+                matrix = sparse.csr_matrix(attention[layer, head], dtype=np.float64)
             # Prompt queries are not modelled internally; the last prompt query
             # can still supply the first next-token prediction when it was saved.
             keep = np.asarray(queries) >= p - 1

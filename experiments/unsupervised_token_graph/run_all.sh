@@ -26,7 +26,8 @@ printf '\n[1/3] Run reanchor and NPZ interface tests\n'
 "$PY" -u -m pytest \
   tests/test_reanchor_information.py \
   tests/test_reanchor_pipeline.py \
-  tests/test_npz_inputs.py -q
+  tests/test_npz_inputs.py \
+  tests/test_attention_cache_dtypes.py -q
 
 run_split() {
   local split="$1" cache="$2" output="$3"
