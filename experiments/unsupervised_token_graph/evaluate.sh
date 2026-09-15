@@ -2,7 +2,8 @@
 # Evaluate saved scores only. Default: the test output from run_all.sh.
 # SPLIT=train selects train. --completed-only previews an interrupted run.
 # Preview reports use evaluation_partial.json; scoring/checkpoint files are unchanged.
-# ANNOTATIONS is optional when the saved population settings supply its path.
+# ANNOTATIONS overrides saved settings and automatic cache-ancestor discovery.
+# The evaluator finds an existing RAGTruth/response.jsonl without rescoring.
 
 set -euo pipefail
 

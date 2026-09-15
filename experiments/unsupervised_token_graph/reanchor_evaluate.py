@@ -173,11 +173,41 @@ def evaluate(prediction_dir, annotations_path, output=None, split="test", quanti
     return report
 
 
+def resolve_annotations(prediction_dir, explicit=None):
+    """Find the existing label file without rewriting saved scoring settings.
+
+    Explicit and saved paths take priority. Otherwise check the cache directory
+    and its ancestors (e.g. RAGTruth/attention/model/train -> RAGTruth).
+    This checks paths only; labels are still read after prediction_records().
+    """
+    settings = {}
+    if not explicit:
+        settings = json.loads((Path(prediction_dir) / "settings.json").read_text())
+    configured = explicit or settings.get("annotations")
+    if configured:
+        path = Path(configured).expanduser().resolve()
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"annotation file not found: {path}; set --annotations to the existing response.jsonl"
+            )
+        return str(path)
+
+    cache = settings.get("cache")
+    if cache:
+        cache = Path(cache).expanduser().resolve()
+        folder = cache.parent if cache.suffix == ".npz" else cache
+        for parent in (folder, *folder.parents):
+            path = parent / "response.jsonl"
+            if path.is_file():
+                return str(path)
+    return None
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--predictions", required=True)
-    parser.add_argument("--annotations", help="RAGTruth response.jsonl; defaults to saved population settings")
-    parser.add_argument("--if-available", action="store_true", help="skip only when no annotation path is configured")
+    parser.add_argument("--annotations", help="existing RAGTruth response.jsonl; otherwise use saved settings or cache ancestors")
+    parser.add_argument("--if-available", action="store_true", help="skip only when no annotation path is configured or found")
     parser.add_argument("--output", required=True)
     parser.add_argument("--completed-only", action="store_true",
                         help="preview finalized sample NPZs without requiring full-run completion; no rescoring")
@@ -185,14 +215,18 @@ def main(argv=None):
     parser.add_argument("--channel-quantile", type=float, default=.9)
     parser.add_argument("--bootstrap", type=int, default=200)
     args = parser.parse_args(argv)
-    if not args.annotations:
-        settings = json.loads((Path(args.predictions) / "settings.json").read_text())
-        args.annotations = settings.get("annotations")
+    try:
+        args.annotations = resolve_annotations(args.predictions, args.annotations)
+    except FileNotFoundError as error:
+        parser.error(str(error))
     if not args.annotations:
         if args.if_available:
-            print("Evaluation skipped: no ANNOTATIONS or population dataset path; graph results are saved.")
+            print("Evaluation skipped: no configured or nearby response.jsonl; graph results are saved.")
             return
-        parser.error("set --annotations, or use an existing population with settings.json during analysis")
+        parser.error("no response.jsonl found in saved settings or cache ancestors; "
+                     "set --annotations to the existing RAGTruth response.jsonl. "
+                     "Do not rerun analysis or change saved settings.")
+    print(f"Annotations: {args.annotations}", flush=True)
     result = evaluate(args.predictions, args.annotations, args.output, args.split, args.channel_quantile, args.bootstrap,
                       completed_only=args.completed_only)
     print(json.dumps({k: result[k] for k in ("evaluation_scope", "completed_samples_found", "evaluated_responses", "split")}))
