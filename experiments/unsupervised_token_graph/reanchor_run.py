@@ -1,4 +1,4 @@
-"""Stream frozen, label-free per-head source-flow measurements from NPZ caches."""
+"""Stream source-flow measurements directly from existing attention NPZs."""
 
 import argparse
 from dataclasses import asdict
@@ -8,28 +8,14 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
+from .cache_index import CacheIndex, file_stamp
 from .channels import iter_channels
-from .data import CacheDataset
+from .data import CacheDataset, ResponseCache
 from .information import SourceFlow, future_influence
 from .reanchor import ReanchorAnalyzer
 
 
 VERSION = "source-carrier-information-v1"
-
-
-def read_metadata(path):
-    if path is None:
-        return {}
-    result = {}
-    fields = ("id", "source_id", "response_sha256", "offsets", "split", "official_split", "task", "generator")
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            row = json.loads(line)
-            key = str(row.get("cache", row.get("trace", "")))
-            if not key or key in result:
-                raise ValueError("metadata needs unique relative cache/trace paths")
-            result[key] = {k: row[k] for k in fields if k in row}
-    return result
 
 
 def analyze_record(record, analyzer=None, root_bins=None, layers=None, heads=None,
@@ -63,62 +49,58 @@ def analyze_record(record, analyzer=None, root_bins=None, layers=None, heads=Non
 
 def run(cache_root, output, metadata=None, window=10, event_quantile=.9, cooldown=2,
         min_history=8, root_bins=None, layers=None, heads=None, pattern="*.npz", controls=True,
-        offline_influence=False, horizon_low=10, horizon_high=100, resume=False):
+        offline_influence=False, horizon_low=10, horizon_high=100, resume=False,
+        population=None, index=None):
     dataset, output = CacheDataset(cache_root, pattern), Path(output)
     if not len(dataset):
         raise FileNotFoundError("no attention NPZ files matched the cache pattern")
-    meta = read_metadata(metadata)
-    config = dict(version=VERSION, cache=str(dataset.root.resolve()), pattern=pattern,
+    if sum(x is not None for x in (population, index, metadata)) > 1:
+        raise ValueError("choose one existing population/index; --metadata is only a legacy alias")
+    identities = CacheIndex(dataset.root, population or index or metadata)
+    dataset.cache = ResponseCache(index=identities)
+    config = dict(version=VERSION, input_schema="existing-npz-index-v2",
+                  cache=str(Path(cache_root).resolve()), pattern=pattern,
                   window=window, event_quantile=event_quantile, cooldown=cooldown,
                   min_history=min_history, root_bins=root_bins, layers=layers, heads=heads,
                   controls=controls, offline_influence=offline_influence,
                   horizon_low=horizon_low, horizon_high=horizon_high,
-                  metadata=meta, labels_read=False)
+                  index_files=identities.inputs, annotations=identities.annotations, labels_read=False)
     settings = output / "settings.json"
     if output.exists():
         if not resume or not settings.exists() or json.loads(settings.read_text()) != config:
-            raise ValueError("use a new output, or --resume with identical method and metadata")
+            raise ValueError("use a new output, or --resume with identical method and input index")
     else:
         output.mkdir(parents=True)
         settings.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
     (output / "complete.json").unlink(missing_ok=True)
     analyzer = ReanchorAnalyzer(window, event_quantile, cooldown, min_history)
     rows = []
-    basenames = [p.name for p in dataset.files]
     for path in tqdm(dataset.files, desc="reanchor/source-flow", unit="sample"):
         relative = path.relative_to(dataset.root)
-        identity = meta.get(relative.as_posix(), {})
-        if not identity and relative.name in meta:
-            if basenames.count(relative.name) > 1:
-                raise ValueError("ambiguous metadata basename; specify the relative cache path")
-            identity = meta[relative.name]
         destination = output / "samples" / relative
-        stamp = [path.stat().st_size, path.stat().st_mtime_ns]
+        stamp = file_stamp(path)[1:]
         if destination.exists() and resume:
             with np.load(destination, allow_pickle=False) as saved:
                 if saved["cache_stamp"].tolist() != stamp:
                     raise ValueError("cache changed since scoring: " + str(relative))
                 row = json.loads(str(saved["record_json"]))
+            if any(file_stamp(item[0]) != item for item in row.get("identity_files", [])):
+                raise ValueError("identity NPZ changed since scoring: " + str(relative))
         else:
             record = dataset.cache.load(path)
             arrays = analyze_record(record, analyzer, root_bins, layers, heads, controls,
                                     offline_influence, horizon_low, horizon_high)
-            cache_meta = record.metadata or {}
-            def scalar(name, fallback=""):
-                value = cache_meta.get(name, fallback)
-                return value.item() if isinstance(value, np.ndarray) and value.ndim == 0 else value
+            identity = record.metadata or {}
             row = dict(cache=relative.as_posix(), file=(Path("samples") / relative).as_posix(),
-                       id=str(identity.get("id", scalar("sample_id", record.response_id))),
-                       source_id=str(identity.get("source_id", record.source_id)),
-                       split=str(identity.get("official_split", identity.get("split", scalar("official_split", scalar("dataset_split"))))),
-                       task=str(identity.get("task", scalar("task"))),
-                       generator=str(identity.get("generator", scalar("generator"))),
-                       response_sha256=str(identity.get("response_sha256", scalar("response_sha256"))),
+                       id=record.response_id, source_id=record.source_id,
+                       split=identity.get("split", ""), task=identity.get("task", ""),
+                       generator=identity.get("generator", ""),
+                       response_sha256=identity.get("response_sha256", ""),
+                       identity_files=identity.get("identity_files", []),
                        queries=len(arrays["query_positions"]), channels=len(arrays["layer_ids"]),
                        events=int(arrays["event"].sum()))
-            offsets = identity.get("offsets", record.offsets)
-            if offsets is not None:
-                arrays["offsets"] = np.asarray(offsets, dtype=np.int64)
+            if record.offsets is not None:
+                arrays["offsets"] = record.offsets
             if record.token_ids is not None:
                 arrays["token_ids"] = record.token_ids
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -139,9 +121,11 @@ def run(cache_root, output, metadata=None, window=10, event_quantile=.9, cooldow
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cache", required=True)
+    parser.add_argument("--cache", required=True, help="existing attention NPZ file or directory")
     parser.add_argument("--output", required=True)
-    parser.add_argument("--metadata", help="label-free JSONL: cache/trace, id, source_id, split, response_sha256, offsets")
+    parser.add_argument("--population", help="existing population directory with inputs.jsonl/settings.json")
+    parser.add_argument("--index", help="existing inputs.jsonl, records.jsonl, or records.json; auto-detected beside caches")
+    parser.add_argument("--metadata", help="legacy alias for an existing index; no new metadata file is needed")
     parser.add_argument("--pattern", default="*.npz", help="use **/*.npz for nested task/split directories")
     parser.add_argument("--window", type=int, default=10)
     parser.add_argument("--event-quantile", type=float, default=.9)

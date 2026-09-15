@@ -71,10 +71,15 @@ def iter_channels(record, layers=None, heads=None):
             queries = np.arange(tokens)
         else:
             queries = p - 1 + np.arange(count)
-    layer_ids = range(n_layers) if layers is None else layers
-    head_ids = range(n_heads) if heads is None else heads
-    for layer in layer_ids:
-        for head in head_ids:
+    identity = record.metadata or {}
+    layer_ids = [identity["layer"]] if n_layers == 1 and "layer" in identity else list(range(n_layers))
+    head_ids = [identity["head"]] if n_heads == 1 and "head" in identity else list(range(n_heads))
+    for layer, physical_layer in enumerate(layer_ids):
+        if layers is not None and physical_layer not in layers:
+            continue
+        for head, physical_head in enumerate(head_ids):
+            if heads is not None and physical_head not in heads:
+                continue
             if record.sparse is not None:
                 first = (layer * n_heads + head) * count
                 ptr = pointer[first:first + count + 1]
@@ -87,4 +92,4 @@ def iter_channels(record, layers=None, heads=None):
             # Prompt queries are not modelled internally; the last prompt query
             # can still supply the first next-token prediction when it was saved.
             keep = np.asarray(queries) >= p - 1
-            yield _channel(layer, head, np.asarray(queries)[keep], matrix[keep], p)
+            yield _channel(physical_layer, physical_head, np.asarray(queries)[keep], matrix[keep], p)
