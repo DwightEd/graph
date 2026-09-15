@@ -142,6 +142,9 @@ def main(argv=None):
     parser.add_argument("--annotations", help="RAGTruth response.jsonl; defaults to saved population settings")
     parser.add_argument("--if-available", action="store_true", help="skip only when no annotation path is configured")
     parser.add_argument("--output", required=True)
+    parser.add_argument("--split", default="test")
+    parser.add_argument("--channel-quantile", type=float, default=.9)
+    parser.add_argument("--bootstrap", type=int, default=200)
     args = parser.parse_args(argv)
     if not args.annotations:
         settings = json.loads((Path(args.predictions) / "settings.json").read_text())

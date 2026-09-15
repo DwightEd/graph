@@ -5,23 +5,60 @@ autoencoder is an explicit baseline. The method is described in `PLAN.md`;
 this input adapter does not change its information or reanchor equations.
 No new RAGTruth detection result is claimed.
 
-## Run directly on existing NPZ files
+## Run train and test with the saved server paths
 
 From the repository root, with the research environment active:
 
 ```bash
-CACHE=/path/to/canonical_attention \
+bash experiments/unsupervised_token_graph/run_all.sh
+```
+
+No CACHE or POPULATION assignment is needed for the default server layout.
+The script runs tests once, then processes these two existing directories in order:
+
+```text
+train: /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/attention/llama31_8b/train
+test:  /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/attention/llama31_8b/test
+```
+
+`PATTERN='**/*.npz'` searches recursively, including an `attention/` child if present.
+Each split has its own output and is evaluated with the matching split selection:
+
+```text
+outputs/source_carrier_information_npz_v2/train/
+outputs/source_carrier_information_npz_v2/test/
+```
+
+The train report is a train-set diagnostic, not an official test result. Split
+identity still comes from the NPZ/index and is checked against annotations;
+the shell script does not relabel records based on their directory.
+No annotation path means an explicit evaluation skip, not a successful benchmark.
+Existing unsuffixed v1/v2 outputs are not overwritten or moved. Resuming requires
+identical cache paths and settings; the new split folders start separate runs.
+
+To run only one directory:
+
+```bash
+SPLIT=test bash experiments/unsupervised_token_graph/run_all.sh
+SPLIT=train bash experiments/unsupervised_token_graph/run_all.sh
+```
+
+`ATTENTION_ROOT`, `TRAIN_CACHE` and `TEST_CACHE` can override the server defaults.
+`OUTPUT` is the base output directory in this two-split mode. Extra analysis
+arguments, for example `--layers 10 11 --heads 3 7`, are forwarded to each run.
+If CACHE was exported in the terminal earlier, use `unset CACHE` to restore the
+default two-directory mode.
+
+An explicit `CACHE` keeps the previous single-cache interface (directory or NPZ):
+
+```bash
+CACHE=/path/to/canonical_attention SPLIT=test OUTPUT=outputs/custom_graph \
   bash experiments/unsupervised_token_graph/run_all.sh
 ```
 
-The foreground script runs tests, analyzes all matching NPZ files and then
-attempts evaluation. No annotation path means an explicit evaluation skip,
-not a successful benchmark. The default output is
-`outputs/source_carrier_information_npz_v2`. Existing v1 outputs are untouched;
-use this new directory because the input-identity contract has changed.
-
-`CACHE` may also be a single NPZ. `PATTERN='**/*.npz'` is the recursive default.
-Select an attention directory, not a mixture of scores and feature archives.
+In single-cache mode OUTPUT is the exact result directory, with no split suffix;
+set SPLIT to the split being evaluated (default test). Select attention files,
+not a mixture of scores and feature archives. All runs stay in the foreground.
 No LLM inference, GNN training, dense [L,H,N,N] expansion or new data export is
 required. Unchanged samples can be resumed with identical input settings.
 
@@ -40,11 +77,12 @@ required. Unchanged samples can be resumed with identical input settings.
    be read from its existing `<id>.npz` companion (reuse/structural layout).
    The companion is read for identity only, never as full attention.
 
-For example, reuse the population already used by `reuse_detector`:
+Only when an existing index is elsewhere, point POPULATION to its actual directory.
+No default population path is assumed:
 
 ```bash
 CACHE=/path/to/canonical_attention \
-POPULATION=../reanchor/outputs/ragtruth_population_20260912 \
+POPULATION=/path/to/existing_population \
   bash experiments/unsupervised_token_graph/run_all.sh
 ```
 
@@ -91,10 +129,14 @@ This assumes identity and offsets are already in NPZs or auto-detected records.
 For evaluation only:
 
 ```bash
-OUTPUT=outputs/source_carrier_information_npz_v2 \
-  bash experiments/unsupervised_token_graph/evaluate.sh
+# Default: outputs/source_carrier_information_npz_v2/test
+bash experiments/unsupervised_token_graph/evaluate.sh
+
+# Train diagnostic: outputs/source_carrier_information_npz_v2/train
+SPLIT=train bash experiments/unsupervised_token_graph/evaluate.sh
 ```
 
+An explicit `OUTPUT` selects any other saved result folder without adding a suffix.
 Set `ANNOTATIONS` here as well if it was not resolved from population settings.
 Evaluation reads labels only after scoring and checks answer/source/split identity.
 It reports seven token scopes, coverage, pooled/source-weighted AUROC/AP and
