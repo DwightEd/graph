@@ -23,15 +23,47 @@ def aggregate_channels(values, quantile=.9):
     return result, count
 
 
-def evaluate(prediction_dir, annotations_path, output=None, split="test", quantile=.9, bootstrap=200):
+def prediction_records(root, completed_only=False):
+    """Snapshot finalized sample files before reading labels; never mark a run complete."""
+    root = Path(root)
+    if not completed_only:
+        if not (root / "complete.json").is_file() or not (root / "summary.json").is_file():
+            raise ValueError("run is incomplete; use --completed-only for a saved-sample preview")
+        complete = json.loads((root / "complete.json").read_text())
+        summary = json.loads((root / "summary.json").read_text())
+        if not complete["complete"] or summary["labels_read"] or complete["responses"] != len(summary["responses"]):
+            raise ValueError("complete label-free predictions are required before evaluation")
+        return summary
+
+    settings = json.loads((root / "settings.json").read_text())
+    if settings.get("labels_read") is not False:
+        raise ValueError("saved label-free settings are required for a completed-sample preview")
+    # The runner publishes a sample by renaming .partial to .npz after all heads finish.
+    # Freeze this file list now; later samples belong to the next preview.
+    files = sorted((root / "samples").rglob("*.npz"))
+    if not files:
+        raise ValueError("no completed sample NPZs found; unfinished .partial files cannot be evaluated")
+    records = []
+    for path in files:
+        with np.load(path, allow_pickle=False) as saved:
+            record = json.loads(str(saved["record_json"]))
+        if record["file"] != path.relative_to(root).as_posix():
+            raise ValueError("saved sample path and record disagree: " + str(path))
+        records.append(record)
+    return dict(version=settings["version"], responses=records, labels_read=False)
+
+
+def evaluate(prediction_dir, annotations_path, output=None, split="test", quantile=.9, bootstrap=200,
+             completed_only=False):
     root = Path(prediction_dir)
-    complete = json.loads((root / "complete.json").read_text())
-    summary = json.loads((root / "summary.json").read_text())
-    if not complete["complete"] or summary["labels_read"] or complete["responses"] != len(summary["responses"]):
-        raise ValueError("complete label-free predictions are required before evaluation")
+    if completed_only and output is not None and Path(output).resolve() == (root / "evaluation.json").resolve():
+        raise ValueError("use evaluation_partial.json for a preview; do not overwrite the full evaluation")
+    summary = prediction_records(root, completed_only)
     records = [r for r in summary["responses"] if r["split"] == split]
     if not records:
-        raise ValueError("no identity-bound records in requested split; use native NPZ identities or the existing population/records index")
+        available = sorted({r.get("split", "") or "<missing>" for r in summary["responses"]})
+        raise ValueError(f"no identity-bound records for split={split}; saved splits={available}. "
+                         "Use the split already saved in NPZ identities, not an inferred directory label.")
     ids = [r["id"] for r in records]
     if len(ids) != len(set(ids)):
         raise ValueError("evaluation needs unique response IDs")
@@ -82,6 +114,11 @@ def evaluate(prediction_dir, annotations_path, output=None, split="test", quanti
         groups.setdefault(record["task"] + "|" + record["generator"], []).append(block)
     report = dict(version=summary["version"], alignment="predict_next: score(q) -> token(q+1)",
                   split=split, channel_quantile=quantile, groups={},
+                  evaluation_scope="completed_samples_preview" if completed_only else "full_run",
+                  completed_samples_found=len(summary["responses"]), evaluated_responses=len(records),
+                  evaluated_records=[{k: r[k] for k in ("id", "source_id", "split", "file")} for r in records],
+                  selection_warning=("completed samples are an execution-order subset, not a random population sample; "
+                                     "do not use this preview as the full benchmark or tune on test labels") if completed_only else None,
                   interpretation="fixed high-score hypotheses, not truth probabilities; mismatch has conditional coverage")
     for group, selected in groups.items():
         counts = {}
@@ -142,6 +179,8 @@ def main(argv=None):
     parser.add_argument("--annotations", help="RAGTruth response.jsonl; defaults to saved population settings")
     parser.add_argument("--if-available", action="store_true", help="skip only when no annotation path is configured")
     parser.add_argument("--output", required=True)
+    parser.add_argument("--completed-only", action="store_true",
+                        help="preview finalized sample NPZs without requiring full-run completion; no rescoring")
     parser.add_argument("--split", default="test")
     parser.add_argument("--channel-quantile", type=float, default=.9)
     parser.add_argument("--bootstrap", type=int, default=200)
@@ -154,10 +193,13 @@ def main(argv=None):
             print("Evaluation skipped: no ANNOTATIONS or population dataset path; graph results are saved.")
             return
         parser.error("set --annotations, or use an existing population with settings.json during analysis")
-    result = evaluate(args.predictions, args.annotations, args.output, args.split, args.channel_quantile, args.bootstrap)
+    result = evaluate(args.predictions, args.annotations, args.output, args.split, args.channel_quantile, args.bootstrap,
+                      completed_only=args.completed_only)
+    print(json.dumps({k: result[k] for k in ("evaluation_scope", "completed_samples_found", "evaluated_responses", "split")}))
     for group, values in result["groups"].items():
         for name, metric in values["views"]["all_error"].items():
-            print(json.dumps(dict(group=group, score=name, coverage=metric["coverage"], **metric["pooled"])))
+            print(json.dumps(dict(group=group, score=name, tokens=metric["evaluated_tokens"],
+                                  positives=metric["evaluated_positives"], coverage=metric["coverage"], **metric["pooled"])))
 
 
 if __name__ == "__main__":
