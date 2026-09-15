@@ -68,7 +68,7 @@ def legacy_run(tmp_path, partition='train', with_alignment=True):
                          labels=[dict(start=1, end=2)] if rid == '100' else []))
     annotations = dataset / 'response.jsonl'
     annotations.write_text('\n'.join(map(json.dumps, gold)))
-    (dataset / 'source_info.json').write_text(json.dumps([dict(id='s100', task_type='QA'), dict(id='s101', task_type='Summary')]))
+    (dataset / 'source_info.json').write_text(json.dumps([dict(source_id='s100', task_type='QA'), dict(source_id='s101', task_type='Summary')]))
     return root, annotations, cache
 
 
@@ -201,15 +201,30 @@ def test_partial_and_full_same_cohort_have_same_metrics(tmp_path):
     assert partial['groups'] == full['groups']
 
 
-@pytest.mark.parametrize('form', ['list', 'map', 'jsonl', 'single'])
+@pytest.mark.parametrize('form', ['list', 'map', 'jsonl', 'single', 'jsonl_in_json'])
 def test_existing_source_info_layouts(tmp_path, form):
-    rows = [dict(id='s1', task_type='Data2txt')]
+    rows = [dict(source_id='s1', task_type='Data2txt', source_info={'value': 1}),
+            dict(source_id='s2', task_type='QA', source_info={'passages': 'evidence'})]
     path = tmp_path / ('source_info.jsonl' if form == 'jsonl' else 'source_info.json')
-    value = rows if form == 'list' else ({'s1': {'task_type': 'Data2txt'}} if form == 'map' else rows[0])
-    path.write_text(json.dumps(value))
+    if form in ('jsonl', 'jsonl_in_json'):
+        text = '\n'.join(map(json.dumps, rows)) + '\n'
+    else:
+        value = rows if form == 'list' else ({r['source_id']: r for r in rows} if form == 'map' else rows[0])
+        text = json.dumps(value)
+    path.write_text(text, encoding='utf-8')
     sources, used = read_sources(tmp_path / 'response.jsonl')
-    assert sources['s1']['task_type'] == 'Data2txt'
+    expected = rows[:1] if form == 'single' else rows
+    assert sources == {r['source_id']: r for r in expected}
     assert used == str(path)
+
+
+def test_source_info_joins_on_source_id_not_response_id(tmp_path):
+    # Source records may contain an unrelated id; the join is always source_id.
+    row = dict(id='not_the_source_key', source_id=123, task_type='QA')
+    path = tmp_path / 'source_info.json'
+    path.write_text(json.dumps([row]), encoding='utf-8')
+    sources, _ = read_sources(tmp_path / 'response.jsonl')
+    assert sources == {'123': row}
 
 
 def test_offsets_handle_unicode_and_known_eos():
