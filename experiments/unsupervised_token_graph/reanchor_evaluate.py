@@ -1,13 +1,13 @@
 """Evaluate frozen reanchor scores against RAGTruth token annotations."""
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
 import numpy as np
 
 from .evaluate import Ranking, label_views, scoped_metrics
+from .evaluation_data import EvaluationBinding, prepare_record, read_sources
 
 
 SCORES = ("source_mismatch_bits", "permuted_source_mismatch_bits", "event_strength", "prompt_deficit")
@@ -54,17 +54,19 @@ def prediction_records(root, completed_only=False):
 
 
 def evaluate(prediction_dir, annotations_path, output=None, split="test", quantile=.9, bootstrap=200,
-             completed_only=False):
+             completed_only=False, tokenizer=None, source_info=None):
     root = Path(prediction_dir)
     if completed_only and output is not None and Path(output).resolve() == (root / "evaluation.json").resolve():
         raise ValueError("use evaluation_partial.json for a preview; do not overwrite the full evaluation")
     summary = prediction_records(root, completed_only)
-    records = [r for r in summary["responses"] if r["split"] == split]
-    if not records:
-        available = sorted({r.get("split", "") or "<missing>" for r in summary["responses"]})
-        raise ValueError(f"no identity-bound records for split={split}; saved splits={available}. "
-                         "Use the split already saved in NPZ identities, not an inferred directory label.")
-    ids = [r["id"] for r in records]
+    settings_path = root / "settings.json"
+    settings = json.loads(settings_path.read_text()) if settings_path.is_file() else {}
+    prepared = [(r, prepare_record(settings, r)) for r in summary["responses"]]
+    selected = [(saved, r) for saved, r in prepared if not r["split"] or r["split"] == split]
+    if not selected:
+        available = sorted({r.get("split", "") or "<missing>" for _, r in prepared})
+        raise ValueError(f"no identity-bound records for split={split}; saved splits={available}")
+    ids = [r["id"] for _, r in selected]
     if len(ids) != len(set(ids)):
         raise ValueError("evaluation needs unique response IDs")
     gold = {}
@@ -72,21 +74,26 @@ def evaluate(prediction_dir, annotations_path, output=None, split="test", quanti
         for line in stream:
             row = json.loads(line)
             if str(row["id"]) in ids:
+                if str(row["id"]) in gold:
+                    raise ValueError("duplicate response ID in annotations: " + str(row["id"]))
                 gold[str(row["id"])] = row
+    missing = set(ids) - gold.keys()
+    if missing:
+        raise ValueError("saved IDs not found in response.jsonl: " + ", ".join(sorted(missing)[:10]))
+    sources, source_info_path = read_sources(annotations_path, source_info)
+    binding = EvaluationBinding(settings, tokenizer)
     blocks = []
-    for record in records:
+    for saved_record, record in selected:
         annotation = gold[record["id"]]
-        digest = hashlib.sha256(annotation["response"].encode()).hexdigest()
-        if (not record["response_sha256"] or digest != record["response_sha256"]
-                or str(annotation["source_id"]) != record["source_id"] or annotation["split"] != record["split"]):
-            raise ValueError("response/source/split identity mismatch: " + record["id"])
+        if not record["split"] and annotation["split"] != split:
+            continue
         with np.load(root / record["file"], allow_pickle=False) as arrays:
-            if json.loads(str(arrays["record_json"])) != record or "offsets" not in arrays:
-                raise ValueError("saved identity and response offsets are required: " + record["id"])
-            offsets = arrays["offsets"]
+            if json.loads(str(arrays["record_json"])) != saved_record:
+                raise ValueError("saved identity and result record disagree: " + record["id"])
+            record, offsets = binding.bind(record, annotation, arrays, sources)
             if str(arrays["cache_format"]) == "canonical_csr" and len(offsets) + int(arrays["prompt_length"]) != int(arrays["total_tokens"]):
                 raise ValueError("canonical token count and response offsets disagree")
-            if (offsets.ndim != 2 or offsets.shape[1] != 2 or np.any(offsets < 0)
+            if (offsets.ndim != 2 or offsets.shape[1] != 2 or not np.issubdtype(offsets.dtype, np.integer) or np.any(offsets < 0)
                     or np.any(offsets[:, 1] < offsets[:, 0]) or np.any(offsets[:, 1] > len(annotation["response"]))):
                 raise ValueError("invalid response-relative token offsets")
             positions = arrays["prediction_positions"] - int(arrays["prompt_length"])
@@ -108,12 +115,17 @@ def evaluate(prediction_dir, annotations_path, output=None, split="test", quanti
                 channels[name][positions[usable]] = support[usable]
             blocks.append(dict(record=record, views=label_views(offsets, annotation["labels"]),
                                scores=scores, channels=channels, tokens=len(offsets)))
+    if not blocks:
+        raise ValueError("no records belong to the requested official split: " + split)
+    records = [b["record"] for b in blocks]
     groups = {"ALL": blocks}
     for block in blocks:
         record = block["record"]
         groups.setdefault(record["task"] + "|" + record["generator"], []).append(block)
     report = dict(version=summary["version"], alignment="predict_next: score(q) -> token(q+1)",
                   split=split, channel_quantile=quantile, groups={},
+                  input_cache=settings.get("cache"), annotations=str(annotations_path), source_info=source_info_path,
+                  identity_binding=[{k: r[k] for k in ("id", "split_origin", "alignment_origin", "verified_tokenizer") if k in r} for r in records],
                   evaluation_scope="completed_samples_preview" if completed_only else "full_run",
                   completed_samples_found=len(summary["responses"]), evaluated_responses=len(records),
                   evaluated_records=[{k: r[k] for k in ("id", "source_id", "split", "file")} for r in records],
@@ -212,6 +224,8 @@ def main(argv=None):
     parser.add_argument("--completed-only", action="store_true",
                         help="preview finalized sample NPZs without requiring full-run completion; no rescoring")
     parser.add_argument("--split", default="test")
+    parser.add_argument("--tokenizer", help="original local observer tokenizer; only needed to verify/recover missing identity or offsets")
+    parser.add_argument("--source-info", help="existing source_info.json/jsonl; auto-detected beside response.jsonl")
     parser.add_argument("--channel-quantile", type=float, default=.9)
     parser.add_argument("--bootstrap", type=int, default=200)
     args = parser.parse_args(argv)
@@ -228,8 +242,8 @@ def main(argv=None):
                      "Do not rerun analysis or change saved settings.")
     print(f"Annotations: {args.annotations}", flush=True)
     result = evaluate(args.predictions, args.annotations, args.output, args.split, args.channel_quantile, args.bootstrap,
-                      completed_only=args.completed_only)
-    print(json.dumps({k: result[k] for k in ("evaluation_scope", "completed_samples_found", "evaluated_responses", "split")}))
+                      completed_only=args.completed_only, tokenizer=args.tokenizer, source_info=args.source_info)
+    print(json.dumps({k: result[k] for k in ("evaluation_scope", "completed_samples_found", "evaluated_responses", "split", "input_cache")}))
     for group, values in result["groups"].items():
         for name, metric in values["views"]["all_error"].items():
             print(json.dumps(dict(group=group, score=name, tokens=metric["evaluated_tokens"],

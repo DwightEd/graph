@@ -3,7 +3,8 @@
 # SPLIT=train selects train. --completed-only previews an interrupted run.
 # Preview reports use evaluation_partial.json; scoring/checkpoint files are unchanged.
 # Default labels: the confirmed RAGTruth/dataset/response.jsonl on this server.
-# Override ANNOTATIONS for another dataset; source_info.json is not used here.
+# Missing splits are checked against input cache folders and official annotations.
+# TOKENIZER is optional: verify missing offsets with the original local tokenizer.
 
 set -euo pipefail
 
@@ -14,6 +15,8 @@ PY="${PY:-python}"
 SPLIT="${SPLIT:-test}"
 OUTPUT="${OUTPUT:-outputs/source_carrier_information_npz_v2/$SPLIT}"
 ANNOTATIONS="${ANNOTATIONS:-/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/response.jsonl}"
+TOKENIZER="${TOKENIZER:-}"
+SOURCE_INFO="${SOURCE_INFO:-}"
 COMPLETED_ONLY="${COMPLETED_ONLY:-0}"
 for arg in "$@"; do
   if [[ "$arg" == "--completed-only" ]]; then COMPLETED_ONLY=1; fi
@@ -26,5 +29,7 @@ args=(--predictions "$OUTPUT" --output "$report"
       --channel-quantile "${CHANNEL_QUANTILE:-0.9}")
 if [[ "$COMPLETED_ONLY" == 1 ]]; then args+=(--completed-only); fi
 if [[ -n "$ANNOTATIONS" ]]; then args+=(--annotations "$ANNOTATIONS"); fi
+if [[ -n "$TOKENIZER" ]]; then args+=(--tokenizer "$TOKENIZER"); fi
+if [[ -n "$SOURCE_INFO" ]]; then args+=(--source-info "$SOURCE_INFO"); fi
 
 "$PY" -u -m experiments.unsupervised_token_graph.run evaluate "${args[@]}" "$@"
