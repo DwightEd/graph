@@ -17,7 +17,7 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 PY="${PY:-python}"
-CACHE="${CACHE:?Set CACHE to the existing canonical attention NPZ directory}"
+CACHE="${CACHE:-/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/attention/llama31_8b/train/attention}"
 OUTPUT="${OUTPUT:-outputs/source_carrier_information_v1}"
 PATTERN="${PATTERN:-**/*.npz}"
 METADATA="${METADATA:-}"
