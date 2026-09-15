@@ -42,7 +42,7 @@ def prepare_record(settings, saved):
 
 
 def read_sources(annotations_path, explicit=None):
-    """Read the existing source_info list, ID map, or official JSONL file."""
+    """Index source_info by source_id, as in the existing RAGTruth reader."""
     parent = Path(annotations_path).parent
     path = Path(explicit) if explicit else next((p for p in (parent / "source_info.json", parent / "source_info.jsonl") if p.is_file()), None)
     if path is None:
@@ -53,8 +53,8 @@ def read_sources(annotations_path, explicit=None):
     except json.JSONDecodeError:
         rows = [json.loads(line) for line in text.splitlines() if line.strip()]
     if isinstance(rows, dict):
-        rows = [rows] if "id" in rows else [dict(value, id=key) for key, value in rows.items()]
-    return {str(row["id"]): row for row in rows}, str(path)
+        rows = [rows] if "source_id" in rows else [dict(value, source_id=key) for key, value in rows.items()]
+    return {str(row["source_id"]): row for row in rows}, str(path)
 
 
 def resolve_tokenizer(settings, record, explicit=None):
