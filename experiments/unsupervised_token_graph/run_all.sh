@@ -3,6 +3,7 @@
 # Defaults are the existing llama31_8b cache directories on the shared server.
 # SPLIT=train or SPLIT=test selects one; explicit CACHE retains single-cache mode.
 # NPZ identities and nearby indexes are reused. POPULATION/INDEX remain optional.
+# Labels are passed only to evaluation; source_info.json is not a labels file.
 # Relative paths are resolved from the repository root.
 
 set -euo pipefail
@@ -20,14 +21,15 @@ PATTERN="${PATTERN:-**/*.npz}"
 POPULATION="${POPULATION:-}"
 INDEX="${INDEX:-}"
 METADATA="${METADATA:-}"  # Backward compatibility only.
-ANNOTATIONS="${ANNOTATIONS:-}"
+ANNOTATIONS="${ANNOTATIONS:-/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/response.jsonl}"
 
 printf '\n[1/3] Run reanchor and NPZ interface tests\n'
 "$PY" -u -m pytest \
   tests/test_reanchor_information.py \
   tests/test_reanchor_pipeline.py \
   tests/test_npz_inputs.py \
-  tests/test_attention_cache_dtypes.py -q
+  tests/test_attention_cache_dtypes.py \
+  tests/test_dataset_script_paths.py -q
 
 run_split() {
   local split="$1" cache="$2" output="$3"

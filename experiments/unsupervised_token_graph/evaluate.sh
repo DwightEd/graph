@@ -2,8 +2,8 @@
 # Evaluate saved scores only. Default: the test output from run_all.sh.
 # SPLIT=train selects train. --completed-only previews an interrupted run.
 # Preview reports use evaluation_partial.json; scoring/checkpoint files are unchanged.
-# ANNOTATIONS overrides saved settings and automatic cache-ancestor discovery.
-# The evaluator finds an existing RAGTruth/response.jsonl without rescoring.
+# Default labels: the confirmed RAGTruth/dataset/response.jsonl on this server.
+# Override ANNOTATIONS for another dataset; source_info.json is not used here.
 
 set -euo pipefail
 
@@ -13,7 +13,7 @@ cd "$ROOT"
 PY="${PY:-python}"
 SPLIT="${SPLIT:-test}"
 OUTPUT="${OUTPUT:-outputs/source_carrier_information_npz_v2/$SPLIT}"
-ANNOTATIONS="${ANNOTATIONS:-}"
+ANNOTATIONS="${ANNOTATIONS:-/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/response.jsonl}"
 COMPLETED_ONLY="${COMPLETED_ONLY:-0}"
 for arg in "$@"; do
   if [[ "$arg" == "--completed-only" ]]; then COMPLETED_ONLY=1; fi
