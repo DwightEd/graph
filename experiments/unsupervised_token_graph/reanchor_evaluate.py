@@ -31,7 +31,7 @@ def evaluate(prediction_dir, annotations_path, output=None, split="test", quanti
         raise ValueError("complete label-free predictions are required before evaluation")
     records = [r for r in summary["responses"] if r["split"] == split]
     if not records:
-        raise ValueError("no identity-bound records in requested split; provide a label-free cache metadata sidecar")
+        raise ValueError("no identity-bound records in requested split; use native NPZ identities or the existing population/records index")
     ids = [r["id"] for r in records]
     if len(ids) != len(set(ids)):
         raise ValueError("evaluation needs unique response IDs")
@@ -139,12 +139,21 @@ def evaluate(prediction_dir, annotations_path, output=None, split="test", quanti
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--predictions", required=True)
-    parser.add_argument("--annotations", required=True)
+    parser.add_argument("--annotations", help="RAGTruth response.jsonl; defaults to saved population settings")
+    parser.add_argument("--if-available", action="store_true", help="skip only when no annotation path is configured")
     parser.add_argument("--output", required=True)
     parser.add_argument("--split", default="test")
     parser.add_argument("--channel-quantile", type=float, default=.9)
     parser.add_argument("--bootstrap", type=int, default=200)
     args = parser.parse_args(argv)
+    if not args.annotations:
+        settings = json.loads((Path(args.predictions) / "settings.json").read_text())
+        args.annotations = settings.get("annotations")
+    if not args.annotations:
+        if args.if_available:
+            print("Evaluation skipped: no ANNOTATIONS or population dataset path; graph results are saved.")
+            return
+        parser.error("set --annotations, or use an existing population with settings.json during analysis")
     result = evaluate(args.predictions, args.annotations, args.output, args.split, args.channel_quantile, args.bootstrap)
     for group, values in result["groups"].items():
         for name, metric in values["views"]["all_error"].items():
