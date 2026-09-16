@@ -1,6 +1,7 @@
-"""一个入口完成 prepare → fit → score → evaluate；前3阶段不打开标注。"""
+"""prepare → fit → score → evaluate；前三阶段只用元数据，不使用幻觉标签。"""
 
 import argparse
+from collections import Counter
 import json
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from .data import load_graph, load_observations, load_samples, save_graph, write
 from .detection import decode_spans, score_spans
 from .graph import build_token_graph
 from .learning import fit_detector, load_scorer
+from .metadata import find_response_file
 from .regions import build_views
 
 
@@ -21,7 +23,7 @@ CACHE_ROOT = DATA_ROOT / 'attention/llama31_8b'
 def prepare_graphs(args, output):
     output = Path(output)
     settings = {key: getattr(args, key) for key in (
-        'train_cache', 'test_cache', 'index', 'tasks', 'generators', 'feature_mode',
+        'train_cache', 'test_cache', 'index', 'dataset', 'source_info', 'tasks', 'generators', 'feature_mode',
         'feature_root', 'hidden_layer', 'edges_per_partition', 'context_width', 'layers', 'heads', 'limit')}
     settings['version'] = 'offline-span-graph-v1'
     if output.exists():
@@ -37,7 +39,19 @@ def prepare_graphs(args, output):
     for split, cache in [('train', args.train_cache), ('test', args.test_cache)]:
         if cache is None:
             continue
-        samples, index = load_samples(cache, args.index, split, tasks, generators)
+        samples, index = load_samples(
+            cache, args.index, split, tasks, generators, args.dataset, args.source_info
+        )
+        unresolved = [
+            sample.response_id for sample in samples
+            if not sample.source_id or sample.task == 'unknown' or sample.generator == 'unknown'
+        ]
+        if unresolved:
+            raise ValueError(
+                f'{split}: {len(unresolved)} 个样本缺少来源/任务/生成器身份；'
+                '请用 --dataset 指向原始 RAGTruth 数据目录，或 --index 指向已有索引。'
+                '不需要重跑 attention。'
+            )
         if args.limit:
             samples = samples[:args.limit]
         (output / split).mkdir(exist_ok=True)
@@ -125,19 +139,55 @@ def score_answers(graph_dir, model_dir, output, device='cpu', split='test', resu
 
 
 def inspect_inputs(args):
+    """全体样本检查身份；只对第一条样本读取 attention 和可选特征。"""
+    tasks = [] if args.tasks == ['all'] else args.tasks
+    generators = [] if args.generators == ['all'] else args.generators
+
     for split, cache in [('train', args.train_cache), ('test', args.test_cache)]:
         if cache is None:
             continue
-        samples, index = load_samples(cache, args.index, split)
+        samples, index = load_samples(
+            cache, args.index, split, tasks, generators, args.dataset, args.source_info
+        )
         sample = samples[0]
-        observations = load_observations(sample, index, args.feature_mode, args.hidden_layer, args.feature_root)
-        graph = build_token_graph(sample, observations, args.edges_per_partition, args.context_width, args.layers, args.heads)
-        print(json.dumps(dict(split=split, answers=len(samples), first_id=sample.response_id,
-                              missing_source_ids=sum(not item.source_id for item in samples),
-                              unknown_tasks=sum(item.task == 'unknown' for item in samples),
-                              channel_count=len(graph.channels), tokens=sample.response_length,
-                              coverage=float(graph.coverage.mean()), hidden=graph.node_features.shape,
-                              saved_offsets=bool(len(sample.offsets)), feature_mode=graph.feature_mode), ensure_ascii=False))
+        observations = load_observations(
+            sample, index, args.feature_mode, args.hidden_layer, args.feature_root
+        )
+        graph = build_token_graph(
+            sample, observations, args.edges_per_partition,
+            args.context_width, args.layers, args.heads
+        )
+
+        missing_sources = sum(not item.source_id for item in samples)
+        unknown_tasks = sum(item.task == 'unknown' for item in samples)
+        unknown_generators = sum(item.generator == 'unknown' for item in samples)
+        report = {
+            'split': split,
+            'answers': len(samples),
+            'first_id': sample.response_id,
+            'missing_source_ids': missing_sources,
+            'unknown_tasks': unknown_tasks,
+            'unknown_generators': unknown_generators,
+            'tasks': dict(Counter(item.task for item in samples)),
+            'generators': dict(Counter(item.generator for item in samples)),
+            'metadata_files': sorted({item.metadata_file for item in samples if item.metadata_file}),
+            'ready_to_fit_metadata': not (missing_sources or unknown_tasks or unknown_generators),
+            'channel_count': len(graph.channels),
+            'tokens': sample.response_length,
+            'coverage': float(graph.coverage.mean()),
+            'uncovered_response_positions': np.flatnonzero(~graph.coverage).tolist(),
+            'hidden': list(graph.node_features.shape),
+            'hidden_fields_in_selected_archive': observations['hidden_fields'],
+            'entropy_present': bool(np.isfinite(graph.entropy).any()),
+            'saved_offsets': bool(len(sample.offsets)),
+            'feature_mode': graph.feature_mode,
+            'source_context': (
+                'supplied_groups' if observations['source_groups'] is not None else 'prompt_windows'
+            ),
+            'source_mask_present': observations['source_mask'] is not None,
+            'observation_scope': 'coverage/features describe first_id only, not the whole split',
+        }
+        print(json.dumps(report, ensure_ascii=False), flush=True)
 
 
 def parser():
@@ -146,6 +196,7 @@ def parser():
     command.add_argument('--train-cache', default=str(CACHE_ROOT / 'train'))
     command.add_argument('--test-cache', default=str(CACHE_ROOT / 'test'))
     command.add_argument('--index', help='existing inputs.jsonl/records.jsonl, or its directory; never rebuild metadata')
+    command.add_argument('--dataset', help='原始 RAGTruth 目录或 response.jsonl；未指定则从 cache 祖先目录查找')
     command.add_argument('--output', default='outputs/offline_span_v1')
     command.add_argument('--tasks', nargs='+', default=['all'])
     command.add_argument('--generators', nargs='+', default=['all'])
@@ -172,9 +223,9 @@ def parser():
     command.add_argument('--seed', type=int, default=17)
     command.add_argument('--limit', type=int, default=0, help='explicit execution-order subset per split, not a full benchmark')
     command.add_argument('--resume', action='store_true')
-    command.add_argument('--annotations', default=str(DATA_ROOT / 'dataset/response.jsonl'))
+    command.add_argument('--annotations', help='评价使用的 response.jsonl；默认使用 --dataset 或自动找到的原文件')
     command.add_argument('--tokenizer', help='original local observer tokenizer for evaluation offset verification only')
-    command.add_argument('--source-info')
+    command.add_argument('--source-info', help='原 source_info.json/jsonl，用于任务元数据与最终评价')
     command.add_argument('--bootstrap', type=int, default=200)
     return command
 
@@ -212,11 +263,17 @@ def main(argv=None):
         score_answers(root / 'graphs', root / 'model', root / 'predictions', args.device, resume=args.resume,
                       batch_size=args.batch_size)
     if args.phase in ('all', 'evaluate'):
-        if Path(args.annotations).is_file():
+        annotations = args.annotations
+        if annotations is None:
+            annotations = find_response_file(args.test_cache, args.dataset)
+
+        if annotations is not None and Path(annotations).is_file():
             from .evaluation import evaluate_saved_predictions
-            evaluate_saved_predictions(root / 'predictions', args.annotations, args.tokenizer, args.source_info, args.bootstrap)
+            evaluate_saved_predictions(
+                root / 'predictions', annotations, args.tokenizer, args.source_info, args.bootstrap
+            )
         else:
-            print(f'Evaluation skipped: annotation file absent: {args.annotations}. Frozen scores are preserved.', flush=True)
+            print('Evaluation skipped: response.jsonl not found. Frozen scores are preserved.', flush=True)
 
 
 if __name__ == '__main__':

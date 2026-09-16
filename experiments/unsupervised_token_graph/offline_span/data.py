@@ -8,6 +8,7 @@ import numpy as np
 
 from ..cache_index import CacheIndex, identity_fields
 from ..data import ResponseCache
+from .metadata import find_response_file, merge_metadata, needs_metadata, read_metadata
 
 
 @dataclass
@@ -22,6 +23,7 @@ class Sample:
     prompt_length: int
     offsets: np.ndarray
     response_sha256: str = ""
+    metadata_file: str = ""
 
     @property
     def response_length(self):
@@ -82,19 +84,33 @@ def write_json(path, value):
     partial.replace(path)
 
 
-def load_samples(cache_root, index_path=None, split=None, tasks=(), generators=()):
-    """只打开索引与 NPZ 身份字段；同答的分层/分头导出归并为一个样本。"""
+def load_samples(cache_root, index_path=None, split=None, tasks=(), generators=(),
+                 dataset=None, source_info=None):
+    """先读缓存/索引，缺失身份再按回答编号关联原始 RAGTruth 元数据。"""
     root = Path(cache_root)
     directory = root.parent if root.is_file() else root
     index = CacheIndex(directory, index_path)
     paths = [root] if root.is_file() else sorted(root.rglob('*.npz'))
     samples = {}
+    metadata = None
+    metadata_file = None
 
     for path in paths:
         with np.load(path, allow_pickle=False) as archive:
             native = identity_fields(archive)
         identity, _ = index.resolve(path, native)
         sample_id = identity.get('id', path.stem.removeprefix('attention_'))
+        used_metadata = ""
+        if needs_metadata(identity):
+            if metadata is None:
+                metadata_file = find_response_file(root, dataset)
+                metadata = {}
+                if metadata_file is not None:
+                    metadata = read_metadata(metadata_file, source_info)
+            if str(sample_id) in metadata:
+                identity = merge_metadata(identity, sample_id, metadata)
+                used_metadata = str(metadata_file)
+
         sample_split = identity.get('split') or split
         task = identity.get('task', 'unknown')
         generator = identity.get('generator', 'unknown')
@@ -112,7 +128,7 @@ def load_samples(cache_root, index_path=None, split=None, tasks=(), generators=(
         offsets = np.asarray(identity.get('offsets', []), dtype=np.int64).reshape(-1, 2)
         sample = Sample(str(sample_id), identity.get('source_id', ''), task, generator,
                         sample_split or '', [str(path.resolve())], token_ids,
-                        prompt_length, offsets, identity.get('response_sha256', ''))
+                        prompt_length, offsets, identity.get('response_sha256', ''), used_metadata)
         if sample_id in samples:
             previous = samples[sample_id]
             if (previous.source_id != sample.source_id or previous.prompt_length != prompt_length
@@ -134,12 +150,15 @@ def load_observations(sample, index, feature_mode='tokens', hidden_layer=None, f
     count = len(sample.token_ids)
     observations = dict(records=records, node_features=np.empty((count, 0), np.float32),
                         entropy=np.full(sample.response_length, np.nan, np.float32),
-                        source_groups=None, source_mask=None)
+                        source_groups=None, source_mask=None, hidden_fields=[])
     feature_paths = list(sample.cache_files[:1])
     if feature_root is not None:
         feature_paths = [str(Path(feature_root) / f'{sample.response_id}.npz')]
 
     with np.load(feature_paths[0], allow_pickle=False) as archive:
+        observations['hidden_fields'] = [
+            key for key in ('hidden', 'hidden_states') if key in archive.files
+        ]
         if feature_root is not None:
             if not np.array_equal(archive['token_ids'], sample.token_ids):
                 raise ValueError(f'{sample.response_id}: feature token IDs differ from attention')
