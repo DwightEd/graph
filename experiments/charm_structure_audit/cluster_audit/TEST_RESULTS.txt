@@ -1,0 +1,12 @@
+Publication validation (2026-09-16)
+Base: DwightEd/graph main c7eefb062fc50d9a2708ecce6c09cd16524305a3
+
+python -m pytest tests/test_charm_cluster_audit.py -q
+.........................                                                [100%]
+25 passed in 2.46s
+
+Tested the delivered cluster_audit package locally, including the real CLI.
+Verified the existing main deep_audit capture schema by reading capture.py.
+Existing model, graph, metrics, deep_audit, learned_audit and fixed_graph are unchanged.
+No natural RAGTruth caches or user checkpoint were available in the local runtime.
+No server experiment or new natural-data AUROC/AP is claimed.
