@@ -19,9 +19,26 @@ python -m experiments.unsupervised_token_graph.span_audit \
 `--cache`可指向另一个目录或单个NPZ。默认覆盖QA/Summary/Data2txt所有任务。
 `--tasks QA Summary Data2txt`可显式选任务。来源、任务、生成器从原response/source_info关联。
 六字段cache没有source_id也不需要先造索引；已有inputs/records可用`--index`补充。
-没有offset时用原observer tokenizer核验完全相同的token IDs后恢复，
-可从缓存祖先的settings/manifest找路径，否则明确传 `--tokenizer /原本地tokenizer目录`。
-只加载tokenizer，不加载LLM权重；不能只凭token数恢复标注。
+没有offset时，用原observer tokenizer核验完全相同的token IDs后恢复，不重新提取attention。
+路径优先级：`--tokenizer` → 环境变量 `TOKENIZER` → 缓存祖先及已有索引旁的
+settings/manifest → 本项目已知的默认目录。回答的generator字段不用于选择tokenizer。
+
+仅对 `.../data/RAGTruth/attention/llama31_8b/...` 这一缓存布局，默认查找同一用户目录下的
+`models/Meta-Llama-3.1-8B-Instruct`。其他模型/目录不猜测。加载仅使用本地文件，仍逐答
+核对token ID；选到目录不等于自动认定标签已对齐。首次成功会打印实际tokenizer路径。
+只加载tokenizer，不加载LLM权重；原cache与标签文件不写入。
+
+此前若因缺offset/tokenizer在第一答停止，拉取修复后可直接复用原命令和 `--resume`。
+不必改变实验参数或清空目录。也可临时指定环境变量（不会改变原命令的保存参数）：
+
+```bash
+TOKENIZER=/share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct \
+python -u -m experiments.unsupervised_token_graph.span_audit \
+  --split train --output outputs/span_mechanism_train_v1 --resume
+```
+
+恢复只发生在内存：源NPZ不追加offsets。每个已完成样本仍按原规则保存，续跑跳过完整样本。
+如果token ID核验不一致，程序继续停止，不能跳过检查、只按长度或文件名贴标签。
 
 `--feature-root`可读现有 `<id>.npz` 的entropy与完整token_ids；没有熵就报告没有匹配熵。
 `--layers 15 19 --heads 24`可以先验证读取，正式确认不能根据test的差值挑头。

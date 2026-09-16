@@ -7,6 +7,7 @@ verification, never by guessing an offset from a token count.
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -59,6 +60,7 @@ def read_sources(annotations_path, explicit=None):
 
 def resolve_tokenizer(settings, record, explicit=None):
     """Use a declared observer tokenizer, never the answer-generator field."""
+    explicit = explicit or os.environ.get("TOKENIZER")
     if explicit:
         return str(Path(explicit).expanduser())
     configs = [(settings, Path.cwd())]
@@ -85,6 +87,10 @@ def resolve_tokenizer(settings, record, explicit=None):
                 # A declared Hugging Face ID is allowed only from the local cache.
                 if not local.is_absolute() and len(value.split("/")) == 2:
                     return value
+
+    fallback = settings.get("tokenizer_fallback")
+    if fallback and Path(fallback).expanduser().is_dir():
+        return str(Path(fallback).expanduser().resolve())
     return None
 
 
@@ -153,7 +159,12 @@ class EvaluationBinding:
             path = resolve_tokenizer(self.settings, record, self.tokenizer_path)
             if path is None:
                 missing = "offsets" if offsets is None else "response identity"
-                raise ValueError(f"{result['file']}: no identity-bound alignment; saved identity and offsets are required (missing {missing}). Set TOKENIZER (or --tokenizer) to the original observer tokenizer directory. Scores are saved; do not rerun analysis.")
+                raise ValueError(
+                    f"{result['file']}: cannot align the cached tokens with the labelled text "
+                    f"(missing {missing}). Set --tokenizer or TOKENIZER to the original "
+                    "observer tokenizer directory. No offsets were inferred; "
+                    "the attention cache does not need to be regenerated."
+                )
             if path not in self.tokenizers:
                 from transformers import AutoTokenizer
                 self.tokenizers[path] = AutoTokenizer.from_pretrained(path, use_fast=True, local_files_only=True)

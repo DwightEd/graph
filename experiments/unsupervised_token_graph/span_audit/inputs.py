@@ -48,6 +48,17 @@ def saved_entropy(paths, feature_root, response_id, token_ids, response_length):
     return entropy
 
 
+def default_observer_tokenizer(cache):
+    """本项目已知的 llama31_8b 目录布局；仍须逐样本核验完整 token ID。"""
+    layout = ('data', 'RAGTruth', 'attention', 'llama31_8b')
+    for directory in (cache, *cache.parents):
+        if directory.parts[-4:] == layout:
+            model = directory.parents[3] / 'models' / 'Meta-Llama-3.1-8B-Instruct'
+            if model.is_dir():
+                return str(model)
+    return None
+
+
 class AuditInputs:
     """复用已有reader，集中放置元数据、tokenizer和文件读取。"""
 
@@ -59,7 +70,13 @@ class AuditInputs:
         self.groups = group_cache_files(cache, self.index)
         self.annotations = read_annotations(Path(dataset) / 'response.jsonl')
         self.sources, _ = read_sources(Path(dataset) / 'response.jsonl')
-        self.binding = EvaluationBinding({'cache': '/'}, tokenizer)
+        alignment_settings = dict(
+            cache='/',
+            index_files=self.index.inputs,
+            tokenizer_fallback=default_observer_tokenizer(cache),
+        )
+        self.binding = EvaluationBinding(alignment_settings, tokenizer)
+        self.reported_tokenizer = None
         self.feature_root = feature_root
 
     def selected_ids(self, split, tasks):
@@ -85,7 +102,14 @@ class AuditInputs:
         metadata.update(id=response_id, file=paths[0].name, cache=str(paths[0].resolve()))
         annotation = self.annotations[response_id]
         metadata, offsets = self.binding.bind(metadata, annotation, arrays, self.sources)
+        self.report_alignment(metadata)
         return self.make_answer(metadata, offsets, annotation, token_ids, prompt_length, paths)
+
+    def report_alignment(self, metadata):
+        tokenizer = metadata.get('verified_tokenizer')
+        if tokenizer and tokenizer != self.reported_tokenizer:
+            print(f'Token alignment verified with local tokenizer: {tokenizer}', flush=True)
+            self.reported_tokenizer = tokenizer
 
     def make_answer(self, metadata, offsets, annotation, token_ids, prompt_length, paths):
         spans = marked_spans(offsets, annotation['labels'])
