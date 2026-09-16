@@ -1,0 +1,23 @@
+{
+  "command": "python -m pytest experiments/unsupervised_token_graph/offline_span/tests -q",
+  "passed": 30,
+  "failed": 0,
+  "skipped": 0,
+  "execution": "CPU PyTorch/NumPy/SciPy synthetic end-to-end; no LLM weights",
+  "verified_interfaces": [
+    "canonical CSR",
+    "dense attention/data",
+    "per-layer/per-head adjacency",
+    "existing inputs/records indexes",
+    "optional all-token hidden",
+    "exact-offset evaluation"
+  ],
+  "shared_adapter_blobs": {
+    "cache_index.py": "81d974a4b18752fb29378d740e0b9bb51b2d6777",
+    "channels.py": "22a6b85a735fddfc3353a45fd91151b15e4b6a95",
+    "data.py": "448a8521b7729b012eb7635376f88bf038d5bdb0",
+    "evaluate.py": "a0430bfd5adbb7020ff0f9453763582e49fc15ed",
+    "evaluation_data.py": "6e3f0310fc7f8a6888d033db6f05866b7513613e"
+  },
+  "not_run": "server caches, GPU training, natural RAGTruth AUROC/AP; no efficacy claim"
+}
