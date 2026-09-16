@@ -1,0 +1,19 @@
+{
+  "tests_passed": 57,
+  "new_fixed_graph_tests": 24,
+  "existing_span_audit_regressions": 33,
+  "failed": 0,
+  "skipped": 0,
+  "command": "python -m pytest experiments/unsupervised_token_graph/fixed_graph/tests experiments/unsupervised_token_graph/span_audit/tests -q",
+  "python": "3.13.5",
+  "numpy": "2.3.5",
+  "scipy": "1.17.0",
+  "sklearn": "1.8.0",
+  "scope": "CPU software tests, including three task types and real existing adapters",
+  "not_run": [
+    "server natural RAGTruth caches",
+    "new natural AUROC/AP"
+  ],
+  "base_commit": "3b4fc6fcecaa7890e38d2ca2df04438f5b12ac90",
+  "verification": "57 tests rerun before publishing on the current main base; production code unchanged from the delivered patch"
+}
