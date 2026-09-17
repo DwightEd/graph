@@ -44,8 +44,8 @@ def query_edges(graph, index, query):
 def history_js(graph, index, query):
     """Consecutive query distributions on the SAME already-existing history keys.
 
-Exclude the newly available key q-1. Missing retained mass => unobserved, not zero.
-"""
+    Exclude the newly available key q-1. Missing retained mass => unobserved, not zero.
+    """
     prompt = int(graph['prompt_length'])
     channels = graph['x'].shape[1]
     if query <= prompt + 1:
@@ -72,9 +72,9 @@ Exclude the newly available key q-1. Missing retained mass => unobserved, not ze
 def conditional_excess(source, weights, query, start, end, prompt, token_ids):
     """Exact endpoint-randomization expectation at fixed lag band + token-ID copy.
 
-Includes all eligible past response keys, including zero/unsaved slots. Lag 1
-is its own group. A pure previous-token chain therefore has zero excess.
-"""
+    Includes all eligible past response keys, including zero/unsaved slots. Lag 1
+    is its own group. A pure previous-token chain therefore has zero excess.
+    """
     candidates = np.arange(prompt, query)
     if not len(candidates):
         return np.zeros(weights.shape[1]), np.zeros(weights.shape[1])
@@ -206,7 +206,7 @@ def depth_contrasts(entries, output, bootstrap):
                 continue
             for name, phase, metric in (('onset_prompt_change', 6, 1), ('late_noncopy_excess', 4, 5),
                                          ('late_history_concentration', 4, 6), ('late_shared_key_js', 4, 7)):
-                value = finite_average(delta[phase, metric, layers].reshape(-1))
+                value = float(finite_average(delta[phase, metric, layers].reshape(-1)))
                 rows.append(dict(id=entry['id'], source_id=entry['source_id'], error_start=entry['error_start'],
                     contrast=name, depth=depth, first_layer=int(layers[0]), last_layer=int(layers[-1]), value=value))
     frame = pd.DataFrame(rows)

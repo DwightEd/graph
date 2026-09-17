@@ -1,0 +1,25 @@
+2026-09-17 actual local validation
+Base: DwightEd/graph main 7bb5331b7011c451b4276319dbd4b6e52aedee8a
+
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest \
+  tests/test_charm_structure_audit.py tests/test_charm_prediction_memory.py \
+  tests/test_charm_localization_routes.py tests/test_charm_lockin.py -q
+100 passed in 22.43s (CPU; torch 2.10.0).
+
+74 previous core/location/route regression cases plus 26 new parametrized cases.
+- exact local replay versus independent whole-graph interventions;
+- unchanged divisor and zeroing the complete MLP message including bias;
+- first token cannot receive its own span's future messages;
+- one-round no_reuse equals factual, positive toy detects two-hop inheritance;
+- cut_all equals the full model's pointwise path, not an independently trained model;
+- exact signed readout and two-player factorial decomposition;
+- matched-pair activation swaps and identical-activation no-op;
+- target/lag/copy-matched random cuts; pure lag1 marked nonexchangeable;
+- actual CLI, checkpoint replay refusal, input byte/mtime preservation, resume;
+- CPU-only re-report without importing torch;
+- earlier routes scalar-NaN regression;
+- PNG/SVG generation and local inspection of synthetic plots.
+
+No natural-data checkpoint, natural lock-in experiment, training or LLM generation
+was run this turn. The upload contains results, not the user's weights/graphs.
+No scientific confirmation of lock-in or new real-data AUROC is claimed.

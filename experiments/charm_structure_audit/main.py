@@ -177,7 +177,7 @@ def run_matching(args, output):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow'], default='report')
+    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin'], default='report')
     parser.add_argument('--root', default=DEFAULT_ROOT)
     parser.add_argument('--prepared', default=DEFAULT_PREPARED)
     parser.add_argument('--output', help='New output directory; default <root>/audit_<mode>')
@@ -202,6 +202,9 @@ def main(argv=None):
     parser.add_argument('--tail-fraction', type=float, default=.2, help='Within-answer score tails, descriptive only')
     parser.add_argument('--node-values', action='store_true', help='Read raw self-attention x, never edges, for highlow')
     parser.add_argument('--fixed-output', help='Completed fixed_graph output for score-only comparison')
+    parser.add_argument('--lockin-stage', choices=['all', 'report'], default='all')
+    parser.add_argument('--lockin-random', type=int, default=3, help='Count/lag/copy-matched message cuts')
+    parser.add_argument('--lockin-pair-limit', type=int, default=0, help='Explicit smoke-test subset; 0 uses all fixed pairs')
     args = parser.parse_args(argv)
     output = Path(args.output) if args.output else Path(args.root)/('audit_'+args.mode)
     protected = [Path(args.root), Path(args.prepared)]
@@ -209,6 +212,10 @@ def main(argv=None):
     if output.resolve() in [p.resolve() for p in protected] or (output/'prediction_settings.json').exists():
         raise ValueError('Use a separate output directory, not original data/results')
     config = vars(args).copy()
+    config.pop('lockin_stage')
+    if args.mode != 'lockin':
+        config.pop('lockin_random')
+        config.pop('lockin_pair_limit')
     if args.mode != 'highlow':
         for key in ('tail_fraction', 'node_values', 'fixed_output'):
             config.pop(key)
@@ -220,7 +227,7 @@ def main(argv=None):
         for key in ('pair_tier', 'window', 'channel_unit', 'llm_layers', 'channels', 'channel_sites', 'channel_operations'):
             config.pop(key)
     output = prepare_output(output, config)
-    if args.mode in ('ablate', 'train', 'heads', 'node'):
+    if args.mode in ('ablate', 'train', 'heads', 'node') or (args.mode == 'lockin' and args.lockin_stage == 'all'):
         import torch
         torch.set_num_threads(1)
     pairs = read_pairs(args)
@@ -247,6 +254,9 @@ def main(argv=None):
     elif args.mode == 'node':
         from .node_signal import run_node
         run_node(args, output, pairs)
+    elif args.mode == 'lockin':
+        from .lockin import run_lockin
+        run_lockin(args, output, pairs)
     elif args.mode == 'highlow':
         from .score_groups import run_highlow
         run_highlow(args, output, pairs)
