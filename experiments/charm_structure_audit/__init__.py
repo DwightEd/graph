@@ -1,1 +1,1 @@
-"""Audit a supervised CHARM parent model without inventing a new detector."""
+"""CHARM module ablations. Run with python -m experiments.charm_structure_audit.main."""

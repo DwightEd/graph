@@ -1,0 +1,18 @@
+2026-09-17 local validation
+Base repository: DwightEd/graph main @96cc93fb8ba1c7e5c1e2349ae9c62ddb62d413bb
+
+python -m pytest tests/test_charm_structure_audit.py -q
+41 passed in 5.09s (CPU, torch 2.10.0)
+
+Tested forward/gradient parity with an independent expression of the original
+CHARM algebra, strict legacy state keys, all module controls, no-relay and
+prefix invariants, old partition reuse, calibration, score-blind matching,
+input immutability, and actual report/match/ablate/train CLI workflows.
+Checkpoint/model execution tests use synthetic graphs, not the user's weights.
+
+Also executed new report mode on the user's uploaded six QA CSV exports:
+charm_in AUROC 0.8843679347093193; AP 0.5225681159057125.
+All six original full-stream AUROC/AP values were reproduced.
+Span-position and fixed matched-region metrics were recomputed from those
+natural-data CSVs. No model forward, intervention or retraining on natural
+RAGTruth data was executed locally. No new detector performance is claimed.

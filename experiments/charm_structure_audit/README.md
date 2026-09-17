@@ -1,145 +1,136 @@
-# CHARM 高分来源审计
+# CHARM audit：从 main 看整个实验
 
-这里不是新的幻觉检测器，也不是 SourceFlow。父模型是 `train_charm_grid.py`
-（上游 commit `13e907693aa954bf070e809d8afecdf26b3b88d8`，可读取副本位于
-`DwightEd/Attributed-Graph-Hallucination-Detection`）。目标是区分：
-**首错识别、错误片段内部覆盖、局部连续性、真实端点/属性、未来出度**。
-先读 `PLAN.md`；此次实现与任何自然数据成绩分开记录。
+本版替换旧的 `deep_audit/learned_audit/cluster_audit` 多入口代码。
+旧代码保存在 Git 提交 `96cc93f`；**原 checkpoint、prepared 图和输出文件不迁移、不删除**。
+只重构 CHARM 子项目，其他研究项目不改。
 
-## 直接审计之前的高分模型（不重新训练）
+风格参考 Ja1Zhou/LM_Negation @0ddfe7d 的
+`src/zzj_mi/mi_module/attn_sink_pos_control_sweep_base_models_gen.py`：
+参数 → 数据 → 原模型 → 明确的干预循环 → 输出。只参考代码组织，不移植其 attention sink 算法。
 
-在 graph 根目录，使用原实验实际保存的 checkpoint。路径不能从仓库源码猜出来：
+## 先读这九个文件
 
-```bash
-CHECKPOINT="/实际高分实验/grid_best_model.pt" \
-TASKS="Data2txt" OUTPUT="outputs/charm_checkpoint_audit" \
-BOOTSTRAP=0 bash experiments/charm_structure_audit/run_all.sh
-```
-
-支持 `grid_best_model.pt` 的 `model_state/best_hp`，及 `original/train.py` 的
-`checkpoint.pt` 的 `model_state/hyperparameters`，或纯 state_dict。不支持
-`GNN_train.py` 的双向 HyperCHARM。字段不匹配严格报错，不静默加载一部分。
-只准备指定 task 的 test 图；没有优化器或拟合过程。默认阈值0.5是预先给定值，
-**不声称对应5% FPR**；可用 `THRESHOLD` 填原验证集已经选定的阈值，不能看测试
-结果再调。AUROC/AP不依赖阈值。每个任务应使用对应任务训练出的旧模型。
-
-模型和缓存必须是**相同 observer、通道顺序和构图阈值**。默认缓存是当前
-Llama-3.1 observer 对 `llama-2-7b-chat` 回答的重放；两者不是同一个模型身份。
-1024维相同不代表可以把原 Llama-2 observer checkpoint 接到 Llama-3.1 缓存。
-旧 checkpoint 缺少这一元数据时，报告不能自动保证其历史实验兼容性。
-旧源码的标签错位/实验选择若与这里不同，当前报告也不是历史指标的逐字复现。
-
-## 重新训练公平消融（明确是新对照实验）
-
-不设置 CHECKPOINT 时，脚本在相同数据/划分/初始化seed上分别训练：
-
-| 变体 | 改动与用途 |
+| 文件 | 只负责什么 |
 |---|---|
-| `charm_out` | 父模型的原出度归一化；保留已发现的未来结构依赖以供对照 |
-| `charm_in` | 仅将归一化改为入度；图仍来自真实 attention |
-| `node_only` | 相同编码器/更新MLP/预测头，关闭所有消息；消息MLP不参与梯度 |
-| `local_in` | prompt边不动；每个目标的k条历史边改为最近k个历史节点，保留边向量 |
-| `rewire_in` | prompt边不动；同目标、同粗lag带内重选历史源，不是仅交换原边权 |
+| main.py | 选择实验，读数据，循环消融，保存结果 |
+| data.py | 读取旧缓存、划分与分数；不生成额外模型特征 |
+| model.py | 原 CHARM 消息和节点更新；原 checkpoint 参数名不变 |
+| ablations.py | 明确改变一个模块或一种图输入 |
+| train.py | 原来源划分上的监督训练、选模型和校准 |
+| evaluate.py | token / 同回答 / 同配对比较 |
+| positions.py | 标注 span 内的第几个 token、首中末、三等分位置 |
+| matching.py | 同答等长正常对照；统计量只用于匹配 |
+| __init__.py | 包声明，没有运行逻辑 |
+
+不再在模块之间传递几十组特征、训练多个代理回归器、导出所有层embedding。
+**没有图重构训练或无监督检测器。这里是已训练 CHARM 的审计。**
+
+## 1. 已有结果直接分析（默认；不运行神经网络）
+
+在 graph 根目录、research 环境：
 
 ```bash
-TASKS="QA Summary Data2txt" SEEDS="0" \
-OUTPUT="outputs/charm_structure_audit" \
-bash experiments/charm_structure_audit/run_all.sh
+python -m experiments.charm_structure_audit.main --mode report
 ```
 
-推荐先运行 `TASKS=Data2txt` 对齐原脚本默认任务，再扩到其余任务。
-`LIMIT=40 EPOCHS=2 BOOTSTRAP=0` 是接口连通小试，不能报告为完整数据成绩；
-用单独 OUTPUT。`VARIANTS="charm_out charm_in node_only"` 可先运行最重要对照。
-`SEEDS="0 1 2"` 才是多次训练，不把一次seed的source-bootstrap当成训练方差。
+默认 `--root outputs/charm_structure_audit_qa/QA/seed_0`，符合当前实验目录。
+默认读取已完成的 charm_in/charm_out/node_only/local_in/rewire_in，以及已有node_only平滑分数。
+每个模型使用自己的 threshold.json。输入CSV的报警必须与原阈值一致。
+模型缺文件时明确打印未发现，不新训练；已有模型的token身份/顺序不同则停止比较。
 
-官方 train 内按 source 固定拆成约80% fit、10% selection、10% calibration；
-官方test保持隔离。selection AP只选模型，calibration正常token的固定5% FPR只选
-阈值，测试不参与两者。它不同于原脚本的回答级80/20验证拆分，所以这是公平
-归因实验，不冒充完全相同训练协议。训练有真实幻觉标签，不能称为无监督。
-`node_only`另报固定beta=0.5的过去信息EWMA，阈值也在独立calibration上确定。
+默认复用 `charm_in/test/cluster_audit/pairs.json`，不重新配对。
+这条命令在上传的自然QA导出包上实际运行过，六份原AUROC/AP均复现；具体统计见 ANALYSIS.md。
 
-## 输入：使用已有文件，不制作新 metadata
-
-默认已写入脚本：
-
-- `/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/attention/llama31_8b/{train,test}`
-- `/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/response.jsonl`
-- 同目录 `source_info.jsonl`，来源键为 `source_id`
-- `/share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct`
-
-复用 `unsupervised_token_graph/{data,cache_index,evaluation_data}.py` 的已修复
-解析和token-ID校验。tokenizer只在原始offsets/文本身份缺失时加载，不加载LLM。
-图按任意通道 `attention > 0.05` 的并集构造；x是全部通道的对角线，边属性是
-逐通道超过阈值的权重。没有prompt→prompt边，没有平均head，没有再次归一化
-attention。保留孤立节点。如果manifest的保存floor高于tau则拒绝所谓无损复现；
-floor未知时记录为null，结果只对应已保存边。
-
-节点i使用处理token i后的attention、对齐标签i，包含首个response token。
-这是父模型的post-token检测，不是q→q+1的提前预测。
-
-## 输出具体回答什么？
-
-每个模型/seed/task有 `test/`，旧checkpoint模式有 `TASK/external_checkpoint/`：
-
-- `report.json`：各任务整体、首错、span起点、continuation、strict_post_first的
-  AUROC/AP、accuracy/precision/recall/FPR，统一分数/正常负例下的AUC分解。
-- `spans.csv`：每个原标注span的起止、起点分数/命中、内部覆盖率、检测延迟、
-  `onset_missed_later_80`、`onset_missed_later_all`。漏检的span不伪造延迟0。
-- `tokens.csv`：每个token的文本、gold、概率、阈值预测、首错/起点标记、图属性。
-- `gallery.html`：绿色TP、红色FN、黄色FP、黑框首错。优先显示漏起点却覆盖续写的
-  例子（后验选例，不影响指标；不是随机样本）。重复offset可能重复显示子词文本。
-- `samples/*.npz`：逐token分数、冻结扰动分数、最终embedding、真实结构统计。
-- `comparison.json`：重新训练变体相对`charm_in`的配对source-bootstrap增量。
-
-`boundaries.first_error_spans`给出最关键的计数：
-`missed_onset_later_all_count`表示**首错token漏检、同一首次错误span的其余token
-全部命中**。同时报告长度>1的分母、80%版本、条件于首错漏检的全覆盖比例。
-不要把同一多token实体的后续子词误称为独立错误传播。
-
-片段指标区分原标注span和标签并集的连续runs；IoU>=0.5采用明确的贪心一对一
-匹配。另报错误结束后5个位置中的正常token误报率，以及全正常回答误报警率。
-不采用“一点命中就把gold span全标对”的point-adjustment。
-
-## 结构核查与解释边界
-
-冻结模型另做 no_rp/no_rr、zero_edge、zero_mark、shuffle_nodes、rewire；这些
-操作使用原divisor，避免把删边与重新归一化混淆。full/prefix例外，必须重新计算
-前缀degree，才能暴露未来出度。prefix目标是均匀位置及标注起点；后者只用于
-后验审计，不能作为线上候选事件规则。报告prefix覆盖而不声称全部token验证。
-
-这些是固定模型的敏感性/OOD实验；**下降不等于重训后的结构收益**。真正的收益
-归因以同划分、同seed的独立训练对照为准。local和rewire都保持每目标RR入度、
-边向量、RP边；不保持source出度，local也不保持距离。逐样本记录实际改边比例；
-如果改边太少，不把“分数差不多”解释为结构无用。
-
-保存RR/时间链上HH、NN、混合标签邻居的input/embedding平均cosine及同标签比例。
-高同质性/高相似性仍可能来自类别不均衡、词法、位置，而不是因果依赖。结构与
-得分的Spearman只是描述性，最终以控制实验为准。
-
-## 重用阶段与资源
-
-`PHASE=prepare`只构图；`PHASE=fit`复用已建图跑训练和审计；有CHECKPOINT时
-`PHASE=audit`只跑已有模型。必须保留相同 PREPARED/OUTPUT/任务配置。
-已完成图和逐样本预测原子保存并可续跑；半写入`.partial`不算完成。完整训练的
-checkpoint可复用；**中断的fit目前从该模型训练起点重跑，不是epoch断点恢复**。
-
-只重算报告（不重新推理）：
+## 2. 冻结 charm_in，逐个删除模块
 
 ```bash
-python -m experiments.charm_structure_audit.run report \
-  --predictions outputs/charm_checkpoint_audit/Data2txt/external_checkpoint \
-  --output outputs/charm_checkpoint_audit/Data2txt/preview \
-  --bootstrap 0 --completed-only
+python -u -m experiments.charm_structure_audit.main --mode ablate \
+  --ablations no_graph no_node no_edge no_source no_mark no_prompt no_history no_residual no_relay head_mean
 ```
 
-训练每次加载一张图，按父模型batch的response-token总数归一化累积梯度。
-EDGE_CHUNK默认4096，训练checkpoint重算消息MLP，避免保留所有边的大输入在GPU。
-CPU仍需一张[E,L*H]边属性图，不保证任意长样本内存充足；不截断样本冒充全量。
-图/预测保存为自己的输出，不动之前SourceFlow结果。没有已训练模型路径时，
-不能声称已经解释“那一次”高分；新训练也必须先检查父模型是否复现相近表现。
+只读取已经保存的 `charm_in/checkpoint.pt` 和原prepared图；**不训练，不运行8B模型**。
+`--checkpoint`允许指定这个原模型的迁移路径；回放不一致直接停止，不通过拟合修复。
+每份图的原分数复算必须与之前的 score 一致，然后进行模块删除。
+逐回答显示进度，保存紧凑的 `scores/*.npz`，没有逐层表征导出。原结果不改写。
+重复同配置命令复用已完成的分数文件；仍检查原模型回放。中断临时文件不计完成。
 
-依赖为现有torch(>=2.4)、numpy、scipy、scikit-learn、tqdm、pytest；缺offsets才需
-transformers。模型不依赖PyG；本轮验证的是原消息代数/参数键一致，不是实际
-PyG运行对照。不要强制更新服务器的CUDA/PyTorch来运行本审计。
+| 消融名字 | 删除/改变什么 | 保留什么 |
+|---|---|---|
+| no_graph | 全部邻居消息 | 节点投影、更新MLP、残差和预测头 |
+| no_node | 输入节点属性清零 | 边、多头边数值、角色及后续网络 |
+| no_edge | 消息中的多头边属性清零 | 邻居状态、连接、来源标记 |
+| no_source | 消息中的源节点状态清零 | 目标自身状态、边属性和角色 |
+| no_mark | prompt/history标记清零 | 两类实际连接、节点和边属性 |
+| no_prompt / no_history | 对应来源的入边 | 另一类连接；冻结干预使用原分母 |
+| no_residual | GNN更新中的跳连 | 更新MLP；不是删除输入节点属性 |
+| no_relay | 源节点不传递从其他节点汇入的信息 | 源自身每层MLP更新；一层时与原模型一致 |
+| head_mean | 每层头数值平均后复制回原维度 | 层身份、网络形状、连接 |
+| one_layer | 只用第一层GNN更新 | 输入投影和原readout；冻结模式属强分布偏移 |
+| local / rewire | 最近k历史邻居 / 原粗距离组内重选 | RP边、目标入度、对应边属性 |
+| coupled_heads / independent_heads | 整向量共同换端点 / 各头独立换端点 | 每target/来源/距离组内的逐头权重列表 |
+| head_names | 每份图内置换各层的head通道 | 节点和边联合置换；不是全数据固定可逆改名 |
 
-测试：`python -m pytest tests/test_charm_structure_audit.py -q`。
+改变 `main.py` 顶部 `ABLATIONS` 或 `--ablations` 就能控制实验。
+不同运行要用不同 `--output`；每次原图归一化分母保持不变，避免删边与重新平均混在一起。
+控制可能是不自然输入，性能下降是**该模型的敏感性**，不是该模块的泛化贡献。
+`graph_changes.csv`分开记录边槽位变化和真正丢失/新增的RR邻接关系。
+
+## 3. 同划分独立重训（只有显式 train 才训练）
+
+```bash
+python -u -m experiments.charm_structure_audit.main --mode train \
+  --ablations no_graph no_edge no_source no_residual no_relay head_mean
+```
+
+复用原 `charm_in/training.json` 的 fit/select/calibration/test IDs，与原prepared index对齐。
+BCE、正类权重、AdamW、学习率计划、selection AP选模型、独立calibration定阈值沿用原配方。
+所有新模型写 `audit_train/`，不会覆盖已经跑出的模型。始终加入full作为本次重训参考。
+删边模型在重训中按自身图计算degree，而不是借用冻结干预的分母。
+head_mean清零/复制等是明确的新消融，不能冒充旧实验复现。只有自然数据重训之后才有成绩。
+`--epochs`可显式覆盖原轮数；小试不是完整实验。已完成fit复用；中断fit目前从头重训，不是epoch断点。
+同来源划分上的一个seed不能替代训练方差；用不同seed单独OUTPUT。
+
+## 4. 需要新匹配时才运行 match
+
+```bash
+python -u -m experiments.charm_structure_audit.main --mode match
+```
+
+使用原prepared图，不重新提取attention。默认 `--prepared outputs/charm_structure_audit_qa/data`。
+只是把原匹配协议收拢到一个文件：同回答、等长、位置差≤.25、重复差≤.15、
+同首token表面类别、同“此前是否已有错误”；候选全部无错误标签。
+cluster再匹配七项聚集描述符；cluster_heads再匹配逐head段均值。
+结构caliper仍为 [.1,.1,.1,.1,.1,.5,.5]，逐头RMS≤.05、最大差≤.25；不根据test得分放宽。
+只合并重叠标注，保留相邻标注；正常区间不重复用；候选少的错误段先配。
+这不是人工正确事实边界，也不是模型自动发现的span。
+匹配不读score和embedding；保留缺匹配。输出pairs.json、匹配状态及逐特征balance。
+旧pairs.json不覆盖；以新的配对评价需显式传 `--pairs 新路径`。
+
+## 输出怎么读
+
+每个模型/消融目录内：
+- `summary.json`：总体、首错/后续起点/续错、同回答排序和阈值。
+- `positions.csv`、`offsets.csv`、`positions_by_length.csv`：有多少错误词、检出多少、在片段何处。
+- `pair_scores.csv`、`matched_positions.csv`：同一对正确/错误窗口的分数差，且按相同相对区域比较。
+- `tokens.csv.gz`：完整逐词ID、原文、标签、报警、span位置。顶层 `models.csv` 和 `paired_comparison.csv`横向比较。
+
+相对位置按 `(offset+0.5)/length` 三等分；first/interior/last是另一种划分，不把两套计数相加。
+短于3token可能没有中间三分之一区域，分母如实减少；按长度另报，避免长片段主导所有结论。
+同一个错误span内没有正常标签，不能伪造真假AUC；配对AUC使用对应正常窗口。
+“首token的配对AUC”是逐对胜率，既不是全数据首错AUC，也不等于阈值召回。
+未做句子分割或语义实体识别，不能把span位置叫语法句子位置，不能把数字token叫独立事实决策。
+来源重采样区间对应source均值，配对宏均值单列；两者不是同一个估计量。
+
+旧的原始attention准备、特征探针、代理logit回归、大规模表征导出从当前主线移除，
+并没有在新main下面再隐藏旧入口。需要查历史算法时读取96cc93f；旧报告仍保留。
+本版直接使用已经构好的图；新缓存的原attention→图准备不是这次重构的运行入口。
+
+## 验证
+
+```bash
+python -m pytest tests/test_charm_structure_audit.py -q
+```
+
+测试覆盖原消息代数/梯度、旧checkpoint格式、每个消融、因果前缀、禁中继、
+标签/阈值/配对口径、四种模式的真实CLI和原文件不变。依赖numpy/pandas/scikit-learn/torch/tqdm/pytest；
+不增加PyG、transformer-lens或新的LLM依赖，不要求升级服务器的torch/CUDA。
