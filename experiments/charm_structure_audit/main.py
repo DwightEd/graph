@@ -1,4 +1,4 @@
-"""One entry: read reports, remove model modules, retrain, or match controls."""
+"""One entry for CHARM experiments. New position/head modes: LOCALIZATION.md."""
 
 import argparse
 from pathlib import Path
@@ -24,6 +24,8 @@ DEFAULT_PREPARED = 'outputs/charm_structure_audit_qa/data'
 
 def read_pairs(args):
     path = Path(args.pairs) if args.pairs else Path(args.root)/'charm_in/test/cluster_audit/pairs.json'
+    if args.pairs and not path.exists():
+        raise FileNotFoundError(path)
     if not path.exists():
         print('没有已保存的配对文件；本次不报告配对成绩。', flush=True)
         return []
@@ -175,7 +177,7 @@ def run_matching(args, output):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match'], default='report')
+    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads'], default='report')
     parser.add_argument('--root', default=DEFAULT_ROOT)
     parser.add_argument('--prepared', default=DEFAULT_PREPARED)
     parser.add_argument('--output', help='New output directory; default <root>/audit_<mode>')
@@ -188,14 +190,26 @@ def main(argv=None):
     parser.add_argument('--seed', type=int, default=0)
     parser.add_argument('--epochs', type=int, help='Explicit training override; otherwise original recipe')
     parser.add_argument('--bootstrap', type=int, default=200)
+    parser.add_argument('--pair-tier', choices=['context', 'cluster', 'cluster_heads'], default='cluster')
+    parser.add_argument('--window', type=int, default=5, help='Common normal context for route pre/post observations')
+    parser.add_argument('--channel-unit', choices=['layer', 'head'], default='layer')
+    parser.add_argument('--llm-layers', nargs='+', type=int, help='Original LLM layer indices for channel masks')
+    parser.add_argument('--channels', nargs='+', help='Exact original LLM coordinates, e.g. 0:0 1:3 (not selected heads)')
+    parser.add_argument('--channel-operations', nargs='+', choices=['zero', 'coupled', 'independent'], default=['zero'])
+    parser.add_argument('--channel-sites', nargs='+', choices=['node', 'edge', 'both'], default=['node', 'edge'])
     args = parser.parse_args(argv)
     output = Path(args.output) if args.output else Path(args.root)/('audit_'+args.mode)
     protected = [Path(args.root), Path(args.prepared)]
     protected += [Path(args.root)/name/'test' for name in MODELS]
     if output.resolve() in [p.resolve() for p in protected] or (output/'prediction_settings.json').exists():
         raise ValueError('Use a separate output directory, not original data/results')
-    output = prepare_output(output, vars(args))
-    if args.mode in ('ablate', 'train'):
+    config = vars(args).copy()
+    if args.mode in ('report', 'ablate', 'train', 'match'):
+        # Preserve actual saved configurations of the four existing workflows.
+        for key in ('pair_tier', 'window', 'channel_unit', 'llm_layers', 'channels', 'channel_sites', 'channel_operations'):
+            config.pop(key)
+    output = prepare_output(output, config)
+    if args.mode in ('ablate', 'train', 'heads'):
         import torch
         torch.set_num_threads(1)
     pairs = read_pairs(args)
@@ -205,8 +219,17 @@ def main(argv=None):
         run_frozen(args, output, pairs)
     elif args.mode == 'train':
         run_training(args, output, pairs)
-    else:
+    elif args.mode == 'match':
         run_matching(args, output)
+    elif args.mode == 'locate':
+        from .localization import run_localization
+        run_localization(args, output, pairs)
+    elif args.mode == 'routes':
+        from .routes import run_routes
+        run_routes(args, output, pairs)
+    else:
+        from .head_audit import run_heads
+        run_heads(args, output, pairs)
     print('Results:', output, flush=True)
 
 
