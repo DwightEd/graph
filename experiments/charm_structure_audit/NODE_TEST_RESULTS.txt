@@ -1,0 +1,26 @@
+2026-09-17. Base main: 6a3b2c7c60b30ae4663898f0687adeba06c51f97.
+
+Regression suite (run separately with CPU thread limits):
+  tests/test_charm_structure_audit.py
+  tests/test_charm_prediction_memory.py
+  tests/test_charm_localization_routes.py
+  74 passed in 29.66s.
+New suite: tests/test_charm_node_signal.py
+  15 passed in 17.72s.
+Total: 89 distinct passing tests across the two runs.
+
+New tests verify pointwise no_graph equality, no message gradients, no dependence
+on other token rows, per-channel/full-vector exchange, source-level inference,
+fixed coordinate alignment, unflipped raw-channel direction, model-specific
+thresholds, input immutability, no edge-array reads, all three real CLI paths,
+reading completed route/head results without model execution, old config keys,
+and exclusion of model/NPZ payloads from review bundles.
+
+Natural-data validation: ran review/compare on the previously uploaded QA CSV
+export (not a new experiment), reproducing node_only AUROC 0.854746 and charm_in
+AUROC 0.884368. 30,619 token coordinates align; error agreement counts are
+620 both detected, 149 node-only detected, 285 full-only detected, 1,253 missed
+by both at their own saved thresholds. Review bundle ~3.00 MiB.
+
+No natural node checkpoint, node input channel experiment, or new routes/heads
+results were available here. New model execution tests use synthetic data only.

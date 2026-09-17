@@ -1,4 +1,4 @@
-"""One entry for CHARM experiments. New position/head modes: LOCALIZATION.md."""
+"""One entry for CHARM experiments. See LOCALIZATION.md and NODE_SIGNAL.md for audit modes."""
 
 import argparse
 from pathlib import Path
@@ -177,14 +177,14 @@ def run_matching(args, output):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads'], default='report')
+    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review'], default='report')
     parser.add_argument('--root', default=DEFAULT_ROOT)
     parser.add_argument('--prepared', default=DEFAULT_PREPARED)
     parser.add_argument('--output', help='New output directory; default <root>/audit_<mode>')
     parser.add_argument('--pairs', help='Reuse one locked pairs.json for every model')
     parser.add_argument('--models', nargs='+', default=MODELS)
     parser.add_argument('--ablations', nargs='+', choices=MODEL_ABLATIONS+GRAPH_ABLATIONS, default=ABLATIONS)
-    parser.add_argument('--checkpoint', help='Original charm_in checkpoint, only for frozen ablations')
+    parser.add_argument('--checkpoint', help='Frozen checkpoint: default charm_in; node mode defaults to node_only')
     parser.add_argument('--device', default='cuda')
     parser.add_argument('--edge-chunk', type=int, default=4096)
     parser.add_argument('--seed', type=int, default=0)
@@ -197,6 +197,8 @@ def main(argv=None):
     parser.add_argument('--channels', nargs='+', help='Exact original LLM coordinates, e.g. 0:0 1:3 (not selected heads)')
     parser.add_argument('--channel-operations', nargs='+', choices=['zero', 'coupled', 'independent'], default=['zero'])
     parser.add_argument('--channel-sites', nargs='+', choices=['node', 'edge', 'both'], default=['node', 'edge'])
+    parser.add_argument('--node-operations', nargs='+', choices=['swap', 'zero'], default=['swap'])
+    parser.add_argument('--audit-inputs', nargs='+', default=[], help='Extra completed audit directories for review')
     args = parser.parse_args(argv)
     output = Path(args.output) if args.output else Path(args.root)/('audit_'+args.mode)
     protected = [Path(args.root), Path(args.prepared)]
@@ -204,12 +206,15 @@ def main(argv=None):
     if output.resolve() in [p.resolve() for p in protected] or (output/'prediction_settings.json').exists():
         raise ValueError('Use a separate output directory, not original data/results')
     config = vars(args).copy()
+    if args.mode not in ('compare', 'node', 'review'):
+        config.pop('node_operations')
+        config.pop('audit_inputs')
     if args.mode in ('report', 'ablate', 'train', 'match'):
         # Preserve actual saved configurations of the four existing workflows.
         for key in ('pair_tier', 'window', 'channel_unit', 'llm_layers', 'channels', 'channel_sites', 'channel_operations'):
             config.pop(key)
     output = prepare_output(output, config)
-    if args.mode in ('ablate', 'train', 'heads'):
+    if args.mode in ('ablate', 'train', 'heads', 'node'):
         import torch
         torch.set_num_threads(1)
     pairs = read_pairs(args)
@@ -227,9 +232,18 @@ def main(argv=None):
     elif args.mode == 'routes':
         from .routes import run_routes
         run_routes(args, output, pairs)
-    else:
+    elif args.mode == 'heads':
         from .head_audit import run_heads
         run_heads(args, output, pairs)
+    elif args.mode == 'compare':
+        from .compare_models import run_compare
+        run_compare(args, output, pairs)
+    elif args.mode == 'node':
+        from .node_signal import run_node
+        run_node(args, output, pairs)
+    else:
+        from .review_results import run_review
+        run_review(args, output, pairs)
     print('Results:', output, flush=True)
 
 
