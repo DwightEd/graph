@@ -177,7 +177,7 @@ def run_matching(args, output):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review'], default='report')
+    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow'], default='report')
     parser.add_argument('--root', default=DEFAULT_ROOT)
     parser.add_argument('--prepared', default=DEFAULT_PREPARED)
     parser.add_argument('--output', help='New output directory; default <root>/audit_<mode>')
@@ -199,6 +199,9 @@ def main(argv=None):
     parser.add_argument('--channel-sites', nargs='+', choices=['node', 'edge', 'both'], default=['node', 'edge'])
     parser.add_argument('--node-operations', nargs='+', choices=['swap', 'zero'], default=['swap'])
     parser.add_argument('--audit-inputs', nargs='+', default=[], help='Extra completed audit directories for review')
+    parser.add_argument('--tail-fraction', type=float, default=.2, help='Within-answer score tails, descriptive only')
+    parser.add_argument('--node-values', action='store_true', help='Read raw self-attention x, never edges, for highlow')
+    parser.add_argument('--fixed-output', help='Completed fixed_graph output for score-only comparison')
     args = parser.parse_args(argv)
     output = Path(args.output) if args.output else Path(args.root)/('audit_'+args.mode)
     protected = [Path(args.root), Path(args.prepared)]
@@ -206,6 +209,9 @@ def main(argv=None):
     if output.resolve() in [p.resolve() for p in protected] or (output/'prediction_settings.json').exists():
         raise ValueError('Use a separate output directory, not original data/results')
     config = vars(args).copy()
+    if args.mode != 'highlow':
+        for key in ('tail_fraction', 'node_values', 'fixed_output'):
+            config.pop(key)
     if args.mode not in ('compare', 'node', 'review'):
         config.pop('node_operations')
         config.pop('audit_inputs')
@@ -241,6 +247,9 @@ def main(argv=None):
     elif args.mode == 'node':
         from .node_signal import run_node
         run_node(args, output, pairs)
+    elif args.mode == 'highlow':
+        from .score_groups import run_highlow
+        run_highlow(args, output, pairs)
     else:
         from .review_results import run_review
         run_review(args, output, pairs)

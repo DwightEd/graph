@@ -1,0 +1,19 @@
+2026-09-17 high/low score audit
+Base remote main: 3ba53b69ebe24d00c2f20f733ddb2a104d3b7e00
+
+Ran 74 previous localization/route/model regressions and 10 new highlow tests:
+84 passed in 29.90s (local CPU).
+
+New tests: label-blind/tie-preserving tails, fixed normal partners, no-edge node
+loading, same-interval controls, source weighting, actual main CLI with no torch,
+immutable original inputs, common coverage and exact token-ID comparison.
+The newer node/compare/review modules from the base commit were NOT rerun here;
+they are unchanged and remain available through main.
+
+Executed highlow CSV-only mode on the user's uploaded QA tables:
+node_only 0.8547457763042392, charm_in 0.8843679347093193 AUROC reproduced.
+Direct score from the saved across-channel mean self-attention: 0.48013329366145246.
+Original full-stream labels, model thresholds and 50 matched pairs unchanged.
+Raw layer/head node inputs, user checkpoints and new fixed_graph scores were
+not available locally; those additional paths were tested only on synthetic data.
+No natural-data LLM/GNN forward or training was run.
