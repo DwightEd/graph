@@ -1,0 +1,28 @@
+2026-09-17 local validation
+Base: DwightEd/graph main c231e20b6a0376eb4bf74130e3e668414a53b138
+
+Command:
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest \
+  tests/test_charm_structure_audit.py tests/test_charm_prediction_memory.py \
+  tests/test_charm_localization_routes.py tests/test_charm_lockin.py \
+  tests/test_charm_whitebox.py -q
+
+Result: 118 passed in 24.30s (CPU; PyTorch 2.10.0).
+100 existing core/localization/lockin tests and 18 new whitebox tests.
+This is not a claim that every repository test was executed.
+
+New checks: original no_graph forward parity; bias-propagated local affine
+identity; analytic coefficients vs autograd; readout reconstruction; no message
+network calls and no edge NPZ member reads; ReLU path crossings; quadrature
+allocation failure despite cancellation in the completeness sum; identical
+endpoints; full/no-channel hybrid identities; layer/magnitude-matched random
+counts; zero-exchangeability disclosure; learned-weight sign and positive-ReLU
+rescaling controls; nonlinear head-combination example with equal marginal
+means; source aggregation; actual CLI, resume, no-torch report mode, original
+file byte/mtime invariance and baseline replay failure. PNG and HTML outputs
+were generated; a synthetic layer-contrast plot was visually inspected.
+
+No user's natural node_only checkpoint was available locally. No natural-data
+whitebox score, head identity, native LLM mechanism, retraining, or new detector
+performance is claimed. Source code changes are limited to one new main mode,
+three whitebox modules, documentation and tests. Prior experiments unchanged.

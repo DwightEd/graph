@@ -177,7 +177,7 @@ def run_matching(args, output):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin'], default='report')
+    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin', 'whitebox'], default='report')
     parser.add_argument('--root', default=DEFAULT_ROOT)
     parser.add_argument('--prepared', default=DEFAULT_PREPARED)
     parser.add_argument('--output', help='New output directory; default <root>/audit_<mode>')
@@ -205,6 +205,10 @@ def main(argv=None):
     parser.add_argument('--lockin-stage', choices=['all', 'report'], default='all')
     parser.add_argument('--lockin-random', type=int, default=3, help='Count/lag/copy-matched message cuts')
     parser.add_argument('--lockin-pair-limit', type=int, default=0, help='Explicit smoke-test subset; 0 uses all fixed pairs')
+    parser.add_argument('--wb-stage', choices=['all', 'report'], default='all')
+    parser.add_argument('--wb-max-points', type=int, default=512, help='Max integration points; failed convergence is disclosed')
+    parser.add_argument('--wb-budget', type=int, default=8, help='Fixed number of input channels for local explanation validation')
+    parser.add_argument('--wb-random', type=int, default=3, help='Layer/input-change matched random channel controls')
     args = parser.parse_args(argv)
     output = Path(args.output) if args.output else Path(args.root)/('audit_'+args.mode)
     protected = [Path(args.root), Path(args.prepared)]
@@ -213,6 +217,10 @@ def main(argv=None):
         raise ValueError('Use a separate output directory, not original data/results')
     config = vars(args).copy()
     config.pop('lockin_stage')
+    config.pop('wb_stage')
+    if args.mode != 'whitebox':
+        for key in ('wb_max_points', 'wb_budget', 'wb_random'):
+            config.pop(key)
     if args.mode != 'lockin':
         config.pop('lockin_random')
         config.pop('lockin_pair_limit')
@@ -227,7 +235,7 @@ def main(argv=None):
         for key in ('pair_tier', 'window', 'channel_unit', 'llm_layers', 'channels', 'channel_sites', 'channel_operations'):
             config.pop(key)
     output = prepare_output(output, config)
-    if args.mode in ('ablate', 'train', 'heads', 'node') or (args.mode == 'lockin' and args.lockin_stage == 'all'):
+    if args.mode in ('ablate', 'train', 'heads', 'node') or (args.mode == 'lockin' and args.lockin_stage == 'all') or (args.mode == 'whitebox' and args.wb_stage == 'all'):
         import torch
         torch.set_num_threads(1)
     pairs = read_pairs(args)
@@ -254,6 +262,9 @@ def main(argv=None):
     elif args.mode == 'node':
         from .node_signal import run_node
         run_node(args, output, pairs)
+    elif args.mode == 'whitebox':
+        from .whitebox import run_whitebox
+        run_whitebox(args, output, pairs)
     elif args.mode == 'lockin':
         from .lockin import run_lockin
         run_lockin(args, output, pairs)
