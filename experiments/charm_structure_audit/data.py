@@ -8,6 +8,7 @@ import pandas as pd
 
 
 GRAPH_KEYS = ('x', 'edge_index', 'edge_attr', 'edge_mark', 'prompt_length', 'layers', 'heads')
+SAMPLE_KEYS = ('gold', 'onset', 'spans', 'offsets', 'response', 'token_ids', 'prompt_length')
 
 
 def read_json(path):
@@ -34,12 +35,13 @@ def save_scores(path, **values):
 def load_graph(record, prepared):
     path = Path(prepared) / 'graphs' / record['split'] / (str(record['id']) + '.npz')
     with np.load(path, allow_pickle=False) as saved:
-        arrays = {key: saved[key] for key in saved.files}
-    identity = json.loads(str(arrays['record_json']))
+        identity = json.loads(str(saved['record_json']))
+        graph = {key: saved[key] for key in GRAPH_KEYS}
+        sample = {key: saved[key] for key in SAMPLE_KEYS}
     if str(identity['id']) != str(record['id']) or str(identity['source_id']) != str(record['source_id']):
         raise ValueError('Prepared graph identity differs from record: ' + str(path))
-    graph = {key: arrays[key] for key in GRAPH_KEYS}
-    return graph, arrays
+    # Evaluation records must not retain every answer's large edge tensors.
+    return graph, sample
 
 
 def load_predictions(directory):

@@ -1,8 +1,8 @@
 2026-09-17 local validation
 Base repository: DwightEd/graph main @96cc93fb8ba1c7e5c1e2349ae9c62ddb62d413bb
 
-python -m pytest tests/test_charm_structure_audit.py -q
-41 passed in 5.09s (CPU, torch 2.10.0)
+python -m pytest tests/test_charm_structure_audit.py tests/test_charm_prediction_memory.py -q
+42 passed in 5.29s (CPU, torch 2.10.0)
 
 Tested forward/gradient parity with an independent expression of the original
 CHARM algebra, strict legacy state keys, all module controls, no-relay and
@@ -16,3 +16,6 @@ All six original full-stream AUROC/AP values were reproduced.
 Span-position and fixed matched-region metrics were recomputed from those
 natural-data CSVs. No model forward, intervention or retraining on natural
 RAGTruth data was executed locally. No new detector performance is claimed.
+
+Final memory regression: prediction metadata excludes x/edge_index/edge_attr/edge_mark;
+collecting selection/calibration predictions no longer retains every full graph.
