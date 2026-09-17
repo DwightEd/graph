@@ -177,7 +177,7 @@ def run_matching(args, output):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin', 'whitebox'], default='report')
+    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin', 'whitebox', 'continuity'], default='report')
     parser.add_argument('--root', default=DEFAULT_ROOT)
     parser.add_argument('--prepared', default=DEFAULT_PREPARED)
     parser.add_argument('--output', help='New output directory; default <root>/audit_<mode>')
@@ -209,13 +209,23 @@ def main(argv=None):
     parser.add_argument('--wb-max-points', type=int, default=512, help='Max integration points; failed convergence is disclosed')
     parser.add_argument('--wb-budget', type=int, default=8, help='Fixed number of input channels for local explanation validation')
     parser.add_argument('--wb-random', type=int, default=3, help='Layer/input-change matched random channel controls')
+    parser.add_argument('--continuity-stage', choices=['observe', 'train'], default='observe')
+    parser.add_argument('--continuity-seeds', nargs='+', type=int, default=[0, 1, 2])
+    parser.add_argument('--continuity-schemes', nargs='+', choices=['token', 'span_equal', 'onset_half', 'random_onset_half'],
+                        default=['token', 'span_equal', 'onset_half', 'random_onset_half'])
     args = parser.parse_args(argv)
-    output = Path(args.output) if args.output else Path(args.root)/('audit_'+args.mode)
+    default_name = 'audit_'+args.mode
+    if args.mode == 'continuity':
+        default_name += '_'+args.continuity_stage
+    output = Path(args.output) if args.output else Path(args.root)/default_name
     protected = [Path(args.root), Path(args.prepared)]
     protected += [Path(args.root)/name/'test' for name in MODELS]
     if output.resolve() in [p.resolve() for p in protected] or (output/'prediction_settings.json').exists():
         raise ValueError('Use a separate output directory, not original data/results')
     config = vars(args).copy()
+    if args.mode != 'continuity':
+        for key in ('continuity_stage', 'continuity_seeds', 'continuity_schemes'):
+            config.pop(key)
     config.pop('lockin_stage')
     config.pop('wb_stage')
     if args.mode != 'whitebox':
@@ -235,7 +245,7 @@ def main(argv=None):
         for key in ('pair_tier', 'window', 'channel_unit', 'llm_layers', 'channels', 'channel_sites', 'channel_operations'):
             config.pop(key)
     output = prepare_output(output, config)
-    if args.mode in ('ablate', 'train', 'heads', 'node') or (args.mode == 'lockin' and args.lockin_stage == 'all') or (args.mode == 'whitebox' and args.wb_stage == 'all'):
+    if (args.mode == 'continuity' and args.continuity_stage == 'train') or args.mode in ('ablate', 'train', 'heads', 'node') or (args.mode == 'lockin' and args.lockin_stage == 'all') or (args.mode == 'whitebox' and args.wb_stage == 'all'):
         import torch
         torch.set_num_threads(1)
     pairs = read_pairs(args)
@@ -262,6 +272,9 @@ def main(argv=None):
     elif args.mode == 'node':
         from .node_signal import run_node
         run_node(args, output, pairs)
+    elif args.mode == 'continuity':
+        from .continuity import run_continuity
+        run_continuity(args, output, pairs)
     elif args.mode == 'whitebox':
         from .whitebox import run_whitebox
         run_whitebox(args, output, pairs)

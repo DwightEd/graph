@@ -1,0 +1,28 @@
+2026-09-17 continuity experiment verification
+Base: DwightEd/graph main 98745c44c3248f12e4f02399e425b9838b242f0b
+
+Executed suite:
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest \
+ tests/test_charm_structure_audit.py tests/test_charm_prediction_memory.py \
+ tests/test_charm_localization_routes.py tests/test_charm_lockin.py \
+ tests/test_charm_whitebox.py tests/test_charm_continuity.py -q
+
+135 passed in 28.13s. After the final training-summary-only change, the 17
+continuity tests were rerun: 17 passed in 5.43s.
+
+17 new cases include shared-permutation prediction/loss/parameter-gradient
+identities on the actual node network; weighted Bayes optimum; constant logit
+shift vs input-dependent ranking change; global and within-span weight mass;
+random-placebo multiset preservation; singleton/overlap handling; no edge reads
+for node-only; fit-only normalization; same original model forward; previous
+label never crosses answer boundaries; history-only oracle has conditional
+AUC 0.5; and actual observe/train CLI for both node_only and charm_in with
+4 loss schemes (8 synthetic fits of 2 epochs), independent calibration,
+completed-fit reuse, and original file byte/mtime preservation.
+
+Natural data executed: read uploaded QA CSVs for node_only/charm_in (149 answers,
+30619 tokens), recomputed original full-stream metrics and conditional/paired
+continuity statistics with 2000 source bootstrap resamples. No natural
+checkpoint, training cache, or LLM forward was available locally. The new
+natural-data reweighting experiment must run on the user's prepared inputs.
+All synthetic results are software validation, not hallucination evidence.
