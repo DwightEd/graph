@@ -177,7 +177,7 @@ def run_matching(args, output):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin', 'whitebox', 'continuity', 'export_circuit', 'circuit', 'mixture'], default='report')
+    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin', 'whitebox', 'continuity', 'export_circuit', 'circuit', 'mixture', 'lda_audit'], default='report')
     parser.add_argument('--root', default=DEFAULT_ROOT)
     parser.add_argument('--prepared', default=DEFAULT_PREPARED)
     parser.add_argument('--output', help='New output directory; default <root>/audit_<mode>')
@@ -218,7 +218,15 @@ def main(argv=None):
     parser.add_argument('--mixture-seeds', nargs='+', type=int, default=[0, 1, 2])
     parser.add_argument('--mixture-ridge', type=float, default=1e-3)
     parser.add_argument('--mixture-iterations', type=int, default=200)
+    parser.add_argument('--lda-stage', choices=['all', 'report', 'scores'], default='all')
+    parser.add_argument('--lda-prompt', action='store_true', help='Also read retained prompt edges for conditional LDA controls')
+    parser.add_argument('--lda-ridge', type=float, default=1e-3)
+    parser.add_argument('--lda-window', type=int, default=10)
     args = parser.parse_args(argv)
+    if args.mode == 'lda_audit':
+        from .lda_audit import run_lda_audit
+        run_lda_audit(args)
+        return
     if args.mode == 'mixture':
         from .mixture import run_mixture
         run_mixture(args)
@@ -243,6 +251,8 @@ def main(argv=None):
     if output.resolve() in [p.resolve() for p in protected] or (output/'prediction_settings.json').exists():
         raise ValueError('Use a separate output directory, not original data/results')
     config = vars(args).copy()
+    for key in ('lda_stage', 'lda_prompt', 'lda_ridge', 'lda_window'):
+        config.pop(key)
     for key in ('mixture_stage', 'mixture_seeds', 'mixture_ridge', 'mixture_iterations'):
         config.pop(key)
     config.pop('circuit_input')

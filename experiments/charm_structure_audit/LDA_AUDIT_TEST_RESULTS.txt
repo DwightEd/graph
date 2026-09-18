@@ -1,0 +1,31 @@
+2026-09-18 local validation
+Base: DwightEd/graph main 2ea741f2c65a597e8fcd5aef95dcbc8108934b6f
+
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest \
+  tests/test_charm_lda_audit.py tests/test_charm_mixture.py \
+  tests/test_charm_structure_audit.py -q
+69 passed in 22.82s: 17 new LDA audit cases, 11 mixture cases, 41 core cases.
+This is not the entire repository suite.
+
+Tests include numerical equality to the existing regularized supervised LDA;
+exact covariance and common/contrast score decompositions; known same-layer and
+cross-layer noise-cancellation examples; head-identity removal with equal means;
+past-only indexing with no current/future/cross-answer leakage; nuisance-only
+signal cancelled by conditional class weighting; prompt-regression residuals;
+node input reads no edges; prompt edge sums retain channel identities;
+full node/prompt/saved-score CLI; source-file byte and mtime preservation;
+TEST-label changes leave FIT parameters unchanged; locked-pair contribution
+sums reconstruct score gaps; missing one-source uncertainty remains missing.
+
+Actually ran --mode lda_audit --lda-stage scores on the user's uploaded
+mixture_review.tar.gz scores and existing 50 locked pairs (40 sources).
+No new natural FIT arrays were available, so no natural covariance ablation,
+conditional refit, head-sorting refit, or prompt-edge experiment was run here.
+The production scores entry reproduces the following natural-data observations:
+Common observable tokens=30470, positives=2306.
+Full / past-10-only / current-minus-past AUROC:
+0.842472 / 0.865594 / 0.534348 (full common stream).
+0.779257 / 0.846240 / 0.551463 (matched back halves, equal-source mean).
+0.756394 / 0.481234 / 0.748569 (previous token erroneous, pooled).
+These are saved-score diagnostics, not a causal proof or unsupervised detector.
+No model checkpoint, raw LLM, new neural training or original-file mutation.
