@@ -11,7 +11,7 @@ from experiments.path_conflict.data import token_text_offsets, quote_tokens
 from experiments.unsupervised_token_graph.span_audit.inputs import AuditInputs
 from experiments.unsupervised_token_graph.span_audit.matching import match_controls
 
-from .native import forward_target
+from .native import forward_target, prepare_target
 
 
 GROUPS = ("source", "other_prompt", "history", "query_self")
@@ -105,7 +105,8 @@ def run_target(model, tokenizer, source_record, answer, role, position, heads, a
     target = int(answer.response_ids[position])
     groups = target_groups(answer, tokenizer, source_record, position, args.recent_window)
     groups["selected_heads"] = heads
-    baseline_logp, baseline = forward_target(model, prefix_ids, target, groups)
+    prepared = prepare_target(model, prefix_ids)
+    baseline_logp, baseline = forward_target(model, prepared, target, groups)
 
     local = {
         (row["layer"], row["head"], row["source_group"]): row
@@ -116,7 +117,7 @@ def run_target(model, tokenizer, source_record, answer, role, position, heads, a
         for group in GROUPS:
             intervention = dict(layer=layer, head=head, source_group=group)
             changed_logp, _ = forward_target(
-                model, prefix_ids, target, groups, intervention
+                model, prepared, target, groups, intervention
             )
             local_row = local[(layer, head, group)]
             final_support = baseline_logp - changed_logp
@@ -137,6 +138,7 @@ def run_target(model, tokenizer, source_record, answer, role, position, heads, a
                 changed_logp=changed_logp,
                 downstream_reversal=local_row["local_support"] * final_support < 0,
             ))
+    del prepared
     target_row = dict(
         response_id=answer.response_id,
         source_id=answer.source_id,

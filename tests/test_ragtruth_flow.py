@@ -1,12 +1,15 @@
-from types import MethodType, SimpleNamespace
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
 import torch
 
-from test_path_conflict import fixture
-from experiments.ragtruth_flow.native import forward_target
+from experiments.ragtruth_flow.native import (
+    cached_values,
+    forward_target,
+    prepare_target,
+)
 from experiments.ragtruth_flow.screen import row_features
 from experiments.ragtruth_flow.confirm import target_rows
 from experiments.ragtruth_flow.report import paired_functional, competition
@@ -35,22 +38,31 @@ def test_target_rows_separates_onset_and_mid_continuation():
     ]
 
 
-def install_base_forward(model):
-    def base_forward(base, input_ids, attention_mask=None, use_cache=False,
-                     output_attentions=True, return_dict=True):
-        state = model.embedding(input_ids)
-        attentions = []
-        for layer in base.layers:
-            state, attention = layer(state)
-            attentions.append(attention)
-        state = base.norm(state)
-        return SimpleNamespace(last_hidden_state=state, attentions=tuple(attentions))
-    model.model.forward = MethodType(base_forward, model.model)
+def test_cached_values_repeat_gqa_heads():
+    values = torch.arange(40.0).reshape(1, 2, 5, 4)
+    cache = SimpleNamespace(
+        layers=[SimpleNamespace(values=values)]
+    )
+    repeated = cached_values(cache, 0, heads=4, kv_heads=2)
+    assert repeated.shape == (1, 4, 5, 4)
+    torch.testing.assert_close(repeated[:, 0], repeated[:, 1])
+    torch.testing.assert_close(repeated[:, 2], repeated[:, 3])
 
 
-def test_actual_token_support_cut_matches_direct_logprob_change():
-    model, probe = fixture()
-    install_base_forward(model)
+def test_cached_query_matches_full_eager_on_tiny_llama():
+    transformers = pytest.importorskip("transformers")
+    config = transformers.LlamaConfig(
+        vocab_size=64,
+        hidden_size=32,
+        intermediate_size=64,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        num_key_value_heads=2,
+        max_position_embeddings=128,
+    )
+    model = transformers.LlamaForCausalLM(config).eval()
+    prefix = [2, 3, 4, 5, 6]
+    target = 7
     groups = dict(
         source=np.array([0]),
         other_prompt=np.array([1, 2]),
@@ -58,24 +70,31 @@ def test_actual_token_support_cut_matches_direct_logprob_change():
         query_self=np.array([4]),
         selected_heads=((0, 1),),
     )
-    target = 7
-    base, run = forward_target(model, probe["prefix_ids"], target, groups)
+
+    model.set_attn_implementation("eager")
+    with torch.inference_mode():
+        full = model(torch.tensor([prefix])).logits[0, -1]
+        expected = float(full.double().log_softmax(-1)[target])
+
+    prepared = prepare_target(model, prefix)
+    actual, run = forward_target(model, prepared, target, groups)
     changed, _ = forward_target(
         model,
-        probe["prefix_ids"],
+        prepared,
         target,
         groups,
         dict(layer=0, head=1, source_group="source"),
     )
+
+    assert actual == pytest.approx(expected, abs=2e-5)
+    assert np.isfinite(actual - changed)
     local = next(
         row for row in run.local
-        if row["layer"] == 0 and row["head"] == 1 and row["source_group"] == "source"
+        if row["layer"] == 0
+        and row["head"] == 1
+        and row["source_group"] == "source"
     )
-    assert np.isfinite(base - changed)
     assert np.isfinite(local["local_support"])
-    manual = model(torch.tensor([probe["prefix_ids"]])).logits[0, -1].double().log_softmax(-1)[target]
-    assert base == pytest.approx(float(manual), abs=2e-6)
-
 
 def test_pair_report_uses_same_response_coordinates():
     table = pd.DataFrame([
