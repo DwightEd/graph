@@ -17,6 +17,13 @@ from .scoring import evaluate_candidates
 
 
 PROTOCOL = "evidence_target_flow_v1"
+WRITE_IDENTITY = ("case_id", "source_id", "side", "panel", "seed", "trace", "query")
+
+
+def attach_identity(frame, identity):
+    for key in WRITE_IDENTITY:
+        frame[key] = identity[key]
+    return frame
 
 
 def save_capture(path, identity, variant, score, run, trial=None):
@@ -45,9 +52,7 @@ def baseline_panel(model, tokenizer, case, side, probe, output):
     if not path.exists():
         save_capture(path, identity, "full", score, run)
 
-    writes = pd.DataFrame(run.writes)
-    for key, value in identity.items():
-        writes[key] = value
+    writes = attach_identity(pd.DataFrame(run.writes), identity)
     return identity, score, writes, source_rows(tokenizer, probe, identity)
 
 

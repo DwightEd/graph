@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 
+from experiments.path_conflict.flow import attach_identity
 from experiments.path_conflict.flow_inputs import add_flow_groups
 from experiments.path_conflict.flow_plan import opposition, select_heads, sign_role
 from experiments.path_conflict.flow_report import role_table
@@ -80,3 +81,21 @@ def test_supervised_head_statistics_separates_self_and_prompt_roles():
     frame = head_statistics(values, prompt, labels, np.ones(2), np.ones(2), heads=2)
     assert frame.loc[0, "routing_pattern"] == "self_up_prompt_down"
     assert frame.loc[1, "routing_pattern"] == "self_down_prompt_up"
+
+
+def test_write_identity_ignores_candidate_list():
+    frame = pd.DataFrame(dict(layer=[0, 1], head=[2, 3]))
+    identity = dict(
+        case_id="c",
+        source_id="s",
+        side="supported",
+        panel="natural",
+        seed=0,
+        trace="00000.npz",
+        query=42,
+        candidates=[" correct", " wrong"],
+    )
+    result = attach_identity(frame, identity)
+    assert "candidates" not in result
+    assert result.case_id.tolist() == ["c", "c"]
+    assert result["query"].tolist() == [42, 42]
