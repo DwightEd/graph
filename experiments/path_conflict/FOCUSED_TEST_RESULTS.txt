@@ -1,0 +1,34 @@
+2026-09-18: focused native evidence-write follow-up
+Remote base: 0455353c31c424fb2b922d6abb0db172c90600c4
+
+Command actually executed:
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest \
+  tests/test_path_conflict.py tests/test_path_conflict_focused.py -q
+Result: 37 passed, 1 skipped (CPU).
+21 existing tests and 16 new test cases. Not the full repository suite.
+The skipped test requires the Transformers package, unavailable locally.
+
+The tests execute actual attention, GQA expansion, residuals and MLPs in the
+existing small causal test Transformer. Checks include:
+- Native no-op parity and A V W_O reconstruction, independent source summation.
+- Disjoint scope/value/self/recent/remote masks and pre-target token position.
+- Canonical candidate first probabilities and log-odds in float32 and bfloat16.
+- Vocabulary-chunked FP32 projection against direct full multiplication.
+- Two interventions on the same layer both applied; zero and half doses.
+- Identity restoration, original same-prefix MLP-output hold under upstream cuts.
+- Final-layer query cuts do not create later-token effects; earlier cuts can.
+- Full source-address routes, causal zeros, source value/write norms.
+- Random interventions use the layer-specific norms of the real parent cut.
+- Explicit single/joint/random/dose/restore plans; joint difference identities.
+- Actual panel execution, resume, report, PNG/HTML/archive creation, weights unchanged.
+
+Re-read the user's old archive: L22H28 evidence local support is
+6.728140830993652 (supported) vs 0.798734188079834 (unsupported).
+Its first probability identity error reaches 0.24925364553928375.
+These old observations motivate the new plan; they are not new interventions.
+
+No original sampling NPZs, natural Llama-3.1-8B weights or CUDA were available.
+The natural focused run has NOT been executed. The code does not claim a new
+hallucination mechanism, restored factual generation, or detection performance.
+The current main's separate continuity changes are preserved. No checkpoint,
+large native data or prior output files are committed.

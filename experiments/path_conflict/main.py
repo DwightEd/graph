@@ -89,7 +89,9 @@ def main(argv=None):
     parser.add_argument('--stage', choices=['inventory', 'run', 'report'], default='run')
     parser.add_argument('--samples', default=DEFAULT_SAMPLES)
     parser.add_argument('--cases', default=str(Path(__file__).with_name('cases.json')))
-    parser.add_argument('--output', default='outputs/same_question_path_conflict')
+    parser.add_argument('--output')
+    parser.add_argument('--study', choices=['coarse', 'focused'], default='coarse')
+    parser.add_argument('--recent-window', type=int, default=10)
     parser.add_argument('--model', help='Same original checkpoint at a relocated local path')
     parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--dtype', choices=['float32', 'float16', 'bfloat16'], default='bfloat16')
@@ -103,6 +105,13 @@ def main(argv=None):
     parser.add_argument('--replay-atol', type=float, default=.25, help='Explicit bf16 cached-vs-prefill logit tolerance; error is saved')
     parser.add_argument('--message-rtol', type=float, default=.02, help='Relative A V W_O numerical reconstruction tolerance')
     args = parser.parse_args(argv)
+    if args.output is None:
+        args.output = ('outputs/same_question_path_conflict_focused_v2' if args.study == 'focused'
+                       else 'outputs/same_question_path_conflict_coarse_v2')
+    if args.study == 'focused':
+        from .focused import run_focused
+        run_focused(args)
+        return
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     if args.stage == 'report':

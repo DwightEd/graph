@@ -9,6 +9,8 @@ from dataclasses import dataclass
 import torch
 from torch.nn import functional as F
 
+from .operators import grouped_values, source_write, equal_norm_change, lens_margin
+
 
 @dataclass(frozen=True)
 class Intervention:
@@ -18,48 +20,27 @@ class Intervention:
     heads: tuple = ()
     operation: str = 'cut'
     seed: int = 0
-
-
-def grouped_values(projected_values, heads, kv_heads):
-    batch, length, width = projected_values.shape
-    values = projected_values.view(batch, length, kv_heads, width // kv_heads).transpose(1, 2)
-    return values.repeat_interleave(heads // kv_heads, dim=1)
-
-
-def source_write(attention, values, output_weight, queries, sources, heads):
-    """Return head-resolved weighted V and its summed W_O write. Batch size is one."""
-    selected_attention = attention[0][:, queries][:, :, sources]
-    weighted_values = selected_attention @ values[0][:, sources]
-    selected = torch.zeros_like(weighted_values)
-    selected[list(heads)] = weighted_values[list(heads)]
-    joined = selected.transpose(0, 1).reshape(len(queries), -1)
-    return selected, F.linear(joined, output_weight), selected_attention.sum(dim=-1)
-
-
-def equal_norm_change(write, seed):
-    """A residual-space random direction with the SAME L2 change per query."""
-    generator = torch.Generator(device=write.device).manual_seed(seed)
-    random = torch.randn(write.shape, generator=generator, device=write.device, dtype=torch.float32)
-    random /= random.norm(dim=-1, keepdim=True).clamp_min(1e-30)
-    return (random * write.float().norm(dim=-1, keepdim=True)).to(write.dtype)
-
-
-def lens_margin(model, states, correct, wrong):
-    normalized = model.model.norm(states)
-    direction = model.lm_head.weight[correct].float() - model.lm_head.weight[wrong].float()
-    return (normalized.float() * direction).sum(dim=-1)
+    dose: float = 1.0
+    reference_norm: float | None = None
 
 
 class NativeRun:
     """One forward's hooks. Handles are removed even when the forward raises."""
-    def __init__(self, model, prefix_length, groups, candidate_ids, interventions=(), restore=None):
+    def __init__(self, model, prefix_length, groups, candidate_ids, interventions=(), restore=None, trace_heads=(), trace_window=10):
         self.model = model
         self.prefix_length = prefix_length
         self.query = prefix_length - 1
         self.groups = groups
         self.correct, self.wrong = candidate_ids
-        self.interventions = {item.layer: item for item in interventions}
+        self.interventions = {}
+        for item in interventions:
+            self.interventions.setdefault(item.layer, []).append(item)
         self.restore = restore
+        self.trace_heads = trace_heads
+        self.trace_window = trace_window
+        self.routes = {}
+        self.baseline_mlps = {}
+        self.final_normalized = None
         self.values, self.head_states, self.residuals = {}, {}, {}
         self.baseline_heads, self.trajectory, self.writes, self.changes = {}, [], [], []
         self.handles = []
@@ -73,11 +54,15 @@ class NativeRun:
             self.handles.append(layer.self_attn.register_forward_hook(self.attention_hook(index)))
             self.handles.append(layer.mlp.register_forward_hook(self.mlp_hook(index)))
             self.handles.append(layer.register_forward_hook(self.layer_hook(index)))
+        self.handles.append(self.model.lm_head.register_forward_pre_hook(self.save_normalized))
         return self
 
     def __exit__(self, *exception):
         for handle in self.handles:
             handle.remove()
+
+    def save_normalized(self, module, inputs):
+        self.final_normalized = inputs[0][0].detach()
 
     def save_residual(self, index):
         def hook(module, inputs):
@@ -103,15 +88,22 @@ class NativeRun:
 
     def mlp_hook(self, index):
         def hook(module, inputs, output):
-            item = self.interventions.get(index)
-            if item is None or item.groups != ('mlp',):
-                return output
-            queries = [self.query] if item.scope == 'query' else list(range(self.prefix_length))
-            changed = output.clone()
-            write = output[0, queries]
-            changed[0, queries] = 0
-            self.changes.append(dict(layer=index, scope=item.scope, operation='cut_mlp', groups='mlp',
-                query_change_norm=float(write[-1].float().norm()), prefix_change_norm=float(write.float().norm())))
+            if not self.interventions and self.restore is None:
+                self.baseline_mlps[index] = output[0, self.query].detach().cpu().clone()
+            changed = output
+            for item in self.interventions.get(index, ()):
+                if item.groups == ('mlp',):
+                    queries = [self.query] if item.scope == 'query' else list(range(self.prefix_length))
+                    write = item.dose * output[0, queries]
+                    changed = changed.clone()
+                    changed[0, queries] -= write
+                    self.changes.append(dict(layer=index, scope=item.scope, operation='cut_mlp', groups='mlp',
+                        dose=item.dose, query_change_norm=float(write[-1].float().norm()),
+                        prefix_change_norm=float(write.float().norm())))
+            restore = self.restore
+            if restore is not None and restore['layer'] == index and restore.get('site', 'heads') == 'mlp':
+                changed = changed.clone()
+                changed[0, self.query] = restore['states'].to(changed)
             return changed
         return hook
 
@@ -121,13 +113,16 @@ class NativeRun:
             config = self.model.config
             values = grouped_values(self.values.pop(index), config.num_attention_heads, config.num_key_value_heads)
             heads = self.head_states.pop(index)
-            self.baseline_heads[index] = heads[:, :self.prefix_length].clone()
             if not self.interventions and self.restore is None:
+                self.baseline_heads[index] = heads[:, :self.prefix_length].cpu().clone()
+                self.save_routes(index, module, attention, values, attention_output)
                 self.observe(index, module, attention, values, heads, attention_output)
             changed = attention_output
-            if index in self.interventions and self.interventions[index].groups != ('mlp',):
-                changed = self.apply(index, module, attention, values, changed)
-            if self.restore is not None and index == self.restore['layer']:
+            for item in self.interventions.get(index, ()):
+                if item.groups != ('mlp',):
+                    changed = self.apply(item, module, attention, values, changed)
+            if (self.restore is not None and index == self.restore['layer']
+                    and self.restore.get('site', 'heads') == 'heads'):
                 changed = self.restore_heads(module, heads, changed)
             residual = self.residuals.pop(index) + changed[0, self.query]
             margin = lens_margin(self.model, residual, self.correct, self.wrong)
@@ -135,17 +130,17 @@ class NativeRun:
             return (changed, *output[1:])
         return hook
 
-    def apply(self, index, module, attention, values, output):
-        item = self.interventions[index]
+    def apply(self, item, module, attention, values, output):
         queries = [self.query] if item.scope == 'query' else list(range(self.prefix_length))
         sources = sorted({int(source) for name in item.groups for source in self.groups[name]})
         heads = item.heads or tuple(range(self.model.config.num_attention_heads))
         _, write, _ = source_write(attention, values, module.o_proj.weight, queries, sources, heads)
+        write = item.dose * write
         if item.operation == 'random':
-            write = equal_norm_change(write, item.seed)
+            write = equal_norm_change(write, item.seed, item.reference_norm)
         changed = output.clone()
         changed[0, queries] -= write
-        self.changes.append(dict(layer=index, scope=item.scope, operation=item.operation,
+        self.changes.append(dict(layer=item.layer, scope=item.scope, operation=item.operation, dose=item.dose,
             groups='+'.join(item.groups), query_change_norm=float(write[-1].float().norm()),
             prefix_change_norm=float(write.float().norm()), heads=list(heads)))
         return changed
@@ -154,13 +149,31 @@ class NativeRun:
         """After an upstream cut, restore only named downstream heads at the decision query."""
         head_count = self.model.config.num_attention_heads
         present = current[0, self.query].view(head_count, -1)
-        baseline = self.restore['states'][0, self.query].view(head_count, -1)
+        baseline = self.restore['states'][0, self.query].to(present).view(head_count, -1)
         delta = torch.zeros_like(present)
         selected = self.restore['heads'] or tuple(range(head_count))
         delta[list(selected)] = baseline[list(selected)] - present[list(selected)]
         result = output.clone()
         result[0, self.query] += F.linear(delta.flatten(), module.o_proj.weight)
         return result
+
+    def save_routes(self, index, module, attention, values, attention_output):
+        queries = list(range(max(0, self.query - self.trace_window), self.query + 1))
+        for layer, head in self.trace_heads:
+            if layer == index:
+                key = f'L{layer}H{head}'
+                self.routes[key + '_attention'] = attention[0, head, queries, :self.prefix_length].float().cpu().numpy()
+                self.routes[key + '_value_norm'] = values[0, head, :self.prefix_length].float().norm(dim=-1).cpu().numpy()
+                self.routes[key + '_queries'] = torch.tensor(queries).numpy()
+                width = values.shape[-1]
+                output_weight = module.o_proj.weight[:, head * width:(head + 1) * width]
+                messages = F.linear(values[0, head, :self.prefix_length], output_weight)
+                messages *= attention[0, head, self.query, :self.prefix_length, None]
+                residual = self.residuals[index] + attention_output[0, self.query]
+                base = lens_margin(self.model, residual, self.correct, self.wrong)
+                removed = lens_margin(self.model, residual[None] - messages, self.correct, self.wrong)
+                self.routes[key + '_source_write_norm'] = messages.float().norm(dim=-1).cpu().numpy()
+                self.routes[key + '_source_lens_support'] = (base - removed).cpu().numpy()
 
     def observe(self, index, module, attention, values, heads, output):
         count = self.model.config.num_attention_heads
@@ -191,7 +204,8 @@ def forward(model, ids, probe, interventions=(), restore=None):
     tensor = torch.tensor([ids], device=next(model.parameters()).device)
     first_ids = [candidate[0] for candidate in probe['candidates']]
     with torch.inference_mode(), NativeRun(model, len(probe['prefix_ids']), probe['groups'],
-                                          first_ids, interventions, restore) as run:
+                                          first_ids, interventions, restore,
+                                          probe.get('trace_heads', ()), probe.get('trace_window', 10)) as run:
         output = model(input_ids=tensor, attention_mask=torch.ones_like(tensor),
                        use_cache=False, output_attentions=True, return_dict=True)
         logits = output.logits[0].float()
@@ -199,25 +213,7 @@ def forward(model, ids, probe, interventions=(), restore=None):
 
 
 def evaluate(model, probe, interventions=(), restore=None):
-    """Score complete fixed alternatives. No temperature, top-p or newly generated gold."""
-    prefix = probe['prefix_ids']
-    record = {}
-    trajectory, writes, changes = [], [], []
-    for name, candidate in zip(('correct', 'wrong'), probe['candidates']):
-        logits, run = forward(model, prefix + candidate, probe, interventions, restore)
-        positions = torch.arange(len(prefix) - 1, len(prefix) + len(candidate) - 1, device=logits.device)
-        target = torch.tensor(candidate, device=logits.device)
-        log_probability = logits[positions].log_softmax(-1)[torch.arange(len(candidate), device=logits.device), target]
-        record[name + '_logp'] = float(log_probability.sum())
-        record[name + '_mean_logp'] = float(log_probability.mean())
-        record[name + '_tokens'] = len(candidate)
-        record[name + '_token_logps'] = log_probability.cpu().tolist()
-        record[name + '_first_logp'] = float(log_probability[0])
-        if name == 'correct':
-            first = logits[len(prefix) - 1]
-            record['next_margin'] = float(first[probe['candidates'][0][0]] - first[probe['candidates'][1][0]])
-            record['next_top1'] = int(first.argmax())
-            trajectory, writes, changes = run.trajectory, run.writes, run.changes
-    record['sequence_margin'] = record['correct_logp'] - record['wrong_logp']
-    record['mean_margin'] = record['correct_mean_logp'] - record['wrong_mean_logp']
-    return record, trajectory, writes, changes
+    """One canonical prefix readout; see scoring.py for all candidate measures."""
+    from .scoring import evaluate_candidates
+    record, run = evaluate_candidates(model, probe, interventions, restore)
+    return record, run.trajectory, run.writes, run.changes
