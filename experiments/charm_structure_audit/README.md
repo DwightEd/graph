@@ -158,3 +158,31 @@ python -u -m experiments.charm_structure_audit.main \
 - previous_gold_1：前一token都错误，比较错误延续与恢复正常。
 
 因此，若current或residual在这些固定历史标签条件下仍有明显AUROC，不能把监督性能解释成简单的“错误标签连续”。单个x_t虽然按token送入LDA，但它来自Transformer上下文化计算：q_t/k_t由前层contextual residual产生，softmax分母也包含全部可见历史key，所以x_t本身可以携带此前上下文状态。
+
+
+## 6. 幻觉边界 vs 一般句子/状态转换
+
+这个审计检验一个关键混杂：RAGTruth 的错误 span 往往覆盖整段表述，onset/exit 可分可能只是一般的语义组织或句子转换。
+
+```bash
+python -u -m experiments.charm_structure_audit.main \
+  --mode boundary_transition
+```
+
+无标签构造四个状态转换量：
+- delta_norm：标准化后的 ||x_t-x_(t-1)||；
+- innovation_norm：FIT上只用 x_(t-1) 预测 x_t 后的不可预测残差幅度；
+- layer_js：每层 head 分布在相邻token之间的JS变化；
+- head_turnover：每层最大self-attention head是否切换的比例；
+- routing_entropy_change：每层head分布的归一化routing entropy变化（不是logits entropy）。
+
+另外检测表面句子起点（标点/换行），并只用FIT无标签数据、按“句首/非句首”分别拟合median/MAD参考，得到 boundary_conditioned_outlier。
+
+评价时重点看：
+- previous_gold_0_sentence_start：幻觉onset vs 正常句子起点；
+- previous_gold_0_high_transition：幻觉onset vs 一般高innovation位置；
+- previous_gold_1：continuation vs recovery。
+
+如果监督current_lda在正常句首/高转换控制后明显下降，之前的onset信号主要是一般状态转换；如果仍然高，才说明有超出“组织新句子”的幻觉特异状态。
+
+当前实验只测routing entropy。prepared CHARM数据不保存词表/logits entropy，因此不会把routing entropy冒充生成不确定性；若现有RAGTruth cache含逐token logits entropy，再作为独立对照加入。

@@ -177,7 +177,7 @@ def run_matching(args, output):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin', 'whitebox', 'continuity', 'export_circuit', 'circuit', 'mixture', 'lda_audit', 'state_context'], default='report')
+    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin', 'whitebox', 'continuity', 'export_circuit', 'circuit', 'mixture', 'lda_audit', 'state_context', 'boundary_transition'], default='report')
     parser.add_argument('--root', default=DEFAULT_ROOT)
     parser.add_argument('--prepared', default=DEFAULT_PREPARED)
     parser.add_argument('--output', help='New output directory; default <root>/audit_<mode>')
@@ -230,6 +230,10 @@ def main(argv=None):
     if args.mode == 'state_context':
         from .state_context_audit import run_state_context
         run_state_context(args)
+        return
+    if args.mode == 'boundary_transition':
+        from .boundary_transition_audit import run_boundary_transition
+        run_boundary_transition(args)
         return
     if args.mode == 'mixture':
         from .mixture import run_mixture
