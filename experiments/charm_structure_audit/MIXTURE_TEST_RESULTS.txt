@@ -1,0 +1,28 @@
+2026-09-18: tied Gaussian hypothesis audit
+Base: DwightEd/graph main 943191edd71e77e3c471017b2b1a41524d1ac01d
+
+OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest \
+  tests/test_charm_structure_audit.py tests/test_charm_mixture.py -q
+Result: 52 passed in 6.21s (local CPU).
+41 existing core tests and 11 new tests; not the whole repository suite.
+
+Verified direct weighted covariance vs rank-one-update algebra, full Gaussian
+log density vs linear posterior/log-density implementation, invertible
+all-channel whitening, component-label symmetry, nested one-Gaussian limit,
+known-mixture recovery, non-Gaussian linear classification counterexample,
+clusters unrelated to truth, actual fit/all/report CLI, unlabelled freezing
+before labels, no gold/edge/checkpoint reads in fit, fit-score invariance to
+changed test labels, report reuse and generated PNG layout.
+
+Also ran held-out synthetic checks (2500 FIT / 2500 TEST, distinct random seeds):
+- True Gaussian classes: latent/class AUC 0.999803; density gain 0.315847 nats/token.
+- Uniform box with a known linear truth boundary: known-axis AUC 1.0;
+  unlabelled component1 AUC 0.491481, component0 AUC 0.508519;
+  two-component density gain 0.077394 despite unrelated truth separation.
+- Same Gaussian mixture with truth on an independent coordinate: latent-cluster
+  AUC 0.999803, truth AUC 0.531586, known truth-axis AUC 1.0.
+All three converged. These are mathematical/software counterexamples, NOT QA results.
+
+No natural FIT cache was available locally. No natural-data GMM was fitted,
+no new RAGTruth AUROC/AP is claimed, and no CHARM/LLM was trained or modified.
+User gold-paired exports were not used as unlabelled training data.
