@@ -1,0 +1,42 @@
+2026-09-18 local validation
+Base: DwightEd/graph main 9bb6f2a9c8450f75b9176f4a4392666d1ced16da
+
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 python -m pytest tests/test_path_conflict.py -q
+21 passed, 1 skipped in 4.18s (PyTorch 2.10.0+cpu).
+
+The passing tests execute a small causal GQA Transformer with learned projections,
+residual blocks and real attention, not mocked intervention scores. They check
+head/KV mapping, source-conditioned A V W_O equality, output bias retention,
+causal query/prefix scope, full-message and MLP cuts, equal-norm controls,
+same-prefix downstream restoration, no-operation identity, seed invariance,
+full candidate teacher forcing, exact stored-token compilation, replay rejection,
+same-question effect/interaction arithmetic, hook cleanup, actual intervention
+pipeline, result re-reading, immutable parameters, resume and PNG/SVG generation.
+A synthetic trajectory plot was inspected locally.
+
+Skipped: test_huggingface_llama_eager_operator_when_installed.
+The local environment has no transformers installation. The implementation was
+checked against the official Llama v4.53.3 source, but actual Hugging Face runtime
+compatibility and native Llama-3.1-8B replay have NOT been executed locally.
+The test remains available in the user's existing transformers environment.
+
+Actually ran inventory on the repository's original text/settings snapshot:
+16 responses / 4 source questions / 1532 generated tokens / 4 repeated refusals.
+Response and prompt bytes matched their original Git blob hashes. No original
+sampling NPZs or 8B checkpoint are mounted here; inventory reports zero locally
+available traces rather than claiming the remote files were opened.
+
+Two local source-support comparisons were analyst-reviewed against the original
+passages. They are NOT official whole-response or token-span gold annotations.
+No native LLM intervention result, free-generation correction, aggregate detection
+score, full-data mechanism or independent confirmation is claimed.
+
+Publication note: the GitHub write tool blocked the second tree-write request.
+No commit/ref update was performed. These complete local files and a git-apply
+patch are provided; the repository main was not changed by this delivery.
+
+Direct-main integration revalidation (2026-09-18):
+Applied the delivered same_question_path_conflict.patch without algorithm edits.
+Reran the same test command: 21 passed, 1 skipped in 5.14s.
+The skipped Transformers integration test and absent native 8B replay remain
+unverified. The publication note above records the previous delivery only.
