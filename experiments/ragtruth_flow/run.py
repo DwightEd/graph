@@ -13,7 +13,11 @@ ROOT = Path("/share/home/tm902089733300000/a903202310/lys/data/RAGTruth")
 
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--phase", choices=["screen", "confirm", "report", "all"], default="all")
+    parser.add_argument(
+        "--phase",
+        choices=["screen", "confirm", "report", "grounding", "all"],
+        default="all",
+    )
     parser.add_argument("--train-cache", type=Path, default=ROOT / "attention/llama31_8b/train")
     parser.add_argument("--test-cache", type=Path, default=ROOT / "attention/llama31_8b/test")
     parser.add_argument("--dataset", type=Path, default=ROOT / "dataset")
@@ -33,6 +37,7 @@ def arguments(argv=None):
     parser.add_argument("--screen-heads", type=int, default=12)
     parser.add_argument("--confirm-heads", type=int, default=4)
     parser.add_argument("--confirm-pairs", type=int, default=8)
+    parser.add_argument("--grounding-ridge", type=float, default=1e-3)
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--dtype", choices=["float32", "float16", "bfloat16"], default="bfloat16")
     parser.add_argument("--limit", type=int, default=0)
@@ -49,6 +54,9 @@ def main(argv=None):
         confirm_dataset(args)
     if args.phase in ("report", "all"):
         report(args.output)
+    if args.phase == "grounding":
+        from .grounding_dynamics import run_grounding_dynamics
+        run_grounding_dynamics(args)
 
 
 if __name__ == "__main__":

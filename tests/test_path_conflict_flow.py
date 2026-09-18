@@ -5,6 +5,7 @@ from experiments.path_conflict.flow import attach_identity
 from experiments.path_conflict.flow_inputs import add_flow_groups
 from experiments.path_conflict.flow_plan import opposition, select_heads, sign_role
 from experiments.path_conflict.flow_report import (
+    binding_table,
     evidence_layers,
     paired_numeric_fields,
     role_table,
@@ -146,3 +147,28 @@ def test_evidence_layers_uses_numeric_head_column(tmp_path):
     assert set(result.source_group) == {
         "evidence", "wrong_source", "history", "all_context"
     }
+
+
+def test_binding_table_distinguishes_complete_and_partial_support():
+    roles = pd.DataFrame([
+        dict(
+            case_id="c", side="supported", panel="natural", layer=2, head=3,
+            final_condition=.4, final_value=.8, final_evidence=1.1,
+            final_wrong_source=-.2,
+            local_lens_support_condition=.5,
+            local_lens_support_value=.7,
+        ),
+        dict(
+            case_id="c", side="unsupported", panel="natural", layer=2, head=4,
+            final_condition=-.1, final_value=.9, final_evidence=.5,
+            final_wrong_source=.3,
+            local_lens_support_condition=.2,
+            local_lens_support_value=1.0,
+        ),
+    ])
+    table = binding_table(roles).set_index("head")
+    assert table.loc[3, "binding_state"] == "complete_correct_support"
+    assert np.isclose(table.loc[3, "binding_completeness"], .5)
+    assert table.loc[4, "binding_state"] == "value_without_condition"
+    assert table.loc[4, "binding_completeness"] == 0
+    assert np.isclose(table.loc[3, "joint_nonadditivity"], -.1)

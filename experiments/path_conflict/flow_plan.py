@@ -2,7 +2,8 @@
 
 from dataclasses import dataclass
 
-SCAN_GROUPS = ("all_context", "evidence", "wrong_source", "history")
+DISCOVERY_GROUPS = ("all_context", "evidence", "wrong_source", "history")
+SCAN_GROUPS = DISCOVERY_GROUPS + ("condition", "value")
 
 
 @dataclass(frozen=True)
@@ -18,7 +19,7 @@ class HeadTrial:
 
 def select_heads(writes, top_k=3, max_heads=12):
     """Select by baseline local effect only; no intervention result is used."""
-    mask = writes.source_group.isin(SCAN_GROUPS) & writes["head"].ge(0)
+    mask = writes.source_group.isin(DISCOVERY_GROUPS) & writes["head"].ge(0)
     frame = writes[mask].copy()
     selected = set()
     for _, rows in frame.groupby(["side", "panel", "source_group"], sort=False):
@@ -30,6 +31,8 @@ def select_heads(writes, top_k=3, max_heads=12):
 
 
 def sign_role(value, tolerance=1e-6):
+    if value != value:
+        return "not_tested"
     if value > tolerance:
         return "supports_correct"
     if value < -tolerance:

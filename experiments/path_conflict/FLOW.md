@@ -54,3 +54,22 @@ CHARM/LDA审计若使用另一模型族，head编号不能与本实验直接对�
     python -m experiments.charm_structure_audit.supervised_head_roles
 
 它输出该监督检测器自己的self/prompt差异、LDA权重和每个head的风险贡献。
+
+
+## Binding completeness追加检验
+
+原head发现规则保持不变，仍只依据all_context/evidence/wrong_source/history的基线局部作用。
+对这批冻结head额外把人工核验的evidence拆成：
+
+    condition = scope
+    value = supported_value
+
+并分别做真实A·V·W_O删除，再与joint evidence删除比较。
+输出binding_completeness.csv：
+- complete_correct_support：condition和value都最终支持正确候选；
+- value_without_condition：值路径支持正确，但适用条件没有同步支持；
+- condition_without_value：条件存在但值路径缺失；
+- condition_value_opposed：两条路径方向相反；
+- joint_nonadditivity：joint cut与两个single cut之和的差；只表示后续网络非加性，不直接声称语义binding synergy。
+
+这专门检验“原句/数值被读到，但适用条件没有一起控制答案”的partial binding假设。

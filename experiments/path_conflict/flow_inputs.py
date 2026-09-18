@@ -6,8 +6,10 @@ import numpy as np
 def add_flow_groups(probe):
     result = dict(probe)
     groups = dict(probe["groups"])
+    groups["condition"] = groups["scope"].copy()
+    groups["value"] = groups["supported_value"].copy()
     groups["evidence"] = np.unique(np.concatenate(
-        [groups["scope"], groups["supported_value"]]
+        [groups["condition"], groups["value"]]
     ))
     groups["history"] = np.unique(np.concatenate(
         [groups["query_self"], groups["recent_history"], groups["remote_history"]]

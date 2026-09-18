@@ -11,7 +11,9 @@ from .flow_plan import opposition, sign_role
 
 
 KEYS = ["case_id", "side", "panel"]
-SOURCE_GROUPS = ("all_context", "evidence", "wrong_source", "history")
+SOURCE_GROUPS = (
+    "all_context", "evidence", "condition", "value", "wrong_source", "history"
+)
 
 
 def paired_numeric_fields(roles):
@@ -69,6 +71,53 @@ def role_table(output):
     return table
 
 
+def binding_table(roles, tolerance=1e-6):
+    required = [
+        "final_condition", "final_value", "final_evidence", "final_wrong_source",
+        "local_lens_support_condition", "local_lens_support_value",
+    ]
+    if any(name not in roles.columns for name in required):
+        return pd.DataFrame()
+
+    table = roles[KEYS + ["layer", "head"] + required].copy()
+    condition = table.final_condition.to_numpy()
+    value = table.final_value.to_numpy()
+    joint = table.final_evidence.to_numpy()
+
+    denominator = np.maximum(np.abs(condition), np.abs(value))
+    same_direction = condition * value > 0
+    table["binding_completeness"] = np.where(
+        same_direction & (denominator > tolerance),
+        np.minimum(np.abs(condition), np.abs(value)) / denominator,
+        0.0,
+    )
+    table.loc[
+        ~np.isfinite(table.final_condition) | ~np.isfinite(table.final_value),
+        "binding_completeness",
+    ] = np.nan
+    table["joint_nonadditivity"] = joint - condition - value
+    table["condition_downstream_change"] = (
+        table.final_condition - table.local_lens_support_condition
+    )
+    table["value_downstream_change"] = (
+        table.final_value - table.local_lens_support_value
+    )
+    table["evidence_vs_wrong_competition"] = [
+        opposition(evidence, wrong)
+        for evidence, wrong in zip(table.final_evidence, table.final_wrong_source)
+    ]
+
+    states = np.full(len(table), "weak_or_mixed", dtype=object)
+    states[(condition > tolerance) & (value > tolerance)] = "complete_correct_support"
+    states[(value > tolerance) & (condition <= tolerance)] = "value_without_condition"
+    states[(condition > tolerance) & (value <= tolerance)] = "condition_without_value"
+    states[(condition < -tolerance) & (value < -tolerance)] = "complete_wrong_support"
+    states[condition * value < -(tolerance ** 2)] = "condition_value_opposed"
+    states[~np.isfinite(condition) | ~np.isfinite(value)] = "not_tested"
+    table["binding_state"] = states
+    return table
+
+
 def layer_competition(output):
     writes = pd.read_csv(output / "baseline_head_sources.csv.gz")
     rows = []
@@ -93,7 +142,10 @@ def layer_competition(output):
 
 def evidence_layers(output):
     writes = pd.read_csv(output / "baseline_head_sources.csv.gz")
-    groups = ["evidence", "wrong_source", "history", "all_context"]
+    groups = [
+        "evidence", "condition", "value",
+        "wrong_source", "history", "all_context"
+    ]
     total = writes[(writes["head"] == -1) & writes.source_group.isin(groups)].copy()
     return total[KEYS + ["layer", "source_group", "attention_mass", "local_lens_support"]]
 
@@ -187,6 +239,7 @@ def write_report(output, roles, alignment):
         "3. evidence_forward.csv：证据在各层的局部支持。",
         "4. propagation_delta.csv.gz：删路径后的影响如何被后续层保留、抵消或反转。",
         "5. same_question_head_deltas.csv：同题有依据/无依据的同head差异。",
+        "6. binding_completeness.csv：condition/value分开后的完整绑定、部分绑定和联合非加性。",
         "",
         "## 最终作用最大的已确认head",
         "",
@@ -212,6 +265,7 @@ def report_flow(output, supervised_path=None):
     evidence = evidence_layers(output)
     paths = propagation_delta(output)
     deltas = same_question_deltas(roles)
+    binding = binding_table(roles)
     alignment = supervised_alignment(roles, supervised_path)
 
     roles.to_csv(output / "head_roles.csv", index=False)
@@ -219,6 +273,7 @@ def report_flow(output, supervised_path=None):
     evidence.to_csv(output / "evidence_forward.csv", index=False)
     paths.to_csv(output / "propagation_delta.csv.gz", index=False)
     deltas.to_csv(output / "same_question_head_deltas.csv", index=False)
+    binding.to_csv(output / "binding_completeness.csv", index=False)
     alignment.to_csv(output / "supervised_alignment.csv", index=False)
     write_report(output, roles, alignment)
 
