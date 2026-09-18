@@ -90,8 +90,11 @@ def main(argv=None):
     parser.add_argument('--samples', default=DEFAULT_SAMPLES)
     parser.add_argument('--cases', default=str(Path(__file__).with_name('cases.json')))
     parser.add_argument('--output')
-    parser.add_argument('--study', choices=['coarse', 'focused'], default='coarse')
+    parser.add_argument('--study', choices=['flow', 'focused', 'coarse'], default='flow')
     parser.add_argument('--recent-window', type=int, default=10)
+    parser.add_argument('--flow-top-k', type=int, default=3)
+    parser.add_argument('--flow-max-heads', type=int, default=12)
+    parser.add_argument('--supervised-head-roles', help='Optional head_rules.csv; joined only for identical geometry')
     parser.add_argument('--model', help='Same original checkpoint at a relocated local path')
     parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--dtype', choices=['float32', 'float16', 'bfloat16'], default='bfloat16')
@@ -106,8 +109,16 @@ def main(argv=None):
     parser.add_argument('--message-rtol', type=float, default=.02, help='Relative A V W_O numerical reconstruction tolerance')
     args = parser.parse_args(argv)
     if args.output is None:
-        args.output = ('outputs/same_question_path_conflict_focused_v2' if args.study == 'focused'
-                       else 'outputs/same_question_path_conflict_coarse_v2')
+        names = {
+            'flow': 'outputs/evidence_target_flow',
+            'focused': 'outputs/same_question_path_conflict_focused_v2',
+            'coarse': 'outputs/same_question_path_conflict_coarse_v2',
+        }
+        args.output = names[args.study]
+    if args.study == 'flow':
+        from .flow import run_flow
+        run_flow(args)
+        return
     if args.study == 'focused':
         from .focused import run_focused
         run_focused(args)

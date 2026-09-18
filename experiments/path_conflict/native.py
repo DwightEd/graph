@@ -189,7 +189,20 @@ class NativeRun:
         error = (actual - expected).norm() / expected.norm().clamp_min(1e-30)
         self.reconstruction.append(float(error))
         for name, sources in self.groups.items():
-            components, _, mass = source_write(attention, values, module.o_proj.weight, [self.query], list(sources), range(count))
+            components, group_write, mass = source_write(
+                attention, values, module.o_proj.weight, [self.query], list(sources), range(count)
+            )
+            group_margin = lens_margin(
+                self.model, residual - group_write[0], self.correct, self.wrong
+            )
+            self.writes.append(dict(
+                layer=index, head=-1, source_group=name,
+                attention_mass=float(mass[:, 0].sum()),
+                value_norm=float(components[:, 0].float().norm()),
+                write_norm=float(group_write[0].float().norm()),
+                local_lens_support=float(base_margin - group_margin),
+            ))
+
             blocks = module.o_proj.weight.view(-1, count, head_width).permute(1, 0, 2)
             messages = torch.einsum('hod,hd->ho', blocks, components[:, 0])
             margins = lens_margin(self.model, residual[None] - messages, self.correct, self.wrong)

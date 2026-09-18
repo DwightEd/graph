@@ -1,40 +1,46 @@
-# 同题采样的原 LLM 路径冲突审计
+# Evidence ↔ Target：当前机制主线
 
-当前定点实验、公式与限制见 [FOCUSED.md](FOCUSED.md)。原批量扫描的完整说明保留在 Git 提交 `fd8b7f7`，历史结果不改。
+当前只研究一个问题：**适用证据为什么没有控制最终答案，以及不同head在证据、错误来源和回答历史之间承担什么功能角色。**
 
-## 运行
+完整定义见 [FLOW.md](FLOW.md)。
 
-```bash
-# 先核查原有16条采样；不加载原模型
-python -u -m experiments.path_conflict.main --study focused --stage inventory
+## 主实验
 
-# 定点检验四个head、来源角色、联合干预和下游恢复
-python -u -m experiments.path_conflict.main --study focused
+    python -u -m experiments.path_conflict.main --study flow
 
-# 只读取完成的结果重新生成报告
-python -u -m experiments.path_conflict.main --study focused --stage report
-```
+流程只有两步：
 
-默认数据仍是 `reanchor/outputs/samples_20260911_145421_235`，原模型路径读自其settings.json。
-输入必须有原始采样NPZ；只有CSV摘要不能复原实际V写入。迁移路径用`--samples`、`--model`明确指定。
+1. 基线前向扫描全部layer/head，记录每个head从 evidence / wrong_source / self+history / all context 的实际 A·V·W_O 写入，以及这些写入在当前层对 correct-vs-wrong 候选的局部支持。
+2. 只对基线作用最大的少量head做真实删除，继续运行后续网络，得到最终支持、下游抵消和反转。
 
-新结果放在 `outputs/same_question_path_conflict_focused_v2/`，每种条件保存NPZ，可续跑。
-完成后上传 `path_conflict_review.tar.gz`。`source_routes.html`可逐头查看最近读取的来源地址。
+主要输出：
+- baseline_head_sources.csv.gz
+- head_roles.csv
+- layer_competition.csv
+- evidence_forward.csv
+- propagation_delta.csv.gz
+- same_question_head_deltas.csv
+- flow_review.tar.gz
 
-原批量扫描仍可运行：
+默认只用已有同题多采样的两个人工核验局部事实，不重新采样、不训练检测器。
 
-```bash
-python -u -m experiments.path_conflict.main --study coarse
-```
+## 监督检测器
 
-由于首词概率改为同一次前向，重算结果放在独立的`same_question_path_conflict_coarse_v2`。
-原报告可通过`--stage report --output outputs/same_question_path_conflict`重新汇总，原NPZ不会被重算覆盖。
+LDA/CHARM使用的模型与本机制样本可能不是同一模型族，head编号不能直接对应。
+监督模型自己的head统计角色单独运行：
 
-## 阅读代码
+    python -m experiments.charm_structure_audit.supervised_head_roles
 
-`operators.py`是A/V/W_O消息与候选读出；`native.py`在原模型中切断或恢复写入；`scoring.py`统一首词和后续词指标。
-`focused_inputs.py`明确来源角色与候选；`focused_plan.py`列出预定对照；`focused.py`运行；`focused_report.py`汇总。
-原`data.py`、`cases.json`与批量报告仍保留。没有引入检测器训练、金标构图或新的幻觉分类器。
+这会解释哪些head在错误token中 self attention 上升/下降、prompt读取上升/下降，以及LDA怎样给这些通道加权。它是监督统计解释，不是原LLM因果head功能。
 
-37项本地小型因果GQA测试通过，1项Transformers集成测试因缺包跳过，见`FOCUSED_TEST_RESULTS.txt`。
-自然8B的本轮定点干预尚未在本地执行。局部读出支持、最终干预效果、语义因果解释必须分别报告。
+## 历史实验
+
+固定L22H28/L23H6/L31H14/L31H21的定点实验保留：
+
+    python -u -m experiments.path_conflict.main --study focused
+
+更早的全层粗扫描保留：
+
+    python -u -m experiments.path_conflict.main --study coarse
+
+新结论以 flow 主线为准；旧结果不删除。
