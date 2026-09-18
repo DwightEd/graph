@@ -11,6 +11,17 @@ from .flow_plan import opposition, sign_role
 
 
 KEYS = ["case_id", "side", "panel"]
+SOURCE_GROUPS = ("all_context", "evidence", "wrong_source", "history")
+
+
+def paired_numeric_fields(roles):
+    fields = []
+    for group in SOURCE_GROUPS:
+        for prefix in ("attention_mass_", "local_lens_support_", "final_"):
+            name = prefix + group
+            if name in roles.columns:
+                fields.append(name)
+    return fields
 
 
 def role_table(output):
@@ -83,7 +94,7 @@ def layer_competition(output):
 def evidence_layers(output):
     writes = pd.read_csv(output / "baseline_head_sources.csv.gz")
     groups = ["evidence", "wrong_source", "history", "all_context"]
-    total = writes[(writes.head == -1) & writes.source_group.isin(groups)].copy()
+    total = writes[(writes["head"] == -1) & writes.source_group.isin(groups)].copy()
     return total[KEYS + ["layer", "source_group", "attention_mass", "local_lens_support"]]
 
 
@@ -121,10 +132,7 @@ def same_question_deltas(roles):
     supported = roles[roles.side == "supported"]
     unsupported = roles[roles.side == "unsupported"]
     keys = ["case_id", "panel", "layer", "head"]
-    fields = [
-        column for column in roles
-        if column.startswith(("attention_mass_", "local_lens_support_", "final_"))
-    ]
+    fields = paired_numeric_fields(roles)
     merged = unsupported[keys + fields].merge(
         supported[keys + fields], on=keys, suffixes=("_unsupported", "_supported")
     )
@@ -149,7 +157,12 @@ def supervised_alignment(roles, path):
             dict(note="different model geometry: head IDs were not aligned")
         ])
 
-    columns = ["layer", "head", "mean_gap", "weight", "fit_gap_contribution"]
+    columns = [
+        "layer", "head", "self_gap", "prompt_gap",
+        "self_weight", "prompt_weight",
+        "self_risk_contribution", "prompt_risk_contribution",
+        "routing_pattern",
+    ]
     return roles.merge(rules[columns], on=["layer", "head"], how="left")
 
 

@@ -4,7 +4,12 @@ import pandas as pd
 from experiments.path_conflict.flow import attach_identity
 from experiments.path_conflict.flow_inputs import add_flow_groups
 from experiments.path_conflict.flow_plan import opposition, select_heads, sign_role
-from experiments.path_conflict.flow_report import role_table
+from experiments.path_conflict.flow_report import (
+    evidence_layers,
+    paired_numeric_fields,
+    role_table,
+    same_question_deltas,
+)
 from experiments.charm_structure_audit.supervised_head_roles import head_statistics
 
 
@@ -99,3 +104,45 @@ def test_write_identity_ignores_candidate_list():
     assert "candidates" not in result
     assert result.case_id.tolist() == ["c", "c"]
     assert result["query"].tolist() == [42, 42]
+
+
+def test_same_question_deltas_only_subtracts_numeric_role_fields():
+    roles = pd.DataFrame([
+        dict(
+            case_id="c", side="supported", panel="natural", layer=2, head=3,
+            attention_mass_evidence=.2, local_lens_support_evidence=.4,
+            final_evidence=.3, final_role="supports_correct",
+            evidence_role="supports_correct",
+        ),
+        dict(
+            case_id="c", side="unsupported", panel="natural", layer=2, head=3,
+            attention_mass_evidence=.1, local_lens_support_evidence=-.2,
+            final_evidence=-.5, final_role="supports_wrong",
+            evidence_role="supports_wrong",
+        ),
+    ])
+    fields = paired_numeric_fields(roles)
+    assert "final_evidence" in fields
+    assert "final_role" not in fields
+    result = same_question_deltas(roles).iloc[0]
+    assert np.isclose(result["delta_final_evidence"], -.8)
+    assert np.isclose(result["delta_attention_mass_evidence"], -.1)
+
+
+def test_evidence_layers_uses_numeric_head_column(tmp_path):
+    rows = []
+    for head in (-1, 0):
+        for group in ("evidence", "wrong_source", "history", "all_context"):
+            rows.append(dict(
+                case_id="c", side="supported", panel="natural",
+                layer=1, head=head, source_group=group,
+                attention_mass=.2, local_lens_support=.1,
+            ))
+    pd.DataFrame(rows).to_csv(
+        tmp_path / "baseline_head_sources.csv.gz", index=False
+    )
+    result = evidence_layers(tmp_path)
+    assert len(result) == 4
+    assert set(result.source_group) == {
+        "evidence", "wrong_source", "history", "all_context"
+    }
