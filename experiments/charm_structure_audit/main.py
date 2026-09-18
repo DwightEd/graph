@@ -177,7 +177,7 @@ def run_matching(args, output):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin', 'whitebox', 'continuity', 'export_circuit', 'circuit', 'mixture', 'lda_audit'], default='report')
+    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin', 'whitebox', 'continuity', 'export_circuit', 'circuit', 'mixture', 'lda_audit', 'state_context'], default='report')
     parser.add_argument('--root', default=DEFAULT_ROOT)
     parser.add_argument('--prepared', default=DEFAULT_PREPARED)
     parser.add_argument('--output', help='New output directory; default <root>/audit_<mode>')
@@ -226,6 +226,10 @@ def main(argv=None):
     if args.mode == 'lda_audit':
         from .lda_audit import run_lda_audit
         run_lda_audit(args)
+        return
+    if args.mode == 'state_context':
+        from .state_context_audit import run_state_context
+        run_state_context(args)
         return
     if args.mode == 'mixture':
         from .mixture import run_mixture

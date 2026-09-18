@@ -134,3 +134,27 @@ python -m pytest tests/test_charm_structure_audit.py -q
 测试覆盖原消息代数/梯度、旧checkpoint格式、每个消融、因果前缀、禁中继、
 标签/阈值/配对口径、四种模式的真实CLI和原文件不变。依赖numpy/pandas/scikit-learn/torch/tqdm/pytest；
 不增加PyG、transformer-lens或新的LLM依赖，不要求升级服务器的torch/CUDA。
+
+
+## 5. 连续标签 vs 当前token携带的上下文状态
+
+这个审计专门回答：LDA/CHARM的单token效果是否只是因为幻觉span连续出现。
+
+```bash
+python -u -m experiments.charm_structure_audit.main \
+  --mode state_context \
+  --lda-window 10
+```
+
+它比较五个监督LDA输入：
+- current：只看当前token的1024维layer×head self-attention diagonal；
+- previous：只看前一token的同一表示；
+- past_mean：只看过去窗口的平均表示；
+- delta_previous：当前减前一token；
+- current_residual_after_previous：先在FIT上用前一token线性预测当前token，再只用不可预测残差分类。
+
+同时固定上一token标签：
+- previous_gold_0：前一token都正常，比较新错误onset与正常token；
+- previous_gold_1：前一token都错误，比较错误延续与恢复正常。
+
+因此，若current或residual在这些固定历史标签条件下仍有明显AUROC，不能把监督性能解释成简单的“错误标签连续”。单个x_t虽然按token送入LDA，但它来自Transformer上下文化计算：q_t/k_t由前层contextual residual产生，softmax分母也包含全部可见历史key，所以x_t本身可以携带此前上下文状态。
