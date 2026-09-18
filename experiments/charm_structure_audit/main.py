@@ -177,7 +177,7 @@ def run_matching(args, output):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin', 'whitebox', 'continuity'], default='report')
+    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin', 'whitebox', 'continuity', 'export_circuit'], default='report')
     parser.add_argument('--root', default=DEFAULT_ROOT)
     parser.add_argument('--prepared', default=DEFAULT_PREPARED)
     parser.add_argument('--output', help='New output directory; default <root>/audit_<mode>')
@@ -214,6 +214,11 @@ def main(argv=None):
     parser.add_argument('--continuity-schemes', nargs='+', choices=['token', 'span_equal', 'onset_half', 'random_onset_half'],
                         default=['token', 'span_equal', 'onset_half', 'random_onset_half'])
     args = parser.parse_args(argv)
+    if args.mode == 'export_circuit':
+        from .export_circuit_inputs import export_circuit_inputs
+        output = Path(args.output) if args.output else Path(args.root) / 'audit_circuit_export'
+        export_circuit_inputs(args.root, output / 'charm_circuit_inputs.tar.gz')
+        return
     default_name = 'audit_'+args.mode
     if args.mode == 'continuity':
         default_name += '_'+args.continuity_stage
