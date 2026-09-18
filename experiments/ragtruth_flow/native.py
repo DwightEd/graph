@@ -35,7 +35,6 @@ class TokenRun:
             self.handles.append(block.self_attn.v_proj.register_forward_hook(self.save_values(layer)))
             self.handles.append(block.self_attn.register_forward_hook(self.attention_hook(layer)))
             self.handles.append(block.register_forward_hook(self.layer_hook(layer)))
-        self.handles.append(self.model.lm_head.register_forward_pre_hook(self.save_final))
         return self
 
     def __exit__(self, *args):
@@ -51,9 +50,6 @@ class TokenRun:
         def hook(module, inputs, output):
             self.values[layer] = output.detach()
         return hook
-
-    def save_final(self, module, inputs):
-        self.final_normalized = inputs[0][0, -1].detach()
 
     def layer_hook(self, layer):
         def hook(module, inputs, output):
@@ -101,7 +97,12 @@ class TokenRun:
             after = base_residual + changed[0, self.query]
             value = token_lens(self.model, after, self.target)
             self.trajectory.append(dict(layer=layer, site="after_attention", target_logit=float(value)))
-            return (changed, *output[1:])
+            # The model only needs this tensor when output_attentions=True.
+            # We consumed it inside the hook; returning None prevents LlamaModel
+            # from retaining [heads, T, T] for every layer until the forward ends.
+            if len(output) == 1:
+                return (changed,)
+            return (changed, None, *output[2:])
         return hook
 
 
@@ -110,13 +111,17 @@ def forward_target(model, prefix_ids, target, groups, intervention=None):
     with torch.inference_mode(), TokenRun(
         model, len(prefix_ids), target, groups, intervention
     ) as run:
-        model(
+        output = model.model(
             input_ids=ids,
             attention_mask=torch.ones_like(ids),
             use_cache=False,
             output_attentions=True,
             return_dict=True,
         )
+        # LlamaModel already applies its final norm. Keep only the decision state
+        # before any vocabulary projection, then release the long sequence.
+        run.final_normalized = output.last_hidden_state[0, -1].detach()
         logits = vocabulary_logits(model, run.final_normalized)
         log_prob = logits.double().log_softmax(-1)[target]
+        del output
     return float(log_prob), run

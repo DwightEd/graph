@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -35,8 +35,22 @@ def test_target_rows_separates_onset_and_mid_continuation():
     ]
 
 
+def install_base_forward(model):
+    def base_forward(base, input_ids, attention_mask=None, use_cache=False,
+                     output_attentions=True, return_dict=True):
+        state = model.embedding(input_ids)
+        attentions = []
+        for layer in base.layers:
+            state, attention = layer(state)
+            attentions.append(attention)
+        state = base.norm(state)
+        return SimpleNamespace(last_hidden_state=state, attentions=tuple(attentions))
+    model.model.forward = MethodType(base_forward, model.model)
+
+
 def test_actual_token_support_cut_matches_direct_logprob_change():
     model, probe = fixture()
+    install_base_forward(model)
     groups = dict(
         source=np.array([0]),
         other_prompt=np.array([1, 2]),

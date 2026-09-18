@@ -1,6 +1,7 @@
 """Functional confirmation on held-out RAGTruth positions with the Llama-3.1 observer."""
 
 from pathlib import Path
+import gc
 
 import numpy as np
 import pandas as pd
@@ -17,14 +18,7 @@ GROUPS = ("source", "other_prompt", "history", "query_self")
 
 
 def source_strings(record):
-    info = record.get("source_info")
-    task = record.get("task_type")
-    if task == "QA" and isinstance(info, dict):
-        passages = info.get("passages", "")
-        return [passages] if isinstance(passages, str) and passages else []
-    if task == "Summary" and isinstance(info, str):
-        return [info]
-
+    """Flatten source_info text for QA/Summary/Data2txt without assuming one schema."""
     strings = []
 
     def visit(value):
@@ -37,7 +31,7 @@ def source_strings(record):
             for child in value:
                 visit(child)
 
-    visit(info)
+    visit(record.get("source_info"))
     return strings
 
 
@@ -202,14 +196,24 @@ def confirm_dataset(args):
             key = (answer.response_id, role, position)
             if key in completed:
                 continue
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats(model.device)
             result, target_row = run_target(
                 model, tokenizer, source_record, answer, role, position, heads, args
             )
+            if torch.cuda.is_available():
+                target_row["peak_cuda_gib"] = (
+                    torch.cuda.max_memory_allocated(model.device) / 1024 ** 3
+                )
             rows.extend(result)
             targets.append(target_row)
             completed.add(key)
             pd.DataFrame(rows).to_csv(effects_path, index=False)
             pd.DataFrame(targets).to_csv(targets_path, index=False)
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
     write_confirmation_summary(output)
 
