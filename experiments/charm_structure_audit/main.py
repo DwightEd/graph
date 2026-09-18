@@ -177,7 +177,7 @@ def run_matching(args, output):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin', 'whitebox', 'continuity', 'export_circuit'], default='report')
+    parser.add_argument('--mode', choices=['report', 'ablate', 'train', 'match', 'locate', 'routes', 'heads', 'compare', 'node', 'review', 'highlow', 'lockin', 'whitebox', 'continuity', 'export_circuit', 'circuit'], default='report')
     parser.add_argument('--root', default=DEFAULT_ROOT)
     parser.add_argument('--prepared', default=DEFAULT_PREPARED)
     parser.add_argument('--output', help='New output directory; default <root>/audit_<mode>')
@@ -213,7 +213,14 @@ def main(argv=None):
     parser.add_argument('--continuity-seeds', nargs='+', type=int, default=[0, 1, 2])
     parser.add_argument('--continuity-schemes', nargs='+', choices=['token', 'span_equal', 'onset_half', 'random_onset_half'],
                         default=['token', 'span_equal', 'onset_half', 'random_onset_half'])
+    parser.add_argument('--circuit-input', help='Exported charm_circuit_inputs.tar.gz')
     args = parser.parse_args(argv)
+    if args.mode == 'circuit':
+        from .circuit import run_circuit
+        source = args.circuit_input or str(Path(args.root) / 'audit_circuit_export/charm_circuit_inputs.tar.gz')
+        output = args.output or str(Path(args.root) / 'audit_circuit')
+        run_circuit(source, output, args.bootstrap)
+        return
     if args.mode == 'export_circuit':
         from .export_circuit_inputs import export_circuit_inputs
         output = Path(args.output) if args.output else Path(args.root) / 'audit_circuit_export'
@@ -228,6 +235,7 @@ def main(argv=None):
     if output.resolve() in [p.resolve() for p in protected] or (output/'prediction_settings.json').exists():
         raise ValueError('Use a separate output directory, not original data/results')
     config = vars(args).copy()
+    config.pop('circuit_input')
     if args.mode != 'continuity':
         for key in ('continuity_stage', 'continuity_seeds', 'continuity_schemes'):
             config.pop(key)
