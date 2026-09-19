@@ -1,8 +1,10 @@
-# 主线：Evidence ↔ Target 功能流
+# 历史 v2：Evidence ↔ Target 局部功能流
 
-2026-09-19 v2：当前判据和研究边界以
-[收敛说明](../../docs/DETECTION_CONVERGENCE_20260919.md)为准。
-推荐入口 `python -u main.py flow`，默认新目录 `outputs/evidence_target_flow_v2`。
+本文保留 v2 的局部 lens 定义，复算入口为
+`python -u -m experiments.path_conflict.flow --output outputs/evidence_target_flow_v2`。
+当前 `python -u main.py flow` 已切换到 v3 的最终候选梯度、明确来源消息和恢复实验，
+见[新方法](../../docs/TRANSPORT_METHOD_20260919.md)。
+v2 判据和研究边界见[原收敛说明](../../docs/DETECTION_CONVERGENCE_20260919.md)。
 增加query_self/recent_history/remote_history/past_history单独删除；history仅保留旧合并口径。
 local_linear_support使用共享FP32局部lens梯度，逐头可加；旧local_lens_support是有限删除，
 不可相加。新head_interactions.csv记录四世界交互，首词/整段候选并报。

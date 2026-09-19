@@ -51,10 +51,11 @@ class Layer(nn.Module):
         self.post_attention_layernorm = nn.LayerNorm(16)
         self.mlp = nn.Sequential(nn.Linear(16, 24), nn.ReLU(), nn.Linear(24, 16))
 
-    def forward(self, states):
+    def forward(self, states, output_attentions=True):
         output, weights = self.self_attn(self.input_layernorm(states))
         states = states + output
-        return (states + self.mlp(self.post_attention_layernorm(states)), weights)
+        return (states + self.mlp(self.post_attention_layernorm(states)),
+                weights if output_attentions else None)
 
 
 class SmallLlama(nn.Module):
@@ -72,8 +73,9 @@ class SmallLlama(nn.Module):
         state = self.embedding(input_ids)
         attentions = []
         for layer in self.model.layers:
-            state, attention = layer(state)
-            attentions.append(attention)
+            state, attention = layer(state, output_attentions=output_attentions)
+            if output_attentions:
+                attentions.append(attention)
         return SimpleNamespace(logits=self.lm_head(self.model.norm(state)), attentions=attentions)
 
 

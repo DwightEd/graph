@@ -1,0 +1,82 @@
+{
+  "scope": "software_and_numerical_validation_only",
+  "date": "2026-09-19",
+  "protocol": "target_transport_v3",
+  "model": {
+    "class": "transformers.LlamaForCausalLM",
+    "random_seed": 18,
+    "random_initialization": true,
+    "pretrained_8b": false,
+    "device": "cpu",
+    "vocab_size": 41,
+    "hidden_size": 16,
+    "intermediate_size": 32,
+    "layers": 3,
+    "heads": 4,
+    "kv_heads": 2,
+    "prefix_tokens": 5
+  },
+  "runtime": {
+    "torch": "2.14.0+cu130",
+    "transformers": "5.17.0"
+  },
+  "first_token_full_tape_comparison": {
+    "target_sources_max_abs_error": 0.0,
+    "head_receiver_sum_max_abs_error": 1.4901161193847656e-08,
+    "margin_abs_error": 0.0,
+    "layer_replay_max_abs_error": 0.0
+  },
+  "same_first_token_complete_candidate": {
+    "next_margin": 0.0,
+    "sequence_margin": 4.286514740207933,
+    "objective_abs_error": 1.8799052980966735e-08,
+    "unit": "L0H3Q0S0",
+    "gate_derivative": -0.17463286221027374,
+    "central_difference_epsilon": 0.002,
+    "central_difference": -0.174558225657373,
+    "derivative_abs_error": 7.4636552900742e-05,
+    "candidate_suffix_selected": false
+  },
+  "low_precision": [
+    {
+      "dtype": "torch.bfloat16",
+      "export_finite": true,
+      "objective_abs_error": 3.9387515471389634e-10,
+      "layer_replay_max_abs_error": 0.0,
+      "edge_sum_max_abs_error": 0.0004924163222312927
+    },
+    {
+      "dtype": "torch.float16",
+      "export_finite": true,
+      "objective_abs_error": 6.536063601458864e-08,
+      "layer_replay_max_abs_error": 0.0,
+      "edge_sum_max_abs_error": 3.1754374504089355e-05
+    }
+  ],
+  "pytest": {
+    "command": "python -m pytest tests/test_target_transport.py tests/test_path_conflict.py tests/test_path_conflict_focused.py tests/test_path_conflict_flow.py tests/test_transport_refactor.py -q",
+    "tests": 72,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "seconds": 7.988
+  },
+  "validated_behaviors": [
+    "final_objective_backward_through_qk_softmax_v_norms_residual_mlp",
+    "specified_past_receiver_and_source_interventions",
+    "same_world_message_and_mlp_restoration",
+    "four_world_interaction_identity_with_complete_candidates",
+    "causal_layer_and_receiver_order",
+    "selection_independent_of_appended_roles_and_gold_columns",
+    "model_attention_stack_collector_disabled",
+    "panel_resume_without_model_forward",
+    "changed_token_ids_rejected_on_resume",
+    "historical_native_and_flow_tests_preserved"
+  ],
+  "not_measured": [
+    "pretrained_8b_results",
+    "natural_detection_AUROC_AP",
+    "24GB_GPU_peak_or_speed",
+    "natural_relation_extraction_or_binding_decoder"
+  ]
+}

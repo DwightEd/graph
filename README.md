@@ -1,18 +1,21 @@
 # 候选内容与适用条件的功能一致性
 
-当前结论、两个项目的证据台账、检测设计及已完成实现，统一见
-[检测方向收敛](docs/DETECTION_CONVERGENCE_20260919.md)。
+两个项目的既有发现见[证据台账](docs/DETECTION_CONVERGENCE_20260919.md)。
+本轮核对了 [18 项原始文献](docs/LITERATURE_TRANSPORT_20260919.md)，
+更新[方法设计与实现](docs/TRANSPORT_METHOD_20260919.md)。
 内部逐头模式可被监督读出；尚无已验证的通用无监督绑定检测器。
 
 本轮主入口：
 
 ```bash
-python -u main.py flow --output outputs/evidence_target_flow_v2
+python -u main.py flow
 ```
 
-读取reanchor既有样本，测量原生A·V·W_O消息，分开self/近历史/远历史，
-运行单头和双头四世界干预，同时保存首词与整段候选结果。新版本用共享局部梯度
-度量有符号可加写入；有限干预单独报告。此命令是机制实验，不是检测成绩。
+默认写入 `outputs/target_transport_v3`，重复命令自动续跑。读取 reanchor 既有样本，
+从完整候选 log 概率差反向追踪原模型，自动发现逐层、逐头、接收位置和来源位置的
+有符号消息；来源角色在选点后追加。执行两种剂量的单删、双头四世界干预，
+以及下游消息/MLP 恢复，同时保存首词与完整候选结果。这是机制实验，不是检测成绩。
+原 v2 局部 lens 实验用 `python -m experiments.path_conflict.flow` 显式运行。
 `python main.py`显示入口；历史无标签基线需显式使用`unsupervised`。
 现有无标签HMM保留为竞争对照：`python main.py regime --phase all --resume`。
 本轮未取得其自然成绩，不把较少占用的状态直接称为已发现的幻觉状态。

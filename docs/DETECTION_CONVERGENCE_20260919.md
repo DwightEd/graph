@@ -4,6 +4,10 @@
 本文取代 README 中把熵种子、历史传播或结构—熵组合直接当研究主线的说法。
 历史实验和缓存继续保留；不是把过去的负结果改写成新方法的成功。
 
+后续更新：本文保留既有证据和 v2 实现记录。最新文献核查与 v3 方法分别见
+[文献表](LITERATURE_TRANSPORT_20260919.md)、[目标消息追踪](TRANSPORT_METHOD_20260919.md)。
+`main.py flow` 现默认运行 v3；下文 v2 复算使用明确的模块入口。
+
 ## 1. 现在可以下的结论
 
 **内部存在可判别的逐头模式，但尚未得到能无标签确定真假方向的通用机制。**
@@ -149,7 +153,7 @@ graph负责检测与评价；reanchor负责原始采样、cache及机制输入�
 
 ```bash
 git pull --ff-only origin main
-python -u main.py flow --output outputs/evidence_target_flow_v2
+python -u -m experiments.path_conflict.flow --output outputs/evidence_target_flow_v2
 ```
 
 默认读既有reanchor样本；v2逐样本保存NPZ并复用完成的干预。

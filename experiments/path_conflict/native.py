@@ -25,11 +25,19 @@ class Intervention:
     seed: int = 0
     dose: float = 1.0
     reference_norm: float | None = None
+    queries: tuple = ()
+    sources: tuple = ()
+    replacement: torch.Tensor | None = None
+
+
+def request_layer_attention(module, args, kwargs):
+    """Expose each layer's A to hooks without retaining the full attention stack."""
+    return args, dict(kwargs, output_attentions=True)
 
 
 class NativeRun:
     """One forward's hooks. Handles are removed even when the forward raises."""
-    def __init__(self, model, prefix_length, groups, candidate_ids, interventions=(), restore=None, trace_heads=(), trace_window=10):
+    def __init__(self, model, prefix_length, groups, candidate_ids, interventions=(), restore=None, trace_heads=(), trace_window=10, record_writes=True, capture_units=()):
         self.model = model
         self.prefix_length = prefix_length
         self.query = prefix_length - 1
@@ -41,6 +49,9 @@ class NativeRun:
         self.restore = restore
         self.trace_heads = trace_heads
         self.trace_window = trace_window
+        self.record_writes = record_writes
+        self.capture_units = capture_units
+        self.message_writes = {}
         self.routes = {}
         self.baseline_mlps = {}
         self.final_normalized = None
@@ -51,6 +62,7 @@ class NativeRun:
 
     def __enter__(self):
         for index, layer in enumerate(self.model.model.layers):
+            self.handles.append(layer.register_forward_pre_hook(request_layer_attention, with_kwargs=True))
             self.handles.append(layer.input_layernorm.register_forward_pre_hook(self.save_residual(index)))
             self.handles.append(layer.self_attn.v_proj.register_forward_hook(self.save_values(index)))
             self.handles.append(layer.self_attn.o_proj.register_forward_pre_hook(self.save_heads(index)))
@@ -91,18 +103,22 @@ class NativeRun:
 
     def mlp_hook(self, index):
         def hook(module, inputs, output):
-            if not self.interventions and self.restore is None:
+            if self.record_writes and not self.interventions and self.restore is None:
                 self.baseline_mlps[index] = output[0, self.query].detach().cpu().clone()
+            if not self.interventions:
+                for unit in self.capture_units:
+                    if unit['layer'] == index:
+                        self.message_writes['mlp_' + unit['unit']] = output[0, [unit['receiver']]].detach().cpu()
             changed = output
             for item in self.interventions.get(index, ()):
                 if item.groups == ('mlp',):
-                    queries = [self.query] if item.scope == 'query' else list(range(self.prefix_length))
-                    write = item.dose * output[0, queries]
+                    queries = self.query_positions(item)
+                    write = self.intervention_change(item, output[0, queries])
                     changed = changed.clone()
                     changed[0, queries] -= write
-                    self.changes.append(dict(layer=index, scope=item.scope, operation='cut_mlp', groups='mlp',
+                    self.changes.append(dict(layer=index, scope=item.scope, operation=item.operation + '_mlp', groups='mlp',
                         dose=item.dose, query_change_norm=float(write[-1].float().norm()),
-                        prefix_change_norm=float(write.float().norm())))
+                        prefix_change_norm=float(write.float().norm()), receiver_positions=queries))
             restore = self.restore
             if restore is not None and restore['layer'] == index and restore.get('site', 'heads') == 'mlp':
                 changed = changed.clone()
@@ -116,7 +132,9 @@ class NativeRun:
             config = self.model.config
             values = grouped_values(self.values.pop(index), config.num_attention_heads, config.num_key_value_heads)
             heads = self.head_states.pop(index)
-            if not self.interventions and self.restore is None:
+            if not self.interventions:
+                self.capture_messages(index, module, attention, values)
+            if self.record_writes and not self.interventions and self.restore is None:
                 self.baseline_heads[index] = heads[:, :self.prefix_length].cpu().clone()
                 self.save_routes(index, module, attention, values, attention_output)
                 self.observe(index, module, attention, values, heads, attention_output)
@@ -133,20 +151,40 @@ class NativeRun:
             return (changed, *output[1:])
         return hook
 
+    def capture_messages(self, index, module, attention, values):
+        for unit in self.capture_units:
+            if unit['layer'] == index:
+                _, write, _ = source_write(attention, values, module.o_proj.weight,
+                                          [unit['receiver']], [unit['source']], [unit['head']])
+                self.message_writes[unit['unit']] = write.detach().cpu()
+
     def apply(self, item, module, attention, values, output):
-        queries = [self.query] if item.scope == 'query' else list(range(self.prefix_length))
-        sources = sorted({int(source) for name in item.groups for source in self.groups[name]})
+        queries = self.query_positions(item)
+        sources = list(item.sources) if item.sources else sorted(
+            {int(source) for name in item.groups for source in self.groups[name]})
         heads = item.heads or tuple(range(self.model.config.num_attention_heads))
         _, write, _ = source_write(attention, values, module.o_proj.weight, queries, sources, heads)
-        write = item.dose * write
-        if item.operation == 'random':
-            write = equal_norm_change(write, item.seed, item.reference_norm)
+        write = self.intervention_change(item, write)
         changed = output.clone()
         changed[0, queries] -= write
         self.changes.append(dict(layer=item.layer, scope=item.scope, operation=item.operation, dose=item.dose,
             groups='+'.join(item.groups), query_change_norm=float(write[-1].float().norm()),
-            prefix_change_norm=float(write.float().norm()), heads=list(heads)))
+            prefix_change_norm=float(write.float().norm()), heads=list(heads),
+            receiver_positions=queries, source_positions=sources))
         return changed
+
+    def query_positions(self, item):
+        if item.queries:
+            return list(item.queries)
+        return [self.query] if item.scope == 'query' else list(range(self.prefix_length))
+
+    @staticmethod
+    def intervention_change(item, write):
+        if item.operation == 'replace':
+            write = write - item.replacement.to(write)
+        if item.operation == 'random':
+            return equal_norm_change(item.dose * write, item.seed, item.reference_norm)
+        return item.dose * write
 
     def restore_heads(self, module, current, output):
         """After an upstream cut, restore only named downstream heads at the decision query."""
@@ -224,9 +262,10 @@ def forward(model, ids, probe, interventions=(), restore=None):
     first_ids = [candidate[0] for candidate in probe['candidates']]
     with torch.inference_mode(), NativeRun(model, len(probe['prefix_ids']), probe['groups'],
                                           first_ids, interventions, restore,
-                                          probe.get('trace_heads', ()), probe.get('trace_window', 10)) as run:
+                                          probe.get('trace_heads', ()), probe.get('trace_window', 10),
+                                          probe.get('record_writes', True), probe.get('capture_units', ())) as run:
         output = model(input_ids=tensor, attention_mask=torch.ones_like(tensor),
-                       use_cache=False, output_attentions=True, return_dict=True)
+                       use_cache=False, output_attentions=False, return_dict=True)
         logits = output.logits[0].float()
     return logits, run
 
