@@ -1,0 +1,129 @@
+"""Unlabelled sticky latent regime over natural physical-head sequences."""
+
+import argparse
+import json
+from pathlib import Path
+
+from threadpoolctl import threadpool_limits
+
+from ..offline_span.data import write_json
+from .inputs import inspect, prepare
+from .pipeline import fit, score
+
+
+ROOT = Path("/share/home/tm902089733300000/a903202310/lys/data/RAGTruth")
+TOKENIZER = Path(
+    "/share/home/tm902089733300000/a903202310/lys/models/"
+    "Meta-Llama-3.1-8B-Instruct"
+)
+
+
+def arguments(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--phase",
+        choices=["all", "inspect", "prepare", "fit", "score", "evaluate"],
+        default="all",
+    )
+    parser.add_argument(
+        "--train-cache",
+        type=Path,
+        default=ROOT / "attention/llama31_8b/train",
+    )
+    parser.add_argument(
+        "--test-cache",
+        type=Path,
+        default=ROOT / "attention/llama31_8b/test",
+    )
+    parser.add_argument("--dataset", type=Path, default=ROOT / "dataset")
+    parser.add_argument("--index", type=Path)
+    parser.add_argument("--source-info", type=Path)
+    parser.add_argument("--tokenizer", default=str(TOKENIZER))
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("outputs/latent_regime_v1"),
+    )
+    parser.add_argument("--tasks", nargs="+", default=["all"])
+    parser.add_argument("--generators", nargs="+", default=["all"])
+    parser.add_argument("--layers", nargs="+", type=int)
+    parser.add_argument("--heads", nargs="+", type=int)
+    parser.add_argument("--iterations", type=int, default=10)
+    parser.add_argument("--starts", type=int, default=2)
+    parser.add_argument("--sticky-prior", type=float, default=20.)
+    parser.add_argument("--ridge", type=float, default=1e-2)
+    parser.add_argument("--tolerance", type=float, default=1e-3)
+    parser.add_argument("--quantile", type=float, default=.95)
+    parser.add_argument("--seed", type=int, default=17)
+    parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--bootstrap", type=int, default=200)
+    parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--resume", action="store_true")
+    return parser.parse_args(argv)
+
+
+def saved_settings(args):
+    values = {
+        key: str(value.resolve()) if isinstance(value, Path) else value
+        for key, value in vars(args).items()
+    }
+    for key in (
+        "phase",
+        "resume",
+        "bootstrap",
+        "threads",
+        "tokenizer",
+    ):
+        values.pop(key)
+    values["version"] = "latent-head-regime-v1"
+    values["natural_labels_used_for_fit"] = False
+    return values
+
+
+def record_settings(args):
+    path = args.output / "settings.json"
+    current = saved_settings(args)
+
+    if path.exists():
+        saved = json.loads(path.read_text())
+        if not args.resume or saved != current:
+            raise ValueError(
+                "Use a new output, or --resume with identical latent-regime settings"
+            )
+        return
+
+    args.output.mkdir(parents=True, exist_ok=True)
+    write_json(path, current)
+
+
+def main(argv=None):
+    args = arguments(argv)
+
+    with threadpool_limits(limits=args.threads):
+        if args.phase == "inspect":
+            inspect(args)
+            return
+
+        if args.phase != "evaluate":
+            record_settings(args)
+
+        if args.phase in ("all", "prepare"):
+            manifest = args.output / "observations/manifest.json"
+            if not (args.resume and manifest.exists()):
+                prepare(args)
+
+        if args.phase in ("all", "fit"):
+            complete = args.output / "fit/complete.json"
+            if not (args.resume and complete.exists()):
+                fit(args)
+
+        if args.phase in ("all", "score"):
+            score(args)
+
+        if args.phase in ("all", "evaluate"):
+            from .evaluation import evaluate
+            evaluate(args)
+
+
+if __name__ == "__main__":
+    main()

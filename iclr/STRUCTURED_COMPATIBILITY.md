@@ -37,3 +37,18 @@ source相关corruption不得改变当前head的prompt总质量。
 只替换 source/(source+other_prompt) 比例，避免学习attention质量守恒这种必然关系。
 source donor限定在同一回答、局部位置块，减少位置和生成阶段的简单差异。
 head_identity在逐physical-head标准化以后置换，目标是head身份/协同而不是原始尺度。
+
+
+## 2026-09-20 natural TEST result: failed as a primary detector
+
+Completed TEST scoring showed:
+- ALL compatibility AUROC 0.5634, AP 0.0870
+- ALL source_head AUROC 0.5822, AP 0.0962
+- ALL sticky AUROC 0.5677, AP 0.0887
+- position AUROC 0.6045
+- QA source_head was the strongest component at AUROC 0.6100, AP 0.1385
+
+Interpretation: the artificial corruption task learns generic internal inconsistency,
+while natural hallucinations can remain internally coordinated. The pretext direction
+does not recover the label-assisted LDA direction. Keep this package as a negative
+control; do not tune corruption weights or add more corruption classes on TEST.
