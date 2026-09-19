@@ -552,6 +552,8 @@ def run_grounding_dynamics(args):
 
     table.to_csv(output / "token_scores.csv.gz", index=False)
     metrics.to_csv(output / "metrics.csv", index=False)
+    from .grounding_report import write_stratified_reports
+    write_stratified_reports(table, high_jump, output)
     np.savez_compressed(
         output / "model.npz",
         geometry=np.asarray(geometry),

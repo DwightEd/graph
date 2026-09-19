@@ -12,6 +12,11 @@ from experiments.path_conflict.flow_report import (
     same_question_deltas,
 )
 from experiments.charm_structure_audit.supervised_head_roles import head_statistics
+from experiments.path_conflict.binding_analysis import (
+    effect_state,
+    sensitivity_table,
+    panel_consistency,
+)
 
 
 def test_flow_groups_are_exact_aggregates():
@@ -172,3 +177,32 @@ def test_binding_table_distinguishes_complete_and_partial_support():
     assert table.loc[4, "binding_state"] == "value_without_condition"
     assert table.loc[4, "binding_completeness"] == 0
     assert np.isclose(table.loc[3, "joint_nonadditivity"], -.1)
+
+
+def test_binding_effect_state_uses_material_threshold():
+    assert effect_state(.03, .2, .02) == "value_with_condition"
+    assert effect_state(.005, .2, .02) == "value_without_condition"
+    assert effect_state(-.03, .2, .02) == "value_without_condition"
+    assert effect_state(.0, .005, .02) == "weak"
+
+
+def test_binding_sensitivity_keeps_thresholds_explicit():
+    frame = pd.DataFrame([
+        dict(case_id="c", panel="natural", side="supported", layer=1, head=2,
+             final_condition=.03, final_value=.04),
+    ])
+    result = sensitivity_table(frame)
+    assert set(result.threshold) == {.01, .02, .05}
+    assert result[result.threshold == .05].iloc[0].state == "weak"
+
+
+def test_panel_consistency_requires_same_physical_head():
+    frame = pd.DataFrame([
+        dict(case_id="c", panel="natural", side="unsupported", layer=1, head=2,
+             final_condition=0., final_value=.2, final_evidence=.2),
+        dict(case_id="c", panel="parallel_singular", side="unsupported", layer=1, head=2,
+             final_condition=0., final_value=.3, final_evidence=.3),
+    ])
+    result = panel_consistency(frame)
+    assert len(result) == 1
+    assert bool(result.iloc[0]["partial_both_0.05"])

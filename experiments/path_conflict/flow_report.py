@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 
 from .flow_plan import opposition, sign_role
+from .binding_analysis import write_binding_robustness
 
 
 KEYS = ["case_id", "side", "panel"]
@@ -239,7 +240,9 @@ def write_report(output, roles, alignment):
         "3. evidence_forward.csv：证据在各层的局部支持。",
         "4. propagation_delta.csv.gz：删路径后的影响如何被后续层保留、抵消或反转。",
         "5. same_question_head_deltas.csv：同题有依据/无依据的同head差异。",
-        "6. binding_completeness.csv：condition/value分开后的完整绑定、部分绑定和联合非加性。",
+        "6. binding_completeness.csv：原始condition/value作用；binding_state仅作方向描述，不作机制结论。",
+        "7. binding_sensitivity_counts.csv：0.01/0.02/0.05三档效应阈值的部分绑定敏感性。",
+        "8. binding_panel_consistency.csv：natural与forced-common-wording面板是否复现同一binding状态。",
         "",
         "## 最终作用最大的已确认head",
         "",
@@ -274,6 +277,7 @@ def report_flow(output, supervised_path=None):
     paths.to_csv(output / "propagation_delta.csv.gz", index=False)
     deltas.to_csv(output / "same_question_head_deltas.csv", index=False)
     binding.to_csv(output / "binding_completeness.csv", index=False)
+    write_binding_robustness(binding, output)
     alignment.to_csv(output / "supervised_alignment.csv", index=False)
     write_report(output, roles, alignment)
 
