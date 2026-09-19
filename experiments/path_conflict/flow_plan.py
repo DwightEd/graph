@@ -3,7 +3,10 @@
 from dataclasses import dataclass
 
 DISCOVERY_GROUPS = ("all_context", "evidence", "wrong_source", "history")
-SCAN_GROUPS = DISCOVERY_GROUPS + ("condition", "value")
+SCAN_GROUPS = DISCOVERY_GROUPS + (
+    "condition", "value", "query_self", "recent_history", "remote_history",
+    "past_history",
+)
 
 
 @dataclass(frozen=True)
@@ -30,7 +33,7 @@ def select_heads(writes, top_k=3, max_heads=12):
     return ordered[:max_heads]
 
 
-def sign_role(value, tolerance=1e-6):
+def sign_role(value, tolerance=.02):
     if value != value:
         return "not_tested"
     if value > tolerance:

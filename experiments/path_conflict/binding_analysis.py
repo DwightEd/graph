@@ -12,13 +12,15 @@ def effect_state(condition, value, threshold):
     if not np.isfinite(condition) or not np.isfinite(value):
         return "not_tested"
     if value > threshold and condition > threshold:
-        return "value_with_condition"
-    if value > threshold and condition <= threshold:
-        return "value_without_condition"
+        return "both_support_candidate"
+    if condition * value < 0 and min(abs(condition), abs(value)) > threshold:
+        return "condition_value_opposed"
+    if value > threshold and abs(condition) <= threshold:
+        return "value_effect_only"
+    if condition > threshold and abs(value) <= threshold:
+        return "condition_effect_only"
     if value < -threshold and condition < -threshold:
-        return "both_wrong"
-    if value < -threshold and condition >= -threshold:
-        return "wrong_value_without_condition"
+        return "both_oppose_candidate"
     return "weak"
 
 
@@ -106,9 +108,9 @@ def panel_consistency(binding):
             paired[f"state_natural_{threshold:g}"]
             == paired[f"state_parallel_{threshold:g}"]
         )
-        paired[f"partial_both_{threshold:g}"] = (
-            (paired[f"state_natural_{threshold:g}"] == "value_without_condition")
-            & (paired[f"state_parallel_{threshold:g}"] == "value_without_condition")
+        paired[f"value_effect_only_both_{threshold:g}"] = (
+            (paired[f"state_natural_{threshold:g}"] == "value_effect_only")
+            & (paired[f"state_parallel_{threshold:g}"] == "value_effect_only")
         )
     return paired
 

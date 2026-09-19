@@ -96,7 +96,8 @@ def test_original_forward_and_full_source_decomposition():
     expected = model(torch.tensor([probe['prefix_ids']])).logits[0]
     torch.testing.assert_close(logits, expected)
     assert max(run.reconstruction) < 1e-6
-    assert len(run.writes) == 3 * 4 * 4
+    # Each source group includes the aggregate row (head=-1) and four heads.
+    assert len(run.writes) == 3 * 4 * 5
     assert len(run.trajectory) == 6
 
 

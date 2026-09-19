@@ -14,6 +14,9 @@ def add_flow_groups(probe):
     groups["history"] = np.unique(np.concatenate(
         [groups["query_self"], groups["recent_history"], groups["remote_history"]]
     ))
+    groups["past_history"] = np.unique(np.concatenate(
+        [groups["recent_history"], groups["remote_history"]]
+    ))
     groups["wrong_source"] = groups["value_source"].copy()
     groups["all_context"] = np.arange(len(probe["prefix_ids"]))
     result["groups"] = groups

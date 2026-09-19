@@ -1,0 +1,17 @@
+{
+  "graph_base": "3f2b5240a78da5e99cbd22765bae0eb004bfd23b",
+  "reanchor_base": "0d1092c4ebba981616c8c7a031d63d3d49fa19d9",
+  "tests": 132,
+  "production_llm_run": false,
+  "natural_detector_retrained": false,
+  "recomputed_tokens": 73545,
+  "recomputed_tested_head_rows": 72,
+  "tiny_hf_llama_message_relative_error": 7.786595546122044e-08,
+  "packages": {
+    "torch": "2.14.0",
+    "transformers": "5.17.0",
+    "numpy": "2.3.5",
+    "pandas": "2.2.3",
+    "pytest": "9.1.1"
+  }
+}

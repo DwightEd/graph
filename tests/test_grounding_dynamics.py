@@ -19,7 +19,7 @@ def test_grounding_transition_predictors_keep_head_identity():
     assert x.shape == (2, 2, 16)
     assert y.shape == (2, 2, 4)
     np.testing.assert_array_equal(x[0, 0, :4], np.ones(4))
-    np.testing.assert_array_equal(x[0, 0, 4:8], np.full(4, 2.0))
+    np.testing.assert_array_equal(x[0, 0, 4:8], np.zeros(4))
     np.testing.assert_array_equal(y[0, 0], np.full(4, 2.0))
 
 

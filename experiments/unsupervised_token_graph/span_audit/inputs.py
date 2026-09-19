@@ -62,7 +62,8 @@ def default_observer_tokenizer(cache):
 class AuditInputs:
     """复用已有reader，集中放置元数据、tokenizer和文件读取。"""
 
-    def __init__(self, cache, dataset, index_path=None, tokenizer=None, feature_root=None):
+    def __init__(self, cache, dataset, index_path=None, tokenizer=None, feature_root=None,
+                 include_labels=True):
         cache = Path(cache).resolve()
         directory = cache.parent if cache.is_file() else cache
         self.index = CacheIndex(directory, index_path)
@@ -78,6 +79,7 @@ class AuditInputs:
         self.binding = EvaluationBinding(alignment_settings, tokenizer)
         self.reported_tokenizer = None
         self.feature_root = feature_root
+        self.include_labels = include_labels
 
     def selected_ids(self, split, tasks):
         for response_id in self.groups:
@@ -112,7 +114,7 @@ class AuditInputs:
             self.reported_tokenizer = tokenizer
 
     def make_answer(self, metadata, offsets, annotation, token_ids, prompt_length, paths):
-        spans = marked_spans(offsets, annotation['labels'])
+        spans = marked_spans(offsets, annotation['labels']) if self.include_labels else []
         response_length = len(token_ids) - prompt_length
         entropy = saved_entropy(paths, self.feature_root, metadata['id'],
                                 token_ids, response_length)
@@ -121,7 +123,7 @@ class AuditInputs:
             task=metadata['task'], generator=metadata['generator'], split=metadata['split'],
             text=annotation['response'], token_ids=token_ids,
             prompt_length=prompt_length, offsets=offsets,
-            error_mask=span_mask(response_length, spans), spans=spans,
+            error_mask=span_mask(response_length, spans) if self.include_labels else None, spans=spans,
             entropy=entropy, cache_paths=paths,
         )
 

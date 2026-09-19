@@ -172,17 +172,17 @@ def test_binding_table_distinguishes_complete_and_partial_support():
         ),
     ])
     table = binding_table(roles).set_index("head")
-    assert table.loc[3, "binding_state"] == "complete_correct_support"
+    assert table.loc[3, "binding_state"] == "both_support_candidate"
     assert np.isclose(table.loc[3, "binding_completeness"], .5)
-    assert table.loc[4, "binding_state"] == "value_without_condition"
+    assert table.loc[4, "binding_state"] == "condition_value_opposed"
     assert table.loc[4, "binding_completeness"] == 0
     assert np.isclose(table.loc[3, "joint_nonadditivity"], -.1)
 
 
 def test_binding_effect_state_uses_material_threshold():
-    assert effect_state(.03, .2, .02) == "value_with_condition"
-    assert effect_state(.005, .2, .02) == "value_without_condition"
-    assert effect_state(-.03, .2, .02) == "value_without_condition"
+    assert effect_state(.03, .2, .02) == "both_support_candidate"
+    assert effect_state(.005, .2, .02) == "value_effect_only"
+    assert effect_state(-.03, .2, .02) == "condition_value_opposed"
     assert effect_state(.0, .005, .02) == "weak"
 
 
@@ -205,4 +205,4 @@ def test_panel_consistency_requires_same_physical_head():
     ])
     result = panel_consistency(frame)
     assert len(result) == 1
-    assert bool(result.iloc[0]["partial_both_0.05"])
+    assert bool(result.iloc[0]["value_effect_only_both_0.05"])

@@ -58,7 +58,7 @@ def main(argv=None):
         screen_dataset(args)
     if args.phase in ("confirm", "all"):
         confirm_dataset(args)
-    if args.phase in ("grounding", "all"):
+    if args.phase == "grounding":
         from .grounding_dynamics import run_grounding_dynamics
         run_grounding_dynamics(args)
     if args.phase in ("report", "all"):

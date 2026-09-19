@@ -1,6 +1,29 @@
-# Unsupervised entropy seeds → local token reuse
+# 候选内容与适用条件的功能一致性
 
-默认 `main.py`：无标签参考熵 → 疑似入口 → 实际局部 attention 多跳复用。
+当前结论、两个项目的证据台账、检测设计及已完成实现，统一见
+[检测方向收敛](docs/DETECTION_CONVERGENCE_20260919.md)。
+内部逐头模式可被监督读出；尚无已验证的通用无监督绑定检测器。
+
+本轮主入口：
+
+```bash
+python -u main.py flow --output outputs/evidence_target_flow_v2
+```
+
+读取reanchor既有样本，测量原生A·V·W_O消息，分开self/近历史/远历史，
+运行单头和双头四世界干预，同时保存首词与整段候选结果。新版本用共享局部梯度
+度量有符号可加写入；有限干预单独报告。此命令是机制实验，不是检测成绩。
+`python main.py`显示入口；历史无标签基线需显式使用`unsupervised`。
+现有无标签HMM保留为竞争对照：`python main.py regime --phase all --resume`。
+本轮未取得其自然成绩，不把较少占用的状态直接称为已发现的幻觉状态。
+
+旧grounding当前步回归存在互补质量恒等式，已改为过去路由预测基线。
+`python -u main.py population --phase grounding --resume`写新目录，
+不会覆盖旧成绩，也不再随population all自动运行。
+
+## 历史基线：entropy seeds → local token reuse
+
+显式 `main.py unsupervised`：无标签参考熵 → 疑似入口 → 实际局部 attention 多跳复用。
 不训练入口/延续分类器，不加载 S10/S11 监督权重，不用正常样本标签校准。
 标签只在全部预测冻结之后用于评价。**尚无新自然 RAGTruth 检测成绩。**
 
@@ -52,8 +75,8 @@ strict_post_first 和错误结束后正常 token 的误报。高 attention 可�
 
 `binding_detector/projection.py` 实现显式关系下的 `-log Q(合法绑定)`，需要可靠来源匹配
 和关系数据包；它不参与本默认流程，不能从五列统计中自动恢复事实图。
-当前默认流程使用熵和经验尾部，不估计真假两类密度、条件互信息或贝叶斯幻觉后验。
-率失真定理解释高置信碰撞的可能性，不为当前 attention 传播提供有效性保证。
+旧复用基线使用熵和经验尾部，不估计真假两类密度、条件互信息或贝叶斯幻觉后验。
+率失真定理解释高置信碰撞的可能性，不为旧attention传播提供有效性保证。
 
 历史结果与归档均不删除。原 S11 说明见 docs/S11_LOCAL_PROPAGATION.md；
 其中旧 transport 命令需改成 supervised-s11 才会运行。

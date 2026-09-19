@@ -1,0 +1,478 @@
+{
+  "operation": "read-only recomputation of submitted v1 scores, no LLM or retraining",
+  "answers": 449,
+  "sources": 449,
+  "grounding": [
+    {
+      "task": "ALL",
+      "scope": "all",
+      "score": "raw_surprise",
+      "tokens": 73096,
+      "positives": 4586,
+      "auroc": 0.5964198470935418,
+      "ap": 0.10429565421847575
+    },
+    {
+      "task": "ALL",
+      "scope": "all",
+      "score": "head_contrast_surprise",
+      "tokens": 73096,
+      "positives": 4586,
+      "auroc": 0.5972104371264921,
+      "ap": 0.10477160554769752
+    },
+    {
+      "task": "ALL",
+      "scope": "all",
+      "score": "self_jump",
+      "tokens": 73096,
+      "positives": 4586,
+      "auroc": 0.5017506460964026,
+      "ap": 0.06518467090829624
+    },
+    {
+      "task": "ALL",
+      "scope": "previous_gold_0",
+      "score": "raw_surprise",
+      "tokens": 68529,
+      "positives": 339,
+      "auroc": 0.49043895656808306,
+      "ap": 0.0054647191359969115
+    },
+    {
+      "task": "ALL",
+      "scope": "previous_gold_0",
+      "score": "head_contrast_surprise",
+      "tokens": 68529,
+      "positives": 339,
+      "auroc": 0.491198892907679,
+      "ap": 0.005482800272272641
+    },
+    {
+      "task": "ALL",
+      "scope": "previous_gold_0",
+      "score": "self_jump",
+      "tokens": 68529,
+      "positives": 339,
+      "auroc": 0.5510122462787258,
+      "ap": 0.006026660410504044
+    },
+    {
+      "task": "ALL",
+      "scope": "previous_gold_1",
+      "score": "raw_surprise",
+      "tokens": 4567,
+      "positives": 4247,
+      "auroc": 0.4487756063103367,
+      "ap": 0.9266895255543868
+    },
+    {
+      "task": "ALL",
+      "scope": "previous_gold_1",
+      "score": "head_contrast_surprise",
+      "tokens": 4567,
+      "positives": 4247,
+      "auroc": 0.44910672239227695,
+      "ap": 0.9267741050338165
+    },
+    {
+      "task": "ALL",
+      "scope": "previous_gold_1",
+      "score": "self_jump",
+      "tokens": 4567,
+      "positives": 4247,
+      "auroc": 0.33319696256180836,
+      "ap": 0.8992447875133558
+    },
+    {
+      "task": "Data2txt",
+      "scope": "all",
+      "score": "raw_surprise",
+      "tokens": 24641,
+      "positives": 1469,
+      "auroc": 0.5896615384145344,
+      "ap": 0.10715847942501078
+    },
+    {
+      "task": "Data2txt",
+      "scope": "all",
+      "score": "head_contrast_surprise",
+      "tokens": 24641,
+      "positives": 1469,
+      "auroc": 0.591152534155151,
+      "ap": 0.10739293683530436
+    },
+    {
+      "task": "Data2txt",
+      "scope": "all",
+      "score": "self_jump",
+      "tokens": 24641,
+      "positives": 1469,
+      "auroc": 0.5287722547705224,
+      "ap": 0.06676667569960415
+    },
+    {
+      "task": "Data2txt",
+      "scope": "previous_gold_0",
+      "score": "raw_surprise",
+      "tokens": 23173,
+      "positives": 203,
+      "auroc": 0.45150453257729617,
+      "ap": 0.007431881881057219
+    },
+    {
+      "task": "Data2txt",
+      "scope": "previous_gold_0",
+      "score": "head_contrast_surprise",
+      "tokens": 23173,
+      "positives": 203,
+      "auroc": 0.4531324859368935,
+      "ap": 0.007458173207309104
+    },
+    {
+      "task": "Data2txt",
+      "scope": "previous_gold_0",
+      "score": "self_jump",
+      "tokens": 23173,
+      "positives": 203,
+      "auroc": 0.5460617940299084,
+      "ap": 0.011035105566358104
+    },
+    {
+      "task": "Data2txt",
+      "scope": "previous_gold_1",
+      "score": "raw_surprise",
+      "tokens": 1468,
+      "positives": 1266,
+      "auroc": 0.46565154145746324,
+      "ap": 0.8671007055257842
+    },
+    {
+      "task": "Data2txt",
+      "scope": "previous_gold_1",
+      "score": "head_contrast_surprise",
+      "tokens": 1468,
+      "positives": 1266,
+      "auroc": 0.4666213066804311,
+      "ap": 0.8671201106549216
+    },
+    {
+      "task": "Data2txt",
+      "scope": "previous_gold_1",
+      "score": "self_jump",
+      "tokens": 1468,
+      "positives": 1266,
+      "auroc": 0.36135094552109237,
+      "ap": 0.808818045575027
+    },
+    {
+      "task": "QA",
+      "scope": "all",
+      "score": "raw_surprise",
+      "tokens": 30321,
+      "positives": 2305,
+      "auroc": 0.6150887128644184,
+      "ap": 0.1326239345433125
+    },
+    {
+      "task": "QA",
+      "scope": "all",
+      "score": "head_contrast_surprise",
+      "tokens": 30321,
+      "positives": 2305,
+      "auroc": 0.6152288404147119,
+      "ap": 0.1332992579273052
+    },
+    {
+      "task": "QA",
+      "scope": "all",
+      "score": "self_jump",
+      "tokens": 30321,
+      "positives": 2305,
+      "auroc": 0.4933285101417101,
+      "ap": 0.0766493582943173
+    },
+    {
+      "task": "QA",
+      "scope": "previous_gold_0",
+      "score": "raw_surprise",
+      "tokens": 28025,
+      "positives": 78,
+      "auroc": 0.712864460476011,
+      "ap": 0.00820669971958254
+    },
+    {
+      "task": "QA",
+      "scope": "previous_gold_0",
+      "score": "head_contrast_surprise",
+      "tokens": 28025,
+      "positives": 78,
+      "auroc": 0.7140727916303111,
+      "ap": 0.008232116554233556
+    },
+    {
+      "task": "QA",
+      "scope": "previous_gold_0",
+      "score": "self_jump",
+      "tokens": 28025,
+      "positives": 78,
+      "auroc": 0.5942209291763805,
+      "ap": 0.0037579072364245358
+    },
+    {
+      "task": "QA",
+      "scope": "previous_gold_1",
+      "score": "raw_surprise",
+      "tokens": 2296,
+      "positives": 2227,
+      "auroc": 0.24622713340231545,
+      "ap": 0.952434232400855
+    },
+    {
+      "task": "QA",
+      "scope": "previous_gold_1",
+      "score": "head_contrast_surprise",
+      "tokens": 2296,
+      "positives": 2227,
+      "auroc": 0.24730091173542101,
+      "ap": 0.9526520253481052
+    },
+    {
+      "task": "QA",
+      "scope": "previous_gold_1",
+      "score": "self_jump",
+      "tokens": 2296,
+      "positives": 2227,
+      "auroc": 0.2370447017173946,
+      "ap": 0.949066615903635
+    },
+    {
+      "task": "Summary",
+      "scope": "all",
+      "score": "raw_surprise",
+      "tokens": 18134,
+      "positives": 812,
+      "auroc": 0.5274886061348563,
+      "ap": 0.05381684418297214
+    },
+    {
+      "task": "Summary",
+      "scope": "all",
+      "score": "head_contrast_surprise",
+      "tokens": 18134,
+      "positives": 812,
+      "auroc": 0.528960224845764,
+      "ap": 0.05428718374976099
+    },
+    {
+      "task": "Summary",
+      "scope": "all",
+      "score": "self_jump",
+      "tokens": 18134,
+      "positives": 812,
+      "auroc": 0.4784515462838624,
+      "ap": 0.04460132310508919
+    },
+    {
+      "task": "Summary",
+      "scope": "previous_gold_0",
+      "score": "raw_surprise",
+      "tokens": 17331,
+      "positives": 58,
+      "auroc": 0.5326361453095024,
+      "ap": 0.00484566372612398
+    },
+    {
+      "task": "Summary",
+      "scope": "previous_gold_0",
+      "score": "head_contrast_surprise",
+      "tokens": 17331,
+      "positives": 58,
+      "auroc": 0.5298213077216385,
+      "ap": 0.004771293683651636
+    },
+    {
+      "task": "Summary",
+      "scope": "previous_gold_0",
+      "score": "self_jump",
+      "tokens": 17331,
+      "positives": 58,
+      "auroc": 0.5722145584997115,
+      "ap": 0.00501775506458349
+    },
+    {
+      "task": "Summary",
+      "scope": "previous_gold_1",
+      "score": "raw_surprise",
+      "tokens": 803,
+      "positives": 754,
+      "auroc": 0.4222919937205651,
+      "ap": 0.9346781661267396
+    },
+    {
+      "task": "Summary",
+      "scope": "previous_gold_1",
+      "score": "head_contrast_surprise",
+      "tokens": 803,
+      "positives": 754,
+      "auroc": 0.4247279813782277,
+      "ap": 0.9354017807995343
+    },
+    {
+      "task": "Summary",
+      "scope": "previous_gold_1",
+      "score": "self_jump",
+      "tokens": 803,
+      "positives": 754,
+      "auroc": 0.33768202241108647,
+      "ap": 0.913184737780216
+    }
+  ],
+  "binding_direct_effects": [
+    {
+      "case_id": "14315_headwear_scope",
+      "panel": "natural",
+      "side": "supported",
+      "tolerance": 0.01,
+      "tested_heads": 12,
+      "value_effect_only": 1
+    },
+    {
+      "case_id": "14315_headwear_scope",
+      "panel": "natural",
+      "side": "supported",
+      "tolerance": 0.02,
+      "tested_heads": 12,
+      "value_effect_only": 1
+    },
+    {
+      "case_id": "14315_headwear_scope",
+      "panel": "natural",
+      "side": "supported",
+      "tolerance": 0.05,
+      "tested_heads": 12,
+      "value_effect_only": 3
+    },
+    {
+      "case_id": "14315_headwear_scope",
+      "panel": "natural",
+      "side": "unsupported",
+      "tolerance": 0.01,
+      "tested_heads": 12,
+      "value_effect_only": 1
+    },
+    {
+      "case_id": "14315_headwear_scope",
+      "panel": "natural",
+      "side": "unsupported",
+      "tolerance": 0.02,
+      "tested_heads": 12,
+      "value_effect_only": 3
+    },
+    {
+      "case_id": "14315_headwear_scope",
+      "panel": "natural",
+      "side": "unsupported",
+      "tolerance": 0.05,
+      "tested_heads": 12,
+      "value_effect_only": 5
+    },
+    {
+      "case_id": "14315_headwear_scope",
+      "panel": "parallel_singular",
+      "side": "supported",
+      "tolerance": 0.01,
+      "tested_heads": 12,
+      "value_effect_only": 3
+    },
+    {
+      "case_id": "14315_headwear_scope",
+      "panel": "parallel_singular",
+      "side": "supported",
+      "tolerance": 0.02,
+      "tested_heads": 12,
+      "value_effect_only": 4
+    },
+    {
+      "case_id": "14315_headwear_scope",
+      "panel": "parallel_singular",
+      "side": "supported",
+      "tolerance": 0.05,
+      "tested_heads": 12,
+      "value_effect_only": 4
+    },
+    {
+      "case_id": "14315_headwear_scope",
+      "panel": "parallel_singular",
+      "side": "unsupported",
+      "tolerance": 0.01,
+      "tested_heads": 12,
+      "value_effect_only": 1
+    },
+    {
+      "case_id": "14315_headwear_scope",
+      "panel": "parallel_singular",
+      "side": "unsupported",
+      "tolerance": 0.02,
+      "tested_heads": 12,
+      "value_effect_only": 1
+    },
+    {
+      "case_id": "14315_headwear_scope",
+      "panel": "parallel_singular",
+      "side": "unsupported",
+      "tolerance": 0.05,
+      "tested_heads": 12,
+      "value_effect_only": 3
+    },
+    {
+      "case_id": "14375_onion_stage",
+      "panel": "natural",
+      "side": "supported",
+      "tolerance": 0.01,
+      "tested_heads": 12,
+      "value_effect_only": 0
+    },
+    {
+      "case_id": "14375_onion_stage",
+      "panel": "natural",
+      "side": "supported",
+      "tolerance": 0.02,
+      "tested_heads": 12,
+      "value_effect_only": 0
+    },
+    {
+      "case_id": "14375_onion_stage",
+      "panel": "natural",
+      "side": "supported",
+      "tolerance": 0.05,
+      "tested_heads": 12,
+      "value_effect_only": 1
+    },
+    {
+      "case_id": "14375_onion_stage",
+      "panel": "natural",
+      "side": "unsupported",
+      "tolerance": 0.01,
+      "tested_heads": 12,
+      "value_effect_only": 0
+    },
+    {
+      "case_id": "14375_onion_stage",
+      "panel": "natural",
+      "side": "unsupported",
+      "tolerance": 0.02,
+      "tested_heads": 12,
+      "value_effect_only": 0
+    },
+    {
+      "case_id": "14375_onion_stage",
+      "panel": "natural",
+      "side": "unsupported",
+      "tolerance": 0.05,
+      "tested_heads": 12,
+      "value_effect_only": 0
+    }
+  ],
+  "interpretation": "value-position effect without a direct condition-position effect is not missing semantic binding"
+}

@@ -94,7 +94,8 @@ def main(argv=None):
     parser.add_argument('--recent-window', type=int, default=10)
     parser.add_argument('--flow-top-k', type=int, default=3)
     parser.add_argument('--flow-max-heads', type=int, default=12)
-    parser.add_argument('--supervised-head-roles', help='Optional head_rules.csv; joined only for identical geometry')
+    parser.add_argument('--pairs-per-group', type=int, default=2)
+    parser.add_argument('--supervised-head-roles', help='Optional head_rules.csv; geometry alone never aligns heads')
     parser.add_argument('--model', help='Same original checkpoint at a relocated local path')
     parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--dtype', choices=['float32', 'float16', 'bfloat16'], default='bfloat16')
@@ -110,7 +111,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.output is None:
         names = {
-            'flow': 'outputs/evidence_target_flow',
+            'flow': 'outputs/evidence_target_flow_v2',
             'focused': 'outputs/same_question_path_conflict_focused_v2',
             'coarse': 'outputs/same_question_path_conflict_coarse_v2',
         }

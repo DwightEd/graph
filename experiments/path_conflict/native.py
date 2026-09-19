@@ -9,7 +9,10 @@ from dataclasses import dataclass
 import torch
 from torch.nn import functional as F
 
-from .operators import grouped_values, source_write, equal_norm_change, lens_margin
+from .operators import (
+    grouped_values, source_write, equal_norm_change, lens_margin,
+    local_readout_direction,
+)
 
 
 @dataclass(frozen=True)
@@ -180,6 +183,7 @@ class NativeRun:
         head_width = heads.shape[-1] // count
         residual = self.residuals[index] + output[0, self.query]
         base_margin = lens_margin(self.model, residual, self.correct, self.wrong)
+        direction = local_readout_direction(self.model, residual, self.correct, self.wrong)
         all_sources = list(range(self.prefix_length))
         _, total, _ = source_write(attention, values, module.o_proj.weight, [self.query], all_sources, range(count))
         expected = output[0, self.query].float()
@@ -201,6 +205,7 @@ class NativeRun:
                 value_norm=float(components[:, 0].float().norm()),
                 write_norm=float(group_write[0].float().norm()),
                 local_lens_support=float(base_margin - group_margin),
+                local_linear_support=float(group_write[0].float() @ direction),
             ))
 
             blocks = module.o_proj.weight.view(-1, count, head_width).permute(1, 0, 2)
@@ -210,7 +215,8 @@ class NativeRun:
                 self.writes.append(dict(layer=index, head=head, source_group=name,
                     attention_mass=float(mass[head, 0]), value_norm=float(components[head, 0].float().norm()),
                     write_norm=float(messages[head].float().norm()),
-                    local_lens_support=float(base_margin - margins[head])))
+                    local_lens_support=float(base_margin - margins[head]),
+                    local_linear_support=float(messages[head].float() @ direction)))
 
 
 def forward(model, ids, probe, interventions=(), restore=None):

@@ -13,14 +13,16 @@ from .binding_analysis import write_binding_robustness
 
 KEYS = ["case_id", "side", "panel"]
 SOURCE_GROUPS = (
-    "all_context", "evidence", "condition", "value", "wrong_source", "history"
+    "all_context", "evidence", "condition", "value", "wrong_source", "history",
+    "query_self", "recent_history", "remote_history", "past_history",
 )
+EFFECT_TOLERANCE = .02
 
 
 def paired_numeric_fields(roles):
     fields = []
     for group in SOURCE_GROUPS:
-        for prefix in ("attention_mass_", "local_lens_support_", "final_"):
+        for prefix in ("attention_mass_", "local_lens_support_", "local_linear_support_", "final_"):
             name = prefix + group
             if name in roles.columns:
                 fields.append(name)
@@ -32,10 +34,13 @@ def role_table(output):
     effects = pd.read_csv(output / "head_interventions.csv")
 
     heads = writes[writes["head"].ge(0)].copy()
+    measures = ["attention_mass", "local_lens_support"]
+    if "local_linear_support" in heads:
+        measures.append("local_linear_support")
     wide = heads.pivot_table(
         index=KEYS + ["layer", "head"],
         columns="source_group",
-        values=["attention_mass", "local_lens_support"],
+        values=measures,
         aggfunc="first",
     )
     wide.columns = [f"{value}_{group}" for value, group in wide.columns]
@@ -50,29 +55,37 @@ def role_table(output):
     final.columns = ["final_" + name for name in final.columns]
     table = wide.merge(final.reset_index(), on=KEYS + ["layer", "head"], how="left")
 
-    table["local_role"] = table.local_lens_support_all_context.map(sign_role)
+    local = "local_linear_support" if "local_linear_support" in heads else "local_lens_support"
+    table["local_measure"] = local
+    table["local_role"] = table[local + "_all_context"].map(sign_role)
     table["final_role"] = table.final_all_context.map(sign_role)
     table["evidence_role"] = table.final_evidence.map(sign_role)
     table["history_role"] = table.final_history.map(sign_role)
     table["local_source_opposition"] = [
         opposition(evidence, history + wrong)
         for evidence, history, wrong in zip(
-            table.local_lens_support_evidence,
-            table.local_lens_support_history,
-            table.local_lens_support_wrong_source,
+            table[local + "_evidence"],
+            table[local + "_history"],
+            table[local + "_wrong_source"],
         )
     ]
     table["downstream_reversal"] = (
-        table.local_lens_support_all_context * table.final_all_context < 0
+        (table[local + "_all_context"] * table.final_all_context < 0)
+        & (table[local + "_all_context"].abs() > EFFECT_TOLERANCE)
+        & (table.final_all_context.abs() > EFFECT_TOLERANCE)
     )
     table["evidence_downstream_reversal"] = (
-        table.local_lens_support_evidence * table.final_evidence < 0
+        (table[local + "_evidence"] * table.final_evidence < 0)
+        & (table[local + "_evidence"].abs() > EFFECT_TOLERANCE)
+        & (table.final_evidence.abs() > EFFECT_TOLERANCE)
     )
-    table["evidence_retention"] = table.final_evidence / table.local_lens_support_evidence.replace(0, np.nan)
+    denominator = table[local + "_evidence"]
+    usable = (denominator.abs() > EFFECT_TOLERANCE) & (denominator * table.final_evidence > 0)
+    table["evidence_final_over_local"] = table.final_evidence / denominator.where(usable)
     return table
 
 
-def binding_table(roles, tolerance=1e-6):
+def binding_table(roles, tolerance=EFFECT_TOLERANCE):
     required = [
         "final_condition", "final_value", "final_evidence", "final_wrong_source",
         "local_lens_support_condition", "local_lens_support_value",
@@ -97,6 +110,7 @@ def binding_table(roles, tolerance=1e-6):
         "binding_completeness",
     ] = np.nan
     table["joint_nonadditivity"] = joint - condition - value
+    table["condition_value_interaction"] = condition + value - joint
     table["condition_downstream_change"] = (
         table.final_condition - table.local_lens_support_condition
     )
@@ -109,13 +123,15 @@ def binding_table(roles, tolerance=1e-6):
     ]
 
     states = np.full(len(table), "weak_or_mixed", dtype=object)
-    states[(condition > tolerance) & (value > tolerance)] = "complete_correct_support"
-    states[(value > tolerance) & (condition <= tolerance)] = "value_without_condition"
-    states[(condition > tolerance) & (value <= tolerance)] = "condition_without_value"
-    states[(condition < -tolerance) & (value < -tolerance)] = "complete_wrong_support"
-    states[condition * value < -(tolerance ** 2)] = "condition_value_opposed"
+    states[(condition > tolerance) & (value > tolerance)] = "both_support_candidate"
+    states[(value > tolerance) & (np.abs(condition) <= tolerance)] = "value_effect_only"
+    states[(condition > tolerance) & (np.abs(value) <= tolerance)] = "condition_effect_only"
+    states[(condition < -tolerance) & (value < -tolerance)] = "both_oppose_candidate"
+    states[(condition * value < 0) & (np.abs(condition) > tolerance)
+           & (np.abs(value) > tolerance)] = "condition_value_opposed"
     states[~np.isfinite(condition) | ~np.isfinite(value)] = "not_tested"
     table["binding_state"] = states
+    table["interpretation"] = "direct_position_effects_not_semantic_binding"
     return table
 
 
@@ -125,7 +141,8 @@ def layer_competition(output):
     selected = writes[(writes["head"] >= 0) & (writes.source_group == "all_context")]
 
     for key, group in selected.groupby(KEYS + ["layer"]):
-        value = group.local_lens_support.to_numpy()
+        measure = "local_linear_support" if "local_linear_support" in group else "local_lens_support"
+        value = group[measure].to_numpy()
         positive = value[value > 0].sum()
         negative = -value[value < 0].sum()
         denominator = positive + negative
@@ -135,6 +152,8 @@ def layer_competition(output):
             positive_support=positive,
             wrong_support=negative,
             competition_balance=balance,
+            measure=measure,
+            additive=measure == "local_linear_support",
             supporting_heads=int((value > 0).sum()),
             wrong_heads=int((value < 0).sum()),
         ))
@@ -197,7 +216,7 @@ def same_question_deltas(roles):
 
 
 def supervised_alignment(roles, path):
-    """Join head IDs only when the saved detector has the same geometry."""
+    """Equal L×H shapes do not identify a checkpoint or align its heads."""
     if not path:
         return pd.DataFrame()
     file = Path(path)
@@ -205,6 +224,13 @@ def supervised_alignment(roles, path):
         return pd.DataFrame()
 
     rules = pd.read_csv(file)
+    identity = "checkpoint_sha"
+    if identity not in roles or identity not in rules:
+        return pd.DataFrame([dict(note="no verified checkpoint identity; head IDs not aligned")])
+    if roles[identity].nunique() != 1 or rules[identity].nunique() != 1:
+        return pd.DataFrame([dict(note="mixed checkpoint identities; head IDs not aligned")])
+    if roles[identity].iloc[0] != rules[identity].iloc[0]:
+        return pd.DataFrame([dict(note="different checkpoints; head IDs not aligned")])
     if rules.layer.max() != roles.layer.max() or rules.head.max() != roles.head.max():
         return pd.DataFrame([
             dict(note="different model geometry: head IDs were not aligned")
@@ -233,6 +259,9 @@ def write_report(output, roles, alignment):
         "",
         "attention质量、当前层局部候选支持、跑完后续网络后的最终功能支持分开报告。",
         "正支持表示该写入帮助正确候选；负支持表示推动错误候选。",
+        "候选是人工指定对比；首子词margin不等于完整事实选择。最终作用依赖删除操作。",
+        "v2的local_linear_support共享FP32局部lens梯度，可相加；旧finite lens删除量不可相加。",
+        "history保留旧定义（含query自身）；应同时检查query_self与past_history。",
         "",
         "## 先看",
         "1. head_roles.csv：每个确认head的证据/历史/错误来源作用。",
@@ -243,6 +272,9 @@ def write_report(output, roles, alignment):
         "6. binding_completeness.csv：原始condition/value作用；binding_state仅作方向描述，不作机制结论。",
         "7. binding_sensitivity_counts.csv：0.01/0.02/0.05三档效应阈值的部分绑定敏感性。",
         "8. binding_panel_consistency.csv：natural与forced-common-wording面板是否复现同一binding状态。",
+        "9. head_interactions.csv（v2）：full/单头/双头四世界交互，同时报告首词与整段候选。",
+        "condition/value是来源位置集合，V已含上下文；直接condition效应弱不证明条件缺失。",
+        "binding_completeness旧字段仅为两个直接效应幅度比，不是语义绑定完整度。",
         "",
         "## 最终作用最大的已确认head",
         "",
@@ -256,7 +288,7 @@ def write_report(output, roles, alignment):
             "",
             "## 监督检测器坐标对齐",
             alignment.head(12).to_string(index=False),
-            "不同模型几何不会强行按head编号对齐。",
+            "同形不同模型也不按head编号对齐；缺少已核验checkpoint身份时保持未对齐。",
         ]
     (output / "REPORT_FLOW_zh.md").write_text("\n".join(lines), encoding="utf-8")
 
@@ -287,7 +319,7 @@ def report_flow(output, supervised_path=None):
             if path.is_file() and path.name != archive.name and path.suffix != ".npz":
                 stream.add(path, arcname=path.name)
 
-    print(roles[KEYS + [
+    print(roles[roles.final_all_context.notna()][KEYS + [
         "layer", "head", "final_all_context", "final_evidence",
         "final_history", "downstream_reversal",
     ]].to_string(index=False))

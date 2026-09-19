@@ -14,9 +14,10 @@ from .flow_inputs import add_flow_groups
 from .flow_plan import HeadTrial, select_heads, SCAN_GROUPS
 from .native import Intervention
 from .scoring import evaluate_candidates
+from .cooperation import select_pairs, run_pairs, save_pairs
 
 
-PROTOCOL = "evidence_target_flow_v1"
+PROTOCOL = "evidence_target_flow_v2"
 WRITE_IDENTITY = ("case_id", "source_id", "side", "panel", "seed", "trace", "query")
 
 
@@ -46,7 +47,7 @@ def baseline_panel(model, tokenizer, case, side, probe, output):
         query=len(probe["prefix_ids"]) - 1,
         candidates=probe["candidate_texts"],
     )
-    score, run = evaluate_candidates(model, probe, sequence=False)
+    score, run = evaluate_candidates(model, probe)
     stem = "_".join([case["case_id"], side, probe["panel"]])
     path = output / "baseline" / (stem + ".npz")
     if not path.exists():
@@ -72,7 +73,7 @@ def final_head_trials(model, probe, identity, baseline_score, heads, output):
                     record = json.loads(str(saved["record"]))
                     trajectory = json.loads(str(saved["trajectory"]))
             else:
-                score, run = evaluate_candidates(model, probe, (action,), sequence=False)
+                score, run = evaluate_candidates(model, probe, (action,))
                 save_capture(path, identity, trial.name, score, run, trial)
                 record = dict(
                     identity,
@@ -85,6 +86,7 @@ def final_head_trials(model, probe, identity, baseline_score, heads, output):
                 trajectory = run.trajectory
 
             record["final_support"] = baseline_score["next_margin"] - record["next_margin"]
+            record["final_sequence_support"] = baseline_score["sequence_margin"] - record["sequence_margin"]
             rows.append(record)
             trajectories.extend(
                 dict(
@@ -113,10 +115,16 @@ def setup(args, output):
         recent_window=args.recent_window,
         top_k=args.flow_top_k,
         max_heads=args.flow_max_heads,
+        pairs_per_group=args.pairs_per_group,
         cases=cases,
         sampling_settings=settings,
     )
-    write_json(output / "flow_config.json", config)
+    config_path = output / "flow_config.json"
+    if config_path.exists():
+        previous = json.loads(config_path.read_text(encoding="utf-8"))
+        if previous != config:
+            raise ValueError("Flow protocol/settings changed; use a new output directory")
+    write_json(config_path, config)
     return cases, samples, prompts, config
 
 
@@ -178,13 +186,22 @@ def run_flow(args):
 
     effects = []
     trajectories = []
+    pair_rows = []
     for identity, score, probe in probes:
+        panel_writes = writes
+        for field in ("case_id", "side", "panel"):
+            panel_writes = panel_writes[panel_writes[field] == identity[field]]
+        pairs = select_pairs(panel_writes, heads, args.pairs_per_group)
+        stem = "_".join([identity["case_id"], identity["side"], identity["panel"]])
+        write_json(output / (stem + "_pair_plan.json"), pairs)
         rows, paths = final_head_trials(model, probe, identity, score, heads, output)
         effects.extend(rows)
         trajectories.extend(paths)
+        pair_rows.extend(run_pairs(model, probe, identity, score, pairs, output))
 
     pd.DataFrame(effects).to_csv(output / "head_interventions.csv", index=False)
     pd.DataFrame(trajectories).to_csv(output / "propagation.csv.gz", index=False)
+    save_pairs(pair_rows, output)
     report_flow(output, args.supervised_head_roles)
 
 
@@ -193,13 +210,14 @@ def cli(argv=None):
     parser.add_argument("--stage", choices=["inventory", "run", "report"], default="run")
     parser.add_argument("--samples", default=DEFAULT_SAMPLES)
     parser.add_argument("--cases", default=str(Path(__file__).with_name("cases.json")))
-    parser.add_argument("--output", default="outputs/evidence_target_flow")
+    parser.add_argument("--output", default="outputs/evidence_target_flow_v2")
     parser.add_argument("--model")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--dtype", choices=["float32", "float16", "bfloat16"], default="bfloat16")
     parser.add_argument("--recent-window", type=int, default=10)
     parser.add_argument("--flow-top-k", type=int, default=3)
     parser.add_argument("--flow-max-heads", type=int, default=12)
+    parser.add_argument("--pairs-per-group", type=int, default=2)
     parser.add_argument("--supervised-head-roles")
     parser.add_argument("--replay-atol", type=float, default=.25)
     parser.add_argument("--message-rtol", type=float, default=.02)

@@ -40,6 +40,26 @@ def lens_margin(model, states, correct, wrong):
     return margin
 
 
+def local_readout_direction(model, state, correct, wrong):
+    """FP32 gradient of the local final-norm lens, not the remaining network.
+
+    All messages at this site share one direction, so their projections add.
+    Supports the native Llama RMSNorm and the LayerNorm used in operator tests.
+    """
+    norm = model.model.norm
+    value = state.float()
+    direction = model.lm_head.weight[correct].float()
+    direction = (direction - model.lm_head.weight[wrong].float()) * norm.weight.float()
+    if isinstance(norm, torch.nn.LayerNorm):
+        value = value - value.mean()
+        direction = direction - direction.mean()
+        epsilon = norm.eps
+    else:
+        epsilon = norm.variance_epsilon
+    scale = (value.square().mean() + epsilon).sqrt()
+    return direction / scale - value * (direction * value).mean() / scale.pow(3)
+
+
 def vocabulary_logits(model, normalized_states, block_size=4096):
     """FP32 LM-head multiplication, avoiding bf16 quantization of final logits.
 

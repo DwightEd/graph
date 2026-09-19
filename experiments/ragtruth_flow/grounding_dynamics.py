@@ -1,4 +1,4 @@
-"""Learn unlabeled grounding-conditioned dynamics, then evaluate frozen surprise on RAGTruth."""
+"""Past-only routing forecast baseline; not a semantic grounding detector."""
 
 from pathlib import Path
 import json
@@ -14,12 +14,13 @@ from .confirm import source_token_ids
 
 
 GROUPS = ("source", "other_prompt", "history", "self")
+PROTOCOL = "past_route_forecast_v2"
 
 
 def route_row(answer, position, keys, weights, source_lookup):
     prompt = answer.prompt_length
     query = prompt + position - 1
-    prompt_key = keys < prompt
+    prompt_key = (keys < prompt) & (keys != query)
     source = np.zeros(len(keys), dtype=bool)
     source[prompt_key] = source_lookup[keys[prompt_key]]
     history = (keys >= prompt) & (keys < query)
@@ -74,20 +75,31 @@ def answer_routes(inputs, tokenizer, answer):
 
 
 def transition_xy(routes):
-    """Per layer: predict Δself from previous self and grounding-route changes."""
+    """Predict Δself_t only from routes at t-1, retaining each physical head.
+
+    Never use current complementary masses: on a complete row their changes
+    sum to -Δself exactly. Sparse rows add retained-mass changes to that identity.
+    """
     previous_self = routes[:-1, :, :, 3]
-    delta = routes[1:] - routes[:-1]
-    target = delta[:, :, :, 3]
+    target = routes[1:, :, :, 3] - previous_self
     predictors = np.concatenate(
         (
             previous_self,
-            delta[:, :, :, 0],
-            delta[:, :, :, 1],
-            delta[:, :, :, 2],
+            routes[:-1, :, :, 0],
+            routes[:-1, :, :, 1],
+            routes[:-1, :, :, 2],
         ),
         axis=2,
     )
     return predictors, target
+
+
+def closure_residual(routes):
+    """Δself + Δsource + Δother_prompt + Δhistory = Δretained_mass.
+
+    This diagnoses a mass identity, not hallucination or semantic inconsistency.
+    """
+    return np.diff(routes.sum(axis=-1), axis=0)
 
 
 class LinearAccumulator:
@@ -147,6 +159,8 @@ def fit_dynamics(inputs, tokenizer, ids, ridge):
         for layer in range(geometry[0]):
             accumulators[layer].add(x[:, layer], y[:, layer], answer_weight)
 
+    if accumulators is None:
+        raise ValueError("No TRAIN answers with source coverage and usable prediction rows")
     models = [accumulator.fit(ridge) for accumulator in accumulators]
     return models, geometry, float(np.mean(coverage))
 
@@ -187,6 +201,7 @@ class CovarianceAccumulator:
 
 def save_reference_checkpoint(path, raw, contrast, train_jumps, next_index, ids):
     payload = {
+        "protocol": np.asarray(PROTOCOL),
         "next_index": np.asarray(next_index, dtype=np.int64),
         "ids": np.asarray(ids),
         "train_jumps": np.asarray(train_jumps, dtype=np.float64),
@@ -206,6 +221,7 @@ def save_reference_checkpoint(path, raw, contrast, train_jumps, next_index, ids)
 
 def load_reference_checkpoint(path, geometry, ids):
     with np.load(path, allow_pickle=False) as saved:
+        require_protocol(saved)
         saved_ids = saved["ids"].astype(str).tolist()
         if saved_ids != [str(value) for value in ids]:
             raise ValueError("Reference checkpoint TRAIN response IDs changed")
@@ -347,14 +363,13 @@ def score_answer(answer, routes, models, raw_reference, contrast_reference):
         task=answer.task,
         generator=answer.generator,
         token=np.arange(1, length),
-        gold=answer.error_mask[1:].astype(int),
-        previous_gold=answer.error_mask[:-1].astype(int),
         sentence_start=sentence_start(answer)[1:],
         raw_surprise=raw_score,
         head_contrast_surprise=contrast_score,
         source_gain=source_gain,
         history_gain=history_gain,
         self_jump=jump,
+        retained_mass_change=np.sqrt(np.nanmean(closure_residual(routes) ** 2, axis=(1, 2))),
     ))
     frame["grounding_balance"] = frame.source_gain - frame.history_gain
     return frame
@@ -396,15 +411,18 @@ def evaluate(table, high_jump):
     rows = []
     for scope, mask in scopes.items():
         for score in score_names:
+            observed = mask & np.isfinite(table[score].to_numpy())
             auroc, ap = safe_metric(
-                table.gold.to_numpy()[mask],
-                table[score].to_numpy()[mask],
+                table.gold.to_numpy()[observed],
+                table[score].to_numpy()[observed],
             )
             rows.append(dict(
                 scope=scope,
                 score=score,
-                tokens=int(mask.sum()),
-                positives=int(table.gold.to_numpy()[mask].sum()),
+                tokens=int(observed.sum()),
+                positives=int(table.gold.to_numpy()[observed].sum()),
+                selected_tokens=int(mask.sum()),
+                missing_tokens=int((mask & ~observed).sum()),
                 auroc=auroc,
                 ap=ap,
             ))
@@ -422,6 +440,7 @@ def write_status(output, stage, **extra):
 def save_dynamics(path, models, geometry, source_coverage):
     np.savez_compressed(
         path,
+        protocol=np.asarray(PROTOCOL),
         geometry=np.asarray(geometry),
         source_coverage=float(source_coverage),
         regression=np.asarray([item[0] for item in models]),
@@ -431,6 +450,7 @@ def save_dynamics(path, models, geometry, source_coverage):
 
 def load_dynamics(path):
     with np.load(path, allow_pickle=False) as saved:
+        require_protocol(saved)
         geometry = tuple(saved["geometry"].astype(int))
         models = list(zip(saved["regression"], saved["intercept"]))
         source_coverage = float(saved["source_coverage"])
@@ -440,6 +460,7 @@ def load_dynamics(path):
 def save_reference(path, raw_reference, contrast_reference, high_jump):
     np.savez_compressed(
         path,
+        protocol=np.asarray(PROTOCOL),
         high_jump_train_q90=float(high_jump),
         raw_mean=np.asarray([item[0] for item in raw_reference]),
         raw_precision=np.asarray([item[1] for item in raw_reference]),
@@ -450,6 +471,7 @@ def save_reference(path, raw_reference, contrast_reference, high_jump):
 
 def load_reference(path):
     with np.load(path, allow_pickle=False) as saved:
+        require_protocol(saved)
         raw_reference = list(zip(saved["raw_mean"], saved["raw_precision"]))
         contrast_reference = list(zip(
             saved["contrast_mean"], saved["contrast_precision"]
@@ -458,10 +480,43 @@ def load_reference(path):
     return raw_reference, contrast_reference, high_jump
 
 
+def require_protocol(saved):
+    if "protocol" not in saved or str(saved["protocol"]) != PROTOCOL:
+        raise ValueError("Old/current-step grounding model is not a past-only forecast; use new output")
+
+
+def freeze_run_settings(output, args, train_ids, test_ids):
+    settings = dict(protocol=PROTOCOL, train_ids=train_ids, test_ids=test_ids,
+                    train_cache=str(args.train_cache.resolve()),
+                    test_cache=str(args.test_cache.resolve()),
+                    tokenizer=str(args.tokenizer), ridge=args.grounding_ridge)
+    path = output / "settings.json"
+    if path.exists() and json.loads(path.read_text(encoding="utf-8")) != settings:
+        raise ValueError("Forecast inputs/settings changed; use a new output directory")
+    path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+
+
+def attach_evaluation_labels(table, inputs):
+    """Only called after every score file has been written without labels."""
+    from experiments.unsupervised_token_graph.span_audit.units import marked_spans, span_mask
+
+    frames = []
+    for response_id, frame in table.groupby("id", sort=False):
+        answer = inputs.load_answer(response_id)
+        spans = marked_spans(answer.offsets, inputs.annotations[response_id]["labels"])
+        labels = span_mask(len(answer.response_ids), spans)
+        positions = frame.token.to_numpy(int)
+        frame = frame.copy()
+        frame["gold"] = labels[positions].astype(int)
+        frame["previous_gold"] = labels[positions - 1].astype(int)
+        frames.append(frame)
+    return pd.concat(frames, ignore_index=True)
+
+
 def run_grounding_dynamics(args):
     from transformers import AutoTokenizer
 
-    output = Path(args.output) / "grounding_dynamics"
+    output = Path(args.output) / PROTOCOL
     output.mkdir(parents=True, exist_ok=True)
     write_status(output, "initializing")
 
@@ -469,15 +524,22 @@ def run_grounding_dynamics(args):
         args.tokenizer, local_files_only=True, use_fast=True
     )
     train = AuditInputs(
-        args.train_cache, args.dataset, args.index, args.tokenizer, args.feature_root
+        args.train_cache, args.dataset, args.index, args.tokenizer, args.feature_root,
+        include_labels=False,
     )
     test = AuditInputs(
-        args.test_cache, args.dataset, args.index, args.tokenizer, args.feature_root
+        args.test_cache, args.dataset, args.index, args.tokenizer, args.feature_root,
+        include_labels=False,
     )
     train_ids = list(train.selected_ids("train", args.tasks))
     test_ids = list(test.selected_ids("test", args.tasks))
     if args.limit:
         train_ids, test_ids = train_ids[:args.limit], test_ids[:args.limit]
+    train_sources = {str(train.annotations[key]["source_id"]) for key in train_ids}
+    test_sources = {str(test.annotations[key]["source_id"]) for key in test_ids}
+    if train_sources & test_sources:
+        raise ValueError("TRAIN and TEST source IDs overlap")
+    freeze_run_settings(output, args, train_ids, test_ids)
 
     dynamics_path = output / "dynamics.npz"
     reference_path = output / "reference.npz"
@@ -548,6 +610,8 @@ def run_grounding_dynamics(args):
         [pd.read_csv(path, dtype={"id": str, "source_id": str}) for path in files],
         ignore_index=True,
     )
+    table.to_csv(output / "frozen_scores.csv.gz", index=False)
+    table = attach_evaluation_labels(table, test)
     metrics = evaluate(table, high_jump)
 
     table.to_csv(output / "token_scores.csv.gz", index=False)
@@ -556,6 +620,7 @@ def run_grounding_dynamics(args):
     write_stratified_reports(table, high_jump, output)
     np.savez_compressed(
         output / "model.npz",
+        protocol=np.asarray(PROTOCOL),
         geometry=np.asarray(geometry),
         source_coverage=source_coverage,
         high_jump_train_q90=high_jump,
@@ -567,13 +632,14 @@ def run_grounding_dynamics(args):
         contrast_precision=np.asarray([item[1] for item in contrast_reference]),
     )
     (output / "protocol.json").write_text(json.dumps(dict(
-        training="all TRAIN tokens, source-balanced by answer; no hallucination labels",
+        protocol=PROTOCOL,
+        training="mixed unlabeled TRAIN; equal total weight per answer, not source",
         target="per-layer Δself-routing vector",
-        predictors=["previous self", "Δsource", "Δother_prompt", "Δhistory"],
+        predictors=["previous self", "previous source", "previous other_prompt", "previous history"],
         scores=["raw residual Mahalanobis", "within-layer head-contrast residual Mahalanobis"],
         source_coverage=source_coverage,
         high_transition_threshold=dict(metric="self_jump", train_quantile=.90, value=high_jump),
-        note="source means exact source_info text located in the saved prompt; missing coverage is skipped",
+        note="routing forecast baseline; no applicability or semantic binding is inferred",
     ), indent=2), encoding="utf-8")
 
     write_status(
