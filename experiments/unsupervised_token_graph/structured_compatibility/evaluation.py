@@ -32,6 +32,28 @@ def transition_views(error, sentence_start, self_jump, high_transition):
     }
 
 
+def binding_arrays(saved, row):
+    """Supply identity fields needed for exact token alignment.
+
+    Predictions written before prompt_length was added remain valid because
+    prompt_length is already frozen in record_json/freeze.json.
+    """
+    prompt_length = int(row["prompt_length"])
+    if "prompt_length" in saved:
+        current = int(saved["prompt_length"])
+        if current != prompt_length:
+            raise ValueError("prediction prompt_length disagrees with frozen record")
+        prompt_length = current
+
+    arrays = {
+        "token_ids": saved["token_ids"],
+        "prompt_length": np.asarray(prompt_length),
+    }
+    if "offsets" in saved and saved["offsets"].size:
+        arrays["offsets"] = saved["offsets"]
+    return arrays
+
+
 def read_blocks(args):
     root = args.output / "predictions"
     freeze = json.loads((root / "freeze.json").read_text())
@@ -54,7 +76,12 @@ def read_blocks(args):
     for row in freeze["records"]:
         annotation = gold[row["id"]]
         with np.load(root / row["file"], allow_pickle=False) as saved:
-            identity, offsets = binder.bind(row, annotation, saved, sources)
+            identity, offsets = binder.bind(
+                row,
+                annotation,
+                binding_arrays(saved, row),
+                sources,
+            )
             standard = label_views(offsets, annotation["labels"])
             error = standard["all_error"][0]
             group = identity["task"] + "|" + identity["generator"]

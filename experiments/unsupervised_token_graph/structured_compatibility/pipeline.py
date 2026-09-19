@@ -303,7 +303,9 @@ def score_sample(sample, index, tokenizer, source_record, model, saved, settings
     )
     arrays["coverage"] = coverage
     arrays["token_ids"] = sample.token_ids
-    arrays["offsets"] = sample.offsets
+    arrays["prompt_length"] = np.asarray(sample.prompt_length)
+    if len(sample.offsets):
+        arrays["offsets"] = sample.offsets
     return arrays
 
 

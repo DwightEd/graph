@@ -1,6 +1,7 @@
 import numpy as np
 
 from experiments.unsupervised_token_graph.structured_compatibility.evaluation import (
+    binding_arrays,
     threshold_metrics,
     transition_views,
 )
@@ -47,3 +48,28 @@ def test_threshold_metrics_uses_only_scoped_finite_scores():
     )
     assert result["recall"] == 1.
     assert result["fpr"] == 0.
+
+
+def test_binding_arrays_backfills_prompt_length_from_frozen_record():
+    class Saved(dict):
+        @property
+        def files(self):
+            return list(self)
+
+    saved = Saved(
+        token_ids=np.array([1, 2, 3, 4]),
+        offsets=np.array([[0, 1], [1, 2]]),
+    )
+    arrays = binding_arrays(saved, {"prompt_length": 2})
+    assert int(arrays["prompt_length"]) == 2
+    np.testing.assert_array_equal(arrays["token_ids"], [1, 2, 3, 4])
+    np.testing.assert_array_equal(arrays["offsets"], [[0, 1], [1, 2]])
+
+
+def test_binding_arrays_omits_empty_offsets_for_exact_recovery():
+    saved = {
+        "token_ids": np.array([1, 2, 3]),
+        "offsets": np.empty((0, 2), dtype=int),
+    }
+    arrays = binding_arrays(saved, {"prompt_length": 1})
+    assert "offsets" not in arrays
