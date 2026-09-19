@@ -52,11 +52,11 @@ def main(argv=None):
         screen_dataset(args)
     if args.phase in ("confirm", "all"):
         confirm_dataset(args)
-    if args.phase in ("report", "all"):
-        report(args.output)
-    if args.phase == "grounding":
+    if args.phase in ("grounding", "all"):
         from .grounding_dynamics import run_grounding_dynamics
         run_grounding_dynamics(args)
+    if args.phase in ("report", "all"):
+        report(args.output)
 
 
 if __name__ == "__main__":
