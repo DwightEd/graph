@@ -322,11 +322,60 @@ def evaluate(table, high_jump):
     return pd.DataFrame(rows)
 
 
+def write_status(output, stage, **extra):
+    payload = dict(stage=stage, **extra)
+    (output / "status.json").write_text(
+        json.dumps(payload, indent=2), encoding="utf-8"
+    )
+    print("grounding:", stage, extra, flush=True)
+
+
+def save_dynamics(path, models, geometry, source_coverage):
+    np.savez_compressed(
+        path,
+        geometry=np.asarray(geometry),
+        source_coverage=float(source_coverage),
+        regression=np.asarray([item[0] for item in models]),
+        intercept=np.asarray([item[1] for item in models]),
+    )
+
+
+def load_dynamics(path):
+    with np.load(path, allow_pickle=False) as saved:
+        geometry = tuple(saved["geometry"].astype(int))
+        models = list(zip(saved["regression"], saved["intercept"]))
+        source_coverage = float(saved["source_coverage"])
+    return models, geometry, source_coverage
+
+
+def save_reference(path, raw_reference, contrast_reference, high_jump):
+    np.savez_compressed(
+        path,
+        high_jump_train_q90=float(high_jump),
+        raw_mean=np.asarray([item[0] for item in raw_reference]),
+        raw_precision=np.asarray([item[1] for item in raw_reference]),
+        contrast_mean=np.asarray([item[0] for item in contrast_reference]),
+        contrast_precision=np.asarray([item[1] for item in contrast_reference]),
+    )
+
+
+def load_reference(path):
+    with np.load(path, allow_pickle=False) as saved:
+        raw_reference = list(zip(saved["raw_mean"], saved["raw_precision"]))
+        contrast_reference = list(zip(
+            saved["contrast_mean"], saved["contrast_precision"]
+        ))
+        high_jump = float(saved["high_jump_train_q90"])
+    return raw_reference, contrast_reference, high_jump
+
+
 def run_grounding_dynamics(args):
     from transformers import AutoTokenizer
 
     output = Path(args.output) / "grounding_dynamics"
     output.mkdir(parents=True, exist_ok=True)
+    write_status(output, "initializing")
+
     tokenizer = AutoTokenizer.from_pretrained(
         args.tokenizer, local_files_only=True, use_fast=True
     )
@@ -341,23 +390,65 @@ def run_grounding_dynamics(args):
     if args.limit:
         train_ids, test_ids = train_ids[:args.limit], test_ids[:args.limit]
 
-    models, geometry, source_coverage = fit_dynamics(
-        train, tokenizer, train_ids, args.grounding_ridge
-    )
-    raw_reference, contrast_reference, high_jump = fit_residual_reference(
-        train, tokenizer, train_ids, models, geometry, args.grounding_ridge
-    )
+    dynamics_path = output / "dynamics.npz"
+    reference_path = output / "reference.npz"
+    if args.resume and dynamics_path.exists():
+        models, geometry, source_coverage = load_dynamics(dynamics_path)
+        write_status(output, "dynamics_loaded", train_answers=len(train_ids))
+    else:
+        write_status(output, "fit_dynamics", train_answers=len(train_ids))
+        models, geometry, source_coverage = fit_dynamics(
+            train, tokenizer, train_ids, args.grounding_ridge
+        )
+        if geometry is None:
+            raise ValueError(
+                "No TRAIN answers had exact source_info coverage and usable attention rows"
+            )
+        save_dynamics(dynamics_path, models, geometry, source_coverage)
+        write_status(
+            output, "dynamics_saved",
+            source_coverage=source_coverage,
+            geometry=list(geometry),
+        )
 
-    frames = []
+    if args.resume and reference_path.exists():
+        raw_reference, contrast_reference, high_jump = load_reference(reference_path)
+        write_status(output, "reference_loaded")
+    else:
+        write_status(output, "fit_reference", train_answers=len(train_ids))
+        raw_reference, contrast_reference, high_jump = fit_residual_reference(
+            train, tokenizer, train_ids, models, geometry, args.grounding_ridge
+        )
+        save_reference(reference_path, raw_reference, contrast_reference, high_jump)
+        write_status(output, "reference_saved", high_jump=high_jump)
+
+    score_dir = output / "test_answers"
+    score_dir.mkdir(exist_ok=True)
+    write_status(output, "score_test", test_answers=len(test_ids))
+    files = []
     for response_id in tqdm(test_ids, desc="score grounding dynamics", unit="answer"):
+        path = score_dir / f"{response_id}.csv.gz"
+        if args.resume and path.exists():
+            files.append(path)
+            continue
         answer = test.load_answer(response_id)
         routes, source_tokens = answer_routes(test, tokenizer, answer)
         if routes is None or len(routes) < 2 or source_tokens == 0:
             continue
-        frames.append(score_answer(
+        frame = score_answer(
             answer, routes, models, raw_reference, contrast_reference
-        ))
-    table = pd.concat(frames, ignore_index=True)
+        )
+        frame.to_csv(path, index=False)
+        files.append(path)
+
+    if not files:
+        raise ValueError(
+            "No TEST answers had exact source_info coverage and usable attention rows"
+        )
+    table = pd.concat(
+        [pd.read_csv(path, dtype={"id": str, "source_id": str}) for path in files],
+        ignore_index=True,
+    )
     metrics = evaluate(table, high_jump)
 
     table.to_csv(output / "token_scores.csv.gz", index=False)
@@ -384,5 +475,10 @@ def run_grounding_dynamics(args):
         note="source means exact source_info text located in the saved prompt; missing coverage is skipped",
     ), indent=2), encoding="utf-8")
 
+    write_status(
+        output, "complete",
+        test_answers=len(files),
+        source_coverage=source_coverage,
+    )
     print(metrics.to_string(index=False), flush=True)
     print("Results:", output, flush=True)
