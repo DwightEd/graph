@@ -38,6 +38,12 @@ def arguments(argv=None):
     parser.add_argument("--confirm-heads", type=int, default=4)
     parser.add_argument("--confirm-pairs", type=int, default=8)
     parser.add_argument("--grounding-ridge", type=float, default=1e-3)
+    parser.add_argument(
+        "--grounding-checkpoint-every",
+        type=int,
+        default=25,
+        help="Save residual-reference sufficient statistics every N TRAIN answers",
+    )
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--dtype", choices=["float32", "float16", "bfloat16"], default="bfloat16")
     parser.add_argument("--limit", type=int, default=0)

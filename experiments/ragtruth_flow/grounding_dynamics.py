@@ -16,11 +16,12 @@ from .confirm import source_token_ids
 GROUPS = ("source", "other_prompt", "history", "self")
 
 
-def route_row(answer, position, keys, weights, source_positions):
+def route_row(answer, position, keys, weights, source_lookup):
     prompt = answer.prompt_length
     query = prompt + position - 1
-    source = np.isin(keys, source_positions)
     prompt_key = keys < prompt
+    source = np.zeros(len(keys), dtype=bool)
+    source[prompt_key] = source_lookup[keys[prompt_key]]
     history = (keys >= prompt) & (keys < query)
     return np.array([
         weights[source].sum(),
@@ -38,6 +39,8 @@ def answer_routes(inputs, tokenizer, answer):
         answer.token_ids[:answer.prompt_length].tolist(),
         source_record,
     )
+    source_lookup = np.zeros(answer.prompt_length, dtype=bool)
+    source_lookup[source_positions] = True
     channels = []
     blocks = []
     for channel in inputs.channels(answer):
@@ -47,7 +50,7 @@ def answer_routes(inputs, tokenizer, answer):
             row = rows.read(position)
             if row is not None:
                 values[position] = route_row(
-                    answer, position, *row, source_positions
+                    answer, position, *row, source_lookup
                 )
         channels.append((channel.layer, channel.head))
         blocks.append(values)
@@ -182,15 +185,88 @@ class CovarianceAccumulator:
         return mean, precision
 
 
-def fit_residual_reference(inputs, tokenizer, ids, models, geometry, ridge):
+def save_reference_checkpoint(path, raw, contrast, train_jumps, next_index, ids):
+    payload = {
+        "next_index": np.asarray(next_index, dtype=np.int64),
+        "ids": np.asarray(ids),
+        "train_jumps": np.asarray(train_jumps, dtype=np.float64),
+    }
+    for prefix, accumulators in (("raw", raw), ("contrast", contrast)):
+        payload[prefix + "_weight"] = np.asarray(
+            [item.weight for item in accumulators], dtype=np.float64
+        )
+        payload[prefix + "_sum"] = np.asarray(
+            [item.sum for item in accumulators], dtype=np.float64
+        )
+        payload[prefix + "_outer"] = np.asarray(
+            [item.outer for item in accumulators], dtype=np.float64
+        )
+    np.savez_compressed(path, **payload)
+
+
+def load_reference_checkpoint(path, geometry, ids):
+    with np.load(path, allow_pickle=False) as saved:
+        saved_ids = saved["ids"].astype(str).tolist()
+        if saved_ids != [str(value) for value in ids]:
+            raise ValueError("Reference checkpoint TRAIN response IDs changed")
+        next_index = int(saved["next_index"])
+        train_jumps = saved["train_jumps"].astype(float).tolist()
+        raw = [CovarianceAccumulator(geometry[1]) for _ in range(geometry[0])]
+        contrast = [CovarianceAccumulator(geometry[1]) for _ in range(geometry[0])]
+        for prefix, accumulators in (("raw", raw), ("contrast", contrast)):
+            weights = saved[prefix + "_weight"]
+            sums = saved[prefix + "_sum"]
+            outers = saved[prefix + "_outer"]
+            for layer, accumulator in enumerate(accumulators):
+                accumulator.weight = float(weights[layer])
+                accumulator.sum = sums[layer].astype(float)
+                accumulator.outer = outers[layer].astype(float)
+    return raw, contrast, train_jumps, next_index
+
+
+def fit_residual_reference(
+    inputs,
+    tokenizer,
+    ids,
+    models,
+    geometry,
+    ridge,
+    checkpoint_path=None,
+    checkpoint_every=25,
+    resume=False,
+):
     raw = [CovarianceAccumulator(geometry[1]) for _ in range(geometry[0])]
     contrast = [CovarianceAccumulator(geometry[1]) for _ in range(geometry[0])]
     train_jumps = []
+    start = 0
 
-    for response_id in tqdm(ids, desc="fit residual reference", unit="answer"):
+    if resume and checkpoint_path is not None and checkpoint_path.exists():
+        raw, contrast, train_jumps, start = load_reference_checkpoint(
+            checkpoint_path, geometry, ids
+        )
+        print(
+            f"grounding: resume reference at {start}/{len(ids)}",
+            flush=True,
+        )
+
+    progress = tqdm(
+        enumerate(ids[start:], start=start),
+        total=len(ids),
+        initial=start,
+        desc="fit residual reference",
+        unit="answer",
+    )
+    for index, response_id in progress:
         answer = inputs.load_answer(response_id)
         routes, source_tokens = answer_routes(inputs, tokenizer, answer)
         if routes is None or len(routes) < 2 or source_tokens == 0:
+            if (
+                checkpoint_path is not None
+                and (index + 1) % checkpoint_every == 0
+            ):
+                save_reference_checkpoint(
+                    checkpoint_path, raw, contrast, train_jumps, index + 1, ids
+                )
             continue
         values = residuals(routes, models)
         delta_self = routes[1:, :, :, 3] - routes[:-1, :, :, 3]
@@ -202,6 +278,19 @@ def fit_residual_reference(inputs, tokenizer, ids, models, geometry, ridge):
         for layer in range(geometry[0]):
             raw[layer].add(values[:, layer], answer_weight)
             contrast[layer].add(centered[:, layer], answer_weight)
+
+        if (
+            checkpoint_path is not None
+            and (index + 1) % checkpoint_every == 0
+        ):
+            save_reference_checkpoint(
+                checkpoint_path, raw, contrast, train_jumps, index + 1, ids
+            )
+
+    if checkpoint_path is not None:
+        save_reference_checkpoint(
+            checkpoint_path, raw, contrast, train_jumps, len(ids), ids
+        )
 
     high_jump = float(np.nanquantile(np.asarray(train_jumps), .90))
     return (
@@ -392,6 +481,7 @@ def run_grounding_dynamics(args):
 
     dynamics_path = output / "dynamics.npz"
     reference_path = output / "reference.npz"
+    reference_checkpoint = output / "reference_checkpoint.npz"
     if args.resume and dynamics_path.exists():
         models, geometry, source_coverage = load_dynamics(dynamics_path)
         write_status(output, "dynamics_loaded", train_answers=len(train_ids))
@@ -417,9 +507,18 @@ def run_grounding_dynamics(args):
     else:
         write_status(output, "fit_reference", train_answers=len(train_ids))
         raw_reference, contrast_reference, high_jump = fit_residual_reference(
-            train, tokenizer, train_ids, models, geometry, args.grounding_ridge
+            train,
+            tokenizer,
+            train_ids,
+            models,
+            geometry,
+            args.grounding_ridge,
+            checkpoint_path=reference_checkpoint,
+            checkpoint_every=args.grounding_checkpoint_every,
+            resume=args.resume,
         )
         save_reference(reference_path, raw_reference, contrast_reference, high_jump)
+        reference_checkpoint.unlink(missing_ok=True)
         write_status(output, "reference_saved", high_jump=high_jump)
 
     score_dir = output / "test_answers"
