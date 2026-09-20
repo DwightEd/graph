@@ -1,0 +1,19 @@
+{
+  "sources": 2,
+  "primary_candidates": 4,
+  "primary_special_sources": 4,
+  "primary_sources_outside_lookback_set": 4,
+  "primary_selected_source_decreased": 4,
+  "finite_effect_rows": 160,
+  "max_control_error": 0.0,
+  "full_dose_rows": 80,
+  "full_dose_abs_effect_above_005": 1,
+  "dose_same_sign": 44,
+  "dose_opposite_sign": 24,
+  "dose_exactly_one_zero": 12,
+  "saved_worlds": 758,
+  "next_top1_changes": 0,
+  "effect_reference_nats": 0.05,
+  "reference_is_significance_test": false,
+  "purpose": "cached_mechanism_review_not_detector_evaluation"
+}

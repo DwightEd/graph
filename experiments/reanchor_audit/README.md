@@ -2,6 +2,18 @@
 
 检验事实生成前的回看候选，是否读取了适用证据，并经更深层、跨位置的消息影响事实选择。[完整设计](../../docs/REANCHOR_AUDIT_DESIGN_20260920.md)。本入口用于标签辅助机制审计，不训练检测器。
 
+**2026-09-20 实测复核：原 v1 候选不能解释为有效 reanchor。** 四个主候选均选中 BOS，虽然 head 的非特殊远端读取增加，这条 BOS 边自身却在下降；势加权根注入也几乎全部集中在位置 0。详见[实测分析](../../results/reanchor_review_20260920/ANALYSIS.md)。原实验与缓存保留，当前不据此扩大 GPU 干预规模。
+
+对已完成的默认双剂量（.25 / 1）实验，可直接用 CPU 复核，无需重新加载模型：
+
+```bash
+python -m experiments.reanchor_audit.review_results \
+  --input outputs/reanchor_audit_v1 \
+  --output outputs/reanchor_review_analysis
+```
+
+输出候选来源一致性、根流集中度、首词/尾部读出分解和不同容量/注入方式的候选排名。新的排名只是敏感性诊断，没有继承原候选的干预结论。
+
 ## 运行
 
 在仓库根目录、原 Llama 3.1 环境运行：

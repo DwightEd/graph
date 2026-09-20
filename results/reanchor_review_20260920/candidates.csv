@@ -1,0 +1,21 @@
+case_id,source_id,side,event,selection,layer,head,receiver,source,source_text,receiver_text,distance_to_decision,source_special,source_in_lookback_set,selected_mass,selected_mass_change_lower,selected_mass_change_upper,lookback_gain,retained_mass,retained_scope_mass_lower_bound,retained_supported_value_mass_lower_bound,retained_value_source_mass_lower_bound
+14315_headwear_scope,14315,supported,0,lookback_target_flow,30,7,465,0,<|begin_of_text|>, added,3,True,False,0.93359375,-0.01171875,-0.01171875,0.0066919997334480286,0.9500579833984375,0.0,0.0,0.0
+14315_headwear_scope,14315,supported,1,matched_low_flow,30,7,463,24,"
+
+",",",5,False,True,0.00118255615234375,-0.00170135498046875,-0.00170135498046875,-0.021612048149108887,0.9620513916015625,0.0,0.0,0.0
+14315_headwear_scope,14315,supported,2,high_flow_without_positive_lookback,30,5,465,0,<|begin_of_text|>, added,3,True,False,0.95703125,0.00390625,0.00390625,-0.01032927818596363,0.9750900268554688,0.0,0.0,0.0
+14315_headwear_scope,14315,supported,3,decision_query_control,31,8,468,0,<|begin_of_text|>, and,0,True,False,0.93359375,0.0390625,0.0390625,-0.0267009437084198,0.9588241577148438,0.0,0.0,0.0
+14315_headwear_scope,14315,unsupported,0,lookback_target_flow,30,3,467,0,<|begin_of_text|>, and,1,True,False,0.6328125,-0.1484375,-0.1484375,0.1390133798122406,0.75347900390625,0.0,0.0,0.01177978515625
+14315_headwear_scope,14315,unsupported,1,matched_low_flow,30,3,464,192, each, large,4,False,True,0.00347900390625,-0.0010986328125,0.00347900390625,-0.08272452652454376,0.9222564697265625,0.0,0.0,0.0036163330078125
+14315_headwear_scope,14315,unsupported,2,high_flow_without_positive_lookback,30,5,467,0,<|begin_of_text|>, and,1,True,False,0.9765625,0.05859375,0.05859375,-0.04796164482831955,0.985137939453125,0.0,0.0,0.0
+14315_headwear_scope,14315,unsupported,3,decision_query_control,31,8,468,0,<|begin_of_text|>, wore,0,True,False,0.94140625,0.0234375,0.0234375,-0.015417791903018951,0.9634170532226562,0.0,0.0,0.0
+14375_onion_stage,14375,supported,0,lookback_target_flow,30,5,658,0,<|begin_of_text|>, cooking,2,True,False,0.91796875,-0.00390625,-0.00390625,0.011384464800357819,0.9408035278320312,0.0,0.0,0.0
+14375_onion_stage,14375,supported,1,matched_low_flow,30,5,648,0,<|begin_of_text|>, in,12,True,False,0.490234375,-0.470703125,-0.470703125,0.05782889947295189,0.9110260009765625,0.0,0.0,0.0
+14375_onion_stage,14375,supported,2,high_flow_without_positive_lookback,30,7,658,0,<|begin_of_text|>, cooking,2,True,False,0.9375,0.01171875,0.01171875,-0.010010037571191788,0.9488105773925781,0.0,0.0,0.0
+14375_onion_stage,14375,supported,3,decision_query_control,31,8,660,0,<|begin_of_text|>, onions,0,True,False,0.90625,0.07421875,0.07421875,-0.00472172349691391,0.9324188232421875,0.0,0.0,0.0
+14375_onion_stage,14375,unsupported,0,lookback_target_flow,30,7,659,0,<|begin_of_text|>, beer,1,True,False,0.92578125,-0.01953125,-0.01953125,0.02004675567150116,0.935302734375,0.0,0.0,0.0
+14375_onion_stage,14375,unsupported,1,matched_low_flow,30,7,650,24,"
+
+", from,10,False,True,0.00189971923828125,-0.00347137451171875,-0.00347137451171875,-0.04288599640130997,0.9366683959960938,0.0,0.0,0.0
+14375_onion_stage,14375,unsupported,2,high_flow_without_positive_lookback,30,5,659,0,<|begin_of_text|>, beer,1,True,False,0.95703125,0.015625,0.015625,-0.0039009787142276764,0.9660263061523438,0.0,0.0,0.0
+14375_onion_stage,14375,unsupported,3,decision_query_control,31,8,660,0,<|begin_of_text|>, mixture,0,True,False,0.9296875,0.04296875,0.04296875,-0.038281626999378204,0.9532470703125,0.0,0.0,0.0

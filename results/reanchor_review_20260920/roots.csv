@@ -1,0 +1,17 @@
+case_id,source_id,side,capacity,seed,position_zero_root_mass,other_root_mass,maximal_root_position
+14315_headwear_scope,14315,supported,attention,potential,1.0,1.5039922164579628e-22,0
+14315_headwear_scope,14315,supported,attention,uniform,0.0021321961620469083,0.9978678038379527,0
+14315_headwear_scope,14315,supported,message_norm,potential,0.9999895579360203,1.0442063979858884e-05,0
+14315_headwear_scope,14315,supported,message_norm,uniform,0.0021321961620469083,0.9978678038379527,0
+14315_headwear_scope,14315,unsupported,attention,potential,1.0,8.777662181303452e-23,0
+14315_headwear_scope,14315,unsupported,attention,uniform,0.0021321961620469083,0.9978678038379527,0
+14315_headwear_scope,14315,unsupported,message_norm,potential,0.9999845556571252,1.5444342874698438e-05,0
+14315_headwear_scope,14315,unsupported,message_norm,uniform,0.0021321961620469083,0.9978678038379527,0
+14375_onion_stage,14375,supported,attention,potential,1.0,1.1128293406465543e-22,0
+14375_onion_stage,14375,supported,attention,uniform,0.0015128593040847202,0.9984871406959154,0
+14375_onion_stage,14375,supported,message_norm,potential,0.999984731488377,1.5268511623017623e-05,0
+14375_onion_stage,14375,supported,message_norm,uniform,0.0015128593040847202,0.9984871406959154,0
+14375_onion_stage,14375,unsupported,attention,potential,1.0,1.2682822017505732e-22,0
+14375_onion_stage,14375,unsupported,attention,uniform,0.0015128593040847202,0.9984871406959154,0
+14375_onion_stage,14375,unsupported,message_norm,potential,0.9999829768219768,1.7023178023031286e-05,0
+14375_onion_stage,14375,unsupported,message_norm,uniform,0.0015128593040847202,0.9984871406959154,0
