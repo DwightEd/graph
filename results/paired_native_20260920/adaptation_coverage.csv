@@ -1,0 +1,3 @@
+case_id,eligible_cross_layer_pairs,measured_pairs,measured_rows,status
+14315_headwear_scope,5,2,32,measured
+14375_onion_stage,0,0,0,not_measured_no_cross_layer_pair

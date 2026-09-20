@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from .paired_exports import adaptation_coverage, export_readouts
+
 
 def classify_interactions(frame, minimum_effect):
     result = frame.copy()
@@ -106,11 +108,14 @@ def report_pairs(output, minimum_effect=.05, repeats=2000):
         source_intervals(paired, keys, repeats).to_csv(output / "source_intervals.csv", index=False)
     inventory = pd.read_csv(output / "pair_inventory.csv")
     controls = control_counts(tables)
+    adaptation_coverage(output, tables["adaptation"]).to_csv(output / "adaptation_coverage.csv", index=False)
+    readouts = export_readouts(output)
     summary = dict(sources=int(inventory.source_id.nunique()), pairs=int(inventory.case_id.nunique()),
         measured_phases=int(effects[["case_id", "side", "phase"]].drop_duplicates().shape[0]) if not effects.empty else 0,
         finite_effect_rows=len(effects), interaction_rows=len(tables["interactions"]),
         failed_control_rows={name: counts["failed"] for name, counts in controls.items()},
         control_rows=controls,
+        readout_export=readouts,
         row_count_note="rows include repeated heads, doses and controls; independent unit is source",
         minimum_effect_nats=minimum_effect, purpose="label_assisted_mechanism_audit_not_detector_evaluation")
     write_report(output, summary)
@@ -128,10 +133,15 @@ def write_report(output, summary):
         "- 正负侧自然历史不同；局部 supported 不代表此前历史全部正确。",
         "- history 包括已输入回答的当前 query；另报 query_self 与 prior_history，避免把 self 效应叫作远历史复用。",
         "- 单头作用、条件作用、联合删除和 J 分开保存；J 正负不直接命名协同/抑制。",
+        "- interactions.numeric_ok 继承两项单独干预的 sham；没有单独执行联合 sham。",
         "- adaptation：删除上游后恢复下游，sham 通过才解释作用；不等于唯一自然中介比例。",
+        "- adaptation_coverage.csv 单列跨层配对覆盖；没有合格跨层配对不等于没有下游恢复。",
         "- persistence：只在起点干预后固定 teacher-forcing 文本，不证明自由生成自我强化。",
         "- screen 中 prefix-RAUQ 是因果化对照，不是原文完整回答选 head 的复现。",
         "- 不同 phase 的 readout 不同，不将其 margin 连接为同尺度事实曲线。", "",
+        "baseline.json 与 worlds/*.json 从已有 NPZ 的 record 导出，包含各候选逐 token/总和/均值概率，",
+        "不包含激活张量；仅运行 report 即可导出，无需重跑模型。readout_inventory.csv 标记缺失，",
+        "旧结果包没有 NPZ 或已导出的 JSON 时不能补算这些概率。", "",
         "指针、地址、载荷的语义分离仍需独立交换实验；当前结果不自动提供这种命名。",
         "完整检测对象、证伪条件和文献依据见 docs/PAIRED_MECHANISM_20260920.md。"]
     (output / "REPORT.md").write_text("\n".join(text), encoding="utf-8")

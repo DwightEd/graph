@@ -1,0 +1,17 @@
+case_id,side,phase,position,readout,baseline,baseline_unique_values,first_candidate_tokens,second_candidate_tokens,baseline_record_available
+14315_headwear_scope,supported,back_half,40,observed_logp,-0.0004778623502353,1,1,1,False
+14315_headwear_scope,supported,before_claim,34,observed_logp,-0.2800448270541008,1,1,1,False
+14315_headwear_scope,supported,onset,35,sequence_margin,7.643988308470591,1,10,11,False
+14315_headwear_scope,supported,post_claim,45,observed_logp,-0.0598411885549153,1,1,1,False
+14315_headwear_scope,unsupported,back_half,40,observed_logp,-0.37745941895589,1,1,1,False
+14315_headwear_scope,unsupported,before_claim,34,observed_logp,-3.541877774100322,1,1,1,False
+14315_headwear_scope,unsupported,onset,35,sequence_margin,-4.697483304481864,1,10,11,False
+14315_headwear_scope,unsupported,post_claim,46,observed_logp,-0.6404281307672172,1,1,1,False
+14375_onion_stage,supported,back_half,127,observed_logp,-0.0008109124372932,1,1,1,False
+14375_onion_stage,supported,before_claim,125,observed_logp,-0.0077313492847184,1,1,1,False
+14375_onion_stage,supported,onset,126,sequence_margin,6.077786245542399,1,3,7,False
+14375_onion_stage,supported,post_claim,129,observed_logp,-0.9603502913773878,1,1,1,False
+14375_onion_stage,unsupported,back_half,129,observed_logp,-0.0261033388349506,1,1,1,False
+14375_onion_stage,unsupported,before_claim,125,observed_logp,-0.0064770747365623,1,1,1,False
+14375_onion_stage,unsupported,onset,126,sequence_margin,0.0745809072025318,1,3,7,False
+14375_onion_stage,unsupported,post_claim,133,observed_logp,-2.438606332680047,1,1,1,False
