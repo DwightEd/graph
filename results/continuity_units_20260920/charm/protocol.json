@@ -1,0 +1,24 @@
+{
+  "methods": [
+    "current",
+    "past_ewma",
+    "current_increment"
+  ],
+  "refit": false,
+  "calibration_available": false,
+  "target_sentence_fpr": 0.05,
+  "sentences": "independent punctuation boundaries; any labeled token makes sentence positive",
+  "score_coverage": "same finite token positions per sentence across methods; label uses full sentence",
+  "sentence_timing": "completed sentence; saved-score causality inherited, not established here",
+  "paired_delays": "gold-window diagnostic only; observed_tokens=1 is the first error token",
+  "token_reweighting": "evaluation only; not a training-loss intervention",
+  "horizons": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "population_tokens": 30619,
+  "sentence_unmapped_tokens": 690,
+  "unmapped_error_tokens": 79
+}

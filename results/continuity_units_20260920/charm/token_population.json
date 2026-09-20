@@ -1,0 +1,20 @@
+{
+  "answers": 149,
+  "sources": 149,
+  "tokens": 30619,
+  "error_tokens": 2307,
+  "annotated_token_spans": 84,
+  "positive_runs": 79,
+  "first_error_tokens": 52,
+  "within_span_continuation": 2223,
+  "within_span_continuation_fraction": 0.9635890767230169,
+  "tokens_after_answer_first_error": 2255,
+  "after_answer_first_error_fraction": 0.9774599046380581,
+  "later_span_error_tokens": 749,
+  "later_span_fraction": 0.3246640658864326,
+  "back_half_error_tokens": 1174,
+  "back_half_fraction": 0.5088859991330733,
+  "median_span_tokens": 20.0,
+  "mean_span_tokens": 27.464285714285715,
+  "max_span_tokens": 261
+}

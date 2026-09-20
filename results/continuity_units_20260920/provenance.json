@@ -1,0 +1,32 @@
+{
+  "date": "2026-09-20",
+  "base_commit": "331ebac3fa3e19570889da517b40cfc9cd5f8b40",
+  "inputs": [
+    {
+      "name": "charm_continuity_review_20260918.zip",
+      "sha256": "29fb251e07d7bd0ab64580325891ac3dadee1472392915f71dc064d1202f164f"
+    },
+    {
+      "name": "charm_audit_review_20260917_182703(1).zip",
+      "sha256": "ce4c570fc7eeb686cc9e20b25afe41a58c94147e5616fbecec21805322f25f02"
+    },
+    {
+      "name": "lda_review.tar.gz",
+      "sha256": "26f720d2f302340a520a547b2fb146872b14326de390fb61a0bdcfb743d49750"
+    },
+    {
+      "name": "response.jsonl",
+      "sha256": "e4c2e4ac24fff676d8984cc61c35d791612fadc58015335d97dd632375e18073"
+    },
+    {
+      "name": "source_info.jsonl",
+      "sha256": "0dffc26ea9f3c1c3d7c7e8336b56ef1646e3cec876edffcca3c9c624d12d578b"
+    }
+  ],
+  "computation": "real saved-score and annotation reanalysis; no detector refit or native LLM run",
+  "bootstrap": 2000,
+  "source_bootstrap_seed": 42,
+  "validation": "10 focused CPU tests passed",
+  "broader_collection": "Two pre-existing torch-dependent test modules could not collect: torch absent",
+  "new_paired_audit": "Only user summary received; raw per-phase tables not available locally"
+}

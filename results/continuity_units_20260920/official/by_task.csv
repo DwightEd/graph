@@ -1,0 +1,4 @@
+task,responses,error_responses,raw_spans,sentences,error_sentences,fully_covered_sentences,lexical_words,error_words,later_span_words,span_text_mismatches,multisentence_spans,sources,partial_error_sentence_fraction,later_span_error_word_fraction
+Data2txt,6198,4254,9290,56965,7847,502,992632,50125,25418,0,34,1033,0.9360265069453294,0.5070922693266833
+QA,5934,1724,2927,50997,4831,3330,705062,56584,20432,0,913,989,0.31070171807079283,0.3610914746218012
+Summary,5658,1686,2072,32014,2037,454,634771,19930,3724,0,37,943,0.7771232204221895,0.18685398896136476

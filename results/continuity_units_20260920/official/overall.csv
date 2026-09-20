@@ -1,0 +1,2 @@
+responses,error_responses,raw_spans,sentences,error_sentences,fully_covered_sentences,lexical_words,error_words,later_span_words,span_text_mismatches,multisentence_spans,sources,partial_error_sentence_fraction,later_span_error_word_fraction
+17790,7664,14289,139976,14715,4286,2332465,126639,49574,0,984,2965,0.708732585796806,0.39145918713824335

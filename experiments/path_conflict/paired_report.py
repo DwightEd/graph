@@ -51,8 +51,24 @@ def source_intervals(paired, keys, repeats=2000, seed=0):
 
 
 def collect(output, name):
-    frames = [pd.read_csv(path) for path in sorted((output / "pairs").glob("*/*/*/" + name + ".csv"))]
+    frames = []
+    for path in sorted((output / "pairs").glob("*/*/*/" + name + ".csv")):
+        frame = pd.read_csv(path, dtype={"numeric_ok": "boolean"})
+        # Before/onset can have no persistence or eligible adaptation pairs.
+        # Their identity-only headers must not turn bool columns into objects.
+        if not frame.empty:
+            frames.append(frame)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def control_counts(tables):
+    counts = {}
+    for name in ("effects", "interactions", "adaptation", "persistence"):
+        frame = tables[name]
+        flags = frame.numeric_ok if not frame.empty else pd.Series(dtype="boolean")
+        counts[name] = dict(rows=len(frame), passed=int(flags.eq(True).sum()),
+                            failed=int(flags.eq(False).sum()), missing=int(flags.isna().sum()))
+    return counts
 
 
 def compare_relationships(output, tables):
@@ -66,7 +82,7 @@ def compare_relationships(output, tables):
         frame = tables[name]
         if frame.empty:
             continue
-        frame = frame[frame.numeric_ok]
+        frame = frame[frame.numeric_ok.eq(True).fillna(False)]
         rows = [paired_differences(frame, ["phase", "readout", *keys], metric).assign(metric=metric)
                 for metric in metrics]
         pd.concat(rows, ignore_index=True).to_csv(output / ("paired_" + name + ".csv"), index=False)
@@ -83,18 +99,19 @@ def report_pairs(output, minimum_effect=.05, repeats=2000):
     compare_relationships(output, tables)
     effects = tables["effects"]
     if not effects.empty:
-        selected = effects[effects.numeric_ok & effects.control.fillna("").eq("")]
+        selected = effects[effects.numeric_ok.eq(True).fillna(False) & effects.control.fillna("").eq("")]
         keys = ["phase", "layer", "head", "source_group", "dose", "readout", "selection"]
         paired = paired_differences(selected, keys, "support")
         paired.to_csv(output / "paired_effects.csv", index=False)
         source_intervals(paired, keys, repeats).to_csv(output / "source_intervals.csv", index=False)
     inventory = pd.read_csv(output / "pair_inventory.csv")
-    failed = {name: int((~tables[name].numeric_ok).sum()) if not tables[name].empty else 0
-              for name in ("effects", "interactions", "adaptation", "persistence")}
+    controls = control_counts(tables)
     summary = dict(sources=int(inventory.source_id.nunique()), pairs=int(inventory.case_id.nunique()),
         measured_phases=int(effects[["case_id", "side", "phase"]].drop_duplicates().shape[0]) if not effects.empty else 0,
         finite_effect_rows=len(effects), interaction_rows=len(tables["interactions"]),
-        failed_control_rows=failed,
+        failed_control_rows={name: counts["failed"] for name, counts in controls.items()},
+        control_rows=controls,
+        row_count_note="rows include repeated heads, doses and controls; independent unit is source",
         minimum_effect_nats=minimum_effect, purpose="label_assisted_mechanism_audit_not_detector_evaluation")
     write_report(output, summary)
     print(json.dumps(summary, ensure_ascii=False), flush=True)

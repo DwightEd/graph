@@ -1,0 +1,8 @@
+{
+  "source": "https://github.com/ParticleMedia/RAGTruth",
+  "model_token_statistics": false,
+  "lexical_unit": "\\w+(?:['’\\-]\\w+)*",
+  "sentence_unit": "punctuation_v1; not manually annotated sentences",
+  "full_sentence_rule": "every alphanumeric character covered by the annotation union",
+  "later_span_rule": "character spans merged only when overlapping; second and subsequent spans"
+}
