@@ -7,6 +7,13 @@ from tqdm import tqdm
 from .paired_inputs import claim_trace, phase_positions
 
 
+def saved_entropy_nats(trace):
+    """Old sampler caches omit full-vocabulary entropy; top-5 cannot recover it."""
+    if "logit_entropy" not in trace:
+        return np.full(trace["attention"].shape[2], np.nan)
+    return trace["logit_entropy"] * np.log(2.)  # Saved sampler entropy is in bits.
+
+
 def confidence_controls(trace, vocabulary_size, alpha=.9):
     """RAUQ-style causal adaptation, not the paper's full-answer head selection.
 
@@ -18,7 +25,7 @@ def confidence_controls(trace, vocabulary_size, alpha=.9):
     length = attention.shape[2]
     queries = int(trace["prompt_length"]) + np.arange(length) - 1
     previous = attention[:, :, np.arange(length), queries].astype(np.float32)
-    entropy = trace["logit_entropy"] * np.log(2.)  # Saved sampler entropy is in bits.
+    entropy = saved_entropy_nats(trace)
     signal = np.maximum(np.log(vocabulary_size) - entropy, np.finfo(float).tiny)
     layers, heads = previous.shape[:2]
     confidence = np.full((layers, heads), signal[0])
@@ -48,15 +55,21 @@ def screen_pair(directory, samples, case, vocabulary_size):
         scores, heads, previous = confidence_controls(trace, vocabulary_size)
         prompt = int(trace["prompt_length"])
         positions = phase_positions(span, len(scores), trace["special_mask"][prompt:])
-        entropy = trace["logit_entropy"] * np.log(2.)
+        entropy = saved_entropy_nats(trace)
+        entropy_status = "saved_bits" if "logit_entropy" in trace else "not_saved"
+        if entropy_status == "not_saved":
+            tqdm.write(f"{case['case_id']}/{side}: logit_entropy not saved; entropy/EWMA/RAUQ controls unavailable. Native audit can continue.")
         surprisal = trace["log_normalizer"] - trace["chosen_logit"]
         for phase, position in positions.items():
             rows.append(dict(case_id=case["case_id"], source_id=case["source_id"],
                 side=side, phase=phase, position=position, entropy_nats=float(entropy[position]),
+                entropy_status=entropy_status,
                 surprisal_nats=float(surprisal[position]), local_confidence_score=scores[position, 0],
                 ewma_score=scores[position, 1], prefix_rauq_score=scores[position, 2],
                 label_scope="reviewed_claim" if phase in ("onset", "back_half") else "unreviewed_neighbor"))
         traces[side + "_scores"] = scores
+        traces[side + "_entropy_nats"] = entropy
+        traces[side + "_entropy_status"] = np.array(entropy_status)
         traces[side + "_selected_heads"] = heads
         traces[side + "_previous_token_attention"] = previous
     return rows, traces

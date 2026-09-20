@@ -19,6 +19,9 @@ python -u main.py flow
 
 onset 保存完整核验候选对比；其他阶段保存实际下一词 logp，二者不能拼成同尺度事实曲线。
 全部 confidence 序列另存熵、无 attention 的 EWMA 和 prefix-RAUQ-style 对照。
+旧采样 NPZ 可能未保存 `logit_entropy`：相关分数记为未测（CSV 空值、NPZ NaN），
+并保存 `entropy_status=not_saved`；已有 surprisal 和原生干预仍可计算。原命令可直接续跑，
+无需补造熵或重新采样。top-5 logits 与 log normalizer 不足以还原全词表熵。
 
 | 文件 | 职责 |
 |---|---|
