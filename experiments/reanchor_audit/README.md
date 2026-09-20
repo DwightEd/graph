@@ -1,5 +1,8 @@
 # Reanchor 原生审计
 
+**全量“标注前是否普遍出现回看变化”请运行 `python -m experiments.unsupervised_token_graph.span_audit.onset_run`。**
+该入口排除全部特殊 token，逐标注起点、逐 head 与正常窗口比较，保留阴性和缺测；见[运行说明](../unsupervised_token_graph/span_audit/ONSET_AUDIT.md)。本页指定案例干预不输出全量发生率。
+
 检验事实生成前的回看候选，是否读取了适用证据，并经更深层、跨位置的消息影响事实选择。[完整设计](../../docs/REANCHOR_AUDIT_DESIGN_20260920.md)。本入口用于标签辅助机制审计，不训练检测器。
 
 **2026-09-20 实测复核：原 v1 候选不能解释为有效 reanchor。** 四个主候选均选中 BOS，虽然 head 的非特殊远端读取增加，这条 BOS 边自身却在下降；势加权根注入也几乎全部集中在位置 0。详见[实测分析](../../results/reanchor_review_20260920/ANALYSIS.md)。原实验与缓存保留，当前不据此扩大 GPU 干预规模。

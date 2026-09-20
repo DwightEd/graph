@@ -1,0 +1,14 @@
+{
+  "window": 8,
+  "purpose": "frozen_score_audit_not_attention_reanchor_measurement",
+  "thresholds": "original independent normal calibration; no test retuning",
+  "note": "a pre-onset score is not an online warning without prefix-causality verification",
+  "inputs": {
+    "charm_tokens": "/workspace/scratch/5baee0804974/tmp/continuity_input/original/outputs/charm_structure_audit_qa/QA/seed_0/charm_in/test/tokens.csv",
+    "lda_tokens": "/workspace/scratch/5baee0804974/tmp/continuity_input/lda/test_scores.csv.gz",
+    "annotations": "/workspace/scratch/5baee0804974/tmp/ragtruth_official/response.jsonl",
+    "pairs": "/workspace/scratch/5baee0804974/tmp/continuity_input/original/outputs/charm_structure_audit_qa/QA/seed_0/charm_in/test/cluster_audit/pairs.json",
+    "charm_threshold": "/workspace/scratch/5baee0804974/tmp/continuity_input/original/outputs/charm_structure_audit_qa/QA/seed_0/charm_in/threshold.json",
+    "lda_thresholds": "/workspace/scratch/5baee0804974/tmp/continuity_input/lda/thresholds.json"
+  }
+}
