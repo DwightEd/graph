@@ -1,0 +1,5 @@
+case_id,source_id,side,prefix_tokens,prompt_tokens,decision_position,first_candidate_tokens,second_candidate_tokens,history_status,readout_status,source_roles,native_graph_measured
+14315_headwear_scope,14315,supported,469,434,35,10,11,contains_other_overgeneralization,natural_prefix_and_wording_confounded,reviewed_local_support,False
+14315_headwear_scope,14315,unsupported,469,434,35,10,11,not_fully_reviewed,natural_prefix_and_wording_confounded,reviewed_local_support,False
+14375_onion_stage,14375,supported,661,535,126,3,7,not_fully_reviewed,different_attribute_slots,reviewed_local_support,False
+14375_onion_stage,14375,unsupported,661,535,126,3,7,not_fully_reviewed,different_attribute_slots,reviewed_local_support,False

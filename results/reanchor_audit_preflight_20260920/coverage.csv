@@ -1,0 +1,5 @@
+case_id,source_id,side,native_graph_measured,earlier_reanchor_candidates,route_capture_available,route_checks_status,matched_controls,unmatched_candidates,no_lookback_controls,direct_read_controls,events_without_relay,empty_source_units,expected_effect_rows,measured_effect_rows,baseline_status,readout_status,history_status
+14315_headwear_scope,14315,supported,False,0,False,not_measured,0,0,0,0,0,0,,0,not_measured,natural_prefix_and_wording_confounded,contains_other_overgeneralization
+14315_headwear_scope,14315,unsupported,False,0,False,not_measured,0,0,0,0,0,0,,0,not_measured,natural_prefix_and_wording_confounded,not_fully_reviewed
+14375_onion_stage,14375,supported,False,0,False,not_measured,0,0,0,0,0,0,,0,not_measured,different_attribute_slots,not_fully_reviewed
+14375_onion_stage,14375,unsupported,False,0,False,not_measured,0,0,0,0,0,0,,0,not_measured,different_attribute_slots,not_fully_reviewed

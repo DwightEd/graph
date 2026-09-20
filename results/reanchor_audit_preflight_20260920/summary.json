@@ -1,0 +1,15 @@
+{
+  "sources": 2,
+  "paired_sides": 4,
+  "native_graphs": 0,
+  "earlier_reanchor_candidates": 0,
+  "measured_effect_rows": 0,
+  "finite_effect_rows": 0,
+  "failed_control_rows": 0,
+  "nonfinite_effect_rows": 0,
+  "baseline_checks_passed": 0,
+  "baseline_checks_missing": 4,
+  "baseline_checks_failed": 0,
+  "route_checks_failed": 0,
+  "purpose": "label_assisted_reanchor_mechanism_audit_not_detector_evaluation"
+}

@@ -97,9 +97,31 @@ class NativeRun:
     def layer_hook(self, index):
         def hook(module, inputs, output):
             state = output[0] if isinstance(output, tuple) else output
+            if not self.interventions:
+                for unit in self.capture_units:
+                    if unit['layer'] == index and unit.get('capture_residual', False):
+                        self.message_writes['residual_' + unit['unit']] = state[0, [unit['receiver']]].detach().cpu()
+            state = self.change_residual(index, state)
             margin = lens_margin(self.model, state[0, self.query], self.correct, self.wrong)
             self.trajectory.append(dict(layer=index, site='after_mlp', margin=float(margin)))
+            return (state, *output[1:]) if isinstance(output, tuple) else state
         return hook
+
+    def change_residual(self, index, state):
+        """Restore a complete layer-output state at explicit earlier positions."""
+        for item in self.interventions.get(index, ()):
+            if item.groups != ('residual',):
+                continue
+            queries = self.query_positions(item)
+            change = self.intervention_change(item, state[0, queries])
+            state = state.clone()
+            if item.operation == 'replace' and item.dose == 1.:
+                state[0, queries] = item.replacement.to(state)
+            else:
+                state[0, queries] -= change
+            self.changes.append(dict(layer=index, operation=item.operation + '_residual',
+                receiver_positions=queries, query_change_norm=float(change[-1].float().norm())))
+        return state
 
     def mlp_hook(self, index):
         def hook(module, inputs, output):
@@ -140,7 +162,7 @@ class NativeRun:
                 self.observe(index, module, attention, values, heads, attention_output)
             changed = attention_output
             for item in self.interventions.get(index, ()):
-                if item.groups != ('mlp',):
+                if item.groups not in (('mlp',), ('residual',)):
                     changed = self.apply(item, module, attention, values, changed)
             if (self.restore is not None and index == self.restore['layer']
                     and self.restore.get('site', 'heads') == 'heads'):
