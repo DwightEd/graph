@@ -1,0 +1,4 @@
+threshold,target,side,unsupported,prior_state,decision_state,prior_node_targets,claim
+0.05,126,supported,False,-1,-1,[],over low heat
+0.1,126,supported,False,-1,-1,[],over low heat
+0.2,126,supported,False,-1,-1,[],over low heat

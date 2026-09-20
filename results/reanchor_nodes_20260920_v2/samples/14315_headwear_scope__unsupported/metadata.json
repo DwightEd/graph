@@ -1,0 +1,16 @@
+{
+  "id": "14315_headwear_scope__unsupported",
+  "source_id": "14315",
+  "task": "QA",
+  "generator": "native_llama31_8b",
+  "split": "resampled_review",
+  "annotation_origin": "reviewed_local_claim_only_prefix_history_unreviewed",
+  "special_ids": [
+    128000,
+    128006,
+    128007,
+    128009
+  ],
+  "special_origin": "explicit_control_spellings_in_saved_native_token_text",
+  "response_tokens": 35
+}

@@ -1,0 +1,13 @@
+threshold,target,side,unsupported,prior_state,decision_state,prior_node_targets,claim,id,source_id,task,generator,split,annotation_origin
+0.05,35,supported,False,1,-1,"[28, 30, 31]",caps with a folded piece of cloth tied on top,14315_headwear_scope__supported,14315,QA,native_llama31_8b,resampled_review,reviewed_local_claim_only_prefix_history_unreviewed
+0.1,35,supported,False,1,-1,"[28, 30, 31]",caps with a folded piece of cloth tied on top,14315_headwear_scope__supported,14315,QA,native_llama31_8b,resampled_review,reviewed_local_claim_only_prefix_history_unreviewed
+0.2,35,supported,False,1,-1,"[28, 30]",caps with a folded piece of cloth tied on top,14315_headwear_scope__supported,14315,QA,native_llama31_8b,resampled_review,reviewed_local_claim_only_prefix_history_unreviewed
+0.05,35,unsupported,True,1,-1,"[28, 31, 33]",a headdress with a special fringe of gold and feathers,14315_headwear_scope__unsupported,14315,QA,native_llama31_8b,resampled_review,reviewed_local_claim_only_prefix_history_unreviewed
+0.1,35,unsupported,True,1,-1,[32],a headdress with a special fringe of gold and feathers,14315_headwear_scope__unsupported,14315,QA,native_llama31_8b,resampled_review,reviewed_local_claim_only_prefix_history_unreviewed
+0.2,35,unsupported,True,1,-1,[32],a headdress with a special fringe of gold and feathers,14315_headwear_scope__unsupported,14315,QA,native_llama31_8b,resampled_review,reviewed_local_claim_only_prefix_history_unreviewed
+0.05,126,supported,False,-1,-1,[],over low heat,14375_onion_stage__supported,14375,QA,native_llama31_8b,resampled_review,reviewed_local_claim_only_prefix_history_unreviewed
+0.1,126,supported,False,-1,-1,[],over low heat,14375_onion_stage__supported,14375,QA,native_llama31_8b,resampled_review,reviewed_local_claim_only_prefix_history_unreviewed
+0.2,126,supported,False,-1,-1,[],over low heat,14375_onion_stage__supported,14375,QA,native_llama31_8b,resampled_review,reviewed_local_claim_only_prefix_history_unreviewed
+0.05,126,unsupported,True,-1,-1,[],for 10 to 12 minutes,14375_onion_stage__unsupported,14375,QA,native_llama31_8b,resampled_review,reviewed_local_claim_only_prefix_history_unreviewed
+0.1,126,unsupported,True,-1,-1,[],for 10 to 12 minutes,14375_onion_stage__unsupported,14375,QA,native_llama31_8b,resampled_review,reviewed_local_claim_only_prefix_history_unreviewed
+0.2,126,unsupported,True,-1,-1,[],for 10 to 12 minutes,14375_onion_stage__unsupported,14375,QA,native_llama31_8b,resampled_review,reviewed_local_claim_only_prefix_history_unreviewed

@@ -1,0 +1,4 @@
+threshold,nodes,absent_positions,unknown_positions,physical_heads
+0.05,15,0,21,1024
+0.1,10,0,26,1024
+0.2,5,0,31,1024

@@ -1,0 +1,4 @@
+threshold,target,side,unsupported,prior_state,decision_state,prior_node_targets,claim
+0.05,126,unsupported,True,-1,-1,[],for 10 to 12 minutes
+0.1,126,unsupported,True,-1,-1,[],for 10 to 12 minutes
+0.2,126,unsupported,True,-1,-1,[],for 10 to 12 minutes

@@ -1,0 +1,11 @@
+target,query,node_token,node_token_id,node_text,context,predicted_token,heads,head_ids,max_shift_low,known_claim_target,lag_to_known_claim,claim_in_next_window,claim_at_decision,known_claim_unsupported,other_followup_annotation,future_hallucination_known
+7,440,6,56874, woven,"ca clothes were made of ⟦ woven⟧  or knitted textiles,", or,1,"[[20, 3]]",0.14990234375,35,28,False,False,True,unknown,
+9,442,8,1168, kn," were made of woven or ⟦ kn⟧ itted textiles, often with",itted,6,"[[9, 9], [14, 11], [15, 5], [26, 3], [27, 28], [30, 26]]",0.5141855875651041,35,26,False,False,True,unknown,
+12,445,11,11,","," woven or knitted textiles ⟦,⟧  often with rich colors and", often,1,"[[6, 25]]",0.11370849609375,35,23,False,False,True,unknown,
+19,452,18,85927, embroidery, with rich colors and delicate ⟦ embroidery⟧  with gold and silver thread, with,1,"[[20, 3]]",0.2115936279296875,35,16,False,False,True,unknown,
+20,453,19,449, with, rich colors and delicate embroidery ⟦ with⟧  gold and silver thread., gold,1,"[[19, 2]]",0.16743977864583331,35,15,False,False,True,unknown,
+22,455,21,323, and, and delicate embroidery with gold ⟦ and⟧  silver thread. They were, silver,12,"[[6, 13], [7, 10], [8, 13], [9, 8], [9, 9], [10, 9], [11, 9], [11, 16], [12, 24], [12, 26], [15, 6], [16, 22]]",0.4662882486979167,35,13,False,False,True,unknown,
+24,457,23,4617, thread, embroidery with gold and silver ⟦ thread⟧ . They were held together,.,3,"[[12, 18], [17, 30], [22, 19]]",0.17963663736979169,35,11,False,False,True,unknown,
+25,458,24,13,., with gold and silver thread ⟦.⟧  They were held together by, They,2,"[[7, 2], [15, 0]]",0.1647796630859375,35,10,False,False,True,unknown,
+26,459,25,2435, They, gold and silver thread. ⟦ They⟧  were held together by large, were,2,"[[7, 27], [16, 22]]",0.22859700520833331,35,9,False,False,True,unknown,
+32,465,31,9501, metal, were held together by large ⟦ metal⟧  pins and wore, pins,1,"[[20, 3]]",0.221588134765625,35,3,True,False,True,unknown,True

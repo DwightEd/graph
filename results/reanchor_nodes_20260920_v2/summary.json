@@ -1,0 +1,8 @@
+{
+  "purpose": "structural_reanchor_association_audit_not_causal_proof",
+  "primary_shift": 0.1,
+  "nodes": 79,
+  "answers": 4,
+  "annotation_scope": "reviewed_local_claim_only_prefix_history_unreviewed",
+  "reviewed_claims": 4
+}

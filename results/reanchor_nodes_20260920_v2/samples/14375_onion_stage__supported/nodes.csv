@@ -1,0 +1,50 @@
+target,query,node_token,node_token_id,node_text,context,predicted_token,heads,head_ids,max_shift_low,known_claim_target,lag_to_known_claim,claim_in_next_window,claim_at_decision,known_claim_unsupported,other_followup_annotation,future_hallucination_known
+5,539,4,47869, passages,"
+
+Based on the given ⟦ passages⟧ , here's how to",",",3,"[[0, 1], [20, 3], [22, 19]]",0.2867431640625,126,121,False,False,False,unknown,
+6,540,5,11,",","Based on the given passages ⟦,⟧  here's how to cook", here,4,"[[9, 9], [12, 18], [14, 11], [17, 4]]",0.2408447265625,126,120,False,False,False,unknown,
+13,547,12,1900,ats,"'s how to cook br ⟦ats⟧ :
+
+1. Preheat",":
+
+",1,"[[29, 29]]",0.13625590006510419,126,113,False,False,False,unknown,
+16,550,15,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill", Pre,1,"[[0, 1]]",0.20303567250569665,126,110,False,False,False,unknown,
+26,560,25,13,., grill for medium-high heat ⟦.⟧  Lightly oil the grate, Light,11,"[[5, 3], [7, 10], [9, 8], [9, 9], [10, 16], [11, 17], [11, 19], [11, 31], [12, 17], [12, 18], [14, 10]]",0.42236328125000006,126,100,False,False,False,unknown,
+32,566,31,627,".
+"," Lightly oil the grate ⟦.
+⟧ 2. If you want",2,13,"[[9, 9], [12, 17], [13, 24], [14, 10], [14, 11], [15, 0], [15, 7], [15, 8], [16, 13], [16, 14], [16, 22], [17, 20], [18, 7]]",0.36021931966145837,126,94,False,False,False,unknown,
+33,567,32,17,2,"ly oil the grate.
+ ⟦2⟧ . If you want to",.,3,"[[5, 12], [11, 19], [12, 28]]",0.15718587239583331,126,93,False,False,False,unknown,
+47,581,46,11,",","ats in a pot first ⟦,⟧  prick them with a fork", prick,2,"[[7, 2], [12, 17]]",0.17240397135416669,126,79,False,False,False,unknown,
+48,582,47,89800, prick," in a pot first, ⟦ prick⟧  them with a fork,", them,1,"[[6, 29]]",0.10162353515625,126,78,False,False,False,unknown,
+52,586,51,23243, fork,", prick them with a ⟦ fork⟧ , combine them with onions",",",1,"[[26, 3]]",0.15526326497395831,126,74,False,False,False,unknown,
+57,591,56,45697, onions," fork, combine them with ⟦ onions⟧ , butter, and beer",",",1,"[[20, 3]]",0.20774332682291669,126,69,False,False,False,unknown,
+62,596,61,13179, beer," onions, butter, and ⟦ beer⟧  in a large pot,", in,2,"[[14, 10], [26, 3]]",0.13370768229166669,126,64,False,False,False,unknown,
+63,597,62,304, in,", butter, and beer ⟦ in⟧  a large pot, and", a,2,"[[7, 27], [11, 8]]",0.2508544921875,126,63,False,False,False,unknown,
+67,601,66,11,","," beer in a large pot ⟦,⟧  and simmer over medium heat", and,2,"[[8, 22], [16, 22]]",0.3546142578125,126,59,False,False,False,unknown,
+71,605,70,11298, medium," pot, and simmer over ⟦ medium⟧  heat for 15 to", heat,1,"[[26, 3]]",0.15603129069010419,126,55,False,False,False,unknown,
+76,610,75,311, to," medium heat for 15 ⟦ to⟧  20 minutes.
+3", ,2,"[[8, 22], [9, 9]]",0.12162272135416669,126,50,False,False,False,unknown,
+80,614,79,627,".
+","15 to 20 minutes ⟦.
+⟧ 3. Alternatively, cook",3,3,"[[5, 12], [16, 22], [18, 30]]",0.33939615885416663,126,46,False,False,False,unknown,
+81,615,80,18,3," to 20 minutes.
+ ⟦3⟧ . Alternatively, cook the",.,2,"[[2, 13], [5, 22]]",0.23248545328776044,126,45,False,False,False,unknown,
+87,621,86,1437, br,". Alternatively, cook the ⟦ br⟧ ats directly on the pre",ats,2,"[[13, 24], [30, 24]]",0.261962890625,126,39,False,False,False,unknown,
+92,626,91,864, pre, brats directly on the ⟦ pre⟧ heated grill for ,he,1,"[[12, 18]]",0.11191813151041666,126,34,False,False,False,unknown,
+93,627,92,383,he,ats directly on the pre ⟦he⟧ ated grill for 10,ated,5,"[[8, 13], [8, 22], [9, 9], [9, 10], [10, 30]]",0.25072224934895837,126,33,False,False,False,unknown,
+96,630,95,369, for, the preheated grill ⟦ for⟧  10 to 14, ,1,"[[16, 22]]",0.20499674479166663,126,30,False,False,False,unknown,
+98,632,97,605,10,"heated grill for  ⟦10⟧  to 14 minutes,", to,1,"[[31, 11]]",0.14120992024739581,126,28,False,False,False,unknown,
+99,633,98,311, to,"ated grill for 10 ⟦ to⟧  14 minutes, turning", ,3,"[[11, 16], [14, 10], [16, 22]]",0.17327880859375,126,27,False,False,False,unknown,
+102,636,101,4520, minutes," 10 to 14 ⟦ minutes⟧ , turning occasionally to brown",",",1,"[[30, 31]]",0.13112386067708334,126,24,False,False,False,unknown,
+103,637,102,11,",","10 to 14 minutes ⟦,⟧  turning occasionally to brown evenly", turning,4,"[[5, 3], [5, 12], [5, 13], [16, 22]]",0.45355224609375,126,23,False,False,False,unknown,
+108,642,107,42147, evenly,", turning occasionally to brown ⟦ evenly⟧ .
+4. If cooking",".
+",1,"[[16, 22]]",0.26586405436197913,126,18,False,False,False,unknown,
+109,643,108,627,".
+"," turning occasionally to brown evenly ⟦.
+⟧ 4. If cooking in",4,6,"[[5, 3], [5, 13], [7, 2], [8, 22], [13, 24], [24, 21]]",0.21455891927083331,126,17,False,False,False,unknown,
+112,646,111,1442, If," brown evenly.
+4. ⟦ If⟧  cooking in a pot,", cooking,1,"[[31, 11]]",0.19515991210937503,126,14,False,False,False,unknown,

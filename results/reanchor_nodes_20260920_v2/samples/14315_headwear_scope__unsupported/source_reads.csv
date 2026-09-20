@@ -1,0 +1,195 @@
+target,query,layer,head,source,attention_now,attention_before,source_gain,source_gain_low,source_token_id,source_text,source_context,region,source_is_prior_event,same_token_as_node,reviewed_roles
+22,455,6,13,442,0.150390625,0.0,0.150390625,0.0581258138020833,1168, kn," were made of woven or ⟦ kn⟧ itted textiles, often with",history,True,False,outside_reviewed_claim_sources
+22,455,6,13,445,0.134765625,0.0,0.134765625,0.0425008138020833,11,","," woven or knitted textiles ⟦,⟧  often with rich colors and",history,True,False,outside_reviewed_claim_sources
+22,455,6,13,437,0.1171875,0.0,0.1171875,0.0249226888020833,1051, were,"<|end_header_id|>
+
+Inca clothes ⟦ were⟧  made of woven or kn",history,False,False,outside_reviewed_claim_sources
+22,455,6,13,434,0.0791015625,0.0,0.0791015625,-0.0131632486979166,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes were made of",history,False,False,outside_reviewed_claim_sources
+12,445,6,25,434,0.31640625,0.12939453125,0.18701171875,0.0911865234375,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes were made of",history,False,False,outside_reviewed_claim_sources
+25,458,7,2,445,0.076171875,0.0097249348958333,0.0664469401041666,-0.0038808186848958,11,","," woven or knitted textiles ⟦,⟧  often with rich colors and",history,True,False,outside_reviewed_claim_sources
+25,458,7,2,433,0.061767578125,0.0,0.061767578125,-0.0085601806640625,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Inca clothes were made",prompt,False,False,outside_reviewed_claim_sources
+25,458,7,2,434,0.060546875,0.0,0.060546875,-0.0097808837890625,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes were made of",history,False,False,outside_reviewed_claim_sources
+25,458,7,2,437,0.0311279296875,0.0097249348958333,0.0214029947916666,-0.0489247639973958,1051, were,"<|end_header_id|>
+
+Inca clothes ⟦ were⟧  made of woven or kn",history,False,False,outside_reviewed_claim_sources
+22,455,7,10,434,0.1552734375,0.0,0.1552734375,-0.0286051432291666,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes were made of",history,False,False,outside_reviewed_claim_sources
+22,455,7,10,437,0.130859375,0.0,0.130859375,-0.0530192057291666,1051, were,"<|end_header_id|>
+
+Inca clothes ⟦ were⟧  made of woven or kn",history,False,False,outside_reviewed_claim_sources
+22,455,7,10,436,0.13671875,0.0107421875,0.1259765625,-0.0579020182291666,15447, clothes,"assistant<|end_header_id|>
+
+Inca ⟦ clothes⟧  were made of woven or",history,False,False,outside_reviewed_claim_sources
+22,455,7,10,442,0.04443359375,0.0,0.04443359375,-0.1394449869791666,1168, kn," were made of woven or ⟦ kn⟧ itted textiles, often with",history,True,False,outside_reviewed_claim_sources
+26,459,7,27,437,0.111328125,0.0226236979166666,0.0887044270833333,0.0087331136067708,1051, were,"<|end_header_id|>
+
+Inca clothes ⟦ were⟧  made of woven or kn",history,False,False,outside_reviewed_claim_sources
+26,459,7,27,438,0.0673828125,0.0,0.0673828125,-0.0125885009765625,1903, made,"
+
+Inca clothes were ⟦ made⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+26,459,7,27,439,0.064453125,0.0031331380208333,0.0613199869791666,-0.0186513264973958,315, of,Inca clothes were made ⟦ of⟧  woven or knitted textiles,history,False,False,outside_reviewed_claim_sources
+26,459,7,27,436,0.049072265625,0.0,0.049072265625,-0.0308990478515625,15447, clothes,"assistant<|end_header_id|>
+
+Inca ⟦ clothes⟧  were made of woven or",history,False,False,outside_reviewed_claim_sources
+22,455,8,13,442,0.31640625,0.0,0.31640625,0.2293701171875,1168, kn," were made of woven or ⟦ kn⟧ itted textiles, often with",history,True,False,outside_reviewed_claim_sources
+22,455,8,13,445,0.154296875,0.0,0.154296875,0.0672607421875,11,","," woven or knitted textiles ⟦,⟧  often with rich colors and",history,True,False,outside_reviewed_claim_sources
+22,455,8,13,435,0.060302734375,0.0,0.060302734375,-0.0267333984375,936,ca,"<|start_header_id|>assistant<|end_header_id|>
+
+In ⟦ca⟧  clothes were made of woven",history,False,False,outside_reviewed_claim_sources
+22,455,9,8,442,0.07666015625,0.0,0.07666015625,-0.0455118815104166,1168, kn," were made of woven or ⟦ kn⟧ itted textiles, often with",history,True,False,outside_reviewed_claim_sources
+22,455,9,8,437,0.07568359375,0.0,0.07568359375,-0.0464884440104166,1051, were,"<|end_header_id|>
+
+Inca clothes ⟦ were⟧  made of woven or kn",history,False,False,outside_reviewed_claim_sources
+22,455,9,8,445,0.10400390625,0.03546142578125,0.06854248046875,-0.0536295572916666,11,","," woven or knitted textiles ⟦,⟧  often with rich colors and",history,True,False,outside_reviewed_claim_sources
+22,455,9,8,434,0.051513671875,0.0,0.051513671875,-0.0706583658854166,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes were made of",history,False,False,outside_reviewed_claim_sources
+9,442,9,9,433,0.33203125,0.0194498697916666,0.3125813802083333,0.2608642578125,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Inca clothes were made",prompt,False,False,outside_reviewed_claim_sources
+22,455,9,9,442,0.2021484375,0.0,0.2021484375,0.1298624674479166,1168, kn," were made of woven or ⟦ kn⟧ itted textiles, often with",history,True,False,outside_reviewed_claim_sources
+22,455,9,9,437,0.11767578125,0.0,0.11767578125,0.0453898111979166,1051, were,"<|end_header_id|>
+
+Inca clothes ⟦ were⟧  made of woven or kn",history,False,False,outside_reviewed_claim_sources
+22,455,9,9,434,0.11328125,0.0,0.11328125,0.0409952799479166,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes were made of",history,False,False,outside_reviewed_claim_sources
+22,455,10,9,437,0.07421875,0.0,0.07421875,-0.05145263671875,1051, were,"<|end_header_id|>
+
+Inca clothes ⟦ were⟧  made of woven or kn",history,False,False,outside_reviewed_claim_sources
+22,455,10,9,433,0.072265625,0.0,0.072265625,-0.05340576171875,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Inca clothes were made",prompt,False,False,outside_reviewed_claim_sources
+22,455,10,9,442,0.0693359375,0.0,0.0693359375,-0.05633544921875,1168, kn," were made of woven or ⟦ kn⟧ itted textiles, often with",history,True,False,outside_reviewed_claim_sources
+22,455,10,9,434,0.05517578125,0.0,0.05517578125,-0.07049560546875,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes were made of",history,False,False,outside_reviewed_claim_sources
+22,455,10,9,445,0.07373046875,0.0191853841145833,0.0545450846354166,-0.0711263020833333,11,","," woven or knitted textiles ⟦,⟧  often with rich colors and",history,True,False,outside_reviewed_claim_sources
+22,455,11,9,435,0.1796875,0.0,0.1796875,-0.1246744791666666,936,ca,"<|start_header_id|>assistant<|end_header_id|>
+
+In ⟦ca⟧  clothes were made of woven",history,False,False,outside_reviewed_claim_sources
+22,455,11,9,437,0.140625,0.0,0.140625,-0.1637369791666666,1051, were,"<|end_header_id|>
+
+Inca clothes ⟦ were⟧  made of woven or kn",history,False,False,outside_reviewed_claim_sources
+22,455,11,9,436,0.080078125,0.0,0.080078125,-0.2242838541666666,15447, clothes,"assistant<|end_header_id|>
+
+Inca ⟦ clothes⟧  were made of woven or",history,False,False,outside_reviewed_claim_sources
+22,455,11,16,437,0.171875,0.0,0.171875,0.1293131510416666,1051, were,"<|end_header_id|>
+
+Inca clothes ⟦ were⟧  made of woven or kn",history,False,False,outside_reviewed_claim_sources
+22,455,11,16,445,0.11279296875,0.01458740234375,0.09820556640625,0.0556437174479166,11,","," woven or knitted textiles ⟦,⟧  often with rich colors and",history,True,False,outside_reviewed_claim_sources
+22,455,11,16,442,0.06591796875,0.0,0.06591796875,0.0233561197916666,1168, kn," were made of woven or ⟦ kn⟧ itted textiles, often with",history,True,False,outside_reviewed_claim_sources
+22,455,11,16,434,0.06494140625,0.0,0.06494140625,0.0223795572916666,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes were made of",history,False,False,outside_reviewed_claim_sources
+24,457,12,18,442,0.1767578125,0.0289713541666666,0.1477864583333333,0.0441487630208333,1168, kn," were made of woven or ⟦ kn⟧ itted textiles, often with",history,True,False,outside_reviewed_claim_sources
+24,457,12,18,445,0.12451171875,0.01708984375,0.107421875,0.0037841796875,11,","," woven or knitted textiles ⟦,⟧  often with rich colors and",history,True,False,outside_reviewed_claim_sources
+22,455,12,24,436,0.201171875,0.0,0.201171875,0.0085856119791666,15447, clothes,"assistant<|end_header_id|>
+
+Inca ⟦ clothes⟧  were made of woven or",history,False,False,outside_reviewed_claim_sources
+22,455,12,24,438,0.1201171875,0.0,0.1201171875,-0.0724690755208333,1903, made,"
+
+Inca clothes were ⟦ made⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+22,455,12,24,439,0.1162109375,0.0123697916666666,0.1038411458333333,-0.0887451171875,315, of,Inca clothes were made ⟦ of⟧  woven or knitted textiles,history,False,False,outside_reviewed_claim_sources
+22,455,12,26,436,0.17578125,0.0,0.17578125,-0.0968017578125,15447, clothes,"assistant<|end_header_id|>
+
+Inca ⟦ clothes⟧  were made of woven or",history,False,False,outside_reviewed_claim_sources
+22,455,12,26,441,0.0986328125,0.0,0.0986328125,-0.1739501953125,477, or," clothes were made of woven ⟦ or⟧  knitted textiles, often",history,False,False,outside_reviewed_claim_sources
+22,455,12,26,445,0.07568359375,0.0,0.07568359375,-0.1968994140625,11,","," woven or knitted textiles ⟦,⟧  often with rich colors and",history,True,False,outside_reviewed_claim_sources
+22,455,12,26,437,0.055419921875,0.0,0.055419921875,-0.2171630859375,1051, were,"<|end_header_id|>
+
+Inca clothes ⟦ were⟧  made of woven or kn",history,False,False,outside_reviewed_claim_sources
+9,442,14,11,433,0.248046875,0.0858561197916666,0.1621907552083333,0.0904744466145833,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Inca clothes were made",prompt,False,False,outside_reviewed_claim_sources
+9,442,14,11,431,0.09228515625,0.0,0.09228515625,0.02056884765625,78191,assistant,".""
+output:<|eot_id|><|start_header_id|> ⟦assistant⟧ <|end_header_id|>
+
+Inca clothes",prompt,False,False,outside_reviewed_claim_sources
+25,458,15,0,436,0.09375,0.0045572916666666,0.0891927083333333,-0.07159423828125,15447, clothes,"assistant<|end_header_id|>
+
+Inca ⟦ clothes⟧  were made of woven or",history,False,False,outside_reviewed_claim_sources
+25,458,15,0,435,0.0634765625,0.0078531901041666,0.0556233723958333,-0.10516357421875,936,ca,"<|start_header_id|>assistant<|end_header_id|>
+
+In ⟦ca⟧  clothes were made of woven",history,False,False,outside_reviewed_claim_sources
+25,458,15,0,438,0.044677734375,0.0,0.044677734375,-0.1161092122395833,1903, made,"
+
+Inca clothes were ⟦ made⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+25,458,15,0,437,0.04443359375,0.0,0.04443359375,-0.1163533528645833,1051, were,"<|end_header_id|>
+
+Inca clothes ⟦ were⟧  made of woven or kn",history,False,False,outside_reviewed_claim_sources
+25,458,15,0,444,0.02685546875,0.0,0.02685546875,-0.1339314778645833,94082, textiles," of woven or knitted ⟦ textiles⟧ , often with rich colors",history,False,False,outside_reviewed_claim_sources
+9,442,15,5,433,0.48828125,0.0125325520833333,0.4757486979166667,0.30157470703125,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Inca clothes were made",prompt,False,False,outside_reviewed_claim_sources
+9,442,15,5,428,0.058349609375,0.0,0.058349609375,-0.1158243815104166,25,:," on given passages.""
+output ⟦:⟧ <|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+",prompt,False,False,outside_reviewed_claim_sources
+22,455,15,6,442,0.2041015625,0.0053304036458333,0.1987711588541666,-0.0016276041666666,1168, kn," were made of woven or ⟦ kn⟧ itted textiles, often with",history,True,False,outside_reviewed_claim_sources
+22,455,15,6,437,0.1826171875,0.011474609375,0.171142578125,-0.0292561848958333,1051, were,"<|end_header_id|>
+
+Inca clothes ⟦ were⟧  made of woven or kn",history,False,False,outside_reviewed_claim_sources
+22,455,15,6,445,0.125,0.0055338541666666,0.1194661458333333,-0.0809326171875,11,","," woven or knitted textiles ⟦,⟧  often with rich colors and",history,True,False,outside_reviewed_claim_sources
+22,455,16,22,435,0.1328125,0.0,0.1328125,0.1107381184895833,936,ca,"<|start_header_id|>assistant<|end_header_id|>
+
+In ⟦ca⟧  clothes were made of woven",history,False,False,outside_reviewed_claim_sources
+22,455,16,22,434,0.130859375,0.0,0.130859375,0.1087849934895833,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes were made of",history,False,False,outside_reviewed_claim_sources
+22,455,16,22,436,0.10009765625,0.0,0.10009765625,0.0780232747395833,15447, clothes,"assistant<|end_header_id|>
+
+Inca ⟦ clothes⟧  were made of woven or",history,False,False,outside_reviewed_claim_sources
+22,455,16,22,440,0.1015625,0.0026906331380208,0.0988718668619791,0.0767974853515625,56874, woven,"ca clothes were made of ⟦ woven⟧  or knitted textiles,",history,True,False,outside_reviewed_claim_sources
+22,455,16,22,438,0.07666015625,0.0,0.07666015625,0.0545857747395833,1903, made,"
+
+Inca clothes were ⟦ made⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+26,459,16,22,436,0.1806640625,0.0,0.1806640625,0.040802001953125,15447, clothes,"assistant<|end_header_id|>
+
+Inca ⟦ clothes⟧  were made of woven or",history,False,False,outside_reviewed_claim_sources
+26,459,16,22,435,0.1318359375,0.0116373697916666,0.1201985677083333,-0.0196634928385416,936,ca,"<|start_header_id|>assistant<|end_header_id|>
+
+In ⟦ca⟧  clothes were made of woven",history,False,False,outside_reviewed_claim_sources
+26,459,16,22,444,0.0595703125,0.0,0.0595703125,-0.080291748046875,94082, textiles," of woven or knitted ⟦ textiles⟧ , often with rich colors",history,False,False,outside_reviewed_claim_sources
+24,457,17,30,447,0.1806640625,0.02490234375,0.15576171875,0.1172383626302083,449, with," knitted textiles, often ⟦ with⟧  rich colors and delicate embroidery",history,False,False,outside_reviewed_claim_sources
+24,457,17,30,446,0.0908203125,0.0014750162760416,0.0893452962239583,0.0508219401041666,3629, often," or knitted textiles, ⟦ often⟧  with rich colors and delicate",history,False,False,outside_reviewed_claim_sources
+24,457,17,30,438,0.054931640625,0.0016988118489583,0.0532328287760416,0.01470947265625,1903, made,"
+
+Inca clothes were ⟦ made⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+24,457,17,30,437,0.0537109375,0.00286865234375,0.05084228515625,0.0123189290364583,1051, were,"<|end_header_id|>
+
+Inca clothes ⟦ were⟧  made of woven or kn",history,False,False,outside_reviewed_claim_sources
+20,453,19,2,106,0.1748046875,0.00360107421875,0.17120361328125,0.0664876302083333,15310, silver,"ately embroidered with gold and ⟦ silver⟧  thread”, according to this",prompt,False,False,outside_reviewed_claim_sources
+20,453,19,2,104,0.1474609375,0.0086669921875,0.1387939453125,0.0340779622395833,6761, gold," was delicately embroidered with ⟦ gold⟧  and silver thread”, according",prompt,False,False,outside_reviewed_claim_sources
+20,453,19,2,107,0.0869140625,0.0180867513020833,0.0688273111979166,-0.035888671875,4617, thread," embroidered with gold and silver ⟦ thread⟧ ”, according to this article",prompt,False,False,outside_reviewed_claim_sources
+7,440,20,3,144,0.400390625,0.01727294921875,0.38311767578125,0.2177480061848958,56874, woven,"Clothing everywhere consisted of ⟦ woven⟧  or knitted textiles,",prompt,False,True,outside_reviewed_claim_sources
+19,452,20,3,102,0.5859375,0.023681640625,0.562255859375,0.4390309651692708,93759, embroidered, colors and was delicately ⟦ embroidered⟧  with gold and silver thread,prompt,False,False,outside_reviewed_claim_sources
+32,465,20,3,168,0.58984375,0.06201171875,0.52783203125,0.3900044759114583,9501, metal, were held together by large ⟦ metal⟧  pins. The garments of,prompt,False,True,outside_reviewed_claim_sources
+24,457,22,19,445,0.2578125,0.0107014973958333,0.2471110026041666,0.1719589233398437,11,","," woven or knitted textiles ⟦,⟧  often with rich colors and",history,True,False,outside_reviewed_claim_sources
+24,457,22,19,437,0.041015625,0.0,0.041015625,-0.0341364542643229,1051, were,"<|end_header_id|>
+
+Inca clothes ⟦ were⟧  made of woven or kn",history,False,False,outside_reviewed_claim_sources
+24,457,22,19,444,0.049072265625,0.0146484375,0.034423828125,-0.0407282511393229,94082, textiles," of woven or knitted ⟦ textiles⟧ , often with rich colors",history,False,False,outside_reviewed_claim_sources
+9,442,26,3,146,0.6875,0.0,0.6875,0.6496124267578125,1168, kn," everywhere consisted of woven or ⟦ kn⟧ itted textiles, and these",prompt,False,True,outside_reviewed_claim_sources
+9,442,27,28,146,0.2197265625,0.0,0.2197265625,0.1464792887369791,1168, kn," everywhere consisted of woven or ⟦ kn⟧ itted textiles, and these",prompt,False,True,outside_reviewed_claim_sources
+9,442,27,28,328,0.0458984375,0.0,0.0458984375,-0.0273488362630208,11716, tun, Inca men wore simple ⟦ tun⟧ ics. The length of,prompt,False,False,outside_reviewed_claim_sources
+9,442,30,26,146,0.88671875,0.0,0.88671875,0.7174173990885416,1168, kn," everywhere consisted of woven or ⟦ kn⟧ itted textiles, and these",prompt,False,True,outside_reviewed_claim_sources

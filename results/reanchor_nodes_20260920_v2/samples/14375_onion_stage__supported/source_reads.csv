@@ -1,0 +1,610 @@
+target,query,layer,head,source,attention_now,attention_before,source_gain,source_gain_low,source_token_id,source_text,source_context,region,source_is_prior_event,same_token_as_node,reviewed_roles
+5,539,0,1,527,0.1767578125,0.0568440755208333,0.1199137369791666,-0.0177510579427083,10246,".""
+"," answer based on given passages ⟦.""
+⟧ output:<|eot_id|><|start_header_id|>assistant",prompt,False,False,outside_reviewed_claim_sources
+5,539,0,1,534,0.150390625,0.0531819661458333,0.0972086588541666,-0.0404561360677083,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Based on the given passages",prompt,False,False,outside_reviewed_claim_sources
+5,539,0,1,499,0.049072265625,0.0206502278645833,0.0284220377604166,-0.1092427571614583,382,".
+
+","wurst and freeze it ⟦.
+
+⟧ In case the passages do",prompt,False,False,outside_reviewed_claim_sources
+16,550,0,1,534,0.271484375,0.099866231282552,0.1716181437174479,0.0577522913614909,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Based on the given passages",prompt,False,False,outside_reviewed_claim_sources
+16,550,0,1,527,0.1806640625,0.053558349609375,0.127105712890625,0.0132398605346679,10246,".""
+"," answer based on given passages ⟦.""
+⟧ output:<|eot_id|><|start_header_id|>assistant",prompt,False,False,outside_reviewed_claim_sources
+81,615,2,13,568,0.3046875,0.0,0.3046875,0.251922607421875,13,.," oil the grate.
+2 ⟦.⟧  If you want to cook",history,False,False,outside_reviewed_claim_sources
+81,615,2,13,550,0.1494140625,0.0,0.1494140625,0.096649169921875,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+26,560,5,3,550,0.07763671875,0.0050455729166666,0.0725911458333333,0.0371907552083333,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,True,outside_reviewed_claim_sources
+26,560,5,3,548,0.041748046875,0.0048726399739583,0.0368754069010416,0.0014750162760416,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+26,560,5,3,549,0.0302734375,0.0,0.0302734375,-0.005126953125,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+103,637,5,3,617,0.09375,0.0,0.09375,0.0339864095052083,39578, Alternatively,"20 minutes.
+3. ⟦ Alternatively⟧ , cook the brats",history,False,False,outside_reviewed_claim_sources
+103,637,5,3,618,0.0830078125,0.0,0.0830078125,0.0232442220052083,11,","," minutes.
+3. Alternatively ⟦,⟧  cook the brats directly",history,False,True,outside_reviewed_claim_sources
+109,643,5,3,618,0.040771484375,0.0005645751953125,0.0402069091796875,0.0149459838867187,11,","," minutes.
+3. Alternatively ⟦,⟧  cook the brats directly",history,False,False,outside_reviewed_claim_sources
+109,643,5,3,617,0.039306640625,0.0005722045898437,0.0387344360351562,0.0134735107421875,39578, Alternatively,"20 minutes.
+3. ⟦ Alternatively⟧ , cook the brats",history,False,False,outside_reviewed_claim_sources
+109,643,5,3,615,0.032958984375,0.0,0.032958984375,0.0076980590820312,18,3," to 20 minutes.
+ ⟦3⟧ . Alternatively, cook the",history,True,False,outside_reviewed_claim_sources
+109,643,5,3,616,0.02197265625,0.0,0.02197265625,-0.0032882690429687,13,.," 20 minutes.
+3 ⟦.⟧  Alternatively, cook the br",history,False,False,outside_reviewed_claim_sources
+33,567,5,12,550,0.212890625,0.0154622395833333,0.1974283854166666,0.1699625651041666,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+33,567,5,12,549,0.1630859375,0.0041707356770833,0.1589152018229166,0.1314493815104166,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+33,567,5,12,551,0.0859375,0.0137939453125,0.0721435546875,0.044677734375,5075, Pre," brats:
+
+1. ⟦ Pre⟧ heat an outdoor grill for",history,False,False,outside_reviewed_claim_sources
+33,567,5,12,548,0.055419921875,0.0,0.055419921875,0.0279541015625,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+80,614,5,12,569,0.06640625,0.0,0.06640625,0.0053507486979166,1442, If," the grate.
+2. ⟦ If⟧  you want to cook the",history,False,False,outside_reviewed_claim_sources
+80,614,5,12,582,0.04736328125,0.0,0.04736328125,-0.0136922200520833,89800, prick," in a pot first, ⟦ prick⟧  them with a fork,",history,True,False,outside_reviewed_claim_sources
+80,614,5,12,561,0.04052734375,0.0,0.04052734375,-0.0205281575520833,8828, Light," for medium-high heat. ⟦ Light⟧ ly oil the grate.
+",history,False,False,outside_reviewed_claim_sources
+80,614,5,12,568,0.04052734375,0.0,0.04052734375,-0.0205281575520833,13,.," oil the grate.
+2 ⟦.⟧  If you want to cook",history,False,False,outside_reviewed_claim_sources
+80,614,5,12,567,0.03759765625,0.0,0.03759765625,-0.0234578450520833,17,2,"ly oil the grate.
+ ⟦2⟧ . If you want to",history,True,False,outside_reviewed_claim_sources
+103,637,5,12,619,0.142578125,0.0038655598958333,0.1387125651041666,0.0868733723958333,4394, cook,".
+3. Alternatively, ⟦ cook⟧  the brats directly on",history,False,False,outside_reviewed_claim_sources
+103,637,5,12,623,0.091796875,0.0055135091145833,0.0862833658854166,0.0344441731770833,6089, directly,", cook the brats ⟦ directly⟧  on the preheated",history,False,False,outside_reviewed_claim_sources
+103,637,5,12,617,0.04345703125,0.0,0.04345703125,-0.0083821614583333,39578, Alternatively,"20 minutes.
+3. ⟦ Alternatively⟧ , cook the brats",history,False,False,outside_reviewed_claim_sources
+103,637,5,12,624,0.05859375,0.0153605143229166,0.0432332356770833,-0.00860595703125,389, on, cook the brats directly ⟦ on⟧  the preheated grill,history,False,False,outside_reviewed_claim_sources
+103,637,5,13,619,0.0654296875,0.0,0.0654296875,0.0221405029296875,4394, cook,".
+3. Alternatively, ⟦ cook⟧  the brats directly on",history,False,False,outside_reviewed_claim_sources
+103,637,5,13,624,0.035400390625,0.0050862630208333,0.0303141276041666,-0.0129750569661458,389, on, cook the brats directly ⟦ on⟧  the preheated grill,history,False,False,outside_reviewed_claim_sources
+103,637,5,13,618,0.0301513671875,0.0,0.0301513671875,-0.0131378173828125,11,","," minutes.
+3. Alternatively ⟦,⟧  cook the brats directly",history,False,True,outside_reviewed_claim_sources
+103,637,5,13,623,0.0250244140625,0.0,0.0250244140625,-0.0182647705078125,6089, directly,", cook the brats ⟦ directly⟧  on the preheated",history,False,False,outside_reviewed_claim_sources
+109,643,5,13,617,0.06298828125,0.0,0.06298828125,0.0379854838053385,39578, Alternatively,"20 minutes.
+3. ⟦ Alternatively⟧ , cook the brats",history,False,False,outside_reviewed_claim_sources
+109,643,5,13,619,0.04833984375,0.0004831949869791,0.0478566487630208,0.0228538513183593,4394, cook,".
+3. Alternatively, ⟦ cook⟧  the brats directly on",history,False,False,outside_reviewed_claim_sources
+109,643,5,13,618,0.03125,0.0,0.03125,0.0062472025553385,11,","," minutes.
+3. Alternatively ⟦,⟧  cook the brats directly",history,False,False,outside_reviewed_claim_sources
+109,643,5,13,623,0.01904296875,0.0015462239583333,0.0174967447916666,-0.0075060526529947,6089, directly,", cook the brats ⟦ directly⟧  on the preheated",history,False,False,outside_reviewed_claim_sources
+81,615,5,22,567,0.416015625,0.0029500325520833,0.4130655924479167,0.3048960367838542,17,2,"ly oil the grate.
+ ⟦2⟧ . If you want to",history,True,False,outside_reviewed_claim_sources
+81,615,5,22,568,0.119140625,0.0044962565104166,0.1146443684895833,0.0064748128255208,13,.," oil the grate.
+2 ⟦.⟧  If you want to cook",history,False,False,outside_reviewed_claim_sources
+48,582,6,29,227,0.1298828125,0.0,0.1298828125,0.052703857421875,875,ick, 2:1 Pr ⟦ick⟧  bratwurst with fork,prompt,False,False,outside_reviewed_claim_sources
+48,582,6,29,241,0.032958984375,0.0,0.032958984375,-0.044219970703125,13,., from exploding as they cook ⟦.⟧  2  Place in,prompt,False,False,outside_reviewed_claim_sources
+47,581,7,2,567,0.05224609375,0.0,0.05224609375,-0.0110270182291666,17,2,"ly oil the grate.
+ ⟦2⟧ . If you want to",history,True,False,outside_reviewed_claim_sources
+47,581,7,2,569,0.072265625,0.0201416015625,0.0521240234375,-0.0111490885416666,1442, If," the grate.
+2. ⟦ If⟧  you want to cook the",history,False,False,outside_reviewed_claim_sources
+47,581,7,2,568,0.035400390625,0.0,0.035400390625,-0.0278727213541666,13,.," oil the grate.
+2 ⟦.⟧  If you want to cook",history,False,False,outside_reviewed_claim_sources
+109,643,7,2,615,0.08349609375,0.0,0.08349609375,0.0599416097005208,18,3," to 20 minutes.
+ ⟦3⟧ . Alternatively, cook the",history,True,False,outside_reviewed_claim_sources
+109,643,7,2,617,0.028076171875,0.0,0.028076171875,0.0045216878255208,39578, Alternatively,"20 minutes.
+3. ⟦ Alternatively⟧ , cook the brats",history,False,False,outside_reviewed_claim_sources
+109,643,7,2,616,0.0263671875,0.0,0.0263671875,0.0028127034505208,13,.," 20 minutes.
+3 ⟦.⟧  Alternatively, cook the br",history,False,False,outside_reviewed_claim_sources
+109,643,7,2,618,0.0203857421875,0.0,0.0203857421875,-0.0031687418619791,11,","," minutes.
+3. Alternatively ⟦,⟧  cook the brats directly",history,False,False,outside_reviewed_claim_sources
+26,560,7,10,550,0.1494140625,0.0073649088541666,0.1420491536458333,-0.0102132161458333,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,True,outside_reviewed_claim_sources
+26,560,7,10,549,0.1279296875,0.0,0.1279296875,-0.0243326822916666,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+26,560,7,10,548,0.064453125,0.0,0.064453125,-0.0878092447916666,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+26,560,7,10,539,0.052001953125,0.0,0.052001953125,-0.1002604166666666,47869, passages,"
+
+Based on the given ⟦ passages⟧ , here's how to",history,True,False,outside_reviewed_claim_sources
+63,597,7,27,587,0.11083984375,0.03369140625,0.0771484375,-0.0143636067708333,11,","," prick them with a fork ⟦,⟧  combine them with onions,",history,False,False,outside_reviewed_claim_sources
+63,597,7,27,584,0.07275390625,0.0049641927083333,0.0677897135416666,-0.0237223307291666,449, with," pot first, prick them ⟦ with⟧  a fork, combine them",history,False,False,outside_reviewed_claim_sources
+63,597,7,27,583,0.07373046875,0.006103515625,0.067626953125,-0.0238850911458333,1124, them," a pot first, prick ⟦ them⟧  with a fork, combine",history,False,False,outside_reviewed_claim_sources
+63,597,7,27,582,0.07958984375,0.0154622395833333,0.0641276041666666,-0.0273844401041666,89800, prick," in a pot first, ⟦ prick⟧  them with a fork,",history,True,False,outside_reviewed_claim_sources
+93,627,8,13,610,0.484375,0.0,0.484375,0.3240763346354166,311, to," medium heat for 15 ⟦ to⟧  20 minutes.
+3",history,True,False,outside_reviewed_claim_sources
+93,627,8,13,548,0.1298828125,0.0,0.1298828125,-0.0304158528645833,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+67,601,8,22,588,0.2021484375,0.0430094401041666,0.1591389973958333,0.06964111328125,16343, combine," them with a fork, ⟦ combine⟧  them with onions, butter",history,False,False,outside_reviewed_claim_sources
+67,601,8,22,587,0.04443359375,0.0,0.04443359375,-0.0450642903645833,11,","," prick them with a fork ⟦,⟧  combine them with onions,",history,False,True,outside_reviewed_claim_sources
+67,601,8,22,582,0.0390625,0.0,0.0390625,-0.0504353841145833,89800, prick," in a pot first, ⟦ prick⟧  them with a fork,",history,True,False,outside_reviewed_claim_sources
+76,610,8,22,567,0.0927734375,0.0,0.0927734375,-0.0321451822916666,17,2,"ly oil the grate.
+ ⟦2⟧ . If you want to",history,True,False,outside_reviewed_claim_sources
+76,610,8,22,569,0.0869140625,0.0,0.0869140625,-0.0380045572916666,1442, If," the grate.
+2. ⟦ If⟧  you want to cook the",history,False,False,outside_reviewed_claim_sources
+76,610,8,22,549,0.07568359375,0.0,0.07568359375,-0.0492350260416666,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+76,610,8,22,560,0.06591796875,0.0,0.06591796875,-0.0590006510416666,13,., grill for medium-high heat ⟦.⟧  Lightly oil the grate,history,True,False,outside_reviewed_claim_sources
+76,610,8,22,581,0.064453125,0.0,0.064453125,-0.0604654947916666,11,",","ats in a pot first ⟦,⟧  prick them with a fork",history,True,False,outside_reviewed_claim_sources
+93,627,8,22,548,0.087890625,0.0,0.087890625,0.00042724609375,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+93,627,8,22,614,0.06689453125,0.0,0.06689453125,-0.02056884765625,627,".
+","15 to 20 minutes ⟦.
+⟧ 3. Alternatively, cook",history,True,False,outside_reviewed_claim_sources
+93,627,8,22,615,0.06982421875,0.013427734375,0.056396484375,-0.03106689453125,18,3," to 20 minutes.
+ ⟦3⟧ . Alternatively, cook the",history,True,False,outside_reviewed_claim_sources
+93,627,8,22,610,0.049560546875,0.0,0.049560546875,-0.03790283203125,311, to," medium heat for 15 ⟦ to⟧  20 minutes.
+3",history,True,False,outside_reviewed_claim_sources
+109,643,8,22,615,0.1357421875,0.0022379557291666,0.1335042317708333,0.0533650716145833,18,3," to 20 minutes.
+ ⟦3⟧ . Alternatively, cook the",history,True,False,outside_reviewed_claim_sources
+109,643,8,22,617,0.09716796875,0.0,0.09716796875,0.01702880859375,39578, Alternatively,"20 minutes.
+3. ⟦ Alternatively⟧ , cook the brats",history,False,False,outside_reviewed_claim_sources
+109,643,8,22,616,0.050048828125,0.0,0.050048828125,-0.03009033203125,13,.," 20 minutes.
+3 ⟦.⟧  Alternatively, cook the br",history,False,False,outside_reviewed_claim_sources
+26,560,9,8,549,0.16796875,0.033203125,0.134765625,0.00830078125,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+26,560,9,8,548,0.1005859375,0.0266927083333333,0.0738932291666666,-0.0525716145833333,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+26,560,9,8,550,0.15625,0.0861002604166666,0.0701497395833333,-0.0563151041666666,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,True,outside_reviewed_claim_sources
+6,540,9,9,534,0.369140625,0.09716796875,0.27197265625,0.2257080078125,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Based on the given passages",prompt,False,False,outside_reviewed_claim_sources
+26,560,9,9,549,0.33984375,0.0514322916666666,0.2884114583333333,0.2260742187499999,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+26,560,9,9,548,0.140625,0.01318359375,0.12744140625,0.0651041666666666,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+32,566,9,9,550,0.1943359375,0.0291341145833333,0.1652018229166666,0.0552571614583333,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+32,566,9,9,549,0.10693359375,0.0,0.10693359375,-0.0030110677083333,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+32,566,9,9,548,0.0849609375,0.0,0.0849609375,-0.0249837239583333,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+76,610,9,9,548,0.236328125,0.0,0.236328125,0.0688883463541666,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+76,610,9,9,534,0.0830078125,0.0,0.0830078125,-0.0844319661458333,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Based on the given passages",prompt,False,False,outside_reviewed_claim_sources
+76,610,9,9,540,0.0498046875,0.0,0.0498046875,-0.1176350911458333,11,",","Based on the given passages ⟦,⟧  here's how to cook",history,True,False,outside_reviewed_claim_sources
+93,627,9,9,548,0.21484375,0.0,0.21484375,0.0618896484375,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+93,627,9,9,534,0.1240234375,0.0,0.1240234375,-0.0289306640625,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Based on the given passages",prompt,False,False,outside_reviewed_claim_sources
+93,627,9,9,541,0.05419921875,0.0,0.05419921875,-0.0987548828125,1618, here," on the given passages, ⟦ here⟧ 's how to cook br",history,False,False,outside_reviewed_claim_sources
+93,627,9,10,610,0.34375,0.0,0.34375,0.265411376953125,311, to," medium heat for 15 ⟦ to⟧  20 minutes.
+3",history,True,False,outside_reviewed_claim_sources
+93,627,9,10,534,0.055908203125,0.0,0.055908203125,-0.022430419921875,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Based on the given passages",prompt,False,False,outside_reviewed_claim_sources
+26,560,10,16,549,0.1572265625,0.0263671875,0.130859375,0.0561726888020833,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+26,560,10,16,548,0.057861328125,0.0,0.057861328125,-0.0168253580729166,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+93,627,10,30,548,0.29296875,0.0,0.29296875,0.1190592447916666,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+93,627,10,30,534,0.111328125,0.0,0.111328125,-0.0625813802083333,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Based on the given passages",prompt,False,False,outside_reviewed_claim_sources
+93,627,10,30,610,0.060546875,0.0,0.060546875,-0.1133626302083333,311, to," medium heat for 15 ⟦ to⟧  20 minutes.
+3",history,True,False,outside_reviewed_claim_sources
+63,597,11,8,583,0.310546875,0.0694173177083333,0.2411295572916666,0.0462849934895833,1124, them," a pot first, prick ⟦ them⟧  with a fork, combine",history,False,False,outside_reviewed_claim_sources
+63,597,11,8,587,0.091796875,0.0166219075520833,0.0751749674479166,-0.1196695963541666,11,","," prick them with a fork ⟦,⟧  combine them with onions,",history,False,False,outside_reviewed_claim_sources
+63,597,11,8,582,0.05078125,0.0,0.05078125,-0.1440633138020833,89800, prick," in a pot first, ⟦ prick⟧  them with a fork,",history,True,False,outside_reviewed_claim_sources
+99,633,11,16,617,0.1142578125,0.0,0.1142578125,0.0275929768880208,39578, Alternatively,"20 minutes.
+3. ⟦ Alternatively⟧ , cook the brats",history,False,False,outside_reviewed_claim_sources
+99,633,11,16,618,0.1181640625,0.0201212565104166,0.0980428059895833,0.0113779703776041,11,","," minutes.
+3. Alternatively ⟦,⟧  cook the brats directly",history,False,False,outside_reviewed_claim_sources
+99,633,11,16,615,0.09326171875,0.0,0.09326171875,0.0065968831380208,18,3," to 20 minutes.
+ ⟦3⟧ . Alternatively, cook the",history,True,False,outside_reviewed_claim_sources
+99,633,11,16,616,0.061767578125,0.0,0.061767578125,-0.0248972574869791,13,.," 20 minutes.
+3 ⟦.⟧  Alternatively, cook the br",history,False,False,outside_reviewed_claim_sources
+26,560,11,17,548,0.1767578125,0.0475260416666666,0.1292317708333333,0.0487874348958333,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+26,560,11,17,550,0.26171875,0.1376953125,0.1240234375,0.0435791015625,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,True,outside_reviewed_claim_sources
+26,560,11,17,549,0.107421875,0.0189615885416666,0.0884602864583333,0.0080159505208333,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+26,560,11,19,549,0.1962890625,0.0252278645833333,0.1710611979166666,0.0917154947916666,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+26,560,11,19,550,0.173828125,0.081298828125,0.092529296875,0.01318359375,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,True,outside_reviewed_claim_sources
+33,567,11,19,549,0.1357421875,0.0,0.1357421875,0.0278523763020833,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+33,567,11,19,548,0.099609375,0.0,0.099609375,-0.0082804361979166,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+33,567,11,19,550,0.091796875,0.0315755208333333,0.0602213541666666,-0.04766845703125,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+26,560,11,31,549,0.09423828125,0.0104166666666666,0.0838216145833333,0.0260416666666666,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+26,560,11,31,550,0.1064453125,0.0286458333333333,0.0777994791666666,0.02001953125,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,True,outside_reviewed_claim_sources
+26,560,12,17,550,0.26953125,0.0911458333333333,0.1783854166666666,0.14422607421875,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,True,outside_reviewed_claim_sources
+26,560,12,17,549,0.1640625,0.0257161458333333,0.1383463541666666,0.10418701171875,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+32,566,12,17,550,0.1689453125,0.014068603515625,0.154876708984375,0.1080525716145833,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+32,566,12,17,549,0.07421875,0.0,0.07421875,0.0273946126302083,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+47,581,12,17,569,0.25390625,0.053955078125,0.199951171875,0.1322428385416666,1442, If," the grate.
+2. ⟦ If⟧  you want to cook the",history,False,False,outside_reviewed_claim_sources
+47,581,12,17,571,0.14453125,0.0583089192708333,0.0862223307291666,0.0185139973958333,1390, want,".
+2. If you ⟦ want⟧  to cook the brats",history,False,False,outside_reviewed_claim_sources
+47,581,12,17,570,0.050537109375,0.0098063151041666,0.0407307942708333,-0.0269775390624999,499, you," grate.
+2. If ⟦ you⟧  want to cook the br",history,False,False,outside_reviewed_claim_sources
+6,540,12,18,534,0.2021484375,0.0397135416666666,0.1624348958333333,0.11334228515625,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Based on the given passages",prompt,False,False,outside_reviewed_claim_sources
+26,560,12,18,550,0.287109375,0.1212972005208333,0.1658121744791666,0.1175537109375,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,True,outside_reviewed_claim_sources
+26,560,12,18,549,0.0869140625,0.011474609375,0.075439453125,0.0271809895833333,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+92,626,12,18,614,0.0673828125,0.0,0.0673828125,-0.014007568359375,627,".
+","15 to 20 minutes ⟦.
+⟧ 3. Alternatively, cook",history,True,False,outside_reviewed_claim_sources
+92,626,12,18,610,0.06298828125,0.0,0.06298828125,-0.018402099609375,311, to," medium heat for 15 ⟦ to⟧  20 minutes.
+3",history,True,False,outside_reviewed_claim_sources
+92,626,12,18,550,0.025146484375,0.0,0.025146484375,-0.056243896484375,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+92,626,12,18,615,0.0244140625,0.0,0.0244140625,-0.056976318359375,18,3," to 20 minutes.
+ ⟦3⟧ . Alternatively, cook the",history,True,False,outside_reviewed_claim_sources
+33,567,12,28,545,0.08544921875,0.0,0.08544921875,-0.0201822916666666,4394, cook,", here's how to ⟦ cook⟧  brats:
+
+1.",history,False,False,outside_reviewed_claim_sources
+33,567,12,28,550,0.076171875,0.0,0.076171875,-0.0294596354166666,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+33,567,12,28,544,0.0380859375,0.0,0.0380859375,-0.0675455729166666,311, to," passages, here's how ⟦ to⟧  cook brats:
+
+1",history,False,False,outside_reviewed_claim_sources
+33,567,12,28,552,0.04345703125,0.0067952473958333,0.0366617838541666,-0.0689697265625,20559,heat,"ats:
+
+1. Pre ⟦heat⟧  an outdoor grill for medium",history,False,False,outside_reviewed_claim_sources
+32,566,13,24,550,0.2265625,0.0206705729166666,0.2058919270833333,0.0865885416666666,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+32,566,13,24,551,0.0830078125,0.0,0.0830078125,-0.0362955729166666,5075, Pre," brats:
+
+1. ⟦ Pre⟧ heat an outdoor grill for",history,False,False,outside_reviewed_claim_sources
+32,566,13,24,548,0.0546875,0.0,0.0546875,-0.0646158854166666,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+87,621,13,24,550,0.29296875,0.0218098958333333,0.2711588541666667,0.1001383463541666,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+87,621,13,24,551,0.09228515625,0.0,0.09228515625,-0.0787353515625,5075, Pre," brats:
+
+1. ⟦ Pre⟧ heat an outdoor grill for",history,False,False,outside_reviewed_claim_sources
+87,621,13,24,568,0.030029296875,0.0,0.030029296875,-0.1409912109375,13,.," oil the grate.
+2 ⟦.⟧  If you want to cook",history,False,False,outside_reviewed_claim_sources
+109,643,13,24,550,0.158203125,0.0,0.158203125,-0.068359375,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+109,643,13,24,548,0.09326171875,0.0,0.09326171875,-0.13330078125,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+109,643,13,24,615,0.036865234375,0.0,0.036865234375,-0.189697265625,18,3," to 20 minutes.
+ ⟦3⟧ . Alternatively, cook the",history,True,False,outside_reviewed_claim_sources
+109,643,13,24,567,0.03076171875,0.0,0.03076171875,-0.19580078125,17,2,"ly oil the grate.
+ ⟦2⟧ . If you want to",history,True,False,outside_reviewed_claim_sources
+109,643,13,24,627,0.0277099609375,0.0,0.0277099609375,-0.1988525390625,383,he,ats directly on the pre ⟦he⟧ ated grill for 10,history,True,False,outside_reviewed_claim_sources
+26,560,14,10,549,0.1689453125,0.041015625,0.1279296875,-0.0217692057291666,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+26,560,14,10,548,0.1669921875,0.0533447265625,0.1136474609375,-0.0360514322916666,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+32,566,14,10,548,0.177734375,0.0122884114583333,0.1654459635416666,-0.0415852864583333,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+32,566,14,10,550,0.1240234375,0.0322265625,0.091796875,-0.115234375,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+32,566,14,10,549,0.06640625,0.0,0.06640625,-0.140625,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+62,596,14,10,581,0.447265625,0.0966796875,0.3505859375,0.1903889973958333,11,",","ats in a pot first ⟦,⟧  prick them with a fork",history,True,False,outside_reviewed_claim_sources
+99,633,14,10,610,0.142578125,0.0388997395833333,0.1036783854166666,-0.1536865234375,311, to," medium heat for 15 ⟦ to⟧  20 minutes.
+3",history,True,True,outside_reviewed_claim_sources
+99,633,14,10,548,0.109375,0.0127766927083333,0.0965983072916666,-0.1607666015625,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+99,633,14,10,621,0.11181640625,0.0406901041666666,0.0711263020833333,-0.1862386067708333,1437, br,". Alternatively, cook the ⟦ br⟧ ats directly on the pre",history,True,False,outside_reviewed_claim_sources
+99,633,14,10,615,0.09375,0.0344645182291666,0.0592854817708333,-0.1980794270833333,18,3," to 20 minutes.
+ ⟦3⟧ . Alternatively, cook the",history,True,False,outside_reviewed_claim_sources
+99,633,14,10,534,0.0361328125,0.0,0.0361328125,-0.2212320963541666,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Based on the given passages",prompt,False,False,outside_reviewed_claim_sources
+6,540,14,11,534,0.1943359375,0.0734049479166666,0.1209309895833333,0.081146240234375,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Based on the given passages",prompt,False,False,outside_reviewed_claim_sources
+6,540,14,11,532,0.1142578125,0.0289713541666666,0.0852864583333333,0.0455017089843749,78191,assistant,".""
+output:<|eot_id|><|start_header_id|> ⟦assistant⟧ <|end_header_id|>
+
+Based on the",prompt,False,False,outside_reviewed_claim_sources
+32,566,14,11,548,0.23046875,0.0108235677083333,0.2196451822916666,0.1125284830729166,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+32,566,14,11,550,0.0908203125,0.0293986002604166,0.0614217122395833,-0.0456949869791666,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+32,566,14,11,534,0.034423828125,0.0,0.034423828125,-0.07269287109375,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Based on the given passages",prompt,False,False,outside_reviewed_claim_sources
+32,566,15,0,555,0.091796875,0.03839111328125,0.05340576171875,0.0003000895182291,40158, grill,. Preheat an outdoor ⟦ grill⟧  for medium-high heat.,history,False,False,outside_reviewed_claim_sources
+32,566,15,0,547,0.0400390625,0.0,0.0400390625,-0.0130666097005208,1900,ats,"'s how to cook br ⟦ats⟧ :
+
+1. Preheat",history,True,False,outside_reviewed_claim_sources
+32,566,15,0,550,0.0361328125,0.0,0.0361328125,-0.0169728597005208,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+32,566,15,0,549,0.03125,0.0,0.03125,-0.0218556722005208,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+32,566,15,0,552,0.02490234375,0.0,0.02490234375,-0.0282033284505208,20559,heat,"ats:
+
+1. Pre ⟦heat⟧  an outdoor grill for medium",history,False,False,outside_reviewed_claim_sources
+32,566,15,7,550,0.255859375,0.001251220703125,0.254608154296875,0.2302068074544271,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+32,566,15,7,553,0.15234375,0.0129318237304687,0.1394119262695312,0.1150105794270833,459, an,":
+
+1. Preheat ⟦ an⟧  outdoor grill for medium-high",history,False,False,outside_reviewed_claim_sources
+32,566,15,8,548,0.259765625,0.0356038411458333,0.2241617838541666,-0.0233154296875,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+32,566,15,8,550,0.1865234375,0.035888671875,0.150634765625,-0.0968424479166666,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+32,566,15,8,534,0.05029296875,0.0,0.05029296875,-0.1971842447916666,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Based on the given passages",prompt,False,False,outside_reviewed_claim_sources
+32,566,16,13,548,0.2041015625,0.0,0.2041015625,0.1153564453125,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+32,566,16,13,550,0.201171875,0.0343424479166666,0.1668294270833333,0.0780843098958333,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+32,566,16,13,549,0.08984375,0.0,0.08984375,0.0010986328125,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+32,566,16,14,550,0.2236328125,0.0027262369791666,0.2209065755208333,0.161712646484375,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+32,566,16,14,549,0.166015625,0.0,0.166015625,0.1068216959635416,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+32,566,16,14,551,0.0771484375,0.0,0.0771484375,0.0179545084635416,5075, Pre," brats:
+
+1. ⟦ Pre⟧ heat an outdoor grill for",history,False,False,outside_reviewed_claim_sources
+32,566,16,14,553,0.06787109375,0.002838134765625,0.065032958984375,0.0058390299479166,459, an,":
+
+1. Preheat ⟦ an⟧  outdoor grill for medium-high",history,False,False,outside_reviewed_claim_sources
+32,566,16,22,551,0.1748046875,0.0020751953125,0.1727294921875,0.1429799397786458,5075, Pre," brats:
+
+1. ⟦ Pre⟧ heat an outdoor grill for",history,False,False,outside_reviewed_claim_sources
+32,566,16,22,549,0.15625,0.0,0.15625,0.1265004475911458,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+32,566,16,22,552,0.099609375,0.0014546712239583,0.0981547037760416,0.0684051513671875,20559,heat,"ats:
+
+1. Pre ⟦heat⟧  an outdoor grill for medium",history,False,False,outside_reviewed_claim_sources
+67,601,16,22,588,0.26953125,0.0101064046223958,0.2594248453776042,0.2143147786458333,16343, combine," them with a fork, ⟦ combine⟧  them with onions, butter",history,False,False,outside_reviewed_claim_sources
+67,601,16,22,582,0.2373046875,0.003662109375,0.233642578125,0.1885325113932291,89800, prick," in a pot first, ⟦ prick⟧  them with a fork,",history,True,False,outside_reviewed_claim_sources
+67,601,16,22,569,0.09521484375,0.0,0.09521484375,0.0501047770182291,1442, If," the grate.
+2. ⟦ If⟧  you want to cook the",history,False,False,outside_reviewed_claim_sources
+80,614,16,22,569,0.19140625,0.0,0.19140625,0.0794677734375,1442, If," the grate.
+2. ⟦ If⟧  you want to cook the",history,False,False,outside_reviewed_claim_sources
+80,614,16,22,603,0.291015625,0.1103922526041666,0.1806233723958333,0.0686848958333333,62915, simmer," a large pot, and ⟦ simmer⟧  over medium heat for ",history,False,False,outside_reviewed_claim_sources
+80,614,16,22,567,0.1396484375,0.0,0.1396484375,0.0277099609375,17,2,"ly oil the grate.
+ ⟦2⟧ . If you want to",history,True,False,outside_reviewed_claim_sources
+80,614,16,22,582,0.0703125,0.0,0.0703125,-0.0416259765625,89800, prick," in a pot first, ⟦ prick⟧  them with a fork,",history,True,False,outside_reviewed_claim_sources
+96,630,16,22,619,0.4609375,0.014251708984375,0.446685791015625,0.261474609375,4394, cook,".
+3. Alternatively, ⟦ cook⟧  the brats directly on",history,False,False,outside_reviewed_claim_sources
+96,630,16,22,617,0.138671875,0.0,0.138671875,-0.046539306640625,39578, Alternatively,"20 minutes.
+3. ⟦ Alternatively⟧ , cook the brats",history,False,False,outside_reviewed_claim_sources
+99,633,16,22,617,0.29296875,0.0487467447916666,0.2442220052083333,0.1842854817708333,39578, Alternatively,"20 minutes.
+3. ⟦ Alternatively⟧ , cook the brats",history,False,False,outside_reviewed_claim_sources
+99,633,16,22,615,0.140625,0.010009765625,0.130615234375,0.0706787109375,18,3," to 20 minutes.
+ ⟦3⟧ . Alternatively, cook the",history,True,False,outside_reviewed_claim_sources
+99,633,16,22,623,0.16015625,0.0452473958333333,0.1149088541666666,0.0549723307291666,6089, directly,", cook the brats ⟦ directly⟧  on the preheated",history,False,False,outside_reviewed_claim_sources
+103,637,16,22,617,0.439453125,0.0005467732747395,0.4389063517252604,0.37152099609375,39578, Alternatively,"20 minutes.
+3. ⟦ Alternatively⟧ , cook the brats",history,False,False,outside_reviewed_claim_sources
+103,637,16,22,619,0.1640625,0.0107421875,0.1533203125,0.0859349568684895,4394, cook,".
+3. Alternatively, ⟦ cook⟧  the brats directly on",history,False,False,outside_reviewed_claim_sources
+103,637,16,22,623,0.09765625,0.0,0.09765625,0.0302708943684895,6089, directly,", cook the brats ⟦ directly⟧  on the preheated",history,False,False,outside_reviewed_claim_sources
+108,642,16,22,615,0.2373046875,0.0013224283854166,0.2359822591145833,0.197052001953125,18,3," to 20 minutes.
+ ⟦3⟧ . Alternatively, cook the",history,True,False,outside_reviewed_claim_sources
+108,642,16,22,617,0.1435546875,0.0042368570963541,0.1393178304036458,0.1003875732421875,39578, Alternatively,"20 minutes.
+3. ⟦ Alternatively⟧ , cook the brats",history,False,False,outside_reviewed_claim_sources
+108,642,16,22,619,0.07568359375,0.0065205891927083,0.0691630045572916,0.0302327473958333,4394, cook,".
+3. Alternatively, ⟦ cook⟧  the brats directly on",history,False,False,outside_reviewed_claim_sources
+6,540,17,4,534,0.28515625,0.0982259114583333,0.1869303385416666,0.0321553548177083,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Based on the given passages",prompt,False,False,outside_reviewed_claim_sources
+6,540,17,4,333,0.05078125,0.0057881673177083,0.0449930826822916,-0.1097819010416666,383,he, bratwurst on pre ⟦he⟧ ated grill for 10,prompt,False,False,outside_reviewed_claim_sources
+32,566,17,20,548,0.1865234375,0.0,0.1865234375,0.042724609375,1473,":
+
+"," how to cook brats ⟦:
+
+⟧ 1. Preheat an",history,False,False,outside_reviewed_claim_sources
+32,566,17,20,549,0.039794921875,0.0,0.039794921875,-0.10400390625,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+32,566,18,7,549,0.326171875,0.0016276041666666,0.3245442708333333,0.2824808756510416,16,1," to cook brats:
+
+ ⟦1⟧ . Preheat an outdoor",history,False,False,outside_reviewed_claim_sources
+32,566,18,7,550,0.11083984375,0.0255533854166666,0.0852864583333333,0.0432230631510416,13,.," cook brats:
+
+1 ⟦.⟧  Preheat an outdoor grill",history,True,False,outside_reviewed_claim_sources
+80,614,18,30,567,0.6171875,0.0081380208333333,0.6090494791666666,0.5165449778238932,17,2,"ly oil the grate.
+ ⟦2⟧ . If you want to",history,True,False,outside_reviewed_claim_sources
+5,539,20,3,57,0.37890625,0.0107218424479166,0.3681844075520833,0.1412353515624999,47869, passages," based on the following three ⟦ passages⟧ :
+passage 1",prompt,False,True,outside_reviewed_claim_sources
+5,539,20,3,503,0.1484375,0.0,0.1484375,-0.0785115559895833,47869, passages," it.
+
+In case the ⟦ passages⟧  do not contain the necessary",prompt,False,True,outside_reviewed_claim_sources
+5,539,20,3,60,0.1015625,0.0,0.1015625,-0.1253865559895833,425,age," following three passages:
+pass ⟦age⟧  1:1 Reduce",prompt,False,False,outside_reviewed_claim_sources
+5,539,20,3,221,0.09716796875,0.0,0.09716796875,-0.1297810872395833,425,age,", and pepper.
+
+pass ⟦age⟧  2:1 Pr",prompt,False,False,outside_reviewed_claim_sources
+57,591,20,3,253,0.2138671875,0.00390625,0.2099609375,0.013580322265625,45697, onions," large stock pot with the ⟦ onions⟧ , butter, and beer",prompt,False,True,outside_reviewed_claim_sources
+57,591,20,3,182,0.103515625,0.0,0.103515625,-0.092864990234375,45697, onions,  Combine the beer and ⟦ onions⟧  in a large pot;,prompt,False,True,outside_reviewed_claim_sources
+57,591,20,3,101,0.0927734375,0.0026041666666666,0.0901692708333333,-0.1062113444010416,45697, onions,", and continue cooking the ⟦ onions⟧ . 3  Cook",prompt,False,True,supported_value
+57,591,20,3,356,0.05810546875,0.0,0.05810546875,-0.138275146484375,45697, onions,age 3:Add the ⟦ onions⟧ . Brown the onions in,prompt,False,True,outside_reviewed_claim_sources
+5,539,22,19,534,0.462890625,0.0533447265625,0.4095458984375,0.3076375325520833,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Based on the given passages",prompt,False,False,outside_reviewed_claim_sources
+109,643,24,21,615,0.25,0.0026652018229166,0.2473347981770833,0.1632741292317708,18,3," to 20 minutes.
+ ⟦3⟧ . Alternatively, cook the",history,True,False,outside_reviewed_claim_sources
+52,586,26,3,232,0.578125,0.0906575520833333,0.4874674479166667,0.3766581217447917,23243, fork,ick bratwurst with ⟦ fork⟧  to prevent them from exploding,prompt,False,True,outside_reviewed_claim_sources
+62,596,26,3,258,0.24609375,0.0161946614583333,0.2298990885416666,0.1228434244791666,13179, beer," onions, butter, and ⟦ beer⟧ . 3  Place",prompt,False,True,outside_reviewed_claim_sources
+62,596,26,3,89,0.1162109375,0.0183919270833333,0.0978190104166666,-0.0092366536458333,13179, beer, bratwurst from the ⟦ beer⟧  mixture; reduce heat to,prompt,False,True,scope
+71,605,26,3,266,0.271484375,0.0011850992838541,0.2702992757161458,0.1209360758463541,11298, medium,"3  Place pot over ⟦ medium⟧  heat, and simmer for",prompt,False,True,outside_reviewed_claim_sources
+71,605,26,3,161,0.0869140625,0.0,0.0869140625,-0.0624491373697916,11298, medium,heat an outdoor grill for ⟦ medium⟧ -high heat. 2,prompt,False,True,outside_reviewed_claim_sources
+13,547,29,29,532,0.177734375,0.0105183919270833,0.1672159830729166,0.0986226399739583,78191,assistant,".""
+output:<|eot_id|><|start_header_id|> ⟦assistant⟧ <|end_header_id|>
+
+Based on the",prompt,False,False,outside_reviewed_claim_sources
+13,547,29,29,21,0.07373046875,0.0060628255208333,0.0676676432291666,-0.0009256998697916,220, ," Date: 26 Jul ⟦ ⟧ 2024
+
+<|eot_id|><|start_header_id|>",prompt,False,False,outside_reviewed_claim_sources
+13,547,29,29,24,0.043212890625,0.0,0.043212890625,-0.0253804524739583,271,"
+
+","26 Jul 2024 ⟦
+
+⟧ <|eot_id|><|start_header_id|>user<|end_header_id|>
+
+",prompt,False,False,outside_reviewed_claim_sources
+13,547,29,29,29,0.037109375,0.0,0.037109375,-0.0314839680989583,271,"
+
+","
+
+<|eot_id|><|start_header_id|>user<|end_header_id|> ⟦
+
+⟧ Briefly answer the following",prompt,False,False,outside_reviewed_claim_sources
+87,621,30,24,575,0.388671875,0.0,0.388671875,0.2406209309895833,1437, br, you want to cook the ⟦ br⟧ ats in a pot first,history,False,True,outside_reviewed_claim_sources
+87,621,30,24,546,0.07666015625,0.0,0.07666015625,-0.0713907877604166,1437, br," here's how to cook ⟦ br⟧ ats:
+
+1. Pre",history,False,True,outside_reviewed_claim_sources
+102,636,30,31,623,0.267578125,0.0106201171875,0.2569580078125,0.0991160074869791,6089, directly,", cook the brats ⟦ directly⟧  on the preheated",history,False,False,outside_reviewed_claim_sources
+102,636,30,31,617,0.06982421875,0.02532958984375,0.04449462890625,-0.1133473714192708,39578, Alternatively,"20 minutes.
+3. ⟦ Alternatively⟧ , cook the brats",history,False,False,outside_reviewed_claim_sources
+98,632,31,11,609,0.46484375,0.0,0.46484375,0.3145090738932291,868,15," over medium heat for  ⟦15⟧  to 20 minutes.
+",history,False,False,outside_reviewed_claim_sources
+112,646,31,11,569,0.451171875,0.0,0.451171875,0.3237406412760416,1442, If," the grate.
+2. ⟦ If⟧  you want to cook the",history,False,True,outside_reviewed_claim_sources

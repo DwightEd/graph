@@ -1,0 +1,174 @@
+target,query,layer,head,source,attention_now,attention_before,source_gain,source_gain_low,source_token_id,source_text,source_context,region,source_is_prior_event,same_token_as_node,reviewed_roles
+11,444,6,25,434,0.30859375,0.1246744791666666,0.1839192708333333,0.1045227050781249,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes consisted of woven",history,False,False,outside_reviewed_claim_sources
+28,461,6,29,359,0.3359375,0.0,0.3359375,0.1716715494791666,3160, length," Skirts were usually full ⟦ length⟧ , which covered up to",prompt,False,False,outside_reviewed_claim_sources
+28,461,6,29,340,0.060302734375,0.0,0.060302734375,-0.1039632161458333,1317, long, tunic were a bit ⟦ long⟧ . It reached up to,prompt,False,False,outside_reviewed_claim_sources
+28,461,6,29,358,0.0595703125,0.0,0.0595703125,-0.1046956380208333,2539, full,". Skirts were usually ⟦ full⟧  length, which covered up",prompt,False,True,outside_reviewed_claim_sources
+18,451,7,10,434,0.1318359375,0.0,0.1318359375,-0.0321858723958333,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes consisted of woven",history,False,False,outside_reviewed_claim_sources
+18,451,7,10,426,0.08447265625,0.0,0.08447265625,-0.0795491536458333,10246,".""
+"," answer based on given passages ⟦.""
+⟧ output:<|eot_id|><|start_header_id|>assistant",prompt,False,False,outside_reviewed_claim_sources
+18,451,7,10,437,0.052734375,0.0,0.052734375,-0.1112874348958333,44660, consisted,"<|end_header_id|>
+
+Inca clothes ⟦ consisted⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+18,451,7,10,433,0.044189453125,0.0,0.044189453125,-0.1198323567708333,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Inca clothes consisted of",prompt,False,False,outside_reviewed_claim_sources
+8,441,9,9,433,0.310546875,0.0151774088541666,0.2953694661458333,0.267822265625,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Inca clothes consisted of",prompt,False,False,outside_reviewed_claim_sources
+18,451,9,9,434,0.1494140625,0.0,0.1494140625,0.0338541666666666,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes consisted of woven",history,False,False,outside_reviewed_claim_sources
+18,451,9,9,433,0.109375,0.0,0.109375,-0.0061848958333333,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Inca clothes consisted of",prompt,False,False,outside_reviewed_claim_sources
+18,451,9,9,441,0.072265625,0.0,0.072265625,-0.0432942708333333,1168, kn," clothes consisted of woven or ⟦ kn⟧ itted textiles, held together",history,True,False,outside_reviewed_claim_sources
+18,451,9,9,436,0.06396484375,0.0,0.06396484375,-0.0515950520833333,15447, clothes,"assistant<|end_header_id|>
+
+Inca ⟦ clothes⟧  consisted of woven or kn",history,False,False,outside_reviewed_claim_sources
+30,463,9,9,451,0.265625,0.0,0.265625,0.1666666666666666,13,., together by large metal pins ⟦.⟧  They wore tunics and,history,True,False,outside_reviewed_claim_sources
+30,463,9,9,453,0.08349609375,0.0144856770833333,0.0690104166666666,-0.0299479166666666,28670, wore, large metal pins. They ⟦ wore⟧  tunics and skirts that,history,False,False,outside_reviewed_claim_sources
+18,451,10,9,437,0.150390625,0.0555826822916666,0.0948079427083333,-0.0472005208333333,44660, consisted,"<|end_header_id|>
+
+Inca clothes ⟦ consisted⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+18,451,10,9,434,0.06787109375,0.0,0.06787109375,-0.0741373697916666,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes consisted of woven",history,False,False,outside_reviewed_claim_sources
+18,451,10,9,433,0.054931640625,0.0,0.054931640625,-0.0870768229166666,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Inca clothes consisted of",prompt,False,False,outside_reviewed_claim_sources
+18,451,10,9,436,0.040771484375,0.0,0.040771484375,-0.1012369791666666,15447, clothes,"assistant<|end_header_id|>
+
+Inca ⟦ clothes⟧  consisted of woven or kn",history,False,False,outside_reviewed_claim_sources
+18,451,10,9,441,0.04052734375,0.0,0.04052734375,-0.1014811197916666,1168, kn," clothes consisted of woven or ⟦ kn⟧ itted textiles, held together",history,True,False,outside_reviewed_claim_sources
+18,451,10,30,437,0.134765625,0.0,0.134765625,0.0236409505208333,44660, consisted,"<|end_header_id|>
+
+Inca clothes ⟦ consisted⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+18,451,10,30,441,0.10302734375,0.0,0.10302734375,-0.0080973307291666,1168, kn," clothes consisted of woven or ⟦ kn⟧ itted textiles, held together",history,True,False,outside_reviewed_claim_sources
+18,451,10,30,433,0.08837890625,0.0,0.08837890625,-0.0227457682291666,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Inca clothes consisted of",prompt,False,False,outside_reviewed_claim_sources
+18,451,10,30,434,0.045654296875,0.0,0.045654296875,-0.0654703776041666,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes consisted of woven",history,False,False,outside_reviewed_claim_sources
+18,451,11,16,437,0.1845703125,0.0208333333333333,0.1637369791666666,0.0919596354166666,44660, consisted,"<|end_header_id|>
+
+Inca clothes ⟦ consisted⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+18,451,11,16,434,0.0859375,0.0,0.0859375,0.01416015625,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes consisted of woven",history,False,False,outside_reviewed_claim_sources
+18,451,11,16,436,0.05859375,0.0,0.05859375,-0.01318359375,15447, clothes,"assistant<|end_header_id|>
+
+Inca ⟦ clothes⟧  consisted of woven or kn",history,False,False,outside_reviewed_claim_sources
+18,451,11,17,436,0.162109375,0.0348307291666666,0.1272786458333333,-0.0279947916666666,15447, clothes,"assistant<|end_header_id|>
+
+Inca ⟦ clothes⟧  consisted of woven or kn",history,False,False,outside_reviewed_claim_sources
+18,451,11,17,433,0.08203125,0.0,0.08203125,-0.0732421875,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Inca clothes consisted of",prompt,False,False,outside_reviewed_claim_sources
+18,451,11,17,434,0.06591796875,0.0,0.06591796875,-0.08935546875,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes consisted of woven",history,False,False,outside_reviewed_claim_sources
+18,451,11,17,435,0.06494140625,0.0096435546875,0.0552978515625,-0.0999755859375,936,ca,"<|start_header_id|>assistant<|end_header_id|>
+
+In ⟦ca⟧  clothes consisted of woven or",history,False,False,outside_reviewed_claim_sources
+18,451,12,17,437,0.12158203125,0.0255533854166666,0.0960286458333333,0.0366923014322916,44660, consisted,"<|end_header_id|>
+
+Inca clothes ⟦ consisted⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+18,451,12,17,433,0.0703125,0.0,0.0703125,0.0109761555989583,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Inca clothes consisted of",prompt,False,False,outside_reviewed_claim_sources
+18,451,12,17,441,0.0289306640625,0.0,0.0289306640625,-0.0304056803385416,1168, kn," clothes consisted of woven or ⟦ kn⟧ itted textiles, held together",history,True,False,outside_reviewed_claim_sources
+31,464,12,17,453,0.23828125,0.0411783854166666,0.1971028645833333,0.1285196940104166,28670, wore, large metal pins. They ⟦ wore⟧  tunics and skirts that,history,False,False,outside_reviewed_claim_sources
+31,464,12,17,452,0.06494140625,0.0088704427083333,0.0560709635416666,-0.01251220703125,2435, They, by large metal pins. ⟦ They⟧  wore tunics and skirts,history,False,False,outside_reviewed_claim_sources
+18,451,12,24,436,0.20703125,0.0216471354166666,0.1853841145833333,0.0477498372395833,15447, clothes,"assistant<|end_header_id|>
+
+Inca ⟦ clothes⟧  consisted of woven or kn",history,False,False,outside_reviewed_claim_sources
+18,451,12,24,438,0.20703125,0.0372721354166666,0.1697591145833333,0.0321248372395833,315, of,"
+
+Inca clothes consisted ⟦ of⟧  woven or knitted textiles",history,False,False,outside_reviewed_claim_sources
+18,451,12,24,437,0.07763671875,0.0,0.07763671875,-0.05999755859375,44660, consisted,"<|end_header_id|>
+
+Inca clothes ⟦ consisted⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+18,451,13,24,437,0.322265625,0.0747884114583333,0.2474772135416666,0.0977376302083333,44660, consisted,"<|end_header_id|>
+
+Inca clothes ⟦ consisted⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+18,451,13,24,441,0.052001953125,0.0,0.052001953125,-0.0977376302083333,1168, kn," clothes consisted of woven or ⟦ kn⟧ itted textiles, held together",history,True,False,outside_reviewed_claim_sources
+18,451,13,24,434,0.04248046875,0.0,0.04248046875,-0.1072591145833333,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes consisted of woven",history,False,False,outside_reviewed_claim_sources
+30,463,14,10,433,0.0849609375,0.0,0.0849609375,-0.0583089192708333,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Inca clothes consisted of",prompt,False,False,outside_reviewed_claim_sources
+30,463,14,10,437,0.10107421875,0.0298665364583333,0.0712076822916666,-0.0720621744791666,44660, consisted,"<|end_header_id|>
+
+Inca clothes ⟦ consisted⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+30,463,14,10,451,0.1240234375,0.0557047526041666,0.0683186848958333,-0.074951171875,13,., together by large metal pins ⟦.⟧  They wore tunics and,history,True,False,outside_reviewed_claim_sources
+30,463,14,10,441,0.0703125,0.027587890625,0.042724609375,-0.1005452473958333,1168, kn," clothes consisted of woven or ⟦ kn⟧ itted textiles, held together",history,True,False,outside_reviewed_claim_sources
+30,463,14,11,451,0.1435546875,0.04541015625,0.09814453125,-0.0396728515625,13,., together by large metal pins ⟦.⟧  They wore tunics and,history,True,False,outside_reviewed_claim_sources
+30,463,14,11,453,0.04541015625,0.0,0.04541015625,-0.0924072265625,28670, wore, large metal pins. They ⟦ wore⟧  tunics and skirts that,history,False,False,outside_reviewed_claim_sources
+30,463,14,11,437,0.038330078125,0.0,0.038330078125,-0.0994873046875,44660, consisted,"<|end_header_id|>
+
+Inca clothes ⟦ consisted⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+30,463,14,11,452,0.036865234375,0.0,0.036865234375,-0.1009521484375,2435, They, by large metal pins. ⟦ They⟧  wore tunics and skirts,history,False,False,outside_reviewed_claim_sources
+30,463,14,11,441,0.04052734375,0.0087483723958333,0.0317789713541666,-0.1060384114583333,1168, kn," clothes consisted of woven or ⟦ kn⟧ itted textiles, held together",history,True,False,outside_reviewed_claim_sources
+18,451,15,0,435,0.099609375,0.0,0.099609375,-0.0126953125,936,ca,"<|start_header_id|>assistant<|end_header_id|>
+
+In ⟦ca⟧  clothes consisted of woven or",history,False,False,outside_reviewed_claim_sources
+18,451,15,0,436,0.08837890625,0.0,0.08837890625,-0.02392578125,15447, clothes,"assistant<|end_header_id|>
+
+Inca ⟦ clothes⟧  consisted of woven or kn",history,False,False,outside_reviewed_claim_sources
+18,451,15,0,439,0.03466796875,0.0,0.03466796875,-0.07763671875,56874, woven,"Inca clothes consisted of ⟦ woven⟧  or knitted textiles,",history,False,False,outside_reviewed_claim_sources
+18,451,15,0,437,0.029052734375,0.0,0.029052734375,-0.083251953125,44660, consisted,"<|end_header_id|>
+
+Inca clothes ⟦ consisted⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+8,441,15,5,433,0.44921875,0.041259765625,0.407958984375,0.279876708984375,271,"
+
+",":<|eot_id|><|start_header_id|>assistant<|end_header_id|> ⟦
+
+⟧ Inca clothes consisted of",prompt,False,False,outside_reviewed_claim_sources
+8,441,15,5,428,0.050537109375,0.0,0.050537109375,-0.077545166015625,25,:," on given passages.""
+output ⟦:⟧ <|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+",prompt,False,False,outside_reviewed_claim_sources
+18,451,16,22,434,0.12890625,0.0,0.12890625,0.0888315836588541,644,In,"<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+ ⟦In⟧ ca clothes consisted of woven",history,False,False,outside_reviewed_claim_sources
+18,451,16,22,437,0.0771484375,0.0,0.0771484375,0.0370737711588541,44660, consisted,"<|end_header_id|>
+
+Inca clothes ⟦ consisted⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+18,451,16,22,435,0.06591796875,0.0,0.06591796875,0.0258433024088541,936,ca,"<|start_header_id|>assistant<|end_header_id|>
+
+In ⟦ca⟧  clothes consisted of woven or",history,False,False,outside_reviewed_claim_sources
+18,451,17,30,438,0.08740234375,0.00592041015625,0.08148193359375,0.0487569173177083,315, of,"
+
+Inca clothes consisted ⟦ of⟧  woven or knitted textiles",history,False,False,outside_reviewed_claim_sources
+18,451,17,30,437,0.05908203125,0.0,0.05908203125,0.0263570149739583,44660, consisted,"<|end_header_id|>
+
+Inca clothes ⟦ consisted⟧  of woven or knitted",history,False,False,outside_reviewed_claim_sources
+30,463,17,30,453,0.59375,0.067138671875,0.526611328125,0.4632364908854167,28670, wore, large metal pins. They ⟦ wore⟧  tunics and skirts that,history,False,False,outside_reviewed_claim_sources
+16,449,20,3,168,0.55859375,0.03515625,0.5234375,0.3973185221354166,9501, metal, were held together by large ⟦ metal⟧  pins. The garments of,prompt,False,True,outside_reviewed_claim_sources
+31,464,23,21,453,0.5,0.0481160481770833,0.4518839518229167,0.3575846354166667,28670, wore, large metal pins. They ⟦ wore⟧  tunics and skirts that,history,False,False,outside_reviewed_claim_sources
+8,441,26,3,146,0.59375,0.0,0.59375,0.5324147542317709,1168, kn," everywhere consisted of woven or ⟦ kn⟧ itted textiles, and these",prompt,False,True,outside_reviewed_claim_sources
+12,445,26,3,164,0.330078125,0.0,0.330078125,0.2175089518229166,5762, held, or tailored; they were ⟦ held⟧  together by large metal pins,prompt,False,True,outside_reviewed_claim_sources
+21,454,26,3,328,0.59765625,0.0,0.59765625,0.45159912109375,11716, tun, Inca men wore simple ⟦ tun⟧ ics. The length of,prompt,False,True,outside_reviewed_claim_sources

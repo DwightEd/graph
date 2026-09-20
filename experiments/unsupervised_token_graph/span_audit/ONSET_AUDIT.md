@@ -1,75 +1,118 @@
-# 标注起点之前是否普遍有明显回看变化？
+# 重锚节点计算与双向标注审计，v2
 
-本入口回答发生率问题。旧 `experiments.reanchor_audit.run` 的两个事实案例和路径干预不回答这个问题。
-不训练检测器，不以金标首词定义重锚，也不把 attention 最大来源称为所需证据。
+这次先独立扫描整个回答，包括全正常回答，再读取标签检查节点和幻觉 span 的关系。
+不从幻觉起点向前挑最大变化，不用正常／错误标签设定节点阈值。
+`v1` 的“旧来源正增量之和”已退出该入口；它会把旧来源之间的换位算成事件，不能作为本定义。
+
+## 1. 本轮明确检验的定义
+
+**结构重锚候选：同一 head 从局部读取占优，切换到旧来源读取占优，并且两方向质量变化都足够大。**
+这不是“正确证据已被整合”的定义。始终全局读取的 head、全局来源之间换位，都不属于这个切换。
+若真实机制没有占优切换，本定义会漏掉它；所以阴性只否定这一明确模式，不能否定所有可能的重锚机制。
+
+设 prompt 长 P，query 位置 q。该节点是回答 token `q−P`，预测回答 token `t=q+1−P`。
+token 下标均从 0 开始。节点词和它预测的词同时输出，避免把接收信息的位置错写成下一词。
+
+排除全部特殊 token 后，令局部集合为：
+
+    L(q) = 已生成回答中 q−10 < j ≤ q 的普通 token
+    R(q) = 普通 prompt token ∪ 回答中 j ≤ q−10 的普通 token
+
+比较当前行与过去 3 行的平均值。**这 4 行使用当前 q 定义的相同 L/R 集合**，
+防止一个 token 仅因距离变大被划到旧来源，就制造虚假的重锚。
+
+    L_now = Σ[j∈L(q)] A[q,j]             R_now = Σ[j∈R(q)] A[q,j]
+    L_before = mean(Σ[j∈L(q)] A[q−b,j], b=1..3)
+    R_before = mean(Σ[j∈R(q)] A[q−b,j], b=1..3)
+
+    shift = min(R_now−R_before, L_before−L_now)
+
+必须同时满足：
+
+    L_before > R_before
+    R_now > L_now
+    shift ≥ 0.10
+
+0.10 指原 attention 质量，不是概率置信度或 nats。这个操作阈值在看结果前固定；
+同时保存 0.05 / 0.10 / 0.20 三档，不挑结果最好的一档。
+不重新归一化剩余普通 token，避免特殊 token 释放质量造成比例上的虚假局部下降。
+同一 head 连续满足条件只保留首个确认位置；原始逐行成立状态也保存在 NPZ 中。
+未知行会中断“连续确认”段，后一节点是新的确认段入口，不保证是完整真实轨迹的第一次切换。
+
+## 2. 稀疏 attention 的未知部分不能补零
+
+设保存质量为 m，缺失质量 u=max(0,1−m)，特殊 token 已保存的质量仍计入 m，之后才从读取集合排除。
+旧／局部实际质量分别在 `[observed, observed+u]` 内。
+例如，旧来源增长的下界是 `R_now_observed−R_before_observed−u_before`；
+局部下降的下界是 `L_before_observed−L_now_observed−u_now`。
+占优关系也用最不利缺失质量检验。
+
+- 所有下界仍满足定义：`state=1`，确认有结构候选。
+- 至少一个必要条件的上界也不可能满足：`state=0`，排除该位置符合定义。
+- 其余：`state=-1`，未知。缺基准行、特殊 query 行同样记未知。
+
+这是保守边界，不恢复已丢失 attention。小于 0.005 的行质量超 1 数值舍入统一缩回 1。
+总体节点只需某个 head 确认成立；判定没有节点则需要所有输入 head 排除。
+这里的“所有”指实际读取的缓存 head；`detection.npz/head_ids` 保存完整观察范围，不推断缺失 head。
+
+## 3. 节点具体读取了哪些 token
+
+每个确认节点保留全部触发的物理 layer/head，不平均头。
+对该 head 找到累计覆盖 80% **已观测旧来源正增量**的来源位置，输出：
+来源 token ID、token 文本、上下文、prompt/history、当前质量、过去质量、增量及其保守下界。
+总体切换可以确认，但某个具体端点的增长仍可能不能确认，所以 `source_gain_low` 单列。
+同时标出是否只是回读同 token ID，以及来源是否曾是一个更早的候选节点。
+“曾是候选”不自动叫作功能性 hub；原生消息利用和因果作用是另一个待检验问题。
+
+## 4. 双向关联，不能只报成功例子
+
+默认 H=8。所有节点先冻结，再使用金标：
+
+| 方向 | 具体输出 |
+|---|---|
+| 节点→幻觉 | 预测位置 t 后 `(t,t+H]` 是否有新 span 起点；最近起点距离；当前是否已在幻觉内 |
+| 幻觉→节点 | onset 前 `[onset−H,onset)` 是否有节点；具体节点 token；首错决策步 `t=onset` 单列 |
+| 正常比较 | 每个 span 找同回答、相似位置、同表面词类、此前是否有错相同的正常起点，比较相同历史窗口 |
+
+反向统计包含全部标注 span，区分有、无、未知。相邻标注和真正连续正标签的入口分别记录。
+正向统计保留所有非事件位置作为对照；回答结束导致观察不足 H 步时记右删失，不能算无幻觉。
+forward_summary 只用完整后续窗口，按当前标签分组，避免“已经处在错误里”混入“将出现新错误”。
+这些是观察关联，不能因节点位于错误之前就称它导致错误。
+head 越多越容易出现某个节点，因此正常对照也用完全相同的 head 集合与节点定义。
+相邻窗口和匹配样本相关；配对差按 source 聚合、重采样，不把 head 当独立样本。
+
+## 5. 运行与查看
+
+服务器上一次运行全部已有缓存：
 
 ```bash
-git pull origin main
+git pull --ff-only origin main
 python -m experiments.unsupervised_token_graph.span_audit.onset_run
 ```
 
-默认扫描既有 `RAGTruth/attention/llama31_8b` 下 train/test 全部缓存、三任务、全部物理 head。
-tokenizer 自动使用既定服务器目录；目录不同请加 `--tokenizer 原observer模型目录`。
-只需要 tokenizer 与既有 attention NPZ，不加载 LLM、不重新生成。不限制回答数。
-中断后同一命令加 `--resume`。输出默认 `outputs/pre_onset_audit`。
+默认原 RAGTruth 路径、train/test、三任务、全部缓存 head。只读取 tokenizer 和 attention，不加载 LLM。
+可用 `--tasks QA` 缩小任务；路径不同加 `--cache ... --dataset ... --tokenizer ...`。
+恢复相同设置加 `--resume`，输出 `outputs/reanchor_nodes_v2`。
 
-## 一次只检验这个明确的结构假设
-
-对于预测回答 token t 的 query q=P+t−1，比较相邻两行在**同一个来源集合**上的 attention。
-来源包括普通 prompt token，以及距离 q 至少 10 个位置的历史 token。
-用 tokenizer 的 **all_special_ids** 同时排除来源特殊 token；比较行或目标本身为特殊 token 时记缺测。
-不把去掉的特殊 token 或稀疏丢弃质量重新分摊给普通 token。
-
-逐 head 记录普通旧来源 attention 正增量之和：
-
-    gain(q,h) = Σ普通旧来源j max(A[q,h,j] − A[q−1,h,j], 0)
-
-两行使用当前 q 确定的相同来源集合，所以仅由 token 距离增加不会制造正增量。
-这个量也能发现“prompt 总质量不变，但从某些旧来源转向另一些旧来源”。
-它是结构上的回看变化候选，并不证明重新获得了正确证据。
-
-两个时间范围严格分开：
-
-| phase | 使用的预测 token 位置 | 含义 |
-|---|---|---|
-| strict_before | onset−8,...,onset−1 | 严格早于首个标注 token 的预测步骤 |
-| onset_decision | onset | 即将生成首个标注 token 的步骤 |
-
-不使用 onset 后的行选择“提前事件”。缺任一必需行时记缺测，不补零。
-原缓存往往不含 q=P−1；因此回答开头的部分起点不可观测，会列入分母。
-
-## 正常参考和“明显”的固定定义
-
-正常参考取同回答、同首 token 表面类别、相对位置差≤0.25、此前是否已有错误相同的位置。
-正常位置前后 8 个 token 以及变化计算的前一基准行不得包含金标错误。
-每个起点固定取最近的合格正常位置作对照，不依据其 attention 选对照。
-剩余至少 20 个有效正常窗口用于描述性分位数比较。
-
-“明显”要求变化量同时严格超过普通正常窗口的 95% 分位数和原 attention 单位的 0.05。
-两个数是公开固定的操作定义；同时输出连续值和 percentile，不能把这个定义当成自然定律。
-参考窗口可能重叠，所以 percentile **不是显著性检验 p 值**，也不是独立校准的 5% 检测 FPR。
-这是起点比较，未声称匹配事实角色、句法或整段重复度。
-
-每个 head 单独保存；总体起点判定采用所有请求 head、所有窗口步骤的最大值。
-**正常参考也取同样的多头、多步最大值**，不把每个 head 的 5% 尾部直接做并集。
-不同 head 的量级可能不同，因此同时保留逐 head 文件，不能只凭总体最大值否定小幅单 head 效应。
-
-## 看哪些文件
-
-| 文件 | 内容 |
+| 输出 | 怎么看 |
 |---|---|
-| population_coverage.csv | 官方目标回答全集；哪些回答有缓存，哪些完全缺缓存 |
-| inventory.csv | 实际缓存回答及其标注片段数、特殊 token 数 |
-| onsets.csv | 每一个 token 映射标注起点 × 两种时间范围，包括阴性和缺测；最大变化的 layer/head/来源位置 |
-| incidence.csv | 按 split、任务、生成器分别给出发生数、阴性数、缺测数、正常发生率；同 source 配对差和 bootstrap 区间 |
-| head_incidence.csv | 每个物理 head 的发生数、正常发生数与各自可观测分母；不据此逐头宣称统计显著 |
-| samples/ID/heads.csv.gz | 每个物理 head 的变化、峰值来源位置、参考分位数、普通 token 保留质量 |
-| summary.json | 总体覆盖，明确这不是检测器评价 |
+| review.html | 回答中标出具体节点，列出来源 token、span 对应；全量输出较大，逐答原表也保留 |
+| nodes.csv | 每个节点 token、预测 token、触发 head、之后的 span 信息 |
+| node_span_links.csv | 节点与标注起点的具体对应，区分提前和首错决策步 |
+| spans.csv / reverse_summary.csv | 每个幻觉 span 前有／无／未知，以及匹配正常位置比较 |
+| positions.csv.gz / forward_summary.csv | 所有事件／非事件位置的后续 span 发生率与删失标记 |
+| samples/ID/head_events.csv | 同一节点的各 head 切换质量和未知质量上下界 |
+| samples/ID/source_reads.csv | 实际读取哪些来源 token，是否同 token 回读 |
+| samples/ID/detection.npz | 标签介入前的逐 head 状态、连续段入口状态、三档阈值、原始 token ID |
+| population_coverage.csv | 官方目标回答数与缓存缺失，不把缓存子集冒充全量 |
 
-主看 `answer_first` 和 `clean_before`；`all` 保留所有标注起点，包含紧邻前段错误的起点。
-`run_onsets` 把连续正标签的真正入口单列，避免把相邻两个标注之间的边界当成新错误启动。
-阴性和不可观测必须分开；不能只展示成功起点或先取 top-k 案例。
+现有四个原生前缀也能复核：
 
-置信区间按 source 重采样，不把 head 或重叠窗口当独立样本。
-已有 test 被反复研究，仍是探索性审计。特殊 token 排除、对齐和多头正常比较由单元测试验证；
-**完整自然 attention 发生率必须运行本入口后才能报告**。
+```bash
+python -m experiments.unsupervised_token_graph.span_audit.onset_run \
+  --review-archive 已解压的reanchor_review目录 --output outputs/reanchor_prefix_nodes_v2
+```
+
+该存档只有 top-8 边和局部人工核验的 claim，没有完整 RAGTruth span 标注。
+它输出 claim_association，其他历史／后续 token 保持未核验，不能用它估计总体幻觉率。
+这里按存档的逐 token 原生解码明确列出特殊控制 token ID；全量模式必须使用原 tokenizer 的 all_special_ids。

@@ -1,7 +1,7 @@
 # Reanchor 原生审计
 
 **全量“标注前是否普遍出现回看变化”请运行 `python -m experiments.unsupervised_token_graph.span_audit.onset_run`。**
-该入口排除全部特殊 token，逐标注起点、逐 head 与正常窗口比较，保留阴性和缺测；见[运行说明](../unsupervised_token_graph/span_audit/ONSET_AUDIT.md)。本页指定案例干预不输出全量发生率。
+该入口先独立扫描整个回答，排除特殊 token，寻找逐 head 的局部→旧来源占优切换；再双向关联节点和幻觉 span，输出具体 token、来源、阴性和缺测。见[运行说明](../unsupervised_token_graph/span_audit/ONSET_AUDIT.md)。本页指定案例干预不输出全量发生率。
 
 检验事实生成前的回看候选，是否读取了适用证据，并经更深层、跨位置的消息影响事实选择。[完整设计](../../docs/REANCHOR_AUDIT_DESIGN_20260920.md)。本入口用于标签辅助机制审计，不训练检测器。
 

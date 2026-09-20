@@ -1,77 +1,82 @@
-"""All annotation onsets stay in the denominator, including unmatched onsets."""
+"""Attach annotations AFTER detection: node→span and span→node, with censoring."""
+
+import json
 
 import numpy as np
+import pandas as pd
 
 from .matching import token_kind
 
 
-def normal_positions(answer, onset, window, position_gap):
-    """Same answer, surface class, position band and prior-error status.
+def preceding_state(states, onset, horizon):
+    window = states[max(0, onset-horizon):onset]
+    if np.any(window == 1):
+        return 1
+    if len(window) < horizon or np.any(window == -1):
+        return -1
+    return 0
 
-    Both the normal window and its W-token margins must have no gold error.
-    This is a label-assisted reference distribution, not detector calibration.
-    """
+
+def normal_controls(answer, onset, horizon, position_gap=.25):
+    candidates = []
     length = len(answer.response_ids)
-    positions = []
-    prior_error = bool(answer.error_mask[:onset].any())
-    for position in range(window + 1, length):
-        if abs(position - onset) / length > position_gap:
+    for target in range(horizon, length-horizon):
+        if abs(target-onset)/length > position_gap:
             continue
-        if answer.error_mask[max(0, position - window - 1):position + window + 1].any():
+        if answer.error_mask[target-horizon:target+horizon+1].any():
             continue
-        if bool(answer.error_mask[:position].any()) != prior_error:
+        if answer.error_mask[:target].any() != answer.error_mask[:onset].any():
             continue
-        if token_kind(answer, position) == token_kind(answer, onset):
-            positions.append(position)
-    return np.asarray(positions, dtype=int)
+        if token_kind(answer, target) == token_kind(answer, onset):
+            candidates.append(target)
+    return sorted(candidates, key=lambda target: (abs(target-onset), target))
 
 
-def onset_metadata(answer, number, span, window, references):
-    start, end = answer.offsets[span.start, 0], answer.offsets[span.end - 1, 1]
-    return dict(id=answer.response_id, source_id=answer.source_id, task=answer.task,
-                generator=answer.generator, split=answer.split, span_index=number,
-                onset=span.start, end=span.end, text=answer.text[start:end],
-                answer_first=not bool(answer.error_mask[:span.start].any()),
-                run_onset=span.start == 0 or not bool(answer.error_mask[span.start - 1]),
-                contaminated_before=bool(answer.error_mask[max(0, span.start-window-1):span.start].any()),
-                candidate_normal_windows=len(references))
+def span_rows(answer, states, horizon):
+    rows = []
+    for number, span in enumerate(answer.spans):
+        prior = np.flatnonzero(states[max(0, span.start-horizon):span.start] == 1)
+        prior = prior + max(0, span.start-horizon)
+        start, end = answer.offsets[span.start, 0], answer.offsets[span.end-1, 1]
+        candidates = normal_controls(answer, span.start, horizon)
+        control = candidates[0] if candidates else -1
+        rows.append(dict(span_index=number, onset=span.start, end=span.end, text=answer.text[start:end],
+            answer_first=number == 0, run_onset=span.start == 0 or not answer.error_mask[span.start-1],
+            prior_state=preceding_state(states, span.start, horizon), decision_state=int(states[span.start]),
+            prior_node_targets=json.dumps(prior.tolist()), prior_node_count=len(prior),
+            normal_target=control, normal_prior_state=preceding_state(states, control, horizon) if control >= 0 else -1,
+            prior_error=bool(answer.error_mask[max(0, span.start-horizon):span.start].any())))
+    return pd.DataFrame(rows, columns=['span_index', 'onset', 'end', 'text', 'answer_first', 'run_onset',
+        'prior_state', 'decision_state', 'prior_node_targets', 'prior_node_count', 'normal_target',
+        'normal_prior_state', 'prior_error'])
 
 
-def compare_window(values, onset, references, minimum_controls, quantile, minimum_gain):
-    """A held-out nearest normal anchor and error anchor use identical references.
-
-    Overlapping normal windows are correlated; percentiles are descriptive.
-    An all-head maximum is compared to all-head normal maxima, never to a
-    single-head threshold. The nearest anchor is selected without its score.
-    """
-    row = dict(gain=float(values[onset]), normal_onset=-1, normal_gain=np.nan,
-               reference_windows=0, threshold=np.nan, percentile=np.nan,
-               event=None, normal_event=None, status='missing_attention_rows')
-    if not np.isfinite(values[onset]):
-        return row
-    row['status'] = 'insufficient_normal_windows'
-    if not len(references):
-        return row
-    control = min(references, key=lambda position: (abs(position-onset), position))
-    row.update(normal_onset=int(control), normal_gain=float(values[control]))
-    pool = values[references[references != control]]
-    pool = pool[np.isfinite(pool)]
-    row['reference_windows'] = len(pool)
-    if len(pool) < minimum_controls:
-        return row
-    threshold = max(float(np.quantile(pool, quantile, method='higher')), minimum_gain)
-    row.update(threshold=threshold, percentile=float(np.mean(pool < values[onset])),
-               event=bool(values[onset] > threshold), status='measured')
-    if np.isfinite(values[control]):
-        row['normal_event'] = bool(values[control] > threshold)
-    return row
+def position_rows(answer, states, horizon):
+    """Every position, including non-events, unknowns and right-censored endings."""
+    onsets = np.array([span.start for span in answer.spans], dtype=int)
+    length = len(answer.response_ids)
+    rows = []
+    for target, state in enumerate(states):
+        future = onsets[onsets > target]
+        following = future[future <= target+horizon]
+        rows.append(dict(target=target, node_token=target-1, state=int(state),
+            current_gold=int(answer.error_mask[target]) if target < length else -1,
+            at_span_onset=bool(np.any(onsets == target)),
+            next_onset=int(future[0]) if len(future) else -1,
+            next_gap=int(future[0]-target) if len(future) else -1,
+            future_span=bool(len(following)), full_followup=target+horizon < length,
+            following_onsets=json.dumps(following.tolist())))
+    return pd.DataFrame(rows)
 
 
-def peak_location(gain, endpoint, endpoint_gain, onset, phase, window):
-    positions = np.arange(onset-window, onset) if phase == 'strict_before' else np.array([onset])
-    valid = positions[(positions >= 0) & (positions < len(gain))]
-    if not len(valid) or not np.isfinite(gain[valid]).all():
-        return dict(peak_target=-1, peak_source=-1, peak_source_gain=np.nan)
-    target = int(valid[np.argmax(gain[valid])])
-    return dict(peak_target=target, peak_source=int(endpoint[target]),
-                peak_source_gain=float(endpoint_gain[target]))
+def link_rows(answer, nodes, horizon):
+    rows = []
+    for node in nodes.itertuples():
+        for number, span in enumerate(answer.spans):
+            lag = span.start-node.target
+            if 0 <= lag <= horizon:
+                rows.append(dict(target=node.target, node_token=node.node_token, node_text=node.node_text,
+                    span_index=number, onset=span.start, lag_from_decision=lag,
+                    relation='at_decision' if lag == 0 else 'strictly_before'))
+    return pd.DataFrame(rows, columns=['target', 'node_token', 'node_text', 'span_index',
+                                       'onset', 'lag_from_decision', 'relation'])

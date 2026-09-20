@@ -1,0 +1,63 @@
+target,query,node_token,node_token_id,node_text,context,predicted_token,heads,head_ids,max_shift_low,known_claim_target,lag_to_known_claim,claim_in_next_window,claim_at_decision,known_claim_unsupported,other_followup_annotation,future_hallucination_known
+4,538,3,1900,ats,"<|end_header_id|>
+
+To cook br ⟦ats⟧ , follow these steps:
+
+",",",1,"[[29, 29]]",0.16216023763020831,126,122,False,False,True,unknown,
+5,539,4,11,",","
+
+To cook brats ⟦,⟧  follow these steps:
+
+1", follow,2,"[[9, 9], [14, 11]]",0.20896402994791669,126,121,False,False,True,unknown,
+9,543,8,1473,":
+
+","ats, follow these steps ⟦:
+
+⟧ 1. Prick the",1,2,"[[9, 9], [10, 30]]",0.2687581380208333,126,117,False,False,True,unknown,
+12,546,11,2394, Pr," these steps:
+
+1. ⟦ Pr⟧ ick the bratwurst",ick,1,"[[20, 3]]",0.100921630859375,126,114,False,False,True,unknown,
+16,550,15,86,w,. Prick the brat ⟦w⟧ urst with a fork to,urst,3,"[[7, 17], [30, 1], [30, 9]]",0.3425649007161458,126,110,False,False,True,unknown,
+21,555,20,311, to,wurst with a fork ⟦ to⟧  prevent them from exploding as, prevent,1,"[[11, 17]]",0.11531575520833331,126,105,False,False,True,unknown,
+25,559,24,73745, exploding," fork to prevent them from ⟦ exploding⟧  as they cook.
+2", as,1,"[[16, 28]]",0.10522460937499997,126,101,False,False,True,unknown,
+26,560,25,439, as," to prevent them from exploding ⟦ as⟧  they cook.
+2.", they,4,"[[9, 9], [10, 30], [11, 17], [12, 18]]",0.2834879557291667,126,100,False,False,True,unknown,
+28,562,27,4394, cook," them from exploding as they ⟦ cook⟧ .
+2. Combine the",".
+",5,"[[12, 18], [14, 11], [15, 7], [17, 20], [21, 6]]",0.40116373697916663,126,98,False,False,True,unknown,
+29,563,28,627,".
+"," from exploding as they cook ⟦.
+⟧ 2. Combine the brat",2,13,"[[0, 1], [2, 0], [7, 2], [7, 12], [7, 19], [8, 22], [9, 9], [10, 16], [11, 16], [15, 0], [15, 12], [16, 22], [31, 28]]",0.39176432291666663,126,97,False,False,True,unknown,
+35,569,34,86,w,"2. Combine the brat ⟦w⟧ urst, onions, butter",urst,5,"[[6, 19], [8, 22], [30, 1], [30, 9], [30, 24]]",0.3639322916666667,126,91,False,False,True,unknown,
+40,574,39,14432, butter,"wurst, onions, ⟦ butter⟧ , and beer in a",",",1,"[[26, 3]]",0.11836751302083331,126,86,False,False,True,unknown,
+43,577,42,13179, beer," onions, butter, and ⟦ beer⟧  in a large pot.", in,2,"[[16, 13], [17, 30]]",0.2980448404947917,126,83,False,False,True,unknown,
+44,578,43,304, in,", butter, and beer ⟦ in⟧  a large pot. Place", a,3,"[[8, 22], [11, 16], [16, 22]]",0.39555867513020837,126,82,False,False,True,unknown,
+48,582,47,13,., beer in a large pot ⟦.⟧  Place the pot over medium, Place,3,"[[12, 17], [12, 18], [16, 22]]",0.4058380126953125,126,78,False,False,True,unknown,
+53,587,52,11298, medium,. Place the pot over ⟦ medium⟧  heat and simmer for , heat,1,"[[26, 3]]",0.18397013346354169,126,73,False,False,True,unknown,
+54,588,53,8798, heat, Place the pot over medium ⟦ heat⟧  and simmer for 15, and,1,"[[20, 3]]",0.11229451497395831,126,72,False,False,True,unknown,
+60,594,59,311, to," and simmer for 15 ⟦ to⟧  20 minutes.
+3", ,5,"[[8, 13], [8, 22], [9, 10], [11, 16], [16, 22]]",0.27510579427083337,126,66,False,False,True,unknown,
+64,598,63,627,".
+","15 to 20 minutes ⟦.
+⟧ 3. Preheat a",3,3,"[[0, 1], [5, 12], [16, 22]]",0.39906819661458337,126,62,False,False,True,unknown,
+65,599,64,18,3," to 20 minutes.
+ ⟦3⟧ . Preheat a grill",.,1,"[[2, 13]]",0.22639338175455728,126,61,False,False,True,unknown,
+70,604,69,40158, grill,3. Preheat a ⟦ grill⟧  for medium-high heat., for,1,"[[26, 3]]",0.12750244140625,126,56,False,False,True,unknown,
+75,609,74,13,., grill for medium-high heat ⟦.⟧  Lightly oil the grate, Light,2,"[[9, 8], [14, 10]]",0.16837565104166663,126,51,False,False,True,unknown,
+81,615,80,627,".
+"," Lightly oil the grate ⟦.
+⟧ 4. Cook the brat",4,12,"[[9, 8], [10, 9], [11, 17], [12, 17], [12, 28], [14, 10], [14, 11], [16, 13], [16, 22], [17, 20], [18, 7], [22, 7]]",0.41312662760416663,126,45,False,False,True,unknown,
+82,616,81,19,4,"ly oil the grate.
+ ⟦4⟧ . Cook the bratw",.,1,"[[11, 19]]",0.1014404296875,126,44,False,False,True,unknown,
+87,621,86,86,w,4. Cook the brat ⟦w⟧ urst on the prehe,urst,4,"[[9, 9], [9, 10], [16, 22], [30, 24]]",0.344970703125,126,39,False,False,True,unknown,
+95,629,94,369, for, the preheated grill ⟦ for⟧  10 to 14, ,1,"[[16, 22]]",0.31632486979166663,126,31,False,False,True,unknown,
+97,631,96,605,10,"heated grill for  ⟦10⟧  to 14 minutes,", to,1,"[[31, 11]]",0.178314208984375,126,29,False,False,True,unknown,
+102,636,101,11,",","10 to 14 minutes ⟦,⟧  turning occasionally to brown evenly", turning,1,"[[16, 22]]",0.483428955078125,126,24,False,False,True,unknown,
+107,641,106,42147, evenly,", turning occasionally to brown ⟦ evenly⟧ .
+5. Remove the",".
+",2,"[[11, 16], [16, 22]]",0.4701080322265625,126,19,False,False,True,unknown,
+108,642,107,627,".
+"," turning occasionally to brown evenly ⟦.
+⟧ 5. Remove the brat",5,4,"[[5, 13], [7, 2], [8, 22], [24, 21]]",0.1884765625,126,18,False,False,True,unknown,
+114,648,113,86,w,5. Remove the brat ⟦w⟧ urst from the grill and,urst,2,"[[9, 10], [15, 5]]",0.20488484700520831,126,12,False,False,True,unknown,

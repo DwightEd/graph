@@ -1,4 +1,4 @@
-"""Does a marked hallucination onset have an unusual earlier look-back change?"""
+"""Discover reanchor nodes independently, then audit their relation to gold spans."""
 
 import argparse
 import json
@@ -9,10 +9,11 @@ import pandas as pd
 from tqdm import tqdm
 
 from .inputs import AuditInputs, default_observer_tokenizer
-from .onset_changes import before_peaks, head_changes
-from .onset_report import summarize_onsets
-from .onset_windows import compare_window, normal_positions, onset_metadata, peak_location
+from .onset_detection import save_detection, scan_channels
+from .onset_report import summarize, write_review
+from .onset_windows import link_rows, position_rows, span_rows
 from .run import ROOT
+from .units import marked_spans, span_mask
 
 
 def arguments(argv=None):
@@ -21,34 +22,30 @@ def arguments(argv=None):
     parser.add_argument('--dataset', type=Path, default=ROOT / 'dataset')
     parser.add_argument('--tokenizer')
     parser.add_argument('--index', type=Path)
+    parser.add_argument('--review-archive', type=Path, help='existing extracted four-prefix route archive; reviewed claims only')
     parser.add_argument('--splits', nargs='+', choices=['train', 'test'], default=['train', 'test'])
     parser.add_argument('--tasks', nargs='+', choices=['QA', 'Summary', 'Data2txt'])
     parser.add_argument('--layers', nargs='+', type=int)
     parser.add_argument('--heads', nargs='+', type=int)
-    parser.add_argument('--window', type=int, default=8)
+    parser.add_argument('--window', type=int, default=8, help='association horizon; never used to select nodes')
     parser.add_argument('--local-window', type=int, default=10)
-    parser.add_argument('--position-gap', type=float, default=.25)
-    parser.add_argument('--minimum-controls', type=int, default=20)
-    parser.add_argument('--quantile', type=float, default=.95)
-    parser.add_argument('--minimum-gain', type=float, default=.05)
-    parser.add_argument('--output', type=Path, default=Path('outputs/pre_onset_audit'))
+    parser.add_argument('--baseline-steps', type=int, default=3)
+    parser.add_argument('--minimum-shift', type=float, default=.1)
+    parser.add_argument('--output', type=Path, default=Path('outputs/reanchor_nodes_v2'))
     parser.add_argument('--resume', action='store_true')
     return parser.parse_args(argv)
 
 
 def prepare(args):
-    from transformers import AutoTokenizer
-
-    args.tokenizer = args.tokenizer or default_observer_tokenizer(args.cache.resolve())
-    if args.tokenizer is None:
-        raise ValueError('--tokenizer must identify the observer tokenizer to exclude ALL special IDs')
-    if min(args.window, args.local_window, args.minimum_controls) < 1:
-        raise ValueError('window, local-window and minimum-controls must be positive')
-    if not 0 < args.quantile < 1 or args.minimum_gain < 0 or not 0 < args.position_gap <= 1:
-        raise ValueError('invalid quantile, minimum-gain or position-gap')
+    if min(args.window, args.local_window, args.baseline_steps) < 1 or not 0 < args.minimum_shift <= 1:
+        raise ValueError('windows must be positive and minimum-shift must be in (0,1]')
+    if args.review_archive is None:
+        args.tokenizer = args.tokenizer or default_observer_tokenizer(args.cache.resolve())
+        if args.tokenizer is None:
+            raise ValueError('--tokenizer is required to exclude all observer special IDs')
     settings = {key: str(value.resolve()) if isinstance(value, Path) else value
                 for key, value in vars(args).items() if key not in ('resume', 'output')}
-    settings['version'] = 'all-onsets-specials-excluded-v1'
+    settings['version'] = 'label-free-local-to-old-switch-v2'
     path = args.output / 'settings.json'
     if args.output.exists():
         if not args.resume or json.loads(path.read_text()) != settings:
@@ -56,52 +53,6 @@ def prepare(args):
     else:
         args.output.mkdir(parents=True)
         path.write_text(json.dumps(settings, indent=2) + '\n')
-    return AutoTokenizer.from_pretrained(args.tokenizer, local_files_only=True, use_fast=True)
-
-
-def compare(values, onset, references, args):
-    return compare_window(values, onset, references, args.minimum_controls,
-                          args.quantile, args.minimum_gain)
-
-
-def save_answer(destination, details, metadata, references, joint, channels, args):
-    detail_table = pd.DataFrame(details)
-    detail_table.drop(columns='text').to_csv(destination / 'heads.csv.gz', index=False)
-    rows = [dict(meta, phase=phase, channels=len(channels),
-                 **compare(values, meta['onset'], controls, args))
-            for phase, values in joint.items() for meta, controls in zip(metadata, references)]
-    finite = detail_table[np.isfinite(detail_table.gain)]
-    winners = finite.loc[finite.groupby(['phase', 'onset']).gain.idxmax()]
-    columns = ['phase', 'onset', 'layer', 'head', 'peak_target', 'peak_source', 'peak_source_gain']
-    result = pd.DataFrame(rows).merge(winners[columns], on=['phase', 'onset'], how='left')
-    result.to_csv(destination / 'onsets.csv', index=False)
-
-
-def measure_answer(inputs, answer, special, args, destination):
-    references = [normal_positions(answer, span.start, args.window, args.position_gap)
-                  for span in answer.spans]
-    metadata = [onset_metadata(answer, number, span, args.window, controls)
-                for number, (span, controls) in enumerate(zip(answer.spans, references))]
-    joint = dict(strict_before=np.full(len(answer.response_ids), -np.inf),
-                 onset_decision=np.full(len(answer.response_ids), -np.inf))
-    details = []
-    channels = []
-    for channel in inputs.channels(answer, args.layers, args.heads):
-        channels.append((channel.layer, channel.head))
-        gain, endpoint, endpoint_gain, retained = head_changes(channel, answer, special, args.local_window)
-        phases = dict(strict_before=before_peaks(gain, args.window), onset_decision=gain)
-        mass = dict(strict_before=-before_peaks(-retained, args.window), onset_decision=retained)
-        for phase, values in phases.items():
-            joint[phase] = np.maximum(joint[phase], values)
-            for meta, controls in zip(metadata, references):
-                details.append(dict(meta, phase=phase, layer=channel.layer, head=channel.head,
-                    minimum_content_mass=float(mass[phase][meta['onset']]),
-                    **compare(values, meta['onset'], controls, args),
-                    **peak_location(gain, endpoint, endpoint_gain, meta['onset'], phase, args.window)))
-    if not channels:
-        raise ValueError(f'{answer.response_id}: no requested attention channels')
-    save_answer(destination, details, metadata, references, joint, channels, args)
-    return channels
 
 
 def population_coverage(inputs, args):
@@ -119,30 +70,56 @@ def population_coverage(inputs, args):
     return table.loc[table.cached, 'id'].tolist()
 
 
-def main(argv=None):
-    args = arguments(argv)
-    tokenizer = prepare(args)
-    inputs = AuditInputs(args.cache, args.dataset, args.index, args.tokenizer)
+def save_associations(answer, arrays, nodes, destination, args):
+    all_positions, all_spans = [], []
+    for threshold, states in zip(arrays['thresholds'], arrays['node_states']):
+        all_positions.append(position_rows(answer, states, args.window).assign(threshold=threshold))
+        all_spans.append(span_rows(answer, states, args.window).assign(threshold=threshold))
+    positions = pd.concat(all_positions, ignore_index=True)
+    positions.to_csv(destination / 'positions.csv.gz', index=False)
+    pd.concat(all_spans, ignore_index=True).to_csv(destination / 'spans.csv', index=False)
+    primary = positions[positions.threshold.eq(args.minimum_shift)].drop(columns='node_token')
+    nodes.merge(primary, on='target').to_csv(destination / 'nodes.csv', index=False)
+    link_rows(answer, nodes, args.window).to_csv(destination / 'node_span_links.csv', index=False)
+    metadata = dict(id=answer.response_id, source_id=answer.source_id, task=answer.task,
+                    generator=answer.generator, split=answer.split,
+                    annotation_origin='official_ragtruth_complete_response',
+                    response_tokens=len(answer.response_ids), annotated_spans=len(answer.spans))
+    (destination / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n')
+
+
+def run_cache(args):
+    from transformers import AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, local_files_only=True, use_fast=True)
+    inputs = AuditInputs(args.cache, args.dataset, args.index, args.tokenizer, include_labels=False)
     inputs.binding.tokenizers[args.tokenizer] = tokenizer
-    identities = population_coverage(inputs, args)
-    inventory = []
-    for identity in tqdm(identities, desc='all annotated onsets'):
+    for identity in tqdm(population_coverage(inputs, args), desc='whole-answer reanchor scan'):
+        destination = args.output / 'samples' / identity
+        if args.resume and (destination / 'metadata.json').exists():
+            continue
         answer = inputs.load_answer(identity)
         special = np.isin(answer.token_ids, tokenizer.all_special_ids)
-        inventory.append(dict(id=identity, source_id=answer.source_id, spans=len(answer.spans),
-                              special_tokens=int(special.sum()), response_tokens=len(answer.response_ids)))
-        if not answer.spans:
-            continue
-        destination = args.output / 'samples' / identity
-        if args.resume and (destination / 'onsets.csv').exists():
-            continue
-        destination.mkdir(parents=True, exist_ok=True)
-        measure_answer(inputs, answer, special, args, destination)
-    pd.DataFrame(inventory).to_csv(args.output / 'inventory.csv', index=False)
-    if any(row['spans'] for row in inventory):
-        print(json.dumps(summarize_onsets(args.output), indent=2))
+        text = [tokenizer.decode([int(token)], clean_up_tokenization_spaces=False) for token in answer.token_ids]
+        channels = inputs.channels(answer, args.layers, args.heads)
+        arrays, events, sources = scan_channels(channels, answer.token_ids, answer.prompt_length, special, args)
+        nodes = save_detection(destination, arrays, events, sources, answer.token_ids, text, answer.prompt_length)
+        answer.spans = marked_spans(answer.offsets, inputs.annotations[identity]['labels'])
+        answer.error_mask = span_mask(len(answer.response_ids), answer.spans)
+        save_associations(answer, arrays, nodes, destination, args)
+
+
+def main(argv=None):
+    args = arguments(argv)
+    prepare(args)
+    if args.review_archive is None:
+        run_cache(args)
     else:
-        raise ValueError('No annotated onsets found in the selected cache population')
+        from .onset_archive import run_archive
+        run_archive(args)
+    result = summarize(args.output, args.minimum_shift)
+    write_review(args.output)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 if __name__ == '__main__':

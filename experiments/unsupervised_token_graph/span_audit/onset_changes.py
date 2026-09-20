@@ -1,62 +1,119 @@
-"""Per-head changes to the same old endpoints; no labels enter the calculation."""
+"""Label-free local-to-old switches with bounds for omitted attention."""
 
 import numpy as np
 
 
-def content_row(channel, row, special):
-    keys, weights = channel.row(row)
-    keep = ~special[keys]
-    return keys[keep], weights[keep]
+MEASURES = ('old_before', 'local_before', 'old_now', 'local_now',
+            'missing_before', 'missing_now', 'shift_low', 'shift_high',
+            'before_margin_low', 'before_margin_high', 'after_margin_low', 'after_margin_high')
 
 
-def old_endpoint_change(previous, current, prompt_length, query, local_window):
-    """Use one endpoint set for both rows so keys ageing out cannot create a jump.
+def content_rows(channel, special):
+    """Remove specials; correct only roundoff above one, never renormalize top-k loss."""
+    rows = {}
+    for index, query in enumerate(channel.queries):
+        keys, weights = channel.row(index)
+        if weights.sum() > 1.005:
+            raise ValueError('Attention row mass exceeds the allowed rounding tolerance')
+        weights = weights / max(1., float(weights.sum()))
+        missing = max(0., 1. - float(weights.sum()))
+        keep = ~special[keys]
+        keys, weights = keys[keep], weights[keep]
+        rows[int(query)] = (keys, np.r_[0., np.cumsum(weights)], missing)
+    return rows
 
-    The score is sum_j max(A[q,j] - A[q-1,j], 0), for ordinary prompt
-    tokens or response tokens at least local_window positions behind q.
-    We retain original attention units: sparse discarded mass is never restored.
+
+def partition(row, cutoff):
+    keys, cumulative, missing = row
+    old = float(cumulative[np.searchsorted(keys, cutoff)])
+    return old, float(cumulative[-1] - old), missing
+
+
+def switch_bounds(previous, current):
+    """Both directions and both dominance inequalities must survive missing mass."""
+    old_before, local_before, missing_before = previous
+    old_now, local_now, missing_now = current
+    old_gain = old_now - old_before
+    local_drop = local_before - local_now
+    before_margin = local_before - old_before
+    after_margin = old_now - local_now
+    return np.array([old_before, local_before, old_now, local_now,
+        missing_before, missing_now,
+        min(old_gain-missing_before, local_drop-missing_now),
+        min(old_gain+missing_now, local_drop+missing_before),
+        before_margin-missing_before, before_margin+missing_before,
+        after_margin-missing_now, after_margin+missing_now])
+
+
+def classify(measures, threshold):
+    """1=certified switch; 0=ruled out; -1=unknown, never an imputed negative."""
+    columns = dict(zip(MEASURES, measures.T))
+    state = np.full(len(measures), -1, dtype=np.int8)
+    finite = np.isfinite(measures).all(axis=1)
+    positive = ((columns['shift_low'] >= threshold)
+                & (columns['before_margin_low'] > 0) & (columns['after_margin_low'] > 0))
+    negative = ((columns['shift_high'] < threshold)
+                | (columns['before_margin_high'] <= 0) | (columns['after_margin_high'] <= 0))
+    state[finite & negative] = 0
+    state[finite & positive] = 1
+    return state
+
+
+def measure_head(channel, token_ids, prompt_length, special, baseline_steps, local_window):
+    """Index t predicts answer token t: query q=P+t-1, node token index t-1.
+
+    Every baseline row uses the CURRENT cutoff to prevent ageing artefacts.
+    The final response node is retained even if its next token is unavailable.
     """
-    old_keys, old_weights = previous
-    keys, weights = current
-    union = np.union1d(old_keys, keys)
-    change = np.zeros(len(union))
-    change[np.searchsorted(union, keys)] += weights
-    change[np.searchsorted(union, old_keys)] -= old_weights
-    eligible = (union < prompt_length) | (union <= query - local_window)
-    positive = np.where(eligible, np.maximum(change, 0), 0)
-    gain = float(positive.sum())
-    winner = int(union[np.argmax(positive)]) if gain > 0 else -1
-    return gain, winner, float(positive.max(initial=0))
-
-
-def head_changes(channel, answer, special, local_window):
-    """Index t denotes prediction of answer token t, from query P+t-1."""
-    length = len(answer.response_ids)
-    gain = np.full(length, np.nan)
-    endpoint = np.full(length, -1, dtype=int)
-    endpoint_gain = np.full(length, np.nan)
-    retained = np.full(length, np.nan)
-    rows = {int(query): row for row, query in enumerate(channel.queries)}
-    for query, row in rows.items():
-        target = query + 1 - answer.prompt_length
-        if not 0 <= target < length or query - 1 not in rows:
+    rows = content_rows(channel, special)
+    length = len(token_ids) - prompt_length + 1
+    measures = np.full((length, len(MEASURES)), np.nan)
+    for query in rows:
+        target = query + 1 - prompt_length
+        if not 0 <= target < length:
             continue
-        if special[query - 1:query + 2].any():
+        baseline = range(query-baseline_steps, query)
+        if any(position not in rows for position in baseline):
             continue
-        previous = content_row(channel, rows[query - 1], special)
-        current = content_row(channel, row, special)
-        retained[target] = min(float(previous[1].sum()), float(current[1].sum()))
-        if retained[target] <= 0:
+        if special[query-baseline_steps:query+1].any():
             continue
-        gain[target], endpoint[target], endpoint_gain[target] = old_endpoint_change(
-            previous, current, answer.prompt_length, query, local_window)
-    return gain, endpoint, endpoint_gain, retained
+        cutoff = max(prompt_length, query-local_window+1)
+        previous = np.mean([partition(rows[position], cutoff) for position in baseline], axis=0)
+        measures[target] = switch_bounds(previous, partition(rows[query], cutoff))
+    return measures, rows
 
 
-def before_peaks(values, window):
-    """Strictly t-window,...,t-1. A missing row makes that window unavailable."""
-    result = np.full(len(values), np.nan)
-    if len(values) > window:
-        windows = np.lib.stride_tricks.sliding_window_view(values, window)
-        result[window:] = windows[:-1].max(axis=1)
+def aggregate_heads(states):
+    """One certified head proves existence; a negative needs every requested head."""
+    result = np.full(states.shape[-1], -1, dtype=np.int8)
+    result[np.all(states == 0, axis=0)] = 0
+    result[np.any(states == 1, axis=0)] = 1
     return result
+
+
+def event_starts(states):
+    """Keep the first certified point of each contiguous per-head switching episode."""
+    starts = states.copy()
+    continuation = (states[1:] == 1) & (states[:-1] == 1)
+    starts[1:][continuation] = 0
+    return starts
+
+
+def anchor_sources(rows, query, prompt_length, local_window, baseline_steps, coverage=.8):
+    """Endpoints covering 80% of observed positive increments; bounds show uncertainty."""
+    positions = list(range(query-baseline_steps, query+1))
+    keys = np.unique(np.concatenate([rows[position][0] for position in positions]))
+    weights = np.zeros((len(positions), len(keys)))
+    for index, position in enumerate(positions):
+        saved_keys, cumulative, _ = rows[position]
+        weights[index, np.searchsorted(keys, saved_keys)] = np.diff(cumulative)
+    previous = weights[:-1].mean(axis=0)
+    gain = weights[-1] - previous
+    old = keys < max(prompt_length, query-local_window+1)
+    candidates = np.flatnonzero(old & (gain > 0))
+    ordered = candidates[np.argsort(-gain[candidates], kind='stable')]
+    count = np.searchsorted(np.cumsum(gain[ordered]), coverage*gain[ordered].sum()) + 1
+    missing = np.mean([rows[position][2] for position in positions[:-1]])
+    return [dict(source=int(keys[index]), attention_now=float(weights[-1, index]),
+                 attention_before=float(previous[index]), source_gain=float(gain[index]),
+                 source_gain_low=float(gain[index]-missing)) for index in ordered[:count]]
