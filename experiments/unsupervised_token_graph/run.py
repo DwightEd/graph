@@ -5,7 +5,10 @@ import sys
 
 def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
-    if args[:1] == ["regime"]:
+    if args[:1] == ["geometry"]:
+        from .head_geometry.run import main as entry
+        entry(args[1:])
+    elif args[:1] == ["regime"]:
         from .latent_regime.run import main as entry
         entry(args[1:])
     elif args[:1] == ["compatibility"]:
