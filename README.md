@@ -1,5 +1,9 @@
 # 候选内容与适用条件的功能一致性
 
+教学与独立复用入口：[State Audit](teaching/state_audit/README.md)。
+可单独安装，包含生成回答、准确 token 回放、逐层状态保存、离线审计和四世界消息干预；
+支持 Llama、Mistral、Qwen2，并提供无需下载模型的示例。
+
 两个项目的既有发现见[证据台账](docs/DETECTION_CONVERGENCE_20260919.md)。
 当前方案见[正负配对机制审计](docs/PAIRED_MECHANISM_20260920.md)：明确适用性、
 多头条件作用、下游补偿和时间持续性，再在同题重采样中逐项检验。
