@@ -6,7 +6,8 @@
 
 后续更新：本文保留既有证据和 v2 实现记录。最新文献核查与 v3 方法分别见
 [文献表](LITERATURE_TRANSPORT_20260919.md)、[目标消息追踪](TRANSPORT_METHOD_20260919.md)。
-`main.py flow` 现默认运行 v3；下文 v2 复算使用明确的模块入口。
+2026-09-20 更新：[配对机制审计](PAIRED_MECHANISM_20260920.md) 已成为 `main.py flow`
+主入口；原目标消息边实验迁移到 `flow-edges`。下文 v2 复算使用明确的模块入口。
 
 ## 1. 现在可以下的结论
 

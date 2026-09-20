@@ -26,16 +26,24 @@ def baseline_world(model, probe, directory):
     if path.exists():
         with np.load(path, allow_pickle=False) as saved:
             score = json.loads(str(saved["record"]))
-            writes = {str(unit): torch.from_numpy(vector.copy())
-                      for unit, vector in zip(saved["units"], saved["writes"])}
+            writes = {
+                str(unit): {branch: torch.from_numpy(saved["writes_" + branch][index].copy())
+                            for branch in ("prefix", "correct", "wrong")}
+                for index, unit in enumerate(saved["units"])
+            }
             reference = torch.from_numpy(saved["prefix_logp"].copy())
         return score, writes, reference
     score, run = evaluate_candidates(model, probe)
     units = sorted(run.message_writes)
-    writes = np.stack([run.message_writes[unit].float().numpy() for unit in units])
-    np.savez_compressed(path, record=json.dumps(score), units=np.array(units), writes=writes,
-                        prefix_logp=run.prefix_log_prob.numpy())
-    return score, run.message_writes, run.prefix_log_prob
+    arrays = {
+        "writes_" + branch: np.stack([values[unit].float().numpy() for unit in units])
+        for branch, values in run.branch_message_writes.items()
+    }
+    np.savez_compressed(path, record=json.dumps(score), units=np.array(units),
+                        prefix_logp=run.prefix_log_prob.numpy(), **arrays)
+    writes = {unit: {branch: values[unit] for branch, values in run.branch_message_writes.items()}
+              for unit in units}
+    return score, writes, run.prefix_log_prob
 
 
 def run_world(model, probe, directory, name, actions, reference):

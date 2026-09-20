@@ -1,0 +1,12 @@
+{
+  "sources": 2,
+  "panels": 6,
+  "finite_deletions": 60,
+  "gradient_finite_disagreements": 2,
+  "tested_pairs": 24,
+  "opposed_finite_pairs": 11,
+  "proposal_opposed_but_not_finite_opposed": 2,
+  "max_restoration_sham": 0.0737037926285797,
+  "minimum_effect_nats": 0.05,
+  "inference": "descriptive_existing_results_no_new_model_run"
+}

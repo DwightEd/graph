@@ -1,8 +1,9 @@
 # 候选内容与适用条件的功能一致性
 
 两个项目的既有发现见[证据台账](docs/DETECTION_CONVERGENCE_20260919.md)。
-本轮核对了 [18 项原始文献](docs/LITERATURE_TRANSPORT_20260919.md)，
-更新[方法设计与实现](docs/TRANSPORT_METHOD_20260919.md)。
+当前方案见[正负配对机制审计](docs/PAIRED_MECHANISM_20260920.md)：明确适用性、
+多头条件作用、下游补偿和时间持续性，再在同题重采样中逐项检验。
+文献包括前轮 [18 项核查](docs/LITERATURE_TRANSPORT_20260919.md) 及本轮 GoS、Saliency、RAUQ 方法复核。
 内部逐头模式可被监督读出；尚无已验证的通用无监督绑定检测器。
 
 本轮主入口：
@@ -11,10 +12,16 @@
 python -u main.py flow
 ```
 
-默认写入 `outputs/target_transport_v3`，重复命令自动续跑。读取 reanchor 既有样本，
-从完整候选 log 概率差反向追踪原模型，自动发现逐层、逐头、接收位置和来源位置的
-有符号消息；来源角色在选点后追加。执行两种剂量的单删、双头四世界干预，
-以及下游消息/MLP 恢复，同时保存首词与完整候选结果。这是机制实验，不是检测成绩。
+默认写入 `outputs/paired_head_transport_v1`，重复命令复用逐 world 缓存。
+读取 reanchor 既有样本，以两侧 onset 的完整候选目标选出共同物理 head，
+在子句前、起点、后半段、子句后测量单删、四世界条件作用、下游恢复和起点影响传递。
+self 与更早历史分开；原值写回使用各候选分支自己的基线；另存严格只读前缀的置信度对照。
+目前只核验了两个局部事实对，属于标签辅助机制审计，尚无新协议 8B 结果或检测成绩。
+上传 v3 结果的实际重算见 [60 次单删与 24 组双删](results/paired_audit_20260920/README.md)。
+
+`--stage inventory` 仅核对配对，`--stage screen` 只读原始 NPZ，`--stage report` 只重建报告。
+原目标消息边实验改用 `python main.py flow-edges`，新运行写入 `outputs/target_transport_v4`；
+只查看旧 v3 结果用 `flow-edges --stage report --output <原v3目录>`。
 原 v2 局部 lens 实验用 `python -m experiments.path_conflict.flow` 显式运行。
 `python main.py`显示入口；历史无标签基线需显式使用`unsupervised`。
 现有无标签HMM保留为竞争对照：`python main.py regime --phase all --resume`。

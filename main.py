@@ -5,14 +5,15 @@ import sys
 
 HELP = """Usage: python main.py COMMAND [arguments]
 
-  flow             Final-target native transport, head interactions and repair
+  flow             Resampled claim pairs: head interactions, repair and persistence
+  flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis
   unsupervised     Existing entropy/local-reuse baseline; no semantic binding readout
   supervised-s10   Historical supervised baseline
   supervised-s11   Historical supervised baseline
 
-Read docs/TRANSPORT_METHOD_20260919.md for the method, literature and remaining gaps.
+Read docs/PAIRED_MECHANISM_20260920.md for detection targets and the paired audit.
 No command starts an experiment automatically. Each command accepts --help.
 """
 
@@ -24,6 +25,9 @@ def main(argv=None):
         return
     command, arguments = argv[0], argv[1:]
     if command == "flow":
+        from experiments.path_conflict.paired import cli
+        cli(arguments)
+    elif command == "flow-edges":
         from experiments.path_conflict.transport import cli
         cli(arguments)
     elif command == "population":

@@ -4,7 +4,7 @@ Remove actual source-conditioned writes, without changing or renormalizing A.
 All interventions precede the candidate token; subsequent layers run normally.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import torch
 from torch.nn import functional as F
@@ -27,7 +27,7 @@ class Intervention:
     reference_norm: float | None = None
     queries: tuple = ()
     sources: tuple = ()
-    replacement: torch.Tensor | None = None
+    replacement: torch.Tensor | dict | None = None
 
 
 def request_layer_attention(module, args, kwargs):
@@ -154,8 +154,9 @@ class NativeRun:
     def capture_messages(self, index, module, attention, values):
         for unit in self.capture_units:
             if unit['layer'] == index:
+                sources = unit['sources'] if 'sources' in unit else [unit['source']]
                 _, write, _ = source_write(attention, values, module.o_proj.weight,
-                                          [unit['receiver']], [unit['source']], [unit['head']])
+                                          [unit['receiver']], sources, [unit['head']])
                 self.message_writes[unit['unit']] = write.detach().cpu()
 
     def apply(self, item, module, attention, values, output):
@@ -257,7 +258,14 @@ class NativeRun:
                     local_linear_support=float(messages[head].float() @ direction)))
 
 
-def forward(model, ids, probe, interventions=(), restore=None):
+def forward(model, ids, probe, interventions=(), restore=None, branch='prefix'):
+    # A full-candidate forward can have different bf16 rounding from a short
+    # prefix. Restore the baseline from this exact candidate branch and shape.
+    interventions = tuple(
+        replace(item, replacement=item.replacement[branch])
+        if isinstance(item.replacement, dict) else item
+        for item in interventions
+    )
     tensor = torch.tensor([ids], device=next(model.parameters()).device)
     first_ids = [candidate[0] for candidate in probe['candidates']]
     with torch.inference_mode(), NativeRun(model, len(probe['prefix_ids']), probe['groups'],

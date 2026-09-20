@@ -21,10 +21,11 @@ def read_prefix(model, probe, interventions=(), restore=None):
     return record, run, log_prob
 
 
-def continuation_logps(model, probe, candidate, first_logp, interventions, restore):
+def continuation_logps(model, probe, candidate, first_logp, interventions, restore, branch):
     from .native import forward
     # The candidate is forced only after the intervention query. No later cut is added.
-    _, run = forward(model, probe['prefix_ids'] + candidate[:-1], probe, interventions, restore)
+    _, run = forward(model, probe['prefix_ids'] + candidate[:-1], probe,
+                     interventions, restore, branch=branch)
     start = len(probe['prefix_ids']) - 1
     states = run.final_normalized[start:start + len(candidate)]
     with torch.inference_mode():
@@ -34,18 +35,21 @@ def continuation_logps(model, probe, candidate, first_logp, interventions, resto
     branch_difference = float(selected[0]) - first_logp
     selected = selected.clone()
     selected[0] = first_logp
-    return selected.cpu().tolist(), branch_difference
+    return selected.cpu().tolist(), branch_difference, run.message_writes
 
 
 def evaluate_candidates(model, probe, interventions=(), restore=None, sequence=True, reference_logp=None):
     record, run, log_prob = read_prefix(model, probe, interventions, restore)
+    run.branch_message_writes = {'prefix': run.message_writes}
     if reference_logp is not None:
         reference = reference_logp.to(log_prob)
         record['vocabulary_kl_from_full'] = float((reference.exp() * (reference - log_prob)).sum())
     if sequence:
         for name, candidate in zip(('correct', 'wrong'), probe['candidates']):
             first = record[name + '_first_logp']
-            logs, disagreement = continuation_logps(model, probe, candidate, first, interventions, restore)
+            logs, disagreement, writes = continuation_logps(
+                model, probe, candidate, first, interventions, restore, name)
+            run.branch_message_writes[name] = writes
             record[name + '_token_logps'] = logs
             record[name + '_logp'] = sum(logs)
             record[name + '_mean_logp'] = sum(logs) / len(logs)

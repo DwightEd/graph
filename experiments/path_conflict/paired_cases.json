@@ -1,0 +1,86 @@
+[
+  {
+    "case_id": "14315_headwear_scope",
+    "source_id": "14315",
+    "annotation": "analyst-reviewed local source support; not an official RAGTruth response label",
+    "supported": {
+      "seed": 1,
+      "target": "caps with a folded piece of cloth tied on top"
+    },
+    "unsupported": {
+      "seed": 2,
+      "target": "a headdress with a special fringe of gold and feathers"
+    },
+    "candidates": [
+      " caps with a folded piece of cloth tied on top",
+      " a headdress with a special fringe of gold and feathers"
+    ],
+    "evidence": [
+      "Only the Inca could wear",
+      "Both men and women used cap. On their cap they tied a folded piece of cloth."
+    ],
+    "value_source": [
+      "a headdress with his special fringe of gold and feathers."
+    ],
+    "rationale": "The special headdress is restricted to the Inca ruler. Generalizing it to the clothes/people described by They drops this restriction. The caps statement has explicit support. Only this headwear clause is labelled; the rest of each answer is not certified.",
+    "prefix_caution": "The supported seed-1 answer also contains a separate tunic-length overgeneralization earlier. It is NOT an entirely correct answer or an error-free history control.",
+    "control_scope": "Same prompt/model and same local claim type; different natural prefixes/wording. Does not isolate current support from all previous-history effects.",
+    "source_roles": {
+      "scope": [
+        "Only the Inca could wear"
+      ],
+      "supported_value": [
+        "Both men and women used cap. On their cap they tied a folded piece of cloth."
+      ],
+      "value_source": [
+        "a headdress with his special fringe of gold and feathers."
+      ]
+    },
+    "evidence_status": "reviewed_candidate_support_not_exhaustive_world_truth",
+    "history_status": {
+      "supported": "contains_other_overgeneralization",
+      "unsupported": "not_fully_reviewed"
+    }
+  },
+  {
+    "case_id": "14375_onion_stage",
+    "source_id": "14375",
+    "annotation": "analyst-reviewed local source support; not an official RAGTruth response label",
+    "supported": {
+      "seed": 1,
+      "target": "over low heat"
+    },
+    "unsupported": {
+      "seed": 0,
+      "target": "for 10 to 12 minutes"
+    },
+    "candidates": [
+      " over low heat",
+      " for 10 to 12 minutes"
+    ],
+    "evidence": [
+      "Remove the bratwurst from the beer mixture; reduce heat to low, and continue cooking the onions."
+    ],
+    "value_source": [
+      "Reduce heat to medium and cook another 10 to 12 minutes."
+    ],
+    "rationale": "The 10-12 minute interval precedes removal of the bratwurst. It is not supplied as the duration of cooking the onions after removal. Continue over low heat is directly supported. This is an unsupported time-to-stage binding, not proof the duration is impossible in the real world.",
+    "control_scope": "Same prompt/model and same local claim type; different natural prefixes/wording. Does not isolate current support from all previous-history effects.",
+    "source_roles": {
+      "scope": [
+        "Remove the bratwurst from the beer mixture;"
+      ],
+      "supported_value": [
+        "reduce heat to low, and continue cooking the onions."
+      ],
+      "value_source": [
+        "Reduce heat to medium and cook another 10 to 12 minutes."
+      ]
+    },
+    "evidence_status": "reviewed_candidate_support_not_exhaustive_world_truth",
+    "history_status": {
+      "supported": "not_fully_reviewed",
+      "unsupported": "not_fully_reviewed"
+    }
+  }
+]

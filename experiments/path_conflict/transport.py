@@ -15,7 +15,7 @@ from .transport_plan import select_units, select_message_pairs
 from .transport_trials import baseline_world, single_worlds, joint_worlds, mediation_worlds
 
 
-PROTOCOL = "target_transport_v3"
+PROTOCOL = "target_transport_v4_branch_restore"
 
 
 def freeze_json(path, value):
@@ -94,7 +94,7 @@ def prepare(args):
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     if (output / "flow_config.json").exists():
-        raise ValueError("This directory contains v1/v2 results; use a new v3 output directory")
+        raise ValueError("This directory contains v1/v2 results; use a new v4 output directory")
     cases = json.loads(Path(args.cases).read_text())
     directory = output / "inventory"
     directory.mkdir(exist_ok=True)
@@ -129,7 +129,7 @@ def run_transport(args):
         config["model"], local_files_only=True, torch_dtype=getattr(torch, args.dtype),
         attn_implementation="eager").to(args.device).eval().requires_grad_(False)
     if model.config.model_type != "llama":
-        raise ValueError("Transport v3 is validated for native Llama eager attention only")
+        raise ValueError("Transport requires native Llama eager attention")
     for entry in tqdm(compiled, desc="reviewed cases"):
         case = entry["case"]
         for side, native in entry["sides"].items():
@@ -146,7 +146,7 @@ def cli(argv=None):
     parser.add_argument("--stage", choices=["inventory", "run", "report"], default="run")
     parser.add_argument("--samples", default=DEFAULT_SAMPLES)
     parser.add_argument("--cases", default=str(Path(__file__).with_name("cases.json")))
-    parser.add_argument("--output", default="outputs/target_transport_v3")
+    parser.add_argument("--output", default="outputs/target_transport_v4")
     parser.add_argument("--model")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--dtype", choices=["float32", "float16", "bfloat16"], default="bfloat16")

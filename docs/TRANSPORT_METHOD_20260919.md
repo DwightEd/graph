@@ -1,5 +1,9 @@
 # 从完整候选回查原生消息，再检验多头关系
 
+2026-09-20 入口更新：本文保留 v3 方法记录。当前 `main.py flow` 是
+[同题正负配对审计](PAIRED_MECHANISM_20260920.md)；本目标消息边实验改用 `flow-edges`，
+候选分支写回修正后的新运行写入 v4 目录。历史 v3 CSV 可直接重建报告。
+
 本轮基于 graph `bd5ae7d`，继续使用 reanchor 的原始 token IDs 与同题重采样。
 文献核查见 [18 项相关工作的采用边界](LITERATURE_TRANSPORT_20260919.md)，
 此前观察量与负结果见 [证据台账](DETECTION_CONVERGENCE_20260919.md)。
