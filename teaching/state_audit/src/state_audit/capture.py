@@ -1,5 +1,6 @@
 """Select representations, observe native execution, stream each layer to disk."""
 
+from collections import defaultdict
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass
 from functools import partial
@@ -33,6 +34,31 @@ class CaptureSpec:
 
 def numpy(value):
     return value.detach().float().cpu().numpy().copy()
+
+
+@contextmanager
+def capture_targets(model, targets):
+    """Observe named Targets in memory: result[name][layer], with None for global sites.
+
+    Install intervention hooks before this context to observe the changed execution.
+    Only selected coordinates are copied; layer/head/position identity stays in Target.
+    """
+    captured = {name: {} for name in targets}
+    sites = defaultdict(list)
+    for name, target in targets.items():
+        for layer in target.layers or (None,):
+            sites[target.representation, layer].append((name, target))
+
+    def observe(value, layer, selections):
+        for name, target in selections:
+            captured[name][layer] = numpy(value[target.indices(value)])
+        return value
+
+    with ExitStack() as stack:
+        for (representation, layer), selections in sites.items():
+            observer = partial(observe, layer=layer, selections=selections)
+            stack.enter_context(model.bind(representation, layer, observer))
+        yield captured
 
 
 class LayerCapture:

@@ -178,6 +178,16 @@ python -m state_audit check --run runs/demo --sample 0
 
 ## 支持范围与迁移
 
+0.3 新增固定前缀候选对比、轻量定点采集与逐层消息恢复，保留原 capture/operations API。
+独立教学示例（使用上面的 demo run，不依赖仓库 experiments）：
+
+```bash
+python examples/compare_messages.py --run runs/demo
+```
+
+核心接口与计算公式见 [消息交互](docs/INTERACTIONS.md)。项目中的真实审计入口只是这些接口的调用方，
+实验专用的来源角色、头名单和标签不进入模型适配器。
+
 当前原生适配器支持 Llama、Mistral、Qwen2（共享 decoder 布局，包含 GQA 与滑窗 mask）；
 Transformers 4.57.x。其他布局需在 model 中显式映射，不声称任意 `AutoModel` 都支持。
 批大小为 1，支持单设备加载与逐层落盘；全 attention 内存成本仍为二次方。

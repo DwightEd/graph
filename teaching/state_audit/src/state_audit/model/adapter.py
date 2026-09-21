@@ -44,6 +44,21 @@ class ModelAdapter:
         entropy = -(log_probs.exp() * log_probs).sum(-1)
         return actual, entropy
 
+    def head_layout(self, layer):
+        """Native query-head count, KV-head count, and head width, including GQA."""
+        attention = self.layers[layer].self_attn
+        width = attention.head_dim
+        return attention.q_proj.out_features // width, attention.k_proj.out_features // width, width
+
+    def project_heads(self, layer, readout, heads):
+        """[position, head, width] -> individual W_O writes; exclude shared output bias."""
+        projection = self.layers[layer].self_attn.o_proj.weight
+        count, _, width = self.head_layout(layer)
+        matrices = projection.reshape(projection.shape[0], count, width).permute(1, 2, 0)
+        selected = matrices[list(heads)].float()
+        values = torch.as_tensor(readout, device=projection.device, dtype=torch.float32)
+        return (values.transpose(0, 1) @ selected).transpose(0, 1)
+
     def module_at(self, name, layer):
         """Return (module, input_or_output) for a public representation."""
         if name == "embedding":

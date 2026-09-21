@@ -1,0 +1,14 @@
+{
+  "selection_status": "exploratory heads from previous case audits; not discovered or confirmed by this run",
+  "model_layout": "32 layers / 32 query heads; edit explicitly for another model",
+  "groups": [
+    {"name": "L21H11_evidence", "sites": [{"layer": 21, "heads": [11], "source": "evidence"}]},
+    {"name": "L22H28_evidence", "sites": [{"layer": 22, "heads": [28], "source": "evidence"}]},
+    {"name": "L23H6_value", "sites": [{"layer": 23, "heads": [6], "source": "value_source"}]},
+    {"name": "L23H18_history", "sites": [{"layer": 23, "heads": [18], "source": "history"}]},
+    {"name": "L25H4_value", "sites": [{"layer": 25, "heads": [4], "source": "value_source"}]},
+    {"name": "L26H31_evidence", "sites": [{"layer": 26, "heads": [31], "source": "evidence"}]},
+    {"name": "L27H8_history", "sites": [{"layer": 27, "heads": [8], "source": "history"}]},
+    {"name": "L31H14_history", "sites": [{"layer": 31, "heads": [14], "source": "history"}]}
+  ]
+}

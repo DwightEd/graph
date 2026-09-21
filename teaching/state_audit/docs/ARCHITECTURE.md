@@ -20,6 +20,11 @@
 
 ## 核心接口
 
+0.3 在这些边界内扩展：capture_targets 提供定点观察；experiments/contrasts 提供固定候选读出；
+experiments/messages 用已有操作组合出源消息恢复；analysis/interactions 只计算数值分解。
+仓库中的 head_interactions 实验复用这些 API，教学包仍不依赖外部研究目录。
+详见 [INTERACTIONS.md](INTERACTIONS.md)。
+
 ```python
 examples = load_examples(path)
 model, tokenizer = load_model(checkpoint, revision, device, dtype)
@@ -62,3 +67,6 @@ Steer 是沿单位方向加指定长度，不暗含分类器或训练。
 同状态替换、钩子恢复、重采样身份/续跑/标签隔离、全位置到回答位置对齐。
 可编辑安装及 demo/check/pair/Python 干预示例/JSON 干预入口已实际运行。
 未运行用户服务器上的大模型与自然数据，不提供新的机制或检测成绩。
+
+0.3 增量验证：包含新交互接口和仓库实验工作流在内共 102 项测试通过。
+定点采集、GQA 来源消息、BF16 恢复和独立 compare_messages 示例已运行；原 0.2 API 回归通过。

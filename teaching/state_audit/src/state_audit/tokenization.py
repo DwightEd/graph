@@ -81,3 +81,25 @@ def special_token_ids(tokenizer) -> list[int]:
     """Some chat control tokens are marked only in the added-token table."""
     marked = {index for index, token in tokenizer.added_tokens_decoder.items() if token.special}
     return sorted(set(tokenizer.all_special_ids) | marked)
+
+
+def quote_positions(tokenizer, token_ids, quotes):
+    """Map unique reviewed quotes onto immutable IDs; exclude special token positions."""
+    text = tokenizer.decode(token_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)
+    offsets = generated_offsets(tokenizer, token_ids, text)
+    if offsets is None:
+        raise ValueError("Decoded text does not round-trip; supply reviewed token positions")
+    return positions_for_quotes(text, offsets, quotes)
+
+
+def positions_for_quotes(text, offsets, quotes):
+    """Use verified tokenizer offsets when the original prompt text is already available."""
+    offsets = np.asarray(offsets)
+    positions = set()
+    for quote in quotes:
+        if text.count(quote) != 1:
+            raise ValueError(f"Reviewed quote must occur exactly once: {quote!r}")
+        start = text.index(quote)
+        hits = (offsets[:, 0] < start + len(quote)) & (offsets[:, 1] > start)
+        positions.update(np.flatnonzero(hits).tolist())
+    return tuple(sorted(positions))
