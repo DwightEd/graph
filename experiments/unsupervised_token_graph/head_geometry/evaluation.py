@@ -3,6 +3,7 @@
 import json
 
 import numpy as np
+from tqdm import tqdm
 
 from ..evaluate import Ranking, label_views, scoped_metrics
 from ..evaluation_data import EvaluationBinding, read_sources
@@ -16,7 +17,7 @@ COMPARISON_VIEWS = ("all_error", "first_error_until_first", "span_onset_vs_norma
                     "front_half_vs_normal", "back_half_vs_normal", "full_window", "warmup")
 
 
-def read_blocks(args):
+def read_blocks(args, include_context=False):
     root = args.output / "predictions"
     freeze = read_json(root / "freeze.json")
     if not freeze["complete"] or freeze["labels_used"]:
@@ -27,7 +28,7 @@ def read_blocks(args):
     binder = EvaluationBinding(dict(cache="/"), args.tokenizer)
     window = read_json(args.output / "settings.json")["window"]
     blocks = []
-    for row in freeze["records"]:
+    for row in tqdm(freeze["records"], desc="read frozen scores", unit="answer", disable=not include_context):
         annotation = annotations[row["id"]]
         with np.load(root / row["file"], allow_pickle=False) as saved:
             identity, offsets = binder.bind(row, annotation, saved, sources)
@@ -45,6 +46,15 @@ def read_blocks(args):
                 alarms={name: saved[name + "__alarm"].copy() for name in freeze["methods"]},
                 spans={name: saved[name + "__spans"].copy() for name in freeze["methods"]},
                 gold=token_spans(offsets, annotation["labels"])))
+            if include_context:
+                block = blocks[-1]
+                block.update(offsets=offsets.copy(), text=annotation["response"],
+                             annotation_spans=len(annotation["labels"]))
+                if "token_ids" in saved:
+                    prompt = int(saved["prompt_length"])
+                    block["token_ids"] = saved["token_ids"][prompt:prompt + len(offsets)].copy()
+                if "logit_entropy" in saved:
+                    block["entropy"] = saved["logit_entropy"].copy()
     if not blocks:
         raise ValueError("No frozen TEST predictions")
     return blocks, freeze
@@ -131,6 +141,7 @@ def evaluate_group(blocks, methods, draws, primary):
 
 def cross_term_comparisons(blocks, draws):
     pairs = (("pair_cross", "pair_state"), ("pair_diagonal", "pair_state"),
+             ("pair_state_smooth", "pair_state"),
              ("pair_covariance", "pair_diagonal"), ("pair_persistence", "pair_diagonal"),
              ("moment", "raw"), ("moment", "moment_diagonal"),
              ("moment_cross", "moment_diagonal"))

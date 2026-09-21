@@ -144,3 +144,11 @@ OBSERVATIONS=outputs/head_geometry_middle \
 主要看 `predictions/task_summary.md`、`predictions/comparisons.csv` 和各任务 `evaluation.json`。
 `pair_full` 是预先指定的主候选，其他 `pair_*` 分别控制交叉项、持续状态与因果时间平滑。
 这些是待验证的消融，不代表已经获得新的真实数据检测成绩。
+
+## 连续性审计入口
+
+已有交叉项结果可直接运行
+`bash experiments/unsupervised_token_graph/head_geometry/run_continuity.sh --bootstrap 1000`。
+复用冻结分数，输出总体增益的阶段分解、严格同答排序、匹配正常 span、告警延迟及顺序空模型，
+自动生成 `outputs/head_cross_terms_v1_continuity_review.tar.gz`。
+协议及文件说明见 [CONTINUITY_AUDIT.md](CONTINUITY_AUDIT.md)。
