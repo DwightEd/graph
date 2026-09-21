@@ -121,9 +121,12 @@ def test_empty_source_is_observed_zero_not_an_invented_message(tiny_run):
     assert removed[0] == baseline[0]
 
 
-def test_bfloat16_source_delete_restore_stays_within_control_tolerance(tiny_run):
+def test_bfloat16_source_delete_restore_matches_native_exactly(tiny_run):
     model, prefix, candidates = contrast(tiny_run)
     model.native.to(torch.bfloat16)
+    with torch.no_grad():
+        for layer in model.layers:
+            layer.self_attn.v_proj.weight.mul_(16)
     sites = [
         MessageSite(f"route{layer}", layer, (0, 3), (len(prefix) - 1,), (2, 4, 6))
         for layer in (0, 1)
@@ -135,4 +138,8 @@ def test_bfloat16_source_delete_restore_stays_within_control_tolerance(tiny_run)
     baseline = evaluate([])
     operations = [site.deletion() for site in sites]
     restored = restore_messages(evaluate, sites, baseline[1], operations)
-    assert abs(restored[0]["sum_margin"] - baseline[0]["sum_margin"]) <= 0.01
+    assert restored[0] == baseline[0]
+    for site in sites:
+        np.testing.assert_array_equal(
+            restored[1][site.name]["total_readout"], baseline[1][site.name]["total_readout"]
+        )

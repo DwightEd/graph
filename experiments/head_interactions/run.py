@@ -23,7 +23,7 @@ def arguments():
     parser.add_argument("--plan", type=Path, default=DEFAULT_PLAN)
     parser.add_argument("--model", help="Checkpoint override, e.g. after relocating local weights")
     parser.add_argument("--revision", default="main")
-    parser.add_argument("--output", type=Path, default=Path("outputs/head_interactions_v1"))
+    parser.add_argument("--output", type=Path, default=Path("outputs/head_interactions_v2"))
     parser.add_argument("--stage", choices=("run", "prepare", "report"), default="run")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--dtype", choices=("float32", "float16", "bfloat16"), default="bfloat16")
@@ -122,7 +122,9 @@ def execute(model, tokenizer, cases, plan, args):
 
 def freeze_settings(model, cases, plan, args, name):
     settings = dict(
-        protocol_version=1,
+        protocol_version=2,
+        source_restore="native_contraction_source_replacement",
+        candidate_shape="equal_length_causal_tail_padding",
         purpose="candidate_conditioned_mechanism_audit_not_detector_evaluation",
         model=name,
         revision=args.revision,

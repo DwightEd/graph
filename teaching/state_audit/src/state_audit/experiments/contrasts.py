@@ -12,10 +12,13 @@ def score_contrast(model, prefix_ids, candidates, operations=()):
     if list(candidates[0]) == list(candidates[1]):
         raise ValueError("Candidate token sequences must differ")
     token_logp = []
+    length = max(map(len, candidates))
     for candidate in candidates:
+        # Causal tail padding equalizes GEMM shapes; these future tokens are never scored.
+        tail = [prefix_ids[-1]] * (length - len(candidate))
         answer = dict(
             prompt_length=len(prefix_ids),
-            token_ids=[*prefix_ids, *candidate],
+            token_ids=[*prefix_ids, *candidate, *tail],
             response_ids=candidate,
         )
         scores = score_targets(model, answer, list(range(len(candidate))), operations)

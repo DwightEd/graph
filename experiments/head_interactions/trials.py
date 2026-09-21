@@ -84,9 +84,10 @@ def pack_operations(operations, arrays):
     records = []
     for index, operation in enumerate(operations):
         record = dict(operation=type(operation).__name__, **asdict(operation))
-        if "value" in record:
-            key = f"operation_{index}_value"
-            arrays[key] = np.asarray(record.pop("value"))
-            record["value_array"] = key
+        for field in ("value", "weights", "values"):
+            if field in record:
+                key = f"operation_{index}_{field}"
+                arrays[key] = np.asarray(record.pop(field))
+                record[field + "_array"] = key
         records.append(record)
     return records

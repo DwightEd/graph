@@ -21,9 +21,16 @@ def compare_readout(baseline, changed, atol):
     ]
     error = float(max(differences))
     margin_error = abs(baseline[0]["sum_margin"] - changed[0]["sum_margin"])
+    message_errors = {
+        name: float(np.max(np.abs(values["total_readout"] - changed[1][name]["total_readout"])))
+        for name, values in baseline[1].items()
+    }
+    worst_site = max(message_errors, key=message_errors.get)
     return dict(
         max_token_logp_error=error,
         margin_error=margin_error,
+        max_head_readout_error=message_errors[worst_site],
+        worst_message_site=worst_site,
         passed=bool(np.isfinite(error) and max(error, margin_error) <= atol),
     )
 

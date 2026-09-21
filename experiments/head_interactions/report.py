@@ -247,6 +247,7 @@ def write_review(root, summary, aggregate_rows):
         "",
         f"已完成 {summary['completed_panels']}/{summary['expected_panels']} 个 panel；"
         f"有效 {summary['valid_panels']}；失败控制 {summary['failed_controls']}。",
+        f"失败控制类型：{summary['failed_control_types']}。",
         "",
         "先看 inventory.csv 和 controls.csv，再看 interactions.csv 的四个 F。",
         "sum_margin 为主读出，mean_margin 仅为长度敏感性检查；自然两侧前缀不同。",
@@ -293,6 +294,12 @@ def report(root: Path, draws=1000):
         completed_cases=len({row["case_id"] for row in tables["inventory"]}),
         valid_panels=sum(int(row["valid"]) for row in tables["inventory"]),
         failed_controls=sum(int(not row["passed"]) for row in tables["controls"]),
+        failed_control_types={
+            name: sum(
+                int(not row["passed"]) for row in tables["controls"] if row["control"] == name
+            )
+            for name in ("zero_strength", "self_restore", "delete_restore")
+        },
         interaction_rows=len(tables["interactions"]),
         adaptation_rows=len(tables["adaptation"]),
         readouts=["sum_margin", "mean_margin", "candidate_sum_margin"],

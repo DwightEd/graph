@@ -98,14 +98,18 @@ base 与 applicability_swap 同时进行双向 donor 替换；value_swap 和 par
 ```
 
 `source: all` 为整头；其他名字选择该来源的 A·V 消息。删除不重归一化，增强默认 gain=1.5。
-恢复指定来源时在 head_readout 上注入 reference − current；其他来源保留。
-多层恢复逐层重算。注意 `write` 是本次原生 A·V 分量，`total_write` 才包含人为注入后的整个头。
+恢复指定来源时使用 teaching 的 ReplaceSource，在完整原生 A @ V 中替换来源权重和值；其他来源保留。
+不再把分别舍入的 BF16 消息相加。多层恢复逐层重算，候选使用等长、因果的尾部填充。
+注意 `write` 是本次原始路由的 A·V 分量，`total_write` 才包含人为替换后的整个头。
 
 ## 结果与续跑
 
-默认目录 `outputs/head_interactions_v1`，每个 trial 成功后原子保存 JSON/NPZ；中断重跑同一命令。
+默认目录 `outputs/head_interactions_v2`，每个 trial 成功后原子保存 JSON/NPZ；中断重跑同一命令。
 配置改变使用新 OUTPUT，不混用旧结果。进度分 panel 与 trial 两级。
-完成后自动生成仓库根目录下的 `outputs/head_interactions_v1_review.tar.gz`。
+完成后自动生成仓库根目录下的 `outputs/head_interactions_v2_review.tar.gz`。
+v1 八组的删除后恢复失败诊断见 [FAILURE_REVIEW_20260921.md](FAILURE_REVIEW_20260921.md)。
+协议版本升为 2，不读取旧 trial 作为新恢复结果；已有 v1 目录和压缩包保持原样。
+控制阈值仍为 0.01 nats。新增失败类型计数及头状态恢复误差，不放宽门槛。
 
 |文件|回答的问题|
 |---|---|
@@ -148,7 +152,8 @@ bash experiments/head_interactions/run_all.sh --stage prepare
 
 软件验证与自然实验分开记录。CPU 随机小模型验证数值和工程行为，不能解释为发现了幻觉机制。
 
-2026-09-21 实际验证：teaching 全部测试与本实验共 102 项通过，包含 Llama/Mistral/Qwen2、
-GQA、BF16 删除后恢复、候选方向、原始 offset/特殊 token、逐层恢复、donor、随机头、
-source 统计、失败控制与续跑。一键 CLI、教学 compare_messages 示例与自动压缩包均已运行。
-未在用户服务器 checkpoint 或自然配对数据上运行新干预，没有新增自然机制结论或 AUROC。
+2026-09-21 修复后实际验证：teaching 全部测试与本实验共 108 项通过，包含 Llama/Mistral/Qwen2、
+GQA、增大 value 幅值后的 BF16 逐层精确恢复，以及不同长度 donor、query 隔离、同头多来源组合。
+此前 102 项中仅检查小幅值 BF16 的误差低于 0.01，未覆盖此次真实数据暴露的问题。
+已经分析用户上传的 v1 自然数据；修复版尚未在其 8B CUDA checkpoint 上运行。
+没有新增自然机制结论或 AUROC。

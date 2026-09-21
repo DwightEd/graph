@@ -9,7 +9,7 @@
 - model/sites.py：公开表征名、张量轴；模型适配不得散落到研究代码。
 - state.py：LayerState、ModelState；状态容器，逐层懒加载，不预设研究特征。
 - capture.py：CaptureSpec、capture_sample/run；观察器、落盘、释放钩子。
-- operations/：Target 与 Delete/Replace/Inject/Steer；纯张量变换。
+- operations/：Target 与 Delete/Replace/Inject/Steer，以及原生收缩内的 ReplaceSource；纯张量变换。
 - intervention.py：把操作临时装到模型；作用范围由上下文管理器管理。
 - generation.py：GenerationOptions；同题 × seed 重采样，原回答回放。
 - pairing.py：按明确审阅结果配对；未知标签不充当正确样本。
@@ -69,4 +69,7 @@ Steer 是沿单位方向加指定长度，不暗含分类器或训练。
 未运行用户服务器上的大模型与自然数据，不提供新的机制或检测成绩。
 
 0.3 增量验证：包含新交互接口和仓库实验工作流在内共 102 项测试通过。
+
+0.3.1 修复 BF16 来源恢复：改为完整原生 A @ V 内的来源替换，新增压力与隔离测试，共 108 项通过。
+原始来源观测与替换后的头总状态分别保留；详见 INTERACTIONS.md。
 定点采集、GQA 来源消息、BF16 恢复和独立 compare_messages 示例已运行；原 0.2 API 回归通过。

@@ -8,7 +8,7 @@ import torch
 
 from ..capture import capture_targets, numpy
 from ..intervention import intervene
-from ..operations import Delete, Inject, Replace, Target
+from ..operations import Delete, Replace, ReplaceSource, Target
 from .contrasts import score_contrast
 
 
@@ -61,13 +61,15 @@ class MessageSite:
             readout=readout,
             total_readout=captured[self.name + ":total"][self.layer],
             mass=attention.sum(-1).T,
+            attention=attention,
+            values=values[inverse],
         )
 
     def replacement(self, reference, current):
-        """Replace a whole head or add donor-minus-current for only the selected sources."""
+        """Replace only selected contributions before native A @ V is rounded."""
         if self.keys is None:
             return Replace(self.target, reference["readout"])
-        return Inject(self.target, reference["readout"] - current["readout"])
+        return ReplaceSource(self.deletion().target, reference["attention"], reference["values"])
 
 
 def measure_messages(model, prefix_ids, candidates, sites, operations=()):

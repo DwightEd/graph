@@ -70,6 +70,7 @@ def test_full_workflow_donor_random_report_and_resume_without_forward(audit, mon
     result = report(args.output, draws=10)
     assert result["expected_panels"] == result["completed_panels"] == 4
     assert result["valid_panels"] == 4 and result["failed_controls"] == 0
+    assert result["failed_control_types"] == dict(zero_strength=0, self_restore=0, delete_restore=0)
     assert result["interaction_rows"] == 18  # 4 zero-reference + 2 donor panels, three readouts.
     assert result["adaptation_rows"] == 12
     assert (args.output.parent / "audit_review.tar.gz").is_file()
@@ -137,6 +138,9 @@ def test_report_partial_and_failed_panels_are_not_successful(audit):
     write_json(path, result)
     summary = report(args.output, draws=0)
     assert summary["failed_controls"] == 1 and summary["valid_panels"] == 3
+    assert summary["failed_control_types"] == dict(
+        zero_strength=0, self_restore=1, delete_restore=0
+    )
 
 
 def test_semantic_comparison_keeps_candidate_direction_when_support_flips():

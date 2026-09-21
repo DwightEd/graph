@@ -8,6 +8,8 @@ from unittest.mock import patch
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from ..operations.messages import replace_source_readouts
+
 SUPPORTED_MODELS = ("llama", "mistral", "qwen2")
 
 
@@ -119,10 +121,10 @@ class ModelAdapter:
             handle.remove()
 
     @contextmanager
-    def bind_attention(self, layer, transform, edit):
+    def bind_attention(self, layer, transform, edit, replacements=()):
         attention = self.layers[layer].self_attn
         if edit:
-            forward = self.attention_forward(transform)
+            forward = self.attention_forward(transform, replacements)
             with patch.object(attention, "forward", MethodType(forward, attention)):
                 yield
             return
@@ -136,7 +138,7 @@ class ModelAdapter:
         finally:
             handle.remove()
 
-    def attention_forward(self, transform):
+    def attention_forward(self, transform, replacements=()):
         """Native Q/K/RoPE/mask; edit probabilities before A @ V and o_proj."""
         implementation = self.implementation
 
@@ -155,7 +157,8 @@ class ModelAdapter:
             changed = transform(weights[0]).unsqueeze(0)
             validate_attention(changed, attention_mask)
             expanded_value = implementation.repeat_kv(value, module.num_key_value_groups)
-            output = (changed @ expanded_value).transpose(1, 2)
+            output = replace_source_readouts(changed, expanded_value, replacements)
+            output = output.transpose(1, 2)
             output = output.reshape(*hidden_states.shape[:-1], -1).contiguous()
             return module.o_proj(output), changed
 

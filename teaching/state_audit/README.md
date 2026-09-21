@@ -27,7 +27,7 @@ python -m pytest -q
 | `model/` | 原生模块与表征轴映射、forward、读出 | 数据集解析、特征设计 |
 | `state.py` | ModelState / LayerState，逐层读取与绝对位置查询 | 把所有状态同时装进内存 |
 | `capture.py` | 选择表征、观察、逐层保存、移除 hook | 写入干预、挑幻觉 token |
-| `operations/` | Target、Delete、Replace、Inject、Steer | 固定两个 head、固定来源类别 |
+| `operations/` | Target、Delete、Replace、Inject、Steer、ReplaceSource | 固定两个 head、固定来源类别 |
 | `intervention.py` | 将操作临时接入真实模型执行 | 规定具体研究假设 |
 | `generation.py` | 同题多次采样、原回答回放、身份与 seed | 继承旧答案的幻觉标签 |
 | `pairing.py` | 导入审阅结果，按同题配正常/错误回答 | 把未标注回答当正常 |

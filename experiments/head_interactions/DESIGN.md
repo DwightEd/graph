@@ -46,7 +46,7 @@ candidate_sum_margin 始终为候选 0−1，跨条件的交互差只用后者�
 1. 本设计及接口骨架。
 2. teaching/capture.py：指定 Target 的轻量采集；继续复用 ModelAdapter.bind 和资源清理。
 3. teaching/experiments/contrasts.py：固定前缀的候选对比；复用 score_targets。
-4. teaching/experiments/messages.py：来源消息的读取、删除与恢复；复用 Target/Delete/Inject/Replace。
+4. teaching/experiments/messages.py：来源消息的读取、删除与恢复；复用 Target/Delete/Replace/ReplaceSource。
 5. teaching/analysis/interactions.py：纯数值的四条件与补偿分解。
 6. experiments/head_interactions：输入适配、实验条件、分来源报告和一键入口。
 

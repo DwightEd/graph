@@ -4,12 +4,12 @@ from collections import defaultdict
 from contextlib import ExitStack, contextmanager
 from functools import partial
 
-from .operations import apply_operations
+from .operations import ReplaceSource, apply_operations
 
 
 @contextmanager
 def intervene(model, operations):
-    """Group by representation/layer; preserve the order within each site."""
+    """Group by site: routing edits precede source replacements and head readout hooks."""
     sites = defaultdict(list)
     for operation in operations:
         target = operation.target
@@ -17,6 +17,11 @@ def intervene(model, operations):
             sites[target.representation, layer].append(operation)
     with ExitStack() as stack:
         for (name, layer), selected in sites.items():
-            transform = partial(apply_operations, operations=selected)
-            stack.enter_context(model.bind(name, layer, transform, edit=True))
+            replacements = [op for op in selected if isinstance(op, ReplaceSource)]
+            edits = [op for op in selected if not isinstance(op, ReplaceSource)]
+            transform = partial(apply_operations, operations=edits)
+            if replacements:
+                stack.enter_context(model.bind_attention(layer, transform, True, replacements))
+            else:
+                stack.enter_context(model.bind(name, layer, transform, edit=True))
         yield
