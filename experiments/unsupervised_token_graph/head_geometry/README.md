@@ -129,3 +129,18 @@ OUTPUT=outputs/head_geometry_v2_w1 bash experiments/unsupervised_token_graph/hea
 python -m pytest -q experiments/unsupervised_token_graph/head_geometry/tests \
   experiments/unsupervised_token_graph/head_roles/tests
 ```
+## 交叉项审计
+
+新增可选 `cross_terms` 实验，保留旧 `geometry` 默认行为。方案与判读规则见
+[CROSS_TERMS_DESIGN.md](CROSS_TERMS_DESIGN.md)。
+
+```bash
+OBSERVATIONS=outputs/head_geometry_middle \
+  bash experiments/unsupervised_token_graph/head_geometry/run_cross_terms.sh
+```
+
+复用已有 observations，继承其任务/层/头选择，不重新加载模型或扫描大 attention 缓存。
+默认输出 `outputs/head_cross_terms_v1`；成功后自动生成同名 `_review.tar.gz`。
+主要看 `predictions/task_summary.md`、`predictions/comparisons.csv` 和各任务 `evaluation.json`。
+`pair_full` 是预先指定的主候选，其他 `pair_*` 分别控制交叉项、持续状态与因果时间平滑。
+这些是待验证的消融，不代表已经获得新的真实数据检测成绩。

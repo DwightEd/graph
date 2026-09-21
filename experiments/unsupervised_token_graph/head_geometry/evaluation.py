@@ -8,7 +8,12 @@ from ..evaluate import Ranking, label_views, scoped_metrics
 from ..evaluation_data import EvaluationBinding, read_sources
 from ..fixed_graph.evaluation import interval_report, metric_arrays, token_spans
 from .pipeline import read_json
-from .reporting import evaluation_groups, group_identity, save_reports
+from .reporting import archive_review, evaluation_groups, group_identity, save_reports
+
+
+COMPARISON_VIEWS = ("all_error", "first_error_until_first", "span_onset_vs_normal",
+                    "continuation_vs_normal", "previous_normal", "previous_error",
+                    "front_half_vs_normal", "back_half_vs_normal", "full_window", "warmup")
 
 
 def read_blocks(args):
@@ -112,15 +117,30 @@ def evaluate_group(blocks, methods, draws, primary):
             views[view][name] = metric
     differences = {}
     controls = [name for name in methods if name.startswith("all__") and name != primary]
-    for view in ("all_error", "first_error_until_first", "span_onset_vs_normal",
-                 "continuation_vs_normal", "previous_error", "front_half_vs_normal", "back_half_vs_normal"):
+    for view in COMPARISON_VIEWS:
         differences[view] = {}
         for control in controls:
             differences[view][control] = paired_difference(
                 blocks, view, primary, control, draws)
+    extra = cross_term_comparisons(blocks, draws) if primary == "all__pair_full" else {}
     return dict(answers=len(blocks), views=views, primary_minus_control=differences,
+                planned_comparisons=extra,
                 availability=availability_report(blocks, primary),
                 spans={name: interval_report(blocks, name) for name in methods})
+
+
+def cross_term_comparisons(blocks, draws):
+    pairs = (("pair_cross", "pair_state"), ("pair_diagonal", "pair_state"),
+             ("pair_covariance", "pair_diagonal"), ("pair_persistence", "pair_diagonal"),
+             ("moment", "raw"), ("moment", "moment_diagonal"),
+             ("moment_cross", "moment_diagonal"))
+    result = {}
+    for left, right in pairs:
+        left, right = "all__" + left, "all__" + right
+        result[left + "_minus_" + right] = dict(left=left, right=right,
+            views={view: paired_difference(blocks, view, left, right, draws)
+                   for view in COMPARISON_VIEWS})
+    return result
 
 
 def evaluate(args):
@@ -151,4 +171,7 @@ def evaluate(args):
             print(json.dumps(dict(identities[group], group=group, method=name, tokens=metric["evaluated_tokens"],
                   coverage=metric["coverage"], **metric["pooled"])), flush=True)
     save_reports(args.output / "predictions", report, identities)
+    if read_json(args.output / "settings.json").get("suite") == "cross_terms":
+        archive = archive_review(args.output)
+        print(json.dumps(dict(archive=str(archive))), flush=True)
     return report

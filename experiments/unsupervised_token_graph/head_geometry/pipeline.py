@@ -11,7 +11,8 @@ from ..fixed_graph.reference import (
     novelty_distance, sample_reference_rows, split_sources,
 )
 from ..offline_span.data import write_json
-from .geometry import ENERGIES, PRIMARY, embed, fit_geometry
+from . import cross_terms
+from .geometry import ENERGIES, PRIMARY, embed, fit_coordinates, fit_geometry
 
 
 def read_json(path):
@@ -38,8 +39,9 @@ def selected_observations(root, selected):
 def embeddings_from_file(path, model, args, positions=None):
     with np.load(path, allow_pickle=False) as saved:
         layers = np.unique(saved["channels"][:, 0])
-        return embed(saved["observations"], saved["coverage"], layers,
-                     model, args, positions)
+        transform = cross_terms.embed if args.suite == "cross_terms" else embed
+        return transform(saved["observations"], saved["coverage"], layers,
+                         model, args, positions)
 
 
 def reference_embeddings(root, selected, model, args):
@@ -65,6 +67,8 @@ def score_file(path, model, references, args):
                 scores[name][positions] = np.mean(values ** 2, axis=1)
             else:
                 scores[name][positions] = novelty_distance(values, references[name])
+    if args.suite == "cross_terms":
+        cross_terms.add_smooth_scores(scores, counts, args.window)
     return scores, positions, counts, embeddings
 
 
@@ -90,11 +94,15 @@ def fit_group(root, rows, roles, directory, args):
     selected = sample_reference_rows(root, fitting, args.bank_size,
                                      args.tokens_per_source, args.seed)
     observations = selected_observations(root, selected)
-    model = fit_geometry(observations, args.signal_indices, args.ridge)
+    fitting_function = fit_coordinates if args.suite == "cross_terms" else fit_geometry
+    model = fitting_function(observations, args.signal_indices, args.ridge)
     arrays = reference_embeddings(root, selected, model, args)
-    references = {name: (dict(energy=np.array(True)) if name.split("__")[1] in ENERGIES
-                        else fit_reference(values, args.neighbors))
-                  for name, values in arrays.items()}
+    if args.suite == "cross_terms":
+        references = cross_terms.fit_references(arrays, args.neighbors)
+    else:
+        references = {name: (dict(energy=np.array(True)) if name.split("__")[1] in ENERGIES
+                            else fit_reference(values, args.neighbors))
+                      for name, values in arrays.items()}
     controls = group_calibration(root, calibration, model, references, args)
     np.savez_compressed(directory / "geometry.npz", **model)
     bank = {f"{name}___{key}": value for name, reference in references.items()
@@ -147,7 +155,7 @@ def score_answer(args, row, model, references, calibration, destination):
         alarm = arrays[name] > calibration[name]["threshold"]
         arrays[name + "__alarm"] = alarm
         arrays[name + "__spans"] = binary_spans(alarm)
-        if args.save_embeddings:
+        if args.save_embeddings and name in embeddings:
             arrays[name + "__embedding"] = embeddings[name]
     with np.load(source, allow_pickle=False) as saved:
         for key in ("coverage", "token_ids", "offsets", "prompt_length", "retained_mass",
@@ -157,8 +165,10 @@ def score_answer(args, row, model, references, calibration, destination):
         del arrays["offsets"]
     arrays["embedding_positions"] = positions
     # Keep each physical head's residual energy for audit, before scalar readout.
-    layers, heads, features = model["marginal_root"].shape[:3]
     for method in ENERGIES:
+        if "all__" + method not in embeddings:
+            continue
+        layers, heads, features = model["marginal_root"].shape[:3]
         vectors = embeddings["all__" + method].reshape(len(positions), layers, heads, features)
         arrays[method + "__per_head"] = np.mean(vectors ** 2, axis=-1)
     arrays["position"] = np.arange(row["tokens"], dtype=np.float32)
@@ -186,5 +196,6 @@ def score(args):
             score_answer(args, row, model, references, configured["calibration"], path)
         saved.append(dict(row, file=path.name))
     methods = list(next(iter(settings["groups"].values()))["calibration"])
+    primary = cross_terms.PRIMARY if args.suite == "cross_terms" else PRIMARY
     write_json(output / "freeze.json", dict(records=saved, methods=methods,
-               complete=True, labels_used=False, primary="all__" + PRIMARY))
+               complete=True, labels_used=False, primary="all__" + primary))

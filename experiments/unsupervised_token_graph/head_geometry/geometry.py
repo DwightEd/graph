@@ -61,7 +61,7 @@ def conditional_vectors(raw, model):
     return dict(independent_energy=marginal, conditional_energy=conditional)
 
 
-def fit_geometry(observations, signals, ridge):
+def fit_coordinates(observations, signals, ridge):
     raw, contrast = head_views(observations, signals)
     raw_center, raw_scale = robust_scale(raw)
     center, scale = robust_scale(contrast)
@@ -70,8 +70,14 @@ def fit_geometry(observations, signals, ridge):
     reference = moment + ridge * np.eye(moment.shape[-1])
     return dict(raw_center=raw_center, raw_scale=raw_scale, center=center, scale=scale,
                 inverse_root=matrix_function(reference, lambda value: value ** -.5),
-                reference_diagonal=np.diagonal(reference, axis1=-2, axis2=-1).copy(),
-                **fit_conditionals((raw - raw_center) / raw_scale, observations.shape[2], ridge))
+                reference_diagonal=np.diagonal(reference, axis1=-2, axis2=-1).copy())
+
+
+def fit_geometry(observations, signals, ridge):
+    model = fit_coordinates(observations, signals, ridge)
+    raw, _ = head_views(observations, signals)
+    normalized = (raw - model["raw_center"]) / model["raw_scale"]
+    return dict(model, **fit_conditionals(normalized, observations.shape[2], ridge))
 
 
 def window_counts(coverage, window):

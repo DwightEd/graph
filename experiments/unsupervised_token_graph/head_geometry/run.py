@@ -8,6 +8,7 @@ from threadpoolctl import threadpool_limits
 from ..offline_span.data import write_json
 from .inputs import SIGNALS, inspect, prepare, special_ids
 from .pipeline import fit, read_json, score
+from .reuse import inherit_observations, link_observations
 
 
 ROOT = Path("/share/home/tm902089733300000/a903202310/lys/data/RAGTruth")
@@ -25,6 +26,10 @@ def arguments(argv=None):
     parser.add_argument("--tokenizer", default=str(TOKENIZER))
     parser.add_argument("--special-token-ids", nargs="+", type=int)
     parser.add_argument("--output", type=Path, default=Path("outputs/head_geometry_v2"))
+    parser.add_argument("--suite", choices=["geometry", "cross_terms"], default="geometry")
+    parser.add_argument("--coordinates", choices=["raw", "contrast"], default="raw")
+    parser.add_argument("--observations-from", type=Path,
+                        help="reuse a prepared run; inherit its exact data/task/head selection")
     parser.add_argument("--tasks", nargs="+", default=["QA"])
     parser.add_argument("--generators", nargs="+", default=["all"])
     parser.add_argument("--layers", nargs="+", type=int)
@@ -53,9 +58,14 @@ def record_settings(args, excluded):
                for key, value in vars(args).items()}
     for key in ("phase", "resume", "bootstrap", "threads"):
         current.pop(key)
+    if args.suite == "geometry" and args.observations_from is None:
+        for key in ("suite", "coordinates", "observations_from"):
+            current.pop(key)
     current.update(version="head-geometry-v2", excluded_token_ids=excluded,
                    observation_mode="ordinary_key_submass",
                    natural_labels_used_for_fit=False)
+    if args.suite == "cross_terms":
+        current["version"] = "head-cross-terms-v1"
     path = args.output / "settings.json"
     if path.exists():
         if not args.resume or read_json(path) != current:
@@ -73,14 +83,18 @@ def main(argv=None):
     if min(budgets) < 1 or args.ridge <= 0 or not 0 < args.quantile < 1 or args.limit < 0 or args.dimensions < 0:
         raise ValueError("Budgets/ridge must be positive; quantile must lie in (0,1)")
     with threadpool_limits(limits=args.threads):
+        excluded = inherit_observations(args) if args.observations_from else None
         if args.phase == "evaluate":
             from .evaluation import evaluate
             return evaluate(args)
-        excluded = special_ids(args)
+        if excluded is None:
+            excluded = special_ids(args)
         if args.phase == "inspect":
             return inspect(args, excluded)
         record_settings(args, excluded)
-        if args.phase in ("all", "prepare"):
+        if args.observations_from:
+            link_observations(args)
+        elif args.phase in ("all", "prepare"):
             prepare(args, excluded)
         if args.phase in ("all", "fit"):
             if not (args.resume and (args.output / "reference/complete.json").exists()):

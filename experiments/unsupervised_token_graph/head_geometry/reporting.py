@@ -1,7 +1,9 @@
 """Report RAGTruth tasks separately; pooled results remain a supplementary view."""
 
 import csv
+import tarfile
 from collections import defaultdict
+from pathlib import Path
 
 from ..offline_span.data import write_json
 
@@ -89,3 +91,47 @@ def save_reports(root, report, identities):
         write_metrics(directory / "metrics.csv", [row for row in rows if row["group"] in names])
         write_json(directory / "evaluation.json", selected)
     (root / "task_summary.md").write_text(task_summary(report, rows), encoding="utf-8")
+    save_comparisons(root / "comparisons.csv", report)
+
+
+def save_comparisons(path, report):
+    rows = []
+    for group, result in report["groups"].items():
+        for view, controls in result["primary_minus_control"].items():
+            for right, value in controls.items():
+                rows.extend(comparison_rows(group, view, report["primary"], right, value))
+        for pair in result["planned_comparisons"].values():
+            for view, value in pair["views"].items():
+                rows.extend(comparison_rows(group, view, pair["left"], pair["right"], value))
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        fields = ("group", "view", "left", "right", "metric", "delta", "low", "high",
+                  "tokens", "bootstrap_valid")
+        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def comparison_rows(group, view, left, right, value):
+    rows = []
+    interval = value["ci95"]
+    for index, metric in enumerate(value["order"]):
+        rows.append(dict(group=group, view=view, left=left, right=right, metric=metric,
+            delta=value["delta"][metric], low=interval[0][index] if interval else None,
+            high=interval[1][index] if interval else None, tokens=value["tokens"],
+            bootstrap_valid=value["bootstrap_valid"]))
+    return rows
+
+
+def archive_review(output):
+    """Include frozen scores and provenance; exclude attention caches and reference banks."""
+    destination = output.parent / (output.name + "_review.tar.gz")
+    partial = destination.with_suffix(".partial")
+    files = [output / name for name in ("settings.json", "observations/manifest.json",
+                                        "reference/settings.json", "reference/complete.json")]
+    files += sorted((output / "reference").glob("*/complete.json"))
+    files += sorted(path for path in (output / "predictions").rglob("*") if path.is_file())
+    with tarfile.open(partial, "w:gz") as archive:
+        for path in files:
+            archive.add(path, arcname=str(Path(output.name) / path.relative_to(output)))
+    partial.replace(destination)
+    return destination
