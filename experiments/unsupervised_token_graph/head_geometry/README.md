@@ -14,6 +14,44 @@ bash experiments/unsupervised_token_graph/head_geometry/run_all.sh
 旧 v1 结果不能续跑成 v2：观测定义和拟合不同，必须重新 prepare/fit/score；默认新目录保留旧结果。
 `--resume` 仅接受相同的 v2 设置。依赖 numpy/scipy/sklearn/tqdm/threadpoolctl；读取 tokenizer 需要 transformers。
 
+## 仅使用中间层，分别运行三个任务
+
+```bash
+git pull --ff-only origin main
+bash experiments/unsupervised_token_graph/head_geometry/run_middle.sh
+```
+
+这是 Llama-3.1-8B 的显式配置：仅 L8–23（从零编号）的 head，共 512 个；不按 TEST 成绩选头。
+QA、Summary、Data2txt 分别建立参考/校准组，并分别汇报。输出到新目录
+`outputs/head_geometry_middle`，不复用全层拟合结果；旧结果保留。
+默认不再把中间层切成四段，`scope=all` 表示全部已选的中间层。
+这次完整 L8–23 重拟合还没有自然数据成绩，不能直接引用旧 L16–23 子范围的 AUROC。
+
+仅指定某些 head 时，`--heads` 使用原模型的 head 编号，并作用于每个已选层：
+
+```bash
+OUTPUT=outputs/head_geometry_middle_h4_h6 \
+bash experiments/unsupervised_token_graph/head_geometry/run_middle.sh --heads 4 6
+```
+
+这个 head 列表只是语法例子，不代表已发现 4、6 是功能头。不同模型用 `--layers` 明确覆盖层列表，
+不把 Llama 的层号直接套到其他模型。选择不同 head 或窗口时使用不同 OUTPUT。
+
+任意已有完整分数可只重生成报告，不需要重新拟合或运行大模型：
+
+```bash
+python -u -m experiments.unsupervised_token_graph.head_geometry \
+  --phase evaluate --output outputs/head_geometry_v2
+```
+
+`predictions/task_summary.md` 汇报实际层/head、三个任务的完成情况及各方法成绩。
+`predictions/tasks/QA/`、`Summary/`、`Data2txt/` 分别保存 `metrics.csv` 和 `evaluation.json`；
+未运行的任务显示“未评估”，不补零、不复用 QA 数值。总表增加 dataset/task/generator 列，
+控制台只打印 task×generator，避免只有 QA 时重复打印同一份 ALL。
+这里解析的是 RAGTruth；三个名称是其任务类别，并未新增任意其他数据集的解析器。
+
+多头协同的具体定义与实验见 [COOPERATION_DESIGN.md](COOPERATION_DESIGN.md)。
+
 默认缓存：`/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/attention/llama31_8b/{train,test}`；
 默认 tokenizer：`/share/home/tm902089733300000/a903202310/lys/models/Meta-Llama-3.1-8B-Instruct`。
 支持 `--train-cache --test-cache --dataset --tokenizer --index --source-info`。

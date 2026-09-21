@@ -1,7 +1,5 @@
 """Only this module reads natural hallucination labels, after score freeze."""
 
-from collections import defaultdict
-import csv
 import json
 
 import numpy as np
@@ -9,8 +7,8 @@ import numpy as np
 from ..evaluate import Ranking, label_views, scoped_metrics
 from ..evaluation_data import EvaluationBinding, read_sources
 from ..fixed_graph.evaluation import interval_report, metric_arrays, token_spans
-from ..offline_span.data import write_json
 from .pipeline import read_json
+from .reporting import evaluation_groups, group_identity, save_reports
 
 
 def read_blocks(args):
@@ -125,44 +123,32 @@ def evaluate_group(blocks, methods, draws, primary):
                 spans={name: interval_report(blocks, name) for name in methods})
 
 
-def save_table(path, groups):
-    fields = ("group", "scope", "method", "view", "tokens", "positives", "coverage",
-              "auroc", "ap", "source_weighted_auroc", "recall", "fpr")
-    with path.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fields)
-        writer.writeheader()
-        for group, result in groups.items():
-            for view, methods in result["views"].items():
-                for name, metric in methods.items():
-                    scope, method = name.split("__") if "__" in name else ("all", name)
-                    writer.writerow(dict(group=group, scope=scope, method=method, view=view,
-                        tokens=metric["evaluated_tokens"], positives=metric["evaluated_positives"],
-                        coverage=metric["coverage"], auroc=metric["pooled"]["auroc"],
-                        ap=metric["pooled"]["ap"],
-                        source_weighted_auroc=metric["source_fixed_full_answer"]["auroc"],
-                        recall=metric.get("recall"), fpr=metric.get("fpr")))
-
-
 def evaluate(args):
     blocks, freeze = read_blocks(args)
     add_span_halves(blocks)
-    groups = defaultdict(list)
-    groups["ALL"] = blocks
-    for block in blocks:
-        row = block["record"]
-        groups[row["task"] + "|" + row["generator"]].append(block)
+    groups = evaluation_groups(blocks)
+    identities = {name: group_identity(selected) for name, selected in groups.items()}
+    channels = np.asarray(read_json(args.output / "observations/manifest.json")["channels"])
     report = dict(primary=freeze["primary"], labels_used_for_fit=False,
                   score_direction="higher = departure from mixed TRAIN; energy scores use standardized residuals",
                   threshold="unlabelled mixed calibration quantile, not controlled normal FPR",
                   evaluation_status="exploratory; representation motivated by earlier labelled audits",
-                  groups={})
+                  dataset="RAGTruth",
+                  head_selection=dict(layers=np.unique(channels[:, 0]).tolist(),
+                                      heads=np.unique(channels[:, 1]).tolist()), groups={})
+    computed = {}
     for group, selected in groups.items():
-        result = evaluate_group(selected, freeze["methods"], args.bootstrap, freeze["primary"])
+        # A one-task/one-generator run has identical ALL, task and generator groups.
+        signature = tuple(id(block) for block in selected)
+        if signature not in computed:
+            computed[signature] = evaluate_group(selected, freeze["methods"], args.bootstrap, freeze["primary"])
+        result = computed[signature]
         report["groups"][group] = result
+        if "|" not in group:
+            continue
         for name in freeze["methods"]:
             metric = result["views"]["all_error"][name]
-            print(json.dumps(dict(group=group, method=name, tokens=metric["evaluated_tokens"],
+            print(json.dumps(dict(identities[group], group=group, method=name, tokens=metric["evaluated_tokens"],
                   coverage=metric["coverage"], **metric["pooled"])), flush=True)
-    write_json(args.output / "predictions/evaluation.json", report)
-    save_table(args.output / "predictions/metrics.csv", report["groups"])
+    save_reports(args.output / "predictions", report, identities)
     return report

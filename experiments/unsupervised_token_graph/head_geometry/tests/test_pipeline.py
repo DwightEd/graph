@@ -1,23 +1,28 @@
+import csv
 import json
 
 import numpy as np
 import pytest
 
-from experiments.unsupervised_token_graph.fixed_graph.tests.test_fixed_graph import write_cache
+from experiments.unsupervised_token_graph.fixed_graph.tests.test_fixed_graph import (
+    write_cache,
+)
 from experiments.unsupervised_token_graph.head_geometry.run import main
 
 
-def fixture_arguments(tmp_path, output):
+def fixture_arguments(tmp_path, output, tasks=("QA",)):
     dataset = tmp_path / "dataset"
     dataset.mkdir(exist_ok=True)
     rows = []
-    for split, identities in [("train", range(1, 7)), ("test", range(10, 12))]:
-        for identity in identities:
-            name = str(identity)
-            write_cache(tmp_path / split / f"{name}.npz", identity=name, split=split, seed=identity)
-            rows.append(dict(id=name, source_id="source_" + name, split=split,
-                             response="abcdefghijkl", model="fixture",
-                             labels=[dict(start=2, end=6)]))
+    for task_index, task in enumerate(tasks):
+        for split, identities in [("train", range(1, 7)), ("test", range(10, 12))]:
+            for identity in identities:
+                name = str(1000 * task_index + identity)
+                write_cache(tmp_path / split / f"{name}.npz", identity=name,
+                            task=task, split=split, seed=identity)
+                rows.append(dict(id=name, source_id="source_" + name, split=split,
+                                 response="abcdefghijkl", model="fixture",
+                                 labels=[dict(start=2, end=6)]))
     (dataset / "response.jsonl").write_text("\n".join(map(json.dumps, rows)))
     return ["--train-cache", str(tmp_path / "train"), "--test-cache", str(tmp_path / "test"),
             "--dataset", str(dataset), "--output", str(output), "--special-token-ids", "10",
@@ -46,6 +51,9 @@ def test_full_cli_fit_score_evaluate_and_resume(tmp_path):
     metric = report["groups"]["ALL"]["views"]["all_error"]["all__log_moment"]
     assert metric["evaluated_tokens"] == 20
     assert (output / "predictions/metrics.csv").is_file()
+    summary = (output / "predictions/task_summary.md").read_text()
+    assert "|QA|已评估|2|" in summary
+    assert "|Summary|未评估|—|" in summary
     before = score_arrays(output)
     freeze = json.loads((output / "predictions/freeze.json").read_text())
     with np.load(output / "predictions" / freeze["records"][0]["file"]) as saved:
@@ -120,3 +128,26 @@ def test_overlapping_sources_cannot_enter_train_and_test(tmp_path):
     write_cache(tmp_path / "test/10.npz", identity="1", split="test")
     with pytest.raises(ValueError, match="source occurs in train and test"):
         main([*argv, "--phase", "prepare"])
+
+
+def test_separate_task_reports_and_explicit_head_selection(tmp_path):
+    tasks = ("QA", "Summary", "Data2txt")
+    output = tmp_path / "middle"
+    argv = fixture_arguments(tmp_path, output, tasks)
+    report = main([*argv, "--tasks", *tasks, "--layers", "1", "--heads", "0"])
+    assert report["head_selection"] == {"layers": [1], "heads": [0]}
+    assert report["groups"]["ALL"]["answers"] == 6
+    reference = json.loads((output / "reference/settings.json").read_text())
+    source_groups = []
+    for task in tasks:
+        assert report["groups"][task]["answers"] == 2
+        path = output / "predictions/tasks" / task / "metrics.csv"
+        with path.open() as stream:
+            rows = list(csv.DictReader(stream))
+        assert {row["task"] for row in rows} == {task}
+        assert {row["group"] for row in rows} == {task, task + "|fixture"}
+        assert all(row["dataset"] == "RAGTruth" for row in rows)
+        configured = reference["groups"][task + "|fixture"]
+        source_groups.append(set(configured["reference_sources"]))
+    assert not (source_groups[0] & source_groups[1] | source_groups[1] & source_groups[2]
+                | source_groups[0] & source_groups[2])
