@@ -24,7 +24,7 @@ def arguments(argv=None):
     parser.add_argument("--source-info", type=Path)
     parser.add_argument("--tokenizer", default=str(TOKENIZER))
     parser.add_argument("--special-token-ids", nargs="+", type=int)
-    parser.add_argument("--output", type=Path, default=Path("outputs/head_geometry_v1"))
+    parser.add_argument("--output", type=Path, default=Path("outputs/head_geometry_v2"))
     parser.add_argument("--tasks", nargs="+", default=["QA"])
     parser.add_argument("--generators", nargs="+", default=["all"])
     parser.add_argument("--layers", nargs="+", type=int)
@@ -53,7 +53,8 @@ def record_settings(args, excluded):
                for key, value in vars(args).items()}
     for key in ("phase", "resume", "bootstrap", "threads"):
         current.pop(key)
-    current.update(version="head-geometry-v1", excluded_token_ids=excluded,
+    current.update(version="head-geometry-v2", excluded_token_ids=excluded,
+                   observation_mode="ordinary_key_submass",
                    natural_labels_used_for_fit=False)
     path = args.output / "settings.json"
     if path.exists():

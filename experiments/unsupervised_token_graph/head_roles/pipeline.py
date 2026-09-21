@@ -23,6 +23,7 @@ def load_masks(args):
             raise ValueError("Prior and cache physical heads differ")
         names = ["all", "drop_positional", "drop_symbolic"]
         names.extend(f"random_{index}" for index in range(args.random_controls))
+        names.extend(f"symbolic_random_{index}" for index in range(args.random_controls))
         return {name: saved[name].copy() for name in names}
 
 
@@ -114,7 +115,8 @@ def score_answer(args, row, masks, references, controls, path):
         coverage = saved["coverage"]
         scores = score_values(saved["observations"][coverage], masks, references)
         arrays = {key: saved[key].copy() for key in
-                  ("coverage", "token_ids", "offsets", "prompt_length", "retained_mass")}
+                  ("coverage", "token_ids", "offsets", "prompt_length", "retained_mass",
+                   "head_observed", "conditional_defined")}
     for name, values in scores.items():
         score = np.full(len(coverage), np.nan, np.float32)
         score[coverage] = apply_calibration(values, controls[name])

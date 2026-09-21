@@ -1,4 +1,4 @@
-"""Read existing attention; remove special keys before measuring head features."""
+"""Ordinary-key attention submass: zero is observed; a missing row is not."""
 
 import json
 
@@ -20,7 +20,11 @@ def special_ids(args):
         return sorted(set(args.special_token_ids))
     from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, local_files_only=True)
-    return sorted(tokenizer.all_special_ids)
+    excluded = set(tokenizer.all_special_ids)
+    # Chat header/control tokens may be special AddedTokens without a named
+    # bos/eos/etc attribute, so all_special_ids alone can miss them.
+    excluded.update(index for index, token in tokenizer.added_tokens_decoder.items() if token.special)
+    return sorted(excluded)
 
 
 def channel_values(channel, sample, excluded):
@@ -36,9 +40,7 @@ def channel_values(channel, sample, excluded):
         ordinary = ~np.isin(sample.token_ids[keys], excluded)
         retained = float(weights[ordinary].sum())
         masses[target] = (weights.sum(), retained)
-        if retained <= 0:
-            continue
-        keys, weights = keys[ordinary], weights[ordinary] / retained
+        keys, weights = keys[ordinary], weights[ordinary]
         values[target] = (weights[keys == query].sum(),
                           weights[keys < sample.prompt_length].sum())
     return values, masses
@@ -64,8 +66,19 @@ def extract(sample, channels, excluded):
     covered = np.isfinite(observations).all(axis=(1, 2, 3))
     covered &= ~np.isin(sample.token_ids[sample.prompt_length:], excluded)
     return dict(observations=observations, retained_mass=retained,
+                head_observed=np.isfinite(retained[..., 0]),
+                conditional_defined=retained[..., 1] > 0,
                 coverage=covered, channels=layout, token_ids=sample.token_ids,
                 offsets=sample.offsets, prompt_length=sample.prompt_length)
+
+
+def observation_summary(saved):
+    observed = saved["head_observed"]
+    undefined = observed & ~saved["conditional_defined"]
+    return dict(tokens=len(observed), covered=int(saved["coverage"].sum()),
+                missing_head_rows=int((~observed).sum()),
+                observed_zero_mass_heads=int(undefined.sum()),
+                tokens_with_zero_mass=int(undefined.any(axis=(1, 2)).sum()))
 
 
 def prepare(args, excluded):
@@ -74,7 +87,7 @@ def prepare(args, excluded):
     root = args.output / "observations"
     root.mkdir(parents=True, exist_ok=True)
     check_input_roster(root, samples)
-    records, layout = [], None
+    records, summaries, layout = [], [], None
     for number, sample in enumerate(tqdm(samples, desc="head observations", unit="answer")):
         path = root / f"{number:06d}.npz"
         if not (args.resume and path.exists()):
@@ -85,12 +98,15 @@ def prepare(args, excluded):
             partial.replace(path)
         with np.load(path, allow_pickle=False) as saved:
             current = saved["channels"].tolist()
+            summaries.append(dict(id=sample.response_id, split=sample.split,
+                                  **observation_summary(saved)))
         if layout is not None and current != layout:
             raise ValueError("Physical head layout changed between answers")
         layout = current
         records.append(identity_record(sample, path.name))
     write_json(root / "manifest.json", dict(records=records, channels=layout,
-               signals=SIGNALS, special_token_ids=excluded, labels_used=False, complete=True))
+               signals=SIGNALS, special_token_ids=excluded, labels_used=False, complete=True,
+               representation="ordinary_key_submass", coverage_summary=summaries))
 
 
 def inspect(args, excluded):

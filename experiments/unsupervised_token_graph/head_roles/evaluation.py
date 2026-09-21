@@ -3,25 +3,13 @@
 from collections import defaultdict
 import json
 
-import numpy as np
-
 from ..evaluate import scoped_metrics
 from ..fixed_graph.evaluation import interval_report, metric_arrays
-from ..head_geometry.evaluation import alarm_metrics, paired_difference, read_blocks, save_table
+from ..head_geometry.evaluation import (
+    add_span_halves, alarm_metrics, availability_report, paired_difference, read_blocks, save_table,
+)
 from ..offline_span.data import write_json
 from .pipeline import PRIMARY
-
-
-def add_span_halves(blocks):
-    for block in blocks:
-        error = block["views"]["all_error"][0]
-        front, back = np.zeros(len(error), bool), np.zeros(len(error), bool)
-        for start, end in block["gold"]:
-            middle = start + (end - start + 1) // 2
-            front[start:middle] = True
-            back[middle:end] = True
-        block["views"]["front_half_vs_normal"] = (front, front | ~error)
-        block["views"]["back_half_vs_normal"] = (back, back | ~error)
 
 
 def evaluate_group(blocks, methods, draws):
@@ -41,7 +29,16 @@ def evaluate_group(blocks, methods, draws):
         differences[view] = {control: paired_difference(blocks, view, PRIMARY, control, draws)
                              for control in comparisons}
     return dict(answers=len(blocks), views=views, primary_minus_control=differences,
+                availability=availability_report(blocks, PRIMARY),
+                symbolic_minus_random=symbolic_comparisons(blocks, methods, draws),
                 spans={name: interval_report(blocks, name) for name in methods})
+
+
+def symbolic_comparisons(blocks, methods, draws):
+    controls = [name for name in methods if name.startswith("contrast__symbolic_random_")]
+    return {view: {name: paired_difference(blocks, view, "contrast__drop_symbolic", name, draws)
+                   for name in controls}
+            for view in ("all_error", "span_onset_vs_normal", "continuation_vs_normal", "previous_error")}
 
 
 def evaluate(args):

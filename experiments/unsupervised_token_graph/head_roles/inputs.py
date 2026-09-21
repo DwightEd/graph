@@ -5,10 +5,26 @@ from tqdm import tqdm
 
 from ..fixed_graph.inputs import identity_record, list_samples, sample_channels, validate_roster
 from ..fixed_graph.pipeline import check_input_roster
+from ..head_geometry.inputs import observation_summary
 from ..offline_span.data import write_json
 
 
-FEATURES = ("self", "prompt", "recent_history", "distant_history", "entropy", "largest_key")
+FEATURES = ("self", "prompt", "recent_history", "distant_history",
+            "weighted_entropy", "largest_key", "ordinary_mass")
+
+
+def route_features(keys, weights, query, prompt_length, recent_window):
+    """No renormalization of route masses; m H(a/m) extends to zero at m=0."""
+    mass = weights.sum()
+    if mass == 0:
+        return np.zeros(len(FEATURES))
+    history = (keys >= prompt_length) & (keys < query)
+    recent = history & (query - keys <= recent_window)
+    positive = weights > 0
+    weighted_entropy = -(weights[positive] * np.log(weights[positive] / mass)).sum()
+    return (weights[keys == query].sum(), weights[keys < prompt_length].sum(),
+            weights[recent].sum(), weights[history & ~recent].sum(),
+            weighted_entropy, weights.max(), mass)
 
 
 def channel_features(channel, sample, excluded, recent_window):
@@ -21,17 +37,8 @@ def channel_features(channel, sample, excluded, recent_window):
         keys, weights = channel.row(row)
         ordinary = (keys <= query) & ~np.isin(sample.token_ids[keys], excluded)
         keys, weights = keys[ordinary], weights[ordinary].astype(np.float64)
-        mass = weights.sum()
-        masses[target] = mass
-        if mass <= 0:
-            continue
-        weights = weights / mass
-        history = (keys >= sample.prompt_length) & (keys < query)
-        recent = history & (query - keys <= recent_window)
-        entropy = -(weights * np.log(np.maximum(weights, 1e-30))).sum()
-        result[target] = (weights[keys == query].sum(), weights[keys < sample.prompt_length].sum(),
-                          weights[recent].sum(), weights[history & ~recent].sum(),
-                          entropy, weights.max())
+        masses[target] = weights.sum()
+        result[target] = route_features(keys, weights, query, sample.prompt_length, recent_window)
     return result, masses
 
 
@@ -53,8 +60,12 @@ def extract(sample, channels, excluded, recent_window):
     observations = np.stack(values, axis=1)[:, order].reshape(shape)
     coverage = np.isfinite(observations).all(axis=(1, 2, 3))
     coverage &= ~np.isin(sample.token_ids[sample.prompt_length:], excluded)
+    retained = np.stack(masses, axis=1)[:, order]
+    per_head_mass = retained.reshape(shape[:3])
     return dict(observations=observations, coverage=coverage, channels=layout,
-                retained_mass=np.stack(masses, axis=1)[:, order], token_ids=sample.token_ids,
+                head_observed=np.isfinite(per_head_mass),
+                conditional_defined=per_head_mass > 0,
+                retained_mass=retained, token_ids=sample.token_ids,
                 prompt_length=sample.prompt_length, offsets=sample.offsets)
 
 
@@ -64,7 +75,7 @@ def prepare(args, excluded):
     root = args.output / "observations"
     root.mkdir(parents=True, exist_ok=True)
     check_input_roster(root, samples)
-    records, layout = [], None
+    records, summaries, layout = [], [], None
     for number, sample in enumerate(tqdm(samples, desc="ordinary head routes")):
         path = root / f"{number:06d}.npz"
         if not (args.resume and path.exists()):
@@ -76,9 +87,12 @@ def prepare(args, excluded):
             partial.replace(path)
         with np.load(path, allow_pickle=False) as saved:
             current = saved["channels"].tolist()
+            summaries.append(dict(id=sample.response_id, split=sample.split,
+                                  **observation_summary(saved)))
         if layout is not None and current != layout:
             raise ValueError("Physical head layout differs between answers")
         layout = current
         records.append(identity_record(sample, path.name))
     write_json(root / "manifest.json", dict(records=records, channels=layout,
-               features=args.features, special_token_ids=excluded, labels_used=False, complete=True))
+               features=args.features, special_token_ids=excluded, labels_used=False, complete=True,
+               representation="ordinary_key_submass", coverage_summary=summaries))

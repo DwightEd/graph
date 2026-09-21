@@ -37,6 +37,7 @@ def read_blocks(args):
             views["warmup"] = (error, saved["window_count"] < window)
             names = [*freeze["methods"], "position"]
             blocks.append(dict(record=identity, views=views, tokens=len(offsets),
+                window_count=saved["window_count"].copy(), window=window,
                 scores={name: saved[name].copy() for name in names},
                 alarms={name: saved[name + "__alarm"].copy() for name in freeze["methods"]},
                 spans={name: saved[name + "__spans"].copy() for name in freeze["methods"]},
@@ -79,7 +80,29 @@ def alarm_metrics(blocks, view, method):
                 fpr=false_positive / negative if negative else None)
 
 
-def evaluate_group(blocks, methods, draws):
+def availability_report(blocks, method):
+    counts = np.concatenate([block["window_count"][np.isfinite(block["scores"][method])]
+                             for block in blocks])
+    values, frequencies = np.unique(counts, return_counts=True)
+    return dict(tokens=sum(block["tokens"] for block in blocks), scored_tokens=len(counts),
+                configured_window=blocks[0]["window"],
+                full_window_tokens=int((counts == blocks[0]["window"]).sum()),
+                scored_window_lengths={str(value): int(count) for value, count in zip(values, frequencies)})
+
+
+def add_span_halves(blocks):
+    for block in blocks:
+        error = block["views"]["all_error"][0]
+        front, back = np.zeros(len(error), bool), np.zeros(len(error), bool)
+        for start, end in block["gold"]:
+            middle = start + (end - start + 1) // 2
+            front[start:middle] = True
+            back[middle:end] = True
+        block["views"]["front_half_vs_normal"] = (front, front | ~error)
+        block["views"]["back_half_vs_normal"] = (back, back | ~error)
+
+
+def evaluate_group(blocks, methods, draws, primary):
     views = {}
     for view in blocks[0]["views"]:
         views[view] = {}
@@ -90,12 +113,15 @@ def evaluate_group(blocks, methods, draws):
                 metric.update(alarm_metrics(blocks, view, name))
             views[view][name] = metric
     differences = {}
-    for view in ("all_error", "first_error_until_first", "continuation_vs_normal", "previous_error"):
+    controls = [name for name in methods if name.startswith("all__") and name != primary]
+    for view in ("all_error", "first_error_until_first", "span_onset_vs_normal",
+                 "continuation_vs_normal", "previous_error", "front_half_vs_normal", "back_half_vs_normal"):
         differences[view] = {}
-        for control in ("raw", "contrast", "moment", "log_diagonal"):
+        for control in controls:
             differences[view][control] = paired_difference(
-                blocks, view, "all__log_moment", "all__" + control, draws)
+                blocks, view, primary, control, draws)
     return dict(answers=len(blocks), views=views, primary_minus_control=differences,
+                availability=availability_report(blocks, primary),
                 spans={name: interval_report(blocks, name) for name in methods})
 
 
@@ -119,18 +145,19 @@ def save_table(path, groups):
 
 def evaluate(args):
     blocks, freeze = read_blocks(args)
+    add_span_halves(blocks)
     groups = defaultdict(list)
     groups["ALL"] = blocks
     for block in blocks:
         row = block["record"]
         groups[row["task"] + "|" + row["generator"]].append(block)
     report = dict(primary=freeze["primary"], labels_used_for_fit=False,
-                  score_direction="higher = rarer head configuration in mixed TRAIN",
+                  score_direction="higher = departure from mixed TRAIN; energy scores use standardized residuals",
                   threshold="unlabelled mixed calibration quantile, not controlled normal FPR",
                   evaluation_status="exploratory; representation motivated by earlier labelled audits",
                   groups={})
     for group, selected in groups.items():
-        result = evaluate_group(selected, freeze["methods"], args.bootstrap)
+        result = evaluate_group(selected, freeze["methods"], args.bootstrap, freeze["primary"])
         report["groups"][group] = result
         for name in freeze["methods"]:
             metric = result["views"]["all_error"][name]

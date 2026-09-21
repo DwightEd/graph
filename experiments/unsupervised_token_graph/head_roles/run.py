@@ -32,7 +32,7 @@ def arguments(argv=None):
     parser.add_argument("--layers", nargs="+", type=int)
     parser.add_argument("--heads", nargs="+", type=int)
     parser.add_argument("--features", nargs="+", choices=FEATURES, default=list(FEATURES))
-    parser.add_argument("--output", type=Path, default=Path("outputs/head_roles_v1"))
+    parser.add_argument("--output", type=Path, default=Path("outputs/head_roles_v2"))
     parser.add_argument("--probe-sources", type=int, default=8)
     parser.add_argument("--probe-queries", type=int, default=4)
     parser.add_argument("--block-width", type=int, default=8)
@@ -61,7 +61,8 @@ def settings(args, excluded):
               for key, value in vars(args).items()}
     for key in ("phase", "resume", "bootstrap", "threads", "binding_check", "diagnostic_lda"):
         values.pop(key)
-    values.update(version="head-roles-v1", window=1, special_ids=excluded, labels_used_for_fit=False)
+    values.update(version="head-roles-v2", window=1, special_ids=excluded,
+                  observation_mode="ordinary_key_submass", labels_used_for_fit=False)
     path = args.output / "settings.json"
     if path.exists():
         if not args.resume or read_json(path) != values:

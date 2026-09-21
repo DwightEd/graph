@@ -36,6 +36,16 @@ def swap_scores(before, after, temperature=.05):
     return output
 
 
+def random_mask(removed, layer_count, head_count, seed):
+    random = np.random.default_rng(seed)
+    keep = np.ones(len(removed), bool)
+    for layer in range(layer_count):
+        indices = layer * head_count + np.arange(head_count)
+        chosen = random.choice(indices, removed[indices].sum(), replace=False)
+        keep[chosen] = False
+    return keep
+
+
 def choose_masks(layers, heads, gap, informative, fraction, seed, random_controls):
     """Remove only identifiable preferences; random controls match each layer's count."""
     count = len(layers) * len(heads)
@@ -49,11 +59,7 @@ def choose_masks(layers, heads, gap, informative, fraction, seed, random_control
             selected[order[:budget]] = True
     masks = dict(all=np.ones(count, bool), drop_positional=~positional, drop_symbolic=~symbolic)
     for control in range(random_controls):
-        random = np.random.default_rng([seed, control])
-        keep = np.ones(count, bool)
-        for layer_index in range(len(layers)):
-            indices = layer_index * len(heads) + np.arange(len(heads))
-            removed = random.choice(indices, positional[indices].sum(), replace=False)
-            keep[removed] = False
-        masks[f"random_{control}"] = keep
+        masks[f"random_{control}"] = random_mask(positional, len(layers), len(heads), [seed, control])
+        masks[f"symbolic_random_{control}"] = random_mask(
+            symbolic, len(layers), len(heads), [seed, control, 1])
     return masks

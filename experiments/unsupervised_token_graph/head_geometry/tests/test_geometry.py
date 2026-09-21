@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from experiments.unsupervised_token_graph.head_geometry.geometry import (
-    embed, fit_geometry, head_views, matrix_function, second_moments,
+    conditional_vectors, embed, fit_conditionals, fit_geometry, head_views, matrix_function, second_moments,
     symmetric_vector, window_counts,
 )
 from experiments.unsupervised_token_graph.head_geometry.inputs import channel_values, extract
@@ -22,15 +22,82 @@ def observations(seed=1, tokens=18):
     return np.random.default_rng(seed).uniform(.01, .8, (tokens, 4, 3, 2))
 
 
-def test_special_keys_removed_before_normalization_and_prediction_alignment():
+def test_special_keys_removed_without_amplifying_submass_and_prediction_alignment():
     sample = SimpleNamespace(response_length=2, prompt_length=4,
                              token_ids=np.array([99, 1, 2, 3, 4, 5]))
     channel = SimpleNamespace(queries=[4], row=lambda _: (np.array([0, 1, 4]),
                                                          np.array([.9, .05, .05])))
     values, masses = channel_values(channel, sample, [99])
     assert np.isnan(values[0]).all()
-    np.testing.assert_allclose(values[1], [.5, .5])
+    np.testing.assert_allclose(values[1], [.05, .05])
     np.testing.assert_allclose(masses[1], [1., .1])
+
+
+def test_chat_control_added_tokens_are_excluded_without_a_named_special_role(monkeypatch):
+    from transformers import AutoTokenizer
+    from experiments.unsupervised_token_graph.head_geometry.inputs import special_ids
+    tokenizer = SimpleNamespace(all_special_ids=[99], added_tokens_decoder={
+        98: SimpleNamespace(special=True), 97: SimpleNamespace(special=False)})
+    monkeypatch.setattr(AutoTokenizer, "from_pretrained", lambda *args, **kwargs: tokenizer)
+    args = SimpleNamespace(special_token_ids=None, tokenizer="unused")
+    assert special_ids(args) == [98, 99]
+
+
+def test_zero_is_observed_but_absent_query_stays_missing():
+    sample = SimpleNamespace(response_length=3, prompt_length=2,
+                             token_ids=np.array([99, 1, 2, 3, 4]), offsets=np.empty((0, 2), int))
+    channel = SimpleNamespace(layer=0, head=0, queries=[2, 3], row=lambda row: (
+        np.array([0]) if row == 0 else np.array([0, 3]),
+        np.array([1.]) if row == 0 else np.array([1., 1e-12])))
+    arrays = extract(sample, [channel], [99])
+    np.testing.assert_array_equal(arrays["coverage"], [False, True, True])
+    np.testing.assert_array_equal(arrays["head_observed"][:, 0, 0], [False, True, True])
+    np.testing.assert_array_equal(arrays["conditional_defined"][:, 0, 0], [False, False, True])
+    np.testing.assert_allclose(arrays["observations"][1, 0, 0], [0., 0.])
+    assert arrays["observations"][2, 0, 0, 0] == pytest.approx(1e-12, rel=1e-5, abs=0)
+
+
+def test_conditional_residual_agrees_with_leave_whole_head_out_regression():
+    random = np.random.default_rng(4)
+    train = random.normal(size=(200, 2, 6))
+    train[:, :, 2:4] += train[:, :, :2]
+    test = random.normal(size=(3, 2, 6))
+    model = fit_conditionals(train, heads=3, ridge=.1)
+    vectors = conditional_vectors(test, model)
+    covariance = np.linalg.inv(model["precision"])
+    centered = test - train.mean(axis=0)
+    for layer in range(2):
+        held, other = np.array([2, 3]), np.array([0, 1, 4, 5])
+        cov = covariance[layer]
+        regression = cov[np.ix_(held, other)] @ np.linalg.inv(cov[np.ix_(other, other)])
+        residual = centered[:, layer, held] - centered[:, layer, other] @ regression.T
+        conditional_cov = cov[np.ix_(held, held)] - regression @ cov[np.ix_(other, held)]
+        energy = np.einsum("ni,ij,nj->n", residual, np.linalg.inv(conditional_cov), residual)
+        np.testing.assert_allclose((vectors["conditional_energy"][:, layer, 1] ** 2).sum(-1), energy)
+
+
+def test_conditional_energy_detects_broken_pair_with_equal_marginal_energy():
+    # Same amplitudes; the sign relation changes, without any time history.
+    train = np.array([[[-1., -1.]], [[1., 1.]], [[-2., -2.]], [[2., 2.]]])
+    model = fit_conditionals(train, heads=2, ridge=.1)
+    vectors = conditional_vectors(np.array([[[1., 1.]], [[1., -1.]]]), model)
+    independent = (vectors["independent_energy"] ** 2).sum(axis=(1, 2, 3))
+    conditional = (vectors["conditional_energy"] ** 2).sum(axis=(1, 2, 3))
+    np.testing.assert_allclose(independent[0], independent[1])
+    assert conditional[1] > conditional[0]
+
+
+def test_current_conditional_energy_is_unchanged_by_window_length():
+    args = settings()
+    train, test = observations(1), observations(2)
+    model = fit_geometry(train, [0], args.ridge)
+    covered = np.ones(len(test), bool)
+    first, _, counts = embed(test, covered, np.arange(4), model, args)
+    assert counts[-1] == args.window
+    args.window = 1
+    second, _, _ = embed(test, covered, np.arange(4), model, args)
+    for scope in ["all", "L0-0", "L1-1", "L2-2", "L3-3"]:
+        np.testing.assert_array_equal(first[scope + "__conditional_energy"], second[scope + "__conditional_energy"])
 
 
 @pytest.mark.parametrize("layout", ["attention", "data", "canonical"])

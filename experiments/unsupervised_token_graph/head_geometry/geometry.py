@@ -4,8 +4,10 @@ import numpy as np
 from scipy import sparse
 
 
-METHODS = ("raw", "contrast", "moment", "log_moment", "log_diagonal")
-PRIMARY = "log_moment"
+RELATIONS = ("moment", "log_moment", "log_diagonal")
+ENERGIES = ("independent_energy", "conditional_energy")
+METHODS = ("raw", "contrast", *RELATIONS, *ENERGIES)
+PRIMARY = "conditional_energy"
 
 
 def head_views(observations, signals):
@@ -28,6 +30,37 @@ def matrix_function(matrices, function):
     return (eigenvectors * function(eigenvalues)[..., None, :]) @ np.swapaxes(eigenvectors, -1, -2)
 
 
+def head_blocks(matrices, heads):
+    features = matrices.shape[-1] // heads
+    return np.stack([matrices[:, start:start + features, start:start + features]
+                     for start in range(0, matrices.shape[-1], features)], axis=1)
+
+
+def fit_conditionals(raw, heads, ridge):
+    """Joint Gaussian per layer; leave out the entire head, including all signals."""
+    center = raw.mean(axis=0)
+    centered = raw - center
+    covariance = np.einsum("nli,nlj->lij", centered, centered) / len(raw)
+    covariance += ridge * np.eye(raw.shape[-1])
+    precision = np.linalg.inv(covariance)
+    marginal_blocks = head_blocks(covariance, heads)
+    conditional_blocks = head_blocks(precision, heads)
+    return dict(conditional_center=center, precision=precision,
+                marginal_root=matrix_function(marginal_blocks, lambda value: value ** -.5),
+                conditional_root=matrix_function(conditional_blocks, lambda value: value ** -.5))
+
+
+def conditional_vectors(raw, model):
+    """Signed, standardized residuals per physical head; no temporal information."""
+    centered = raw - model["conditional_center"]
+    heads, features = model["marginal_root"].shape[1:3]
+    shape = (*raw.shape[:2], heads, features)
+    marginal = np.einsum("lhij,nlhj->nlhi", model["marginal_root"], centered.reshape(shape))
+    conditional = np.einsum("lij,nlj->nli", model["precision"], centered)
+    conditional = np.einsum("lhij,nlhj->nlhi", model["conditional_root"], conditional.reshape(shape))
+    return dict(independent_energy=marginal, conditional_energy=conditional)
+
+
 def fit_geometry(observations, signals, ridge):
     raw, contrast = head_views(observations, signals)
     raw_center, raw_scale = robust_scale(raw)
@@ -37,7 +70,8 @@ def fit_geometry(observations, signals, ridge):
     reference = moment + ridge * np.eye(moment.shape[-1])
     return dict(raw_center=raw_center, raw_scale=raw_scale, center=center, scale=scale,
                 inverse_root=matrix_function(reference, lambda value: value ** -.5),
-                reference_diagonal=np.diagonal(reference, axis1=-2, axis2=-1).copy())
+                reference_diagonal=np.diagonal(reference, axis1=-2, axis2=-1).copy(),
+                **fit_conditionals((raw - raw_center) / raw_scale, observations.shape[2], ridge))
 
 
 def window_counts(coverage, window):
@@ -75,7 +109,7 @@ def projection(width, dimensions, seed, layer, block):
 def relation_descriptors(relative, positions, counts, model, layer, args):
     width = relative.shape[-1] * (relative.shape[-1] + 1) // 2
     relation_map = projection(width, args.dimensions, args.seed, layer, 1) if args.dimensions else None
-    relations = {name: [] for name in METHODS[2:]}
+    relations = {name: [] for name in RELATIONS}
     for start in range(0, len(positions), 128):
         chosen = positions[start:start + 128]
         moment = second_moments(relative, chosen, counts, args.window, args.ridge)
@@ -86,7 +120,7 @@ def relation_descriptors(relative, positions, counts, model, layer, args):
         index = np.arange(moment.shape[-1])
         diagonal[:, index, index] = np.log(
             np.diagonal(moment, axis1=-2, axis2=-1) / model["reference_diagonal"])
-        for name, matrices in zip(METHODS[2:], (linear, logarithm, diagonal)):
+        for name, matrices in zip(RELATIONS, (linear, logarithm, diagonal)):
             vector = symmetric_vector(matrices)
             relations[name].append(vector @ relation_map if args.dimensions else vector)
     return {name: np.concatenate(values) for name, values in relations.items()}
@@ -108,7 +142,7 @@ def allocate_embeddings(raw, relative, positions, groups, dimensions):
         output[f"{group}__raw"] = raw[positions][:, indices].reshape(len(positions), current_width)
         output[f"{group}__contrast"] = relative[positions][:, indices].reshape(len(positions), current_width)
         width = dimensions or len(indices) * pair_width
-        for method in METHODS[2:]:
+        for method in RELATIONS:
             relations[f"{group}__{method}"] = np.zeros((len(positions), width), np.float32)
     return output, relations
 
@@ -141,5 +175,11 @@ def embed(observations, coverage, layers, model, args, positions=None):
     for name, matrix in relations.items():
         group = name.split("__")[0]
         output[name] = np.concatenate((output[f"{group}__contrast"], matrix), axis=1)
+    # Fit conditionals on raw coordinates. Centering across heads would introduce
+    # an exact sum constraint, making a held-out head mechanically predictable.
+    for name, vectors in conditional_vectors(raw[positions], model).items():
+        for group, indices in groups.items():
+            width = len(indices) * raw.shape[-1]
+            output[f"{group}__{name}"] = vectors[:, indices].reshape(len(positions), width)
     output = {name: values.astype(np.float32) for name, values in output.items()}
     return output, positions, counts

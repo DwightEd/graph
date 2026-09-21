@@ -11,7 +11,7 @@ from ..fixed_graph.reference import (
     novelty_distance, sample_reference_rows, split_sources,
 )
 from ..offline_span.data import write_json
-from .geometry import embed, fit_geometry
+from .geometry import ENERGIES, PRIMARY, embed, fit_geometry
 
 
 def read_json(path):
@@ -61,7 +61,10 @@ def score_file(path, model, references, args):
     for name, values in embeddings.items():
         scores[name] = np.full(len(counts), np.nan, np.float32)
         if len(positions):
-            scores[name][positions] = novelty_distance(values, references[name])
+            if name.split("__")[1] in ENERGIES:
+                scores[name][positions] = np.mean(values ** 2, axis=1)
+            else:
+                scores[name][positions] = novelty_distance(values, references[name])
     return scores, positions, counts, embeddings
 
 
@@ -89,7 +92,8 @@ def fit_group(root, rows, roles, directory, args):
     observations = selected_observations(root, selected)
     model = fit_geometry(observations, args.signal_indices, args.ridge)
     arrays = reference_embeddings(root, selected, model, args)
-    references = {name: fit_reference(values, args.neighbors)
+    references = {name: (dict(energy=np.array(True)) if name.split("__")[1] in ENERGIES
+                        else fit_reference(values, args.neighbors))
                   for name, values in arrays.items()}
     controls = group_calibration(root, calibration, model, references, args)
     np.savez_compressed(directory / "geometry.npz", **model)
@@ -146,11 +150,17 @@ def score_answer(args, row, model, references, calibration, destination):
         if args.save_embeddings:
             arrays[name + "__embedding"] = embeddings[name]
     with np.load(source, allow_pickle=False) as saved:
-        for key in ("coverage", "token_ids", "offsets", "prompt_length", "retained_mass"):
+        for key in ("coverage", "token_ids", "offsets", "prompt_length", "retained_mass",
+                    "head_observed", "conditional_defined"):
             arrays[key] = saved[key]
     if not len(arrays["offsets"]):
         del arrays["offsets"]
     arrays["embedding_positions"] = positions
+    # Keep each physical head's residual energy for audit, before scalar readout.
+    layers, heads, features = model["marginal_root"].shape[:3]
+    for method in ENERGIES:
+        vectors = embeddings["all__" + method].reshape(len(positions), layers, heads, features)
+        arrays[method + "__per_head"] = np.mean(vectors ** 2, axis=-1)
     arrays["position"] = np.arange(row["tokens"], dtype=np.float32)
     arrays["position"][~arrays["coverage"]] = np.nan
     partial = destination.with_suffix(".partial.npz")
@@ -177,4 +187,4 @@ def score(args):
         saved.append(dict(row, file=path.name))
     methods = list(next(iter(settings["groups"].values()))["calibration"])
     write_json(output / "freeze.json", dict(records=saved, methods=methods,
-               complete=True, labels_used=False, primary="all__log_moment"))
+               complete=True, labels_used=False, primary="all__" + PRIMARY))

@@ -1,4 +1,9 @@
-# 位置／符号行为先验：审计其能否帮助去噪
+# 位置／符号行为先验 v2：审计其能否帮助去噪
+
+v2 修复普通 key 零质量误删。必须用新输出重跑 prepare/profile/fit/score，不能续用 v1 的 observations 或 bank。
+质量加权熵定义为 m H(a/m)，m=0 时为 0，并同时保留普通质量和条件分布是否有定义的标记。
+局部 Q/K 角色探测仍需要条件概率，不将没有质量的交换块认作角色证据。
+观测公式与边界见 [优化说明](../head_geometry/OPTIMIZATION_V2.md)。
 
 对应 Urrutia 等人的 [Decoupling Positional and Symbolic Attention Behavior in Transformers](https://arxiv.org/html/2511.11579v1)，第 3 节、附录 A.3。
 
@@ -29,7 +34,7 @@ git pull --ff-only origin main &&
 bash experiments/unsupervised_token_graph/head_roles/run_all.sh
 ```
 
-默认 QA、Llama-3.1-8B-Instruct、本项目既有 TRAIN/TEST 路径，输出 `outputs/head_roles_v1`。包含：原缓存读取 → TRAIN 局部探测 → 冻结去头对照 → TEST AUROC/AP → 监督诊断 → 完整输入 binding 复核。无标签主检测和监督诊断有不同输出，不混报。需要 torch、transformers、numpy、scipy、sklearn、tqdm、matplotlib。
+默认 QA、Llama-3.1-8B-Instruct、本项目既有 TRAIN/TEST 路径，输出 `outputs/head_roles_v2`。包含：原缓存读取 → TRAIN 局部探测 → 冻结去头对照 → TEST AUROC/AP → 监督诊断 → 完整输入 binding 复核。无标签主检测和监督诊断有不同输出，不混报。需要 torch、transformers、numpy、scipy、sklearn、tqdm、matplotlib。
 
 只需主检测时传 `--no-binding-check --no-diagnostic-lda`。模型迁移时显式给出同一 checkpoint 的 `--model /path --tokenizer /path`。CPU 小模型软件验证可设 `--device cpu --dtype float32`，不是推荐在 CPU 运行真实 8B。
 
@@ -71,11 +76,11 @@ python -m experiments.unsupervised_token_graph.head_roles --phase binding --resu
 
 ## 实验 B：去头对照与自然幻觉评价
 
-完整读取原缓存每个 head 的已保存 causal attention，排除特殊 key，提取 6 个通道：self、prompt、前 10 个历史位置、更早历史、熵、最大单 key 份额。self 是前一输入词自身；prompt 不能叫“适用证据”。保留物理 head 身份。稀疏 cache 的统计仅针对已保存普通质量，`retained_mass` 一起保存，未保存尾部不冒充真实零。
+完整读取原缓存每个 head 的已保存 causal attention，排除特殊 key，提取 7 个通道：self、prompt、前 10 个历史位置、更早历史、质量加权熵、最大单 key 原质量、普通 key 总质量。各路由保留原子质量，不重新归一化；已保存行的普通质量为零是合法零观测，缺行才记 NaN。self 是前一输入词自身；prompt 不能叫“适用证据”。保留物理 head 身份。稀疏 cache 的统计仅针对已保存普通质量，`retained_mass` 一起保存，未保存尾部不冒充真实零。
 
 分别使用当前原向量 raw、同层保留 heads 的相对向量 contrast。**先去头，再计算保留头的同层共同分量**，防止被删除头从中心化步骤泄漏回来。没有时间窗口、EWMA 或新神经网络。
 
-每种表示运行 6 个冻结版本：
+每种表示运行 9 个冻结版本：
 
 | 版本 | 改变 |
 |---|---|
@@ -83,15 +88,16 @@ python -m experiments.unsupervised_token_graph.head_roles --phase binding --resu
 | drop_positional | 去掉可靠位置偏好候选，主方法为 contrast__drop_positional |
 | drop_symbolic | 去掉可靠符号偏好候选，反向对照 |
 | random_0 / 1 / 2 | 每层去头数量与 drop_positional 完全相同，3 个固定随机种子 |
+| symbolic_random_0 / 1 / 2 | 每层去头数量与 drop_symbolic 完全相同，单独的 3 组随机对照 |
 
-去头只作用于检测器输入，不改变 LLM。drop_symbolic 的实际数量可能不同，不能当完全同维对照；随机组才严格匹配维数。
+去头只作用于检测器输入，不改变 LLM。drop_symbolic 的实际数量可能不同，不能当完全同维对照；两类各自的随机组才严格匹配维数；evaluation.json 的 symbolic_minus_random 单独报告符号去头减匹配随机去头。
 
 所有版本共用参考／校准 source 划分和参考 token 位置。每来源最多 16 个 token、库大小最多 2048；列中位数/IQR 标准化、5-NN 欧氏距离除以维数平方根；混合无标签校准的 95% 分位数报警。该阈值不保证正常样本 FPR=5%。表示变化没有解决“罕见是否等于幻觉”的问题，不预设结果改善。
 
-默认主比较使用相同的六通道输入；不能将其与旧 self-only 成绩作纯先验增量比较。要单独检验原来的 self 信号：
+默认主比较使用相同的七通道输入；不能将其与旧 self-only 成绩作纯先验增量比较。要单独检验原来的 self 信号：
 
 ```bash
-OUTPUT=outputs/head_roles_self_v1 bash experiments/unsupervised_token_graph/head_roles/run_all.sh --features self
+OUTPUT=outputs/head_roles_self_v2 bash experiments/unsupervised_token_graph/head_roles/run_all.sh --features self
 ```
 
 全部 TEST 分数冻结后才读取自然标签。报告 AUROC、AP、覆盖、报警 recall/FPR、首错、span onset、continuation、span 前半／后半、此前错误条件、检测延迟及覆盖；主方法减各对照的差在共同 token 上按 source bootstrap。前后半以原标注 token 区间二分，奇数多出来的词归前半；不是语义决策点。既有 TEST 已多次分析，只作探索性验证。
@@ -116,14 +122,15 @@ OUTPUT=outputs/head_roles_self_v1 bash experiments/unsupervised_token_graph/head
 - `profile/heads.csv`、`head_roles.png`：实际每个 head 的位置／符号分数、可辨识性、去头名单。
 - `profile/*.npz`：精确 query、交换端点、每次交换前后块均值和原生重构误差。
 - `profile/summary.json`：独立来源数、实际去除数、数值误差。
-- `predictions/metrics.csv`：12 个无标签检测对照及位置基线的 AUROC/AP。
-- `predictions/evaluation.json`：按来源的配对差、区间、延迟和覆盖。
+- `predictions/metrics.csv`：18 个无标签检测对照及位置基线的 AUROC/AP。
+- `predictions/evaluation.json`：按来源的配对差、区间、延迟、覆盖及 availability 窗口统计。
+- `observations/manifest.json.coverage_summary`：每答缺行、观测零质量与有效位置统计。
 - `diagnostic/supervised_lda.csv`：单独标记的有监督信息保留检查。
 - `binding/heads.csv`、`binding/transfer.csv`：完整事实块交换与自然局部先验的对照。
 
 软件测试使用真实随机初始化微型 Llama（含 GQA）及合成缓存，检验 RoPE 配对、原生重构、未来不变性、特殊 token、均匀不可辨识、同层随机数量匹配、去除头不能经中心化泄漏、标签／TEST 不影响拟合以及端到端冻结。没有真实 RAGTruth cache 和 8B 权重的环境中不产生自然检测成绩。
 
-本轮实际通过 14 项新增测试与 17 项既有 head_geometry 回归测试，共 31 项：
+测试命令：
 
 ```bash
 python -m pytest -q experiments/unsupervised_token_graph/head_roles/tests experiments/unsupervised_token_graph/head_geometry/tests

@@ -38,10 +38,18 @@ def test_full_cli_fit_score_evaluate_and_resume(tmp_path):
     output = tmp_path / "run"
     argv = fixture_arguments(tmp_path, output)
     report = main(argv)
+    assert report["primary"] == "all__conditional_energy"
+    assert "all__independent_energy" in report["groups"]["ALL"]["primary_minus_control"]["all_error"]
+    availability = report["groups"]["ALL"]["availability"]
+    assert availability["scored_tokens"] == 20
+    assert availability["full_window_tokens"] > 0
     metric = report["groups"]["ALL"]["views"]["all_error"]["all__log_moment"]
     assert metric["evaluated_tokens"] == 20
     assert (output / "predictions/metrics.csv").is_file()
     before = score_arrays(output)
+    freeze = json.loads((output / "predictions/freeze.json").read_text())
+    with np.load(output / "predictions" / freeze["records"][0]["file"]) as saved:
+        assert saved["conditional_energy__per_head"].shape[0] == len(saved["embedding_positions"])
     main([*argv, "--resume"])
     after = score_arrays(output)
     for first, second in zip(before, after):

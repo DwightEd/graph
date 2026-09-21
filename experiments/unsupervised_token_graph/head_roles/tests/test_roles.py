@@ -144,10 +144,20 @@ def test_route_features_exclude_special_future_and_preserve_nonself_information(
         np.array([0, 1, 2, 4, 5]), np.array([.9, .025, .025, .05, .99])))
     values, masses = channel_features(channel, sample, [99], 10)
     assert np.isnan(values[0]).all()
-    np.testing.assert_allclose(values[1, :4], [.5, .5, 0., 0.])
+    np.testing.assert_allclose(values[1, :4], [.05, .05, 0., 0.])
     assert masses[1] == pytest.approx(.1)
     concentrated = SimpleNamespace(queries=[4], row=lambda _: (
         np.array([1, 4]), np.array([.05, .05])))
     other, _ = channel_features(concentrated, sample, [99], 10)
     assert values[1, 0] == other[1, 0]
     assert values[1, 4] > other[1, 4]
+
+
+def test_symbolic_random_controls_match_their_own_per_layer_counts():
+    gap = np.array([-.8, .7, .8, 0., -.6, -.7, .7, .8])
+    masks = choose_masks(np.arange(2), np.arange(4), gap, np.ones(8, bool), .5, 17, 3)
+    for name, keep in masks.items():
+        if name.startswith("symbolic_random"):
+            np.testing.assert_array_equal((~keep).reshape(2, 4).sum(1), [2, 2])
+        elif name.startswith("random"):
+            np.testing.assert_array_equal((~keep).reshape(2, 4).sum(1), [1, 2])
