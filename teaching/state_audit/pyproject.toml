@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "state-audit"
-version = "0.1.0"
+version = "0.2.0"
 description = "A small, reproducible teaching pipeline for language-model state audits"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24", "tqdm>=4.66"]
 
 [project.optional-dependencies]
-model = ["torch>=2.2", "transformers==4.57.1", "sentencepiece>=0.2"]
+model = ["torch>=2.2", "transformers>=4.57.1,<4.58", "sentencepiece>=0.2"]
 test = ["pytest>=8", "ruff>=0.9"]
 
 [project.scripts]

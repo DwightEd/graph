@@ -6,14 +6,18 @@ from pathlib import Path
 
 import numpy as np
 
-from state_audit.measurements import source_masks
+from state_audit.analysis.measurements import source_masks
+from state_audit.state import ModelState
 from state_audit.storage import read_arrays, read_json
 
 
 def inspect_head(root: Path, sample: int, layer: int, head: int, target: int):
     directory = root / "samples" / f"{sample:06d}"
     answer = read_json(directory / "answer.json")
-    trace = read_arrays(directory / "trace" / f"layer_{layer:03d}.npz")
+    state = ModelState.open(directory / "trace").layer(layer)
+    positions = np.arange(answer["prompt_length"] - 1, len(answer["token_ids"]) - 1)
+    state = state.select(positions)
+    trace = dict(queries=state.positions, **state.tensors)
     weights = read_arrays(root / "weights" / f"layer_{layer:03d}.npz")["output_projection"]
     heads, _, _ = trace["attention"].shape
     kv_head = head // (heads // trace["value"].shape[0])

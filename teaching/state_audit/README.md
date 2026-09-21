@@ -1,180 +1,188 @@
-# State Audit：生成、状态保存与审计
+# State Audit
 
-一个可单独复制、安装、运行的教学项目。只依赖本目录中的代码，不导入历史 `experiments`。
+一个独立的教学与机制研究项目：同题重采样 → 保存内部表征 → 比较回答 → 干预并重新运行模型。
+组织单位是模型表征，不预设只有 evidence/history 两条消息，也不把任何审计结果当检测器。
+本目录可以单独复制和安装；不导入仓库里的其他研究项目。
 
-主线只有四步：**统一样本 → 生成回答 → 原样回放并存状态 → 离线审计**。
-有现成回答时，从回放开始。原生干预是独立实验，通过重新运行模型检验消息对输出的影响。
-
-## 先跑通
-
-Python 3.10+。在本目录中安装：
+## 安装与最小闭环
 
 ```bash
+cd teaching/state_audit
 python -m pip install -e '.[model,test]'
-state-audit demo --output runs/demo
+python -m state_audit demo --output runs/demo
+python -m state_audit check --run runs/demo
+python -m state_audit pair --run runs/demo
+python examples/intervene.py --run runs/demo
+python -m pytest -q
 ```
 
-无需下载模型：demo 创建随机初始化的两层 Llama 和两条人工示例，执行真实 forward、状态保存和离线审计。
-换成 `--family mistral` 或 `--family qwen2` 可演示另两种结构。随机模型不用于事实能力或幻觉检测评价。
+`demo` 用本地创建的随机权重小模型，不下载 checkpoint；样例标注是教学构造。
+默认 Llama，也可 `--family mistral` / `--family qwen2`。它验证软件行为，不提供自然数据结论。
 
-按顺序打开：
+## 职责
 
-1. `runs/demo/samples/000001/answer.json`：问题、回答、准确 token IDs、字符标注。
-2. `runs/demo/audit/000001/tokens.csv`：每个回答词的预测位置、logp、熵和标签。
-3. `runs/demo/audit/000001/heads_000.csv`：第一层逐 head 的读取质量和消息量。
-4. `runs/demo/audit/000001/nodes.csv`：来源回看跃升候选；随机示例可能没有候选。
-5. `runs/demo/audit/000001/roles_000.csv`：固定当前层输入的 key 内容交换实验。
-6. `runs/demo/audit/000001/span_links.csv`：候选与标注 span 的位置关系及匹配正常对照。
+| 位置 | 负责什么 | 不负责什么 |
+|---|---|---|
+| `dataset/` | Example、JSONL、RAGTruth 转换与字符区间核验 | 模型推理、自动判断事实真假 |
+| `model/` | 原生模块与表征轴映射、forward、读出 | 数据集解析、特征设计 |
+| `state.py` | ModelState / LayerState，逐层读取与绝对位置查询 | 把所有状态同时装进内存 |
+| `capture.py` | 选择表征、观察、逐层保存、移除 hook | 写入干预、挑幻觉 token |
+| `operations/` | Target、Delete、Replace、Inject、Steer | 固定两个 head、固定来源类别 |
+| `intervention.py` | 将操作临时接入真实模型执行 | 规定具体研究假设 |
+| `generation.py` | 同题多次采样、原回答回放、身份与 seed | 继承旧答案的幻觉标签 |
+| `pairing.py` | 导入审阅结果，按同题配正常/错误回答 | 把未标注回答当正常 |
+| `analysis/` | 纯数组比较、reanchor/角色/标注审计 | 加载或改变模型 |
+| `experiments/` | 固定回答的条件比较、两组干预交互 | 充当全部干预能力的接口 |
+| `storage.py` | JSON/NPZ 与完成标记 | 用缺省值掩盖缺测 |
+| `cli.py` / `pipeline.py` | 参数与流程编排 | 数学公式 |
 
-`runs/demo/audit/summary.json` 汇总样本数、标注覆盖率及后续幻觉 token 占比。
-它不是 AUROC 报告。完整字段见 [FORMATS.md](docs/FORMATS.md)，课堂顺序见 [LESSON.md](docs/LESSON.md)。
+先读 [架构与接口](docs/ARCHITECTURE.md)，再按 [教学顺序](docs/LESSON.md) 阅读代码。
+具体轴和文件契约见 [FORMATS](docs/FORMATS.md)。
 
-## 职责与阅读顺序
+## 数据与重采样
 
-| 文件 | 只负责什么 |
-|---|---|
-| `pipeline.py` | 串起生成、采集、审计；建议先读 |
-| `datasets.py` | 外部数据 → 统一 `Example` |
-| `tokenization.py` | 模板、证据位置、生成 token 与字符位置的对齐 |
-| `models.py` | 模型加载、原生层接口、最终读出 |
-| `generation.py` | 新生成或录入已有回答；保存精确 token 序列 |
-| `capture.py` | 安装 hook、回放、逐层落盘、移除 hook |
-| `storage.py` | JSON / NPZ / CSV 文件读写与续跑契约 |
-| `measurements.py` | attention、来源消息、候选节点的纯数组计算 |
-| `roles.py` | 固定 Q 与位置，交换 RoPE 之前的 K |
-| `annotations.py` | 观测完成后接入标签、匹配正常片段 |
-| `audit.py` | 调用计算并写审计表 |
-| `intervention.py` | 四世界消息删减与真实下游重跑 |
-| `cli.py` | 参数与命令分发 |
-| `demo.py` | 可离线运行的教学材料 |
-
-没有训练器、注册器、模型基类或隐藏实验分支。纯计算不读文件，数据集适配不修改模型。
-离线审计只需要 `pip install -e .`，不加载 PyTorch、Transformers 或模型权重。
-
-## 使用真实数据和模型
-
-### 1. 统一输入
-
-每行一个样本。`prompt` 为完整的用户内容；`evidence` 是其中互不重叠的证据字符区间：
+任意数据集先转成统一 JSONL。最小一行：
 
 ```json
-{"id":"a1","source_id":"s1","prompt":"Mira wears blue. What color?","evidence":[{"id":"fact","start":0,"end":16}],"response":"Blue.","labels":[],"metadata":{"split":"test"}}
+{"id":"q1", "source_id":"source1", "prompt":"What does Mira wear?", "evidence":[]}
 ```
 
-所有区间都是 Python 字符串的 `[start, end)`，不是字节。`response` 可省略；`labels: null` 表示未标注，`labels: []` 表示已审核且无幻觉。每条标签至少有 `start`、`end`，可保留 `text` 和其他原始属性。
-
-RAGTruth 使用独立转换命令，保留官方 prompt、回答、标签、split、原生成器等信息：
+`evidence` 可选，为 prompt 中的 `{id,start,end}` 字符区间。
+回放已有回答时附 `response`、`labels`；`labels: null` 表示未审阅，`[]` 表示已审阅且无标注错误。
+其他信息进入 `metadata`。没有证据也能采集 hidden/MLP；来源 reanchor 分析则不适用。
 
 ```bash
-state-audit convert-ragtruth --data /path/to/RAGTruth \
-  --split test --limit 20 --output runs/ragtruth.jsonl
+python -m state_audit convert-ragtruth --data /path/to/RAGTruth \
+  --output data/ragtruth.jsonl --split test
+
+python -m state_audit generate --data data/ragtruth.jsonl --model /path/to/checkpoint \
+  --output runs/resampled --device cuda --dtype bfloat16 \
+  --samples 4 --seed 10 --temperature 0.8 --max-new-tokens 128 --max-length 4096
+
+python -m state_audit capture --run runs/resampled --layers 12 16 20 \
+  --representations attention query key value head_readout attention_write \
+  residual_before residual_after mlp_write final_hidden
 ```
 
-目录需包含 `source_info.jsonl` 和 `response.jsonl`。支持 QA、Summary、Data2txt；QA 按 passage 分来源，其余两类默认一个证据来源。证据必须能精确定位；无法匹配时明确报错，需提供统一格式中的显式区间，不猜测位置。格式依据 [RAGTruth 官方说明](https://github.com/ParticleMedia/RAGTruth)。
+生成时按相同 source、prompt 和 evidence 合并已有回答，避免 RAGTruth 同题的多条原回答触发重复重采样；
+保留全部 `parent_ids`。每题使用 seed 10、11、12、13，回答 ID 与 draw 单独保存。
+`--mode replay` 则逐条回放原回答，不合并。
+采集默认只保留回答预测位置；加 `--scope all` 也保存 prompt 内部状态。`run` 是 generate + capture，分析使用独立 `audit` 命令。
 
-### 2. 一条命令运行
+可给不同 checkpoint 和数据集各自的输出目录；[resample_models.py](examples/resample_models.py) 提供一个直接的双循环，
+每个模型只加载一次。新增数据集只需产生 Example；不改模型或采集代码。
+
+重采样不保证一定产生正负答案，也不自动核实事实。审阅 JSONL 每行包含 `sample`（本 run 的整数索引）、
+原样 `response`、`labels`（字符区间）。导入并配对：
 
 ```bash
-state-audit run --data runs/ragtruth.jsonl --model /path/to/checkpoint \
-  --mode replay --output runs/audit --device cuda --dtype bfloat16 \
-  --max-length 4096 --layers 18 20 22 --roles
+python -m state_audit pair --run runs/resampled --reviews reviews.jsonl
 ```
 
-支持 Hugging Face 的 `llama`、`mistral`、`qwen2` 三种 model_type；固定 Transformers 4.57.1 原生 eager 接口，单设备、单样本回放。默认采集所有层，head 始终保留原编号。
-随序列长度变化的 dynamic/LongRoPE 会被明确拒绝：这种配置需要另外实现逐步采集，不能假设整段回放等价。
+结果在 `pairs.json`；未审阅回答只计入 `unreviewed`，同 source 且实际 prompt IDs 相同的已审阅回答才配对。
+`review.json` 单独保存，原始回答与生成 IDs 不变。后续 audit 会读取审阅覆盖层。
+默认输出所有正常×错误组合；统计时这些组合并不独立，应按 source 聚合/重采样。
 
-- `--mode replay`：在当前观测模型下读取已有回答；使用对应字符标签。这不声称恢复原生成器的内部状态。
-- `--mode generate`：先生成新回答，再回放准确的生成 IDs；原回答标签清空为 `null`。新回答需重新标注。
-- `--template chat`：使用当前 tokenizer 的 chat template；`raw` 原样编码输入，不自动追加 BOS 或其他包装。
-- `--temperature 0` 为贪心生成；大于零时使用 temperature 和 top-p。样本实际种子为 `seed + 样本序号`，保存在回答记录中。
-- `--max-length` 为显式资源界限，不做静默截断。长度应在所用 checkpoint 的支持范围内。
+## 读状态，而不是传一串固定特征
 
-不同随机种子使用不同输出目录，以 `source_id` 关联同题回答；不能按文件位置假设正负关系。
+```python
+from pathlib import Path
+from state_audit import ModelState
+from state_audit.analysis.vectors import compare_vectors
 
-### 3. 分步运行，复用状态
+state = ModelState.open(Path("runs/demo/samples/000000/trace"))
+layer = state.layer(0)
+attention = layer["attention"]
+comparison = compare_vectors(
+    {
+        "attention": layer["attention_write"],
+        "mlp": layer["mlp_write"],
+        "residual": layer["residual_after"],
+    }
+)
+print(comparison.groups, comparison.norms.shape)
+print(comparison.pairs, comparison.cosines.shape)
+```
+
+比较结果保留 group/pair 轴，不为每个研究问题手写一批 `result["xxx_norm"]`。
+只有旧 reanchor 报表的 CSV 导出边界会展开固定列名，以保持结果可读。
+
+## 表征干预
+
+```python
+from state_audit.operations import Target, Delete, Replace, Inject, Steer
+from state_audit.intervention import intervene
+
+# 绝对输入位置 30；不限于两个 head，也可跨任意层。
+target = Target("head_readout", layers=(12, 16), positions=(30,), heads=(0, 2, 5))
+operations = [Delete(target)]
+
+with intervene(model, operations):
+    hidden = model.forward(token_ids)
+```
+
+四种操作都接收 Target。Replace 接收 donor 数组，Inject 加指定向量/张量，Steer 加 `amount × 单位方向`。
+参数广播遵循 PyTorch；K/V head 是原生 KV head，不能拿 query head 编号冒充。
+方向如何获得由实验定义；Steer 本身没有训练，也不意味着这个方向代表事实性。
+
+原生 attention 的删除是把指定边置零，不自动把剩余质量重新归一化；这是来源消息消融的含义。
+Replace/Inject 可修改合法边，必须非负且不能打开未来/滑窗 mask。
+修改发生在 `A @ V` **之前**，后续 o_proj、残差、MLP 继续原生执行。
+同一 site 按操作列表顺序执行，跨 site 按模型的 forward 顺序执行。全部 hook/临时 forward 在退出时恢复。
+不要嵌套同一个 attention site 的干预上下文；把多个操作放在同一个列表中。
+
+完整可运行的四类操作、同状态替换、任意 head 组见 [intervene.py](examples/intervene.py)。
+命令行采用计划文件，替代旧版 `--head-a/--head-b`：
 
 ```bash
-state-audit generate --data runs/ragtruth.jsonl --model /path/to/checkpoint \
-  --mode generate --temperature 0.8 --seed 1 --max-length 4096 \
-  --output runs/new_answers --device cuda --dtype bfloat16
-
-state-audit capture --run runs/new_answers --layers 18 20 22
-
-state-audit audit --run runs/new_answers --roles
+python -m state_audit intervene --run runs/demo --sample 0 \
+  --plan examples/delete_heads.json --output runs/demo/interventions/delete_heads.json
 ```
 
-生成和采集可加 `--resume`，配置及输入必须相同。成功样本的完成标记最后写入，中断的样本重新采集。
-审计允许读取同一缓存反复运行；更换阈值或 `--roles` 时用新的 `--output`，避免混放不同实验。
-状态缓存是完整数据，旧 attention-only 缓存不能补零伪装成包含 Q/K/V 的新缓存。
+计划里的 `targets` 是回答 token 索引；`Target.positions` 是绝对输入位置。两者不同：`query=P+target−1`。
+`positions` 省略时操作所有当前输入位置。固定回答比较的分数是干预减基线的实际 target logp（nats）。
+两组条件交互是 `experiments.factorial_interaction` 示例，每一组可含任意数量的头、层、操作；不再叫 world。
 
-## 审计到底计算什么
+自由生成也能干预：`sample_answer(..., operations=operations)`。普通生成使用 KV cache；
+带干预生成使用完整前缀重算，以保持绝对位置含义。固定位置必须已存在；
+`positions=None` 表示对每步当前前缀持续应用操作。速度会慢于普通缓存生成。
 
-设 prompt 长度为 P，回答第 t 个 token 的预测 query 为 **q = P + t − 1**。所有索引从 0 开始。
-q 的 self key 是当前已输入的最后一个词，不能因为叫 self attention 就删掉它。
-
-| 审计 | 计算 | 解释边界 |
-|---|---|---|
-| 来源读取 | 删除 tokenizer 特殊 key 后重归一化，统计每个 head 的 evidence / history / other mass | 最大来源不等于正确证据 |
-| 消息载荷 | 用原始 attention 计算 `Σ_j a[h,q,j] V[h,j] W_O[h]` | 不对消息质量重归一化；来源是 key 所在区间，V 已包含上下文混合 |
-| 消息方向 | 同 head 的 evidence/history 写入余弦；同层 evidence 写入的几何抵消比 | 相反方向不等于事实冲突，不等于下游抑制 |
-| 回看候选 | 同来源 mass 超过阈值，且比过去 W 个 query 的均值增加到指定幅度 | 是来源回看跃升候选，不直接命名为已证实的重锚机制 |
-| head 路由 | 保持 Q、位置、mask 不变，交换两组原始 K，再施加目的位置 RoPE | symbolic 只表示跟随内容，不能推出内容正确 |
-| 标注关联 | 已冻结候选与 span 首词、之前窗口、段内位置关联；同答等长正常对照 | 标签辅助审计，不是无监督检测成绩 |
-
-候选默认 `W=4, minimum_mass=0.25, minimum_rise=0.15`，只是公开的实验参数。
-代码不使用未来 query、不强制每个幻觉前都有候选，也不把相邻满足条件的行自动合并为一个机制事件。
-`nodes.csv` 同时给出 query token、预测 target token、head、来源 ID、该来源内最强 key token。
-
-位置/内容交换借鉴 [Decoupling Positional and Symbolic Attention Behavior in Transformers](https://arxiv.org/html/2511.11579v1)。
-教学版输出逐交换的两个 cosine，不做论文中的跨置换加权总分或频率因果实验。
-每对来源最多取前 8 个普通 token，最多测 8 对；保存准确的两组 key 索引。
-均匀注意力可令两项 cosine 同时很高，因此同时记录质量、对比度和 `identifiable`。
-这只是当前输入上的探针，不是训练得到的通用 head 分类器。
-
-## 从观察进入干预
+## 观察审计与验证
 
 ```bash
-state-audit intervene --run runs/demo --sample 0 --layer 0 --target 3 \
-  --head-a 0 --head-b 1 --source evidence
+python -m state_audit audit --run runs/demo --roles
+python -m state_audit check --run runs/demo --sample 0
 ```
 
-同一层、同一 query，分别运行完整模型、删 A、删 B、同时删 A/B；另做零剂量 sham。
-删减发生在 `o_proj` 前，只减所选 head 来自指定来源的原生 value 消息，不重新归一化 attention。
-所有世界使用固定回答 prefix，继续经过原生下游层。
+`audit` 保留原 reanchor、key swap、标注连续性报告，是一个具体分析实例，放在 analysis 目录。
+它需要完整的 attention/QKV 等状态；hidden-only capture 应直接用 ModelState 分析。
+`check` 明确验证 QK/RoPE/mask → attention、A@V → head 输出、投影 → attention write。
+`complete.json` 只表明采集步骤完成，不能替代重建验证或机制证据。
 
-读出 F 是实际 target 的 **原始 log probability（nats）**：
+观察视图剔除特殊 token；原生状态与模型内干预保持真实计算。
+零普通 attention 质量可以存在，原始值保留为零；“以普通质量为条件”的分布在此处未定义，记 NaN。
+历史消息与证据消息余弦、几何抵消本身不证明错误，也不证明多头协同失败。
 
-```text
-A 在 B 存在时的作用 = F(full) − F(without_A)
-A 在 B 缺失时的作用 = F(without_B) − F(without_both)
-interaction = 两个条件作用之差
-```
+## 检查为什么保留
 
-结果在 `interventions/*.json`。有 interaction 说明本次干预的作用存在条件依赖；
-它既不是“正确减错误”的事实 margin，也不证明这种协作是幻觉特有。需要独立设计正确/错误 claim 对和语义对照。
+没有给每个内部函数增加类型/维度/空值兜底，不捕获错误后补零继续。
+保留的主动检查只覆盖会破坏研究解释的边界：
 
-## 存储、验证和扩展
+- 字符标签错位、证据归属含糊，不能生成貌似有效的标注。
+- 模型结构/动态 RoPE 不匹配，不能悄悄按另一种架构读取。
+- 干预选择了不存在的轴、重复/负索引、零 steering 方向或打开未来边。
+- 输入被截断、续跑配置改变、review 对应另一个回答，不能复用旧身份。
 
-每个样本逐层保存 NPZ，JSON/CSV 可直接阅读；禁止 pickle。完整 attention 不做 top-k，未保存的层明确缺席。
-模型计算中的特殊 token 保留，观测统计才排除它们；因此可以重建原生消息和执行可靠的删减。
-采集检查 `A·V = head_readout`、`W_O·concat(head_readout)+bias = attention_write`；角色审计再检查原始 QK 重建。
-`logit_entropy` 必定随读出保存，来自完整词表的原始模型分布，不是 temperature/top-p 后的采样熵。
+维度或普通索引错误直接交给 NumPy/PyTorch。原生重建的数值检查集中在 validation 与测试，
+不再混在每一层的采集代码里。更多 `raise` 不等于更可靠，全部删掉也不等于更清楚。
 
-全量 attention 每层存储量约为 `4 × H × T × S` 字节，S 是回放输入长度、T 是回答长度；
-eager forward 还有 `S²` 的瞬时显存开销。W_O 每个采集层只保存一次。
-这是一套便于检查的教学实现，长文本和大模型先选少量样本与层，不是多卡高吞吐框架。
+## 支持范围与迁移
 
-```bash
-python -m pytest -q
-ruff check src tests examples
-ruff format --check src tests examples
-```
+当前原生适配器支持 Llama、Mistral、Qwen2（共享 decoder 布局，包含 GQA 与滑窗 mask）；
+Transformers 4.57.x。其他布局需在 model 中显式映射，不声称任意 `AutoModel` 都支持。
+批大小为 1，支持单设备加载与逐层落盘；全 attention 内存成本仍为二次方。
+新架构加入时应实现 forward/score/bind 接口，并验证原生等价，不在 capture 或 operations 中写模型分支。
 
-测试覆盖三种真实 Transformers 结构的小模型：生成/回放、GQA、QK/消息重建、无未来信息、标签隔离、续跑、hook 清理、sham、四世界效果，以及三类 RAGTruth 格式。
-本次 CPU 验收：PyTorch 2.6.0、Transformers 4.57.1，37 项测试通过，Ruff 检查通过。
-另外完成 wheel 独立安装，实际运行生成→采集→审计、已有回答回放、命令行消息干预和示例读取。
-自然数据集上的机制效果与 AUROC 需另做实验，不能从这些软件测试推断。
-
-扩展数据集只需转换为 `Example`；扩展模型先修改 `models.py` 与必要的采集接口，再加入原生重建测试。
-含 Q/K 归一化、不同 RoPE、融合 QKV、交叉注意力的模型不能仅向支持列表添加名字。
-以后添加 LDA 或无监督读出，应读取本项目的缓存，单独划分 reference/train/test，并按 `source_id` 防止泄漏。
+0.2 调整了 Python 导入路径和 CLI，旧 `models/datasets` 改为 `model/dataset`，分析模块进入 `analysis/`。
+既有 v1 完整 trace 可由 ModelState/离线 audit 读取；新的 capture 配置使用 schema 2，不在旧目录直接续采。
+原研究结果不迁移、不覆盖。先拉取 main，再在本目录重新安装即可。

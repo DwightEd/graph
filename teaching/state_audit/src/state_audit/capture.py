@@ -1,6 +1,7 @@
-"""Replay the saved IDs and stream each layer to disk; keep native special-token flow."""
+"""Select representations, observe native execution, stream each layer to disk."""
 
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
+from dataclasses import asdict, dataclass
 from functools import partial
 from pathlib import Path
 
@@ -8,147 +9,136 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from .models import input_tensor, layers, readout
+from .model.sites import AXES, FULL_SEQUENCE_SITES, GLOBAL_SITES, LAYER_SITES
+from .state import LayerState
 from .storage import read_json, start_stage, write_arrays, write_json
 
 
+@dataclass(frozen=True)
+class CaptureSpec:
+    layers: tuple[int, ...] | None = None
+    representations: tuple[str, ...] = (*LAYER_SITES, *GLOBAL_SITES)
+    scope: str = "response"
+
+    def __post_init__(self):
+        if self.layers is not None and any(index < 0 for index in self.layers):
+            raise ValueError("Capture layer numbers must be nonnegative")
+        for name in self.representations:
+            AXES[name]
+
+    def selected_layers(self, model):
+        selected = tuple(range(len(model.layers))) if self.layers is None else self.layers
+        return tuple(dict.fromkeys(selected))
+
+
 def numpy(value):
-    return value.detach().float().cpu().numpy()
+    return value.detach().float().cpu().numpy().copy()
 
 
 class LayerCapture:
-    """Short-lived hook state for exactly one layer during one replay."""
-
-    def __init__(self, queries, path: Path):
-        self.queries = queries
+    def __init__(self, layer: int, positions, path: Path):
+        self.state = LayerState(layer, positions, {})
         self.path = path
-        self.arrays = {}
-        self.checks = {}
 
-    def before_layer(self, module, inputs):
-        self.arrays["residual_before"] = numpy(inputs[0][0, self.queries])
-
-    def before_attention(self, module, inputs, kwargs):
-        length = kwargs["hidden_states"].shape[1]
-        self.head_dim = module.head_dim
-        cosine, sine = kwargs["position_embeddings"]
-        self.arrays["cosine"], self.arrays["sine"] = numpy(cosine[0]), numpy(sine[0])
-        self.arrays["scale"] = np.asarray(module.scaling)
-        mask = kwargs["attention_mask"]
-        if mask is None:
-            allowed = np.arange(length)[None, :] <= self.queries[:, None]
-            self.arrays["attention_bias"] = np.where(allowed, 0.0, -np.inf)
+    def observe(self, name, value):
+        if name in FULL_SEQUENCE_SITES:
+            observed = value
         else:
-            self.arrays["attention_bias"] = numpy(mask[0, 0, self.queries, :length])
+            axis = AXES[name].index("position")
+            positions = torch.as_tensor(self.state.positions, device=value.device)
+            observed = value.index_select(axis, positions)
+        self.state.tensors[name] = numpy(observed)
+        return value
 
-    def capture_qkv(self, name, module, inputs, output):
-        states = output[0].reshape(output.shape[1], -1, self.head_dim).transpose(0, 1)
-        self.arrays[name] = numpy(states[:, self.queries] if name == "query" else states)
-
-    def before_projection(self, module, inputs):
-        self.arrays["head_readout"] = numpy(inputs[0][0, self.queries])
-
-    def after_attention(self, module, inputs, output):
-        attention = numpy(output[1][0, :, self.queries, :])
-        heads, count, _ = attention.shape
-        readout_values = self.arrays["head_readout"].reshape(count, heads, module.head_dim)
-        self.arrays.update(
-            attention=attention,
-            head_readout=readout_values,
-            attention_write=numpy(output[0][0, self.queries]),
+    def attention_metadata(self, module, inputs, kwargs):
+        cosine, sine = kwargs["position_embeddings"]
+        length = kwargs["hidden_states"].shape[1]
+        mask = kwargs["attention_mask"]
+        positions = self.state.positions
+        if mask is None:
+            allowed = np.arange(length)[None, :] <= positions[:, None]
+            bias = np.where(allowed, 0.0, -np.inf)
+        else:
+            bias = numpy(mask[0, 0, positions, :length])
+        self.state.tensors.update(
+            cosine=numpy(cosine[0]),
+            sine=numpy(sine[0]),
+            scale=np.asarray(module.scaling),
+            attention_bias=bias,
         )
-        values = np.repeat(self.arrays["value"], heads // len(self.arrays["value"]), axis=0)
-        reconstructed = np.einsum("hts,hsd->thd", attention, values)
-        np.testing.assert_allclose(
-            reconstructed, readout_values, atol=2e-3, rtol=2e-2, equal_nan=False
-        )
-        self.checks["head_readout_max_error"] = float(np.max(abs(reconstructed - readout_values)))
-        weights = numpy(module.o_proj.weight)
-        projected = readout_values.reshape(count, -1) @ weights.T
-        if module.o_proj.bias is not None:
-            projected += numpy(module.o_proj.bias)
-        native = self.arrays["attention_write"]
-        np.testing.assert_allclose(projected, native, atol=2e-3, rtol=2e-2, equal_nan=False)
-        self.checks["attention_write_max_error"] = float(np.max(abs(projected - native)))
 
-    def after_layer(self, module, inputs, output):
-        self.arrays["residual_after"] = numpy(output[0, self.queries])
-        self.arrays["queries"] = self.queries
-        write_arrays(self.path, **self.arrays)
-        self.arrays.clear()
+    def finish(self, module, inputs, output):
+        self.state.save(self.path)
+        self.state.tensors.clear()
 
 
 @contextmanager
-def capture_hooks(model, selected: list[int], queries, directory: Path):
-    handles, records = [], {}
-    try:
-        for index in selected:
-            layer = layers(model)[index]
-            record = LayerCapture(queries, directory / f"layer_{index:03d}.npz")
-            records[index] = record
-            handles.append(layer.register_forward_pre_hook(record.before_layer))
-            handles.append(
-                layer.self_attn.register_forward_pre_hook(record.before_attention, with_kwargs=True)
-            )
-            for name, projection in (
-                ("query", layer.self_attn.q_proj),
-                ("key", layer.self_attn.k_proj),
-                ("value", layer.self_attn.v_proj),
-            ):
-                handles.append(projection.register_forward_hook(partial(record.capture_qkv, name)))
-            handles.append(
-                layer.self_attn.o_proj.register_forward_pre_hook(record.before_projection)
-            )
-            handles.append(layer.self_attn.register_forward_hook(record.after_attention))
-            handles.append(layer.register_forward_hook(record.after_layer))
-        yield records
-    finally:
-        for handle in handles:
-            handle.remove()
+def capture_hooks(model, spec: CaptureSpec, positions, directory: Path):
+    global_states = {}
+
+    def observe_global(name, value):
+        global_states[name] = numpy(value[positions])
+        return value
+
+    with ExitStack() as stack:
+        for layer in spec.selected_layers(model):
+            record = LayerCapture(layer, positions, directory / f"layer_{layer:03d}.npz")
+            for name in spec.representations:
+                if name not in GLOBAL_SITES:
+                    observer = partial(record.observe, name)
+                    stack.enter_context(model.bind(name, layer, observer))
+            if set(spec.representations) & {"attention", "query", "key"}:
+                handle = model.layers[layer].self_attn.register_forward_pre_hook(
+                    record.attention_metadata, with_kwargs=True
+                )
+                stack.callback(handle.remove)
+            handle = model.layers[layer].register_forward_hook(record.finish)
+            stack.callback(handle.remove)
+        for name in spec.representations:
+            if name in GLOBAL_SITES:
+                stack.enter_context(model.bind(name, None, partial(observe_global, name)))
+        yield global_states
 
 
-def capture_sample(model, answer: dict, directory: Path, selected: list[int]) -> dict:
+def capture_sample(model, answer: dict, directory: Path, spec: CaptureSpec) -> dict:
+    (directory / "complete.json").unlink(missing_ok=True)
     prompt_length = answer["prompt_length"]
-    queries = np.arange(prompt_length - 1, len(answer["token_ids"]) - 1)
-    ids = input_tensor(model, answer["token_ids"])
-    with torch.inference_mode(), capture_hooks(model, selected, queries, directory) as records:
-        # The final response token is a target only; it is never an input to its own query.
-        output = model.model(input_ids=ids[:, :-1], use_cache=False, return_dict=True)
-        hidden = output.last_hidden_state[0, queries]
-        logps, entropies = [], []
-        for start in range(0, len(queries), 32):
-            logp, entropy = readout(
-                model,
-                hidden[start : start + 32],
-                ids[0, prompt_length + start : prompt_length + start + 32],
-            )
+    positions = np.arange(prompt_length - 1, len(answer["token_ids"]) - 1)
+    scopes = {"response": positions, "all": np.arange(len(answer["token_ids"]) - 1)}
+    state_positions = scopes[spec.scope]
+    targets = model.input_ids(answer["response_ids"])[0]
+    logps, entropies = [], []
+    with torch.inference_mode(), capture_hooks(model, spec, state_positions, directory) as arrays:
+        hidden = model.forward(answer["token_ids"][:-1])[positions]
+        for start in range(0, len(positions), 32):
+            logp, entropy = model.score(hidden[start : start + 32], targets[start : start + 32])
             logps.append(numpy(logp))
             entropies.append(numpy(entropy))
+    arrays.update(target_logp=np.concatenate(logps), logit_entropy=np.concatenate(entropies))
+    if not all(np.isfinite(value).all() for value in arrays.values()):
+        raise FloatingPointError("Nonfinite captured states/readout; trace is incomplete")
     write_arrays(
-        directory / "readout.npz",
-        queries=queries,
-        final_hidden=numpy(hidden),
-        target_logp=np.concatenate(logps),
-        logit_entropy=np.concatenate(entropies),
+        directory / "readout.npz", queries=positions, state_positions=state_positions, **arrays
     )
     result = dict(
+        schema_version=2,
         complete=True,
-        layers=selected,
-        response_tokens=len(queries),
-        checks={str(index): record.checks for index, record in records.items()},
+        layers=list(spec.selected_layers(model)),
+        representations=list(spec.representations),
+        scope=spec.scope,
+        response_tokens=len(positions),
     )
     write_json(directory / "complete.json", result)
     return result
 
 
-def capture_run(model, root: Path, selected: list[int] | None, resume: bool = False):
-    selected = list(range(len(layers(model)))) if selected is None else sorted(set(selected))
-    if not selected or min(selected) < 0 or max(selected) >= len(layers(model)):
-        raise ValueError("Selected layers are outside this model")
-    settings = dict(schema_version=1, layers=selected, attention="full", storage_dtype="float32")
+def capture_run(model, root: Path, spec: CaptureSpec, resume: bool = False):
+    selected = spec.selected_layers(model)
+    settings = dict(schema_version=2, **asdict(spec), storage_dtype="float32")
+    settings["layers"] = list(selected)
     start_stage(root / "capture.json", settings, resume)
     for index in selected:
-        projection = layers(model)[index].self_attn.o_proj
+        projection = model.layers[index].self_attn.o_proj
         bias = np.zeros(projection.out_features, dtype=np.float32)
         if projection.bias is not None:
             bias = numpy(projection.bias)
@@ -159,7 +149,6 @@ def capture_run(model, root: Path, selected: list[int] | None, resume: bool = Fa
         )
     for sample in tqdm(read_json(root / "run.json")["samples"], desc="state replay"):
         directory = root / "samples" / f"{sample['index']:06d}"
-        if not (resume and (directory / "trace" / "complete.json").exists()):
-            capture_sample(
-                model, read_json(directory / "answer.json"), directory / "trace", selected
-            )
+        if resume and (directory / "trace" / "complete.json").exists():
+            continue
+        capture_sample(model, read_json(directory / "answer.json"), directory / "trace", spec)

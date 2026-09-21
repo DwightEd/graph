@@ -2,6 +2,8 @@
 
 import numpy as np
 
+from .vectors import compare_vectors
+
 
 def source_masks(answer: dict, length: int) -> dict:
     keys = np.arange(length)
@@ -18,20 +20,17 @@ def source_masks(answer: dict, length: int) -> dict:
     )
 
 
-def cosine(left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    denominator = np.linalg.norm(left, axis=-1) * np.linalg.norm(right, axis=-1)
-    result = np.full(denominator.shape, np.nan)
-    return np.divide((left * right).sum(-1), denominator, out=result, where=denominator > 0)
-
-
 def source_messages(trace: dict, weights: np.ndarray, mask: np.ndarray) -> np.ndarray:
     """Native A·V·W_O for one source group; do not renormalize attention."""
     attention = trace["attention"]
     heads, _, _ = attention.shape
     values = np.repeat(trace["value"], heads // trace["value"].shape[0], axis=0)
-    readout = np.einsum("hts,hsd->thd", attention * mask, values)
+    # [head, query, source] @ [head, source, width] → [head, query, width]
+    readout = (attention * mask) @ values
     projection = weights.reshape(weights.shape[0], heads, values.shape[-1])
-    return np.einsum("thd,ohd->tho", readout, projection)
+    # Per-head output projection, then put query first.
+    writes = readout @ projection.transpose(1, 2, 0)
+    return writes.transpose(1, 0, 2)
 
 
 def measure_heads(trace: dict, weights: np.ndarray, answer: dict) -> dict:
@@ -52,12 +51,17 @@ def measure_heads(trace: dict, weights: np.ndarray, answer: dict) -> dict:
         (normalized * (masks["sources"] == i)).sum(-1).T for i in range(len(answer["evidence"]))
     ]
     result["source_mass"] = np.stack(source_mass, -1) if source_mass else None
-    evidence = source_messages(trace, weights, masks["evidence"])
-    history = source_messages(trace, weights, masks["history"])
-    result["evidence_write_norm"] = np.linalg.norm(evidence, axis=-1)
-    result["history_write_norm"] = np.linalg.norm(history, axis=-1)
-    result["evidence_history_cosine"] = cosine(evidence, history)
-    norms = result["evidence_write_norm"].sum(-1)
+    messages = {
+        group: source_messages(trace, weights, masks[group]) for group in ("evidence", "history")
+    }
+    comparison = compare_vectors(messages)
+    # Only this legacy audit export names columns; the core comparison keeps explicit axes.
+    for index, name in enumerate(comparison.groups):
+        result[f"{name}_write_norm"] = comparison.norms[..., index]
+    for index, (left, right) in enumerate(comparison.pairs):
+        result[f"{left}_{right}_cosine"] = comparison.cosines[..., index]
+    evidence = messages["evidence"]
+    norms = np.linalg.norm(evidence, axis=-1).sum(-1)
     ratio = np.full(norms.shape, np.nan)
     np.divide(np.linalg.norm(evidence.sum(1), axis=-1), norms, out=ratio, where=norms > 0)
     result["evidence_head_cancellation"] = 1 - ratio

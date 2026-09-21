@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from .datasets import Example
+from .dataset import Example
 
 
 def encode_prompt(tokenizer, example: Example, template: str) -> dict:
@@ -34,7 +34,7 @@ def encode_prompt(tokenizer, example: Example, template: str) -> dict:
 
 def generated_offsets(tokenizer, response_ids: list[int], text: str) -> list | None:
     """Retokenization verifies offsets only; it NEVER replaces the generated IDs."""
-    special = set(tokenizer.all_special_ids)
+    special = set(special_token_ids(tokenizer))
     ordinary = [token for token in response_ids if token not in special]
     encoded = tokenizer(text, add_special_tokens=False, return_offsets_mapping=True)
     if ordinary != encoded["input_ids"]:
@@ -57,7 +57,7 @@ def answer_record(
     if not prompt["prompt_ids"] or not response_ids:
         raise ValueError("Prompt and response must both contain at least one token")
     return dict(
-        schema_version=1,
+        schema_version=2,
         id=example.id,
         source_id=example.source_id,
         metadata=example.metadata,
@@ -70,8 +70,14 @@ def answer_record(
         response=response,
         response_offsets=offsets,
         token_strings=tokenizer.convert_ids_to_tokens(ids),
-        special_token_ids=tokenizer.all_special_ids,
+        special_token_ids=special_token_ids(tokenizer),
         evidence=example.evidence,
         labels=example.labels if mode == "replay" else None,
         labels_status="original_response" if mode == "replay" else "new_response_unreviewed",
     )
+
+
+def special_token_ids(tokenizer) -> list[int]:
+    """Some chat control tokens are marked only in the added-token table."""
+    marked = {index for index, token in tokenizer.added_tokens_decoder.items() if token.special}
+    return sorted(set(tokenizer.all_special_ids) | marked)

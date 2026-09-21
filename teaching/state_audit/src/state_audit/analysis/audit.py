@@ -5,10 +5,12 @@ from pathlib import Path
 import numpy as np
 from tqdm import tqdm
 
+from ..pairing import load_answer
+from ..state import LayerState
+from ..storage import read_arrays, read_json, start_stage, write_arrays, write_csv, write_json
 from .annotations import label_report, token_spans
 from .measurements import measure_heads, reanchor_candidates, source_masks
 from .roles import swap_probe
-from .storage import read_arrays, read_json, start_stage, write_arrays, write_csv, write_json
 
 HEAD_FIELDS = [
     "target",
@@ -100,7 +102,10 @@ def describe_nodes(nodes: list[dict], trace: dict, answer: dict, layer: int) -> 
 def audit_layer(
     root: Path, directory: Path, output: Path, layer: int, answer: dict, settings: dict
 ) -> list[dict]:
-    trace = read_arrays(directory / "trace" / f"layer_{layer:03d}.npz")
+    state = LayerState.load(directory / "trace" / f"layer_{layer:03d}.npz", layer)
+    positions = np.arange(answer["prompt_length"] - 1, len(answer["token_ids"]) - 1)
+    state = state.select(positions)
+    trace = dict(queries=state.positions, **state.tensors)
     weights = read_arrays(root / "weights" / f"layer_{layer:03d}.npz")["output_projection"]
     measured = measure_heads(trace, weights, answer)
     arrays = {key: value for key, value in measured.items() if value is not None}
@@ -148,7 +153,7 @@ def token_rows(answer: dict, readout: dict) -> list[dict]:
 
 def audit_sample(root: Path, sample: dict, output: Path, settings: dict) -> dict:
     directory = root / "samples" / f"{sample['index']:06d}"
-    answer = read_json(directory / "answer.json")
+    answer = load_answer(directory)
     complete = read_json(directory / "trace" / "complete.json")
     nodes = []
     for layer in complete["layers"]:
@@ -172,10 +177,8 @@ def audit_sample(root: Path, sample: dict, output: Path, settings: dict) -> dict
 
 
 def audit_run(root: Path, output: Path, settings: dict) -> dict:
-    if settings["window"] < 1 or not 0 <= settings["minimum_mass"] <= 1:
-        raise ValueError("window >= 1 and minimum_mass in [0, 1] are required")
-    if not 0 <= settings["minimum_rise"] <= 1:
-        raise ValueError("minimum_rise must be in [0, 1]")
+    if settings["window"] < 1:
+        raise ValueError("The past-only comparison window must be at least one token")
     samples = read_json(root / "run.json")["samples"]
     start_stage(output / "settings.json", settings, resume=True)
     reports = [

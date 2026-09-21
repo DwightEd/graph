@@ -4,7 +4,8 @@ from itertools import combinations
 
 import numpy as np
 
-from .measurements import cosine, source_masks
+from .measurements import source_masks
+from .vectors import cosine
 
 
 def rotate(states: np.ndarray, cosine_values: np.ndarray, sine_values: np.ndarray):
@@ -19,7 +20,7 @@ def attention_from_keys(trace: dict, keys: np.ndarray) -> np.ndarray:
     )
     keys = rotate(keys, trace["cosine"], trace["sine"])
     keys = np.repeat(keys, len(query) // len(keys), axis=0)
-    logits = np.einsum("htd,hsd->hts", query, keys) * trace["scale"]
+    logits = (query @ keys.transpose(0, 2, 1)) * trace["scale"]
     logits += trace["attention_bias"]
     weights = np.exp(logits - logits.max(-1, keepdims=True))
     return weights / weights.sum(-1, keepdims=True)

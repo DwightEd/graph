@@ -1,4 +1,4 @@
-# 数据与索引契约
+# 数据与索引契约（0.2）
 
 ## 回答记录
 
@@ -7,7 +7,8 @@
 
 | 字段 | 内容 |
 |---|---|
-| `id` / `source_id` | 回答 ID / 同题来源 ID |
+| `id` / `source_id` | 本次回答 ID / 同题来源 ID |
+| `parent_ids` / `draw` / `index` | 原样本身份列表 / 本题第几次采样 / 本 run 样本索引 |
 | `prompt_text` | 实际模板后的文本 |
 | `prompt_ids` / `prompt_length` | 实际输入及长度 P |
 | `response_ids` | 实际生成 IDs，或已有回答在观测 tokenizer 下的 IDs |
@@ -27,7 +28,8 @@
 
 ## 每层状态
 
-对 T 个回答词，只需输入前 S=P+T−1 个 token。保存的 query 是 `[P−1, …, P+T−2]`。
+对 T 个回答词，只需输入前 S=P+T−1 个 token。默认保存的 query 是 `[P−1, …, P+T−2]`。
+`--scope all` 改为 `[0, …, S−1]`，下面逐 query 状态的 T 轴随之变为 S；source K/V 本来就保留完整 S。
 H 为 query head 数，K 为 KV head 数，d 为 head 宽度，D 为 residual 宽度。
 
 `samples/000000/trace/layer_000.npz`：
@@ -44,15 +46,18 @@ H 为 query head 数，K 为 KV head 数，d 为 head 宽度，D 为 residual �
 | `head_readout` | T × H × d | `o_proj` 输入重排后的逐 head 读取结果 |
 | `attention_write` | T × D | attention 输出投影后的写入，含投影 bias |
 | `residual_before` / `residual_after` | T × D | 整个 decoder block 前/后的 residual |
+| `attention_input` / `mlp_input` | T × D | 两个 normalization 后、进入 attention/MLP 的状态 |
+| `mlp_activation` | T × intermediate_size | 门控激活相乘后、down_proj 之前 |
+| `mlp_write` | T × D | MLP 的输出写入 |
 
 Q/K/V 是上下文化状态，不是独立词义。所有层号与 head 号保持物理编号；KV 头展开为 query 头的映射为 `kv_head = head // (H // K)`。
 
-`trace/readout.npz` 保存 `queries`、最终归一化后的 `final_hidden[T,D]`、`target_logp[T]`、`logit_entropy[T]`。完整 vocabulary logits 按 32 个 query 一批计算，避免全序列 logits 常驻；不保存整个词表向量。
+`trace/readout.npz` 保存 `queries`、最终归一化后的 `final_hidden[T,D]`、`target_logp[T]`、`logit_entropy[T]`。按 CaptureSpec 选择保存 `embedding[T,D]` 和 `final_hidden[T,D]`；读出 logp/entropy 始终保存。完整 vocabulary logits 按 32 个 query 一批计算，避免全序列 logits 常驻；不保存整个词表向量。
 
 `weights/layer_000.npz` 保存 `output_projection[D,H*d]` 和 `bias[D]`。同一 run 每层一份。
 NPZ 中的浮点状态转为 float32；这不把原先 bfloat16 计算变成 float32 推理。
 
-`trace/complete.json` 最后写入，包含采集层和消息重建误差。失败时不会写成功标记；没有标记的样本可以用 `--resume` 重采。输入或采集配置变化必须换目录。模型地址对应的本地 checkpoint 也应保持不变。
+`trace/complete.json` 最后写入，包含版本 2、采集层和 representations；只表示采集完成。重建验证另用 `state-audit check`；失败时不会写成功标记；没有标记的样本可以用 `--resume` 重采。输入或采集配置变化必须换目录。模型地址对应的本地 checkpoint 也应保持不变。
 
 ## 离线结果
 
@@ -86,3 +91,33 @@ RAGTruth 字符标注投影后，重叠 token 区间合并，相邻而不重叠�
 正常对照在同回答内匹配长度、首 token 表面类别、相对位置差 ≤ 0.25、token 重复率差 ≤ 0.15、此前是否出现错误；观察邻域不含错误，正常区间不复用。
 两侧必须都有完整前置计算窗口；早期 span 不强配给已经完成窗口预热的正常区间。
 没有匹配时记为未匹配。当前教学版不匹配语法、语义或熵；结果不能解释为完全控制后的幻觉特异性。
+
+## 操作计划
+
+```json
+{
+  "targets": [3],
+  "conditions": {
+    "cut": [{
+      "operation": "delete",
+      "target": {"representation": "attention", "layers": [0, 1], "heads": [0, 1, 2], "keys": [4, 5]}
+    }]
+  }
+}
+```
+
+省略 positions 即所有当前 query，省略 heads 即全部该表征的原生 head。
+Target 的每个轴取笛卡尔积，不采用多个高级下标隐含的一一配对语义。
+Replace/Inject 用 value；Steer 用 direction 和 amount。`value_file` 可从计划文件目录相对读取 `.npy` 数组。
+同层/全局 donor 应优先用 `ModelState.at(name, positions, layer)` 提取，保持绝对位置映射。
+同形状不等于语义上可互换；跨答案 donor 的来源/事实/位置对应由实验明确指定。
+不应把未来生成状态作为在线检测特征或合法的过去信息。
+
+`interventions/*.json` 保存 baseline、conditions、targets、delta_logp，以及 CLI 的原始操作计划。
+无自动筛选有利 head 或改变分数方向。组合干预按照实际模型执行顺序传播。
+
+v1 默认数组名称与轴保持可读；v2 新增采集选择、MLP/全局状态与采样身份。
+只采集 hidden 时没有 attention 文件内容，不能据此运行要求 QKV 的重建检查。
+
+`readout.npz` 中 queries 始终对齐回答 logp/entropy；state_positions 对齐 embedding/final_hidden。
+`ModelState.at` 处理这个差别，不需要调用者手算数组行号。

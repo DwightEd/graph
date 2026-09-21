@@ -14,7 +14,7 @@ from transformers import (
     set_seed,
 )
 
-from .datasets import Example, locate_evidence
+from .dataset import Example, locate_evidence
 
 
 def demo_examples() -> list[Example]:

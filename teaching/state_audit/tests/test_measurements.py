@@ -1,8 +1,8 @@
 import numpy as np
 
-from state_audit.annotations import label_report, match_normal, span_row, token_spans
-from state_audit.measurements import measure_heads, reanchor_candidates, source_messages
-from state_audit.roles import probe_rows
+from state_audit.analysis.annotations import label_report, match_normal, span_row, token_spans
+from state_audit.analysis.measurements import measure_heads, reanchor_candidates, source_messages
+from state_audit.analysis.roles import probe_rows
 
 
 def example_trace():

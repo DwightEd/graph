@@ -1,0 +1,7 @@
+{
+  "targets": [3],
+  "conditions": {
+    "zero_dose": [{"operation": "delete", "strength": 0, "target": {"representation": "head_readout", "layers": [0], "heads": [0, 1, 2]}}],
+    "delete_three_heads": [{"operation": "delete", "target": {"representation": "head_readout", "layers": [0], "heads": [0, 1, 2]}}]
+  }
+}

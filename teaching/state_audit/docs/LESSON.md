@@ -1,76 +1,66 @@
-# 一次课堂可以讲清楚的流程
+# 教学阅读顺序
 
-## 1. 回答的词与计算的位置不同
+## 1. 先看数据与位置
 
-运行 demo，读取 `answer.json`，写出 prompt 长度 P。
-回答第 0 个 token 由 query P−1 预测，第 t 个 token 由 P+t−1 预测。
-修改一个未来回答词再回放：它之前的 query 状态不能变化。对应测试是 `test_future_changes_do_not_change_earlier_states`。
+读 `dataset/schema.py`，再看 JSONL / RAGTruth 适配器。Example 不知道 PyTorch 或 attention。
+`labels=None`、`labels=[]` 的区别必须先讲清：不知道是否错误，不等于正确。
 
-建议先读 `pipeline.py`，然后依次读 `generation.py → capture.py → audit.py`。
-先理解每一步输入和输出，再读内部公式。
+读 `tokenization.py`：prompt 长度 P，回答 token t 在输入 query P+t−1 处预测。
+生成 IDs 是事实记录；重编码只核验字符 offset，不能用来替换生成 IDs。
 
-## 2. 地址、读取结果、实际写入是三个量
+## 2. 看重采样，而不是预设正负样本
 
-运行：
+读 `generation.sampling_inputs → sampling_jobs → generate_run`。
+同一个 prompt 的原回答先合并来源身份，再按 draw/seed 采样。
+采样后先保留所有回答，审阅后才调用 pairing；不能按模型置信度自动贴“正确”标签。
 
-```bash
-python examples/read_trace.py --run runs/demo --sample 0 --layer 0 --head 1 --target 3
+## 3. 看模型执行的表征
+
+读 `model/sites.py` 的轴表，再看 `ModelAdapter.module_at`。
+Residual 是整层输入/输出；QKV 是投影结果；head_readout 是 o_proj 的输入；
+MLP activation 是门控激活后的 down_proj 输入。它们不是同一种空间。
+
+Llama/Mistral/Qwen2 共用一套明确布局，因此没有机械写三个相同的适配器类。
+新增布局改变 model 的映射，不要求 dataset、capture、operations 知道模型家族。
+
+## 4. 看采集与状态容器
+
+读 `CaptureSpec → capture_hooks → LayerCapture → ModelState`。
+一层执行完就写盘，关闭 hook；离线分析只读需要的一层。
+`ModelState.at` 和 `LayerState.at` 接收绝对位置，避免 donor 替换时手算 P+t−1 产生错位。
+全局 embedding/final_hidden 与逐层状态都能用同一接口访问。
+
+## 5. 看张量操作
+
+```python
+# A: [head, query, source], V: [head, source, width]
+head_output = (attention @ values).transpose(1, 0, 2)
 ```
 
-固定一层、一个 head、一个 query，选输入位置 j：
+等价于 `np.einsum("hts,hsd->thd", attention, values)`。
+重复而未写入输出的 s 被求和；t、h、d 是输出轴。einsum 很常见，
+但本项目的这些式子用矩阵乘法已经足够清晰，因此采用后者。
 
-1. attention `a[q,j]` 表示读取强度。
-2. `a[q,j] * V[j]` 是该 head 读到的消息。
-3. `W_O[h] @ (a[q,j] * V[j])` 是写回 residual 空间的消息。
+读 `Target.indices`：broadcast index vectors 选择多个轴的笛卡尔积，
+不是把 (head0,token0)、(head1,token1) 错配成两个点。
+再读四个操作，每个只有一条可解释的变换。
 
-让学生改变观察的 j、head 和 layer，对比注意力大小与写入范数是否同序。
-然后把所有 key 的消息求和，与 `head_readout` 比较；再把所有 head 的投影结果相加，与 `attention_write` 比较。
-这些是重建检查，不是幻觉证据。
+## 6. 区分观察与真正干预
 
-## 3. 固定位置，移动内容
+捕获 attention 权重只需要观察 native 输出；干预权重必须先改 A，再计算 A@V。
+`model.attention_forward` 保留原生 projection、RoPE、mask、GQA 和输出投影。
+`intervention.py` 只安装/清理，不推断语义来源。
 
-阅读 `roles.py` 中 `attention_from_keys` 和 `swap_probe`。
-保持 query 不变，交换两组证据位置上的原始 key；用目的位置的 RoPE 重新旋转，再计算 attention。
-两块均值向量记为 v=(左,右)，交换后为 v′：
+Delete attention sources 和减去相应 A@V 消息可以等价；
+Delete 整个 head、Replace V、Inject residual、Steer MLP 则是不同实验。
+四种条件仅是检验两组效应交互的实验设计，不是框架能表达的最大操作数量。
 
-```text
-positional = cosine(v′, v)
-symbolic   = cosine(v′, reverse(v))
-```
+## 7. 最后才做具体审计
 
-先用 `[0.1,0.8] → [0.8,0.1]` 解释跟随内容，再用均匀 `[0.5,0.5]` 解释不可辨识。
-这里没有把局部交换送入下一层，因而不能从该表直接推断最终回答会变。
-同一 head 在不同 token 上也可能有不同结果。
+`analysis.vectors.compare_vectors` 返回带 group/pair 轴的结果；
+`analysis.audit` 的固定列名仅为旧 reanchor 报告导出。
+把后者换成一个 hidden-state 或 MLP 分析，不需要改前面任何一层。
 
-## 4. 从候选到有对照的实验
-
-先读 `measurements.py` 的候选条件；它比较同一个来源在当前 query 和过去窗口的质量。
-再打开 `nodes.csv` 查具体 token，而不是只看统计数字。
-
-最后才打开 `span_links.csv`：
-
-- 幻觉之前有候选吗？前置窗口是否完整？
-- 同长度、相近位置、相近重复率的正常 span 之前也有吗？
-- 候选只在首词出现，还是进入 span 后才出现？
-- 未匹配的 span 有多少？是否主要来自短回答或全错回答？
-
-换阈值时换输出目录，保存每次假设。不因为某个阈值让图更好看就称它为检测方法。
-随机模型只演示操作；这些问题的实证答案需要真实模型和足够多的独立来源。
-
-## 5. 多 head 的条件作用
-
-运行 README 中的 `intervene` 命令，手算四世界的 interaction。
-如果删 A 的影响在有 B、没有 B 两个世界中不同，就观测到了该干预下的条件作用。
-再用 `--source history --target 0` 做空来源对照：第一个回答词之前没有回答历史，四个世界必须相同。
-
-接下来才讨论需要什么新实验：事实正确/错误候选的 margin、同题正负回答、同 token 位置的语义控制、不同来源上的重复验证。
-不能仅凭目标词 logp 变化命名“纠错 head”或“幻觉 head”。
-
-## 学生扩展作业
-
-1. 转换自己的数据集为统一 JSONL，不改模型采集代码。
-2. 加一个纯 NumPy 观测函数，输入原生状态，输出 `[token, head]` 数组。
-3. 区分 `labels=null` 与 `labels=[]`，验证新生成回答不会继承旧标签。
-4. 若做 LDA，单独写训练脚本，按 source_id 划分；分别报告 onset、continuation 和正常匹配片段的效果。
-
-作业评价看索引是否正确、对照是否有效、结论是否超出证据，不以挑出的最高 AUROC 为唯一标准。
+必须先跑同状态替换/零剂量对照，再解释其他干预效果。
+attention 变化、logp 变化、范数/余弦变化都不自动等于幻觉机制；
+正常/错误对照、标签连续性和来源适用性仍须单独检验。

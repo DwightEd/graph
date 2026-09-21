@@ -3,14 +3,15 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from state_audit.audit import audit_run
-from state_audit.capture import capture_run, capture_sample
-from state_audit.datasets import load_examples
+from state_audit.analysis.audit import audit_run
+from state_audit.capture import CaptureSpec, capture_run, capture_sample
+from state_audit.dataset import load_examples
 from state_audit.generation import generate_run, make_answer
 from state_audit.storage import read_arrays, read_json
 
@@ -30,12 +31,12 @@ def test_full_offline_audit_and_labels(tiny_run):
 
 def test_generation_preserves_ids_and_does_not_inherit_labels(tiny_run, tmp_path):
     model, tokenizer, _, data, options, _ = tiny_run
-    options = dict(options, mode="generate")
+    options = replace(options, mode="generate")
     example = load_examples(data)[1]
     answer = make_answer(model, tokenizer, example, options, seed=5)
     assert answer["token_ids"] == answer["prompt_ids"] + answer["response_ids"]
     assert answer["labels"] is None
-    capture_sample(model, answer, tmp_path / "trace", [0])
+    capture_sample(model, answer, tmp_path / "trace", CaptureSpec(layers=(0,)))
     readout = read_arrays(tmp_path / "trace" / "readout.npz")
     assert len(readout["target_logp"]) == len(answer["response_ids"])
     assert np.isfinite(readout["logit_entropy"]).all()
@@ -48,10 +49,10 @@ def test_resume_preserves_files_and_rejects_changed_settings(tiny_run):
     path = root / "samples" / "000000" / "trace" / "layer_000.npz"
     timestamp = path.stat().st_mtime_ns
     generate_run(model, tokenizer, data, root, options, settings, resume=True)
-    capture_run(model, root, None, resume=True)
+    capture_run(model, root, CaptureSpec(), resume=True)
     assert path.stat().st_mtime_ns == timestamp
     with pytest.raises(ValueError, match="settings changed"):
-        generate_run(model, tokenizer, data, root, dict(options, seed=8), settings, resume=True)
+        generate_run(model, tokenizer, data, root, replace(options, seed=8), settings, resume=True)
 
 
 def test_labels_do_not_change_observations(tiny_run):
@@ -71,7 +72,9 @@ def test_labels_do_not_change_observations(tiny_run):
 
 def test_offline_import_does_not_load_torch():
     script = (
-        "import sys; from state_audit.audit import audit_run; assert 'torch' not in sys.modules"
+        "import sys\n"
+        "from state_audit.analysis.audit import audit_run\n"
+        "assert 'torch' not in sys.modules"
     )
     source = str(Path(__file__).parents[1] / "src")
     subprocess.run(

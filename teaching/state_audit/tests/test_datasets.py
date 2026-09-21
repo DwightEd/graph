@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from state_audit.datasets import convert_ragtruth, load_examples
+from state_audit.dataset import convert_ragtruth, load_examples
 from state_audit.tokenization import generated_offsets
 
 
@@ -47,6 +47,7 @@ def test_ragtruth_adapter_preserves_prompt_labels_and_metadata(tmp_path, task, i
 def test_generated_alignment_failure_does_not_guess_offsets():
     class Tokenizer:
         all_special_ids = [0]
+        added_tokens_decoder = {}
 
         def __call__(self, text, **kwargs):
             return dict(input_ids=[3], offset_mapping=[(0, 1)])
