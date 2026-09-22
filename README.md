@@ -1,4 +1,18 @@
-# 候选内容与适用条件的功能一致性
+# 原生来源支持检测与机制审计
+
+当前检测入口：[Native Support](experiments/native_support/README.md)。
+每个实际输出 token 只做原生前向，从同一个逐头写入账本计算局部 prompt 支持与历史复用：
+`risk = direct_risk + inherited_risk`。不做消融、反向传播或候选语义探针，不读取自然标签。
+回看、熵、FFN 正负写入是解释字段，不筛选检测位置。
+
+```bash
+python -u main.py support --resume
+```
+
+默认仅回放已存的 4 个自然前缀、322 个已观察回答 token，不运行全量数据。
+输出 `outputs/native_support_v1/report.html`、`tokens.csv` 和逐 token NPZ。
+这几个前缀在原决策词之前结束；没有人工拼接候选，不能用它们报告首错或延续成绩。
+[完整定义与研究边界](iclr/NATIVE_SUPPORT_DESIGN.md)。当前是已实现的检测假设，尚无自然数据有效性结论。
 
 教学与独立复用入口：[State Audit](teaching/state_audit/README.md)。
 短错误检验：[短 span 审计](experiments/short_span_audit/README.md)，分别提供已有冻结分数的 CPU 评价和复用 teaching 的逐目标贡献采集。
@@ -6,12 +20,12 @@
 支持 Llama、Mistral、Qwen2，并提供无需下载模型的示例。
 
 两个项目的既有发现见[证据台账](docs/DETECTION_CONVERGENCE_20260919.md)。
-当前方案见[正负配对机制审计](docs/PAIRED_MECHANISM_20260920.md)：明确适用性、
+既有审计方案见[正负配对机制审计](docs/PAIRED_MECHANISM_20260920.md)：明确适用性、
 多头条件作用、下游补偿和时间持续性，再在同题重采样中逐项检验。
 文献包括前轮 [18 项核查](docs/LITERATURE_TRANSPORT_20260919.md) 及本轮 GoS、Saliency、RAUQ 方法复核。
 内部逐头模式可被监督读出；尚无已验证的通用无监督绑定检测器。
 
-本轮主入口：
+历史配对机制审计入口（包含干预，不属于上面的检测流程）：
 
 ```bash
 python -u main.py flow

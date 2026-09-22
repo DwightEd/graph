@@ -2,10 +2,10 @@
 
 import sys
 
-
 HELP = """Usage: python main.py COMMAND [arguments]
 
   flow             Resampled claim pairs: head interactions, repair and persistence
+  support          Native forward-only token support graph; no labels or interventions
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis
@@ -13,7 +13,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   supervised-s10   Historical supervised baseline
   supervised-s11   Historical supervised baseline
 
-Read docs/PAIRED_MECHANISM_20260920.md for detection targets and the paired audit.
+Read experiments/native_support/README.md for the current forward-only detector.
 No command starts an experiment automatically. Each command accepts --help.
 """
 
@@ -24,7 +24,12 @@ def main(argv=None):
         print(HELP)
         return
     command, arguments = argv[0], argv[1:]
-    if command == "flow":
+    if command == "support":
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
+        from experiments.native_support.run import main as run
+        run(arguments)
+    elif command == "flow":
         from experiments.path_conflict.paired import cli
         cli(arguments)
     elif command == "flow-edges":

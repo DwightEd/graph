@@ -1,0 +1,101 @@
+# 原生来源支持检测
+
+核心定义只有一个：`risk = direct_risk + inherited_risk`。
+先用原生 W_O A V 写入衡量 prompt 对实际输出的支持，再沿正向历史写入与相似头模式继承此前分数。
+不消融、不反向传播、不需要正确候选、角色表或幻觉标签。全程 teacher forcing。
+[公式、分析顺序与边界](../../iclr/NATIVE_SUPPORT_DESIGN.md)。
+
+## 一键运行
+
+在 graph 根目录、现有 research 环境中：
+
+```bash
+git pull --ff-only origin main
+python -u main.py support --resume
+```
+
+等价入口：`bash experiments/native_support/run.sh`。
+默认模型和 4 个自然前缀来自 `examples/prefixes.json`，共 322 个已观察回答 token。
+这些前缀止于原决策词之前，没有加入 supported/unsupported 候选续写，不能评价首错与后续延续。
+ID 中的 supported/unsupported 仅保留档案名称，不认证整段回答正确，也不参与计算。
+默认不是全量实验，本轮没有运行服务器 8B。
+
+```bash
+# 更换模型位置；输入 token IDs 必须来自这个 tokenizer。
+python -u main.py support --resume --model /path/to/Meta-Llama-3.1-8B-Instruct
+
+# 已采集后，仅 CPU 重算分数/报告，无需载入模型。
+python main.py support --stage score --output outputs/native_support_v1
+```
+
+采集可断点续跑，缺失文件才前向；评分始终按全部已观察回答 token 重建历史递推。
+读旧 native_trace_audit 结果不会得到新分数：旧文件使用固定人工候选方向，需新的原生前向读出。
+原审计文件不会修改。
+
+## 输出
+
+默认目录 `outputs/native_support_v1/`：
+
+| 文件 | 内容 |
+|---|---|
+| `report.html` | 自包含的逐 token 曲线与表格 |
+| `tokens.csv` | 每个 token 的总分、直接项、历史项、熵、惊讶度、FFN 写入和读取增强 |
+| `summary.json` | 完成数量、账本误差、运行边界 |
+| `responses/0000/token_000000.npz` | 每层每头每来源 attention、signed write、value energy；残差账本 |
+| `responses/0000/scores.npz` | 逐 token 分数、完整头模式、下三角历史边权、逐头 prompt 关注峰 |
+| `settings.json` | 实际模型、token 序列和边界，便于重算及续跑 |
+
+R 越高代表来源支持越弱；R 可正可负，0 不是分类阈值，R 不是幻觉概率。
+回看和熵不进入评分，不用它们挑选位置。FFN 正负写入不是正确/错误标签。
+
+## 输入完整自然回答
+
+`--input` 接受 JSON，沿用 teaching 的原始 token ID 回放：
+
+```json
+{
+  "model": "/path/to/model",
+  "responses": [
+    {
+      "id": "answer-1",
+      "source_id": "source-1",
+      "prompt_length": 3,
+      "token_ids": [1, 2, 3, 4, 5],
+      "token_text": ["<s>", "Question", "Answer:", " text", "."]
+    }
+  ]
+}
+```
+
+例中 ID 仅展示结构，应使用真实的 prompt+response IDs。
+`token_text[i]` 必须是原 tokenizer 的 `decode([token_ids[i]])`，不要求这些片段能拼成整句解码。
+保存的回答必须是实际观察值，不从标签或候选表合成。不要提供未来正确答案作为候选。
+
+## 独立评价（可选，本轮不跑）
+
+先采集、冻结评分，再单独输入标注：
+
+```bash
+python main.py support --stage evaluate \
+  --output outputs/native_support_v1 --annotations token_labels.json
+```
+
+标注文件形如 `{"answer-1": {"token_ids": [4, 5], "labels": [0, 1]}}`。
+ID 与回答 token 必须完全对应，1 表示幻觉；评分阶段不读取此文件。
+评价 `support_graph` 与 `direct_prompt` 的全错误、每答首错、span 起点和延续 AUROC/AP。
+不翻转方向，不以当前测试标签选阈值。没有标签时不输出伪造的 AUROC 或告警准确率。
+
+## 代码与验证
+
+- `state_audit/native_forward.py`：原生采集，自动竞争词与准确账本。
+- `score.py`：预算、保留头身份的模式、因果历史递推。
+- `pipeline.py`：按 token 保存/续跑/评分；`report.py` 输出可读结果。
+- `evaluate.py`：冻结分数后的独立标签评价。
+
+针对性验证：
+
+```bash
+python -m pytest -q tests/test_native_support.py teaching/state_audit/tests/test_native_trace.py
+```
+
+CPU 小型随机 Llama 的软件测试不能证明真实模型的检测有效性。

@@ -16,7 +16,8 @@
 ## 研究与运行约定
 
 修改代码前读取 `iclr/CODING_GUIDELINES.md` 与 `iclr/MECHANISM_FIRST.md`。
-当前检测验证是 `experiments/unsupervised_token_graph/fixed_graph`；先读 `iclr/FIXED_GRAPH_VERIFICATION.md`。
+当前原生前向检测是 `experiments/native_support`；先读 `iclr/NATIVE_SUPPORT_DESIGN.md`。
+历史固定图验证保留在 `experiments/unsupervised_token_graph/fixed_graph`，其协议见 `iclr/FIXED_GRAPH_VERIFICATION.md`。
 `span_audit` 保留为标签辅助解释；不再要求完成所有因果机制后才能检验无标签检测。
 先使用真实错误与正常对照，区分入口、复用、退出；不要启动来源错接训练来替代这个问题。
 最终无监督检测是后续独立任务，不能将金标构图/金标窗口的结果称为检测成绩。

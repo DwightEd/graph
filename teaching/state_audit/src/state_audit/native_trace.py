@@ -33,7 +33,7 @@ def observe_site(record, name, value, *, start_gradient=False):
 
 
 @contextmanager
-def native_hooks(model):
+def native_hooks(model, *, with_grad=True):
     spec = CaptureSpec(representations=TRACE_SITES)
     records = {layer: {} for layer in spec.selected_layers(model)}
     with ExitStack() as stack:
@@ -43,7 +43,7 @@ def native_hooks(model):
                     observe_site,
                     record,
                     name,
-                    start_gradient=layer == 0 and name == "residual_before",
+                    start_gradient=with_grad and layer == 0 and name == "residual_before",
                 )
                 stack.enter_context(model.bind(name, layer, observer))
         yield records
