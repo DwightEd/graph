@@ -75,7 +75,8 @@ def finish_evaluation(output, destination, summary, rows, annotations):
     annotations = annotations or output / "annotations.json"
     methods = summary["methods"]
     evaluation = evaluate_comparison(output, destination, annotations, methods, rows)
-    pairs = [("joint_state", name) for name in (summary["raw_baseline"], "route_mean", "route_state", "instant_state")]
+    controls = summary.get("comparison_controls", [summary["raw_baseline"], "route_mean", "route_state", "instant_state"])
+    pairs = [(summary["candidate_method"], name) for name in controls]
     comparisons = write_deltas(output, destination, annotations, evaluation,
                                summary["raw_baseline"], methods, rows, pairs)
     summary.update(responses=len({row["response_id"] for row in rows}), scored_tokens=len(rows),

@@ -17,6 +17,8 @@
 
 修改代码前读取 `iclr/CODING_GUIDELINES.md` 与 `iclr/MECHANISM_FIRST.md`。
 当前原生前向检测是 `experiments/native_support`；先读 `iclr/JOINT_STATE_DESIGN.md`。
+联合模型的四答阴性结果及后续协议见 `iclr/STATE_READOUT_VALIDATION.md`。
+普通均值仍是有效基线；新 readout 仅检验直接先验收缩，不能宣称已恢复多信号融合。
 `--stage model` 为多观测切换状态候选；默认 optimize 及 v3 保留，定义见 `iclr/ROUTE_FILTER_DESIGN.md`。
 R 固定风险方向，A/熵参与状态长度推断；不能把统计切换称作语义重锚，不能把状态均值称作幻觉概率。
 按同样本 AUROC/AP 优化，保留原路由与普通因果均值；没有自然成绩不宣称滤波有效。

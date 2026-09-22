@@ -16,7 +16,7 @@ EXAMPLE = Path(__file__).parent / "examples" / "prefixes.json"
 
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=("prepare", "run", "score", "optimize", "model", "compare", "evaluate"), default="run")
+    parser.add_argument("--stage", choices=("prepare", "run", "score", "optimize", "model", "readout", "validate", "compare", "evaluate"), default="run")
     parser.add_argument("--input", type=Path, default=EXAMPLE)
     parser.add_argument("--output", type=Path, default=Path("outputs/native_support_v1"))
     parser.add_argument("--model")
@@ -35,6 +35,10 @@ def arguments(argv=None):
     parser.add_argument("--limit", type=int, default=4, help="Maximum official answers; default is a small pilot")
     parser.add_argument("--balanced", action="store_true", help="Diagnostic cohort: equal positive/negative answer counts, using labels only for selection")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--exclude-output", type=Path, help="For validate: exclude every source in an already inspected output")
+    parser.add_argument("--reference-count", type=int, default=16, help="For validate: number of independent train sources")
+    parser.add_argument("--selection-seed", type=int, default=37, help="For validate: label-independent source ordering")
+    parser.add_argument("--prepare-only", action="store_true", help="For validate: freeze/tokenize cohorts without model weights")
     args = parser.parse_args(argv)
     if args.prefill_chunk_size < 1 or args.query_chunk_size < 1:
         parser.error("prefill and query chunk sizes must be positive")
@@ -44,22 +48,21 @@ def arguments(argv=None):
         parser.error("limit must be positive; balanced pilot needs an even limit of at least two")
     if args.stage == "prepare" and args.dataset is None:
         parser.error("prepare requires --dataset pointing to the official RAGTruth directory")
-    if args.dataset is not None and args.stage in ("score", "optimize", "model", "compare", "evaluate"):
+    if args.dataset is not None and args.stage in ("score", "optimize", "model", "readout", "compare", "evaluate"):
         parser.error("--dataset prepares new inputs: use --stage prepare or run, with a new output directory")
     if args.reference_output is not None and args.stage != "model":
         parser.error("--reference-output is only used by --stage model")
+    if args.stage == "validate":
+        if args.dataset is None or args.exclude_output is None:
+            parser.error("validate requires --dataset and --exclude-output")
+        if args.balanced or args.split != "test" or args.reference_count < 1 or args.annotations is not None:
+            parser.error("validate uses unbalanced official test targets, train references, and automatic annotations")
+    elif args.prepare_only or args.exclude_output is not None:
+        parser.error("--prepare-only and --exclude-output are only used by --stage validate")
     return args
 
 
-def prepare(args):
-    manifest = None
-    if args.dataset is not None:
-        from .ragtruth import prepare_official
-        model_name = args.model or read_json(args.input)["model"]
-        manifest, annotations, cohort = prepare_official(args, model_name)
-        responses = manifest["responses"]
-    else:
-        model_name, responses = load_responses(args.input)
+def save_settings(args, model_name, responses, cohort=None):
     settings = {
         "version": "native-support-v1", "model": args.model or model_name,
         "device": args.device, "dtype": args.dtype, "responses": responses,
@@ -67,12 +70,22 @@ def prepare(args):
         "readout": "observed_token_vs_native_highest_other", "labels_used": False,
         "gradients": False, "interventions": False,
     }
-    if manifest is not None:
+    if cohort is not None:
         settings["cohort"] = cohort
     start_stage(args.output / "settings.json", settings, args.resume)
-    if manifest is not None:
-        write_json(args.output / "input.json", manifest)
-        write_json(args.output / "annotations.json", annotations)
+    return settings
+
+
+def prepare(args):
+    if args.dataset is None:
+        model_name, responses = load_responses(args.input)
+        return save_settings(args, model_name, responses)
+    from .ragtruth import prepare_official
+    model_name = args.model or read_json(args.input)["model"]
+    manifest, annotations, cohort = prepare_official(args, model_name)
+    settings = save_settings(args, model_name, manifest["responses"], cohort)
+    write_json(args.output / "input.json", manifest)
+    write_json(args.output / "annotations.json", annotations)
     return settings
 
 
@@ -120,7 +133,11 @@ def evaluate_saved(args):
     from .optimize import evaluate_optimization
     from .state_model import DIRECTORY as STATE_DIRECTORY
     from .state_model import evaluate_state_model
+    from .state_readout import DIRECTORY as READOUT_DIRECTORY
+    from .state_readout import evaluate_readout
 
+    if (args.output / READOUT_DIRECTORY / f"w{args.window}" / "summary.json").exists():
+        return evaluate_readout(args.output, args.annotations, args.window)
     if (args.output / STATE_DIRECTORY / f"w{args.window}" / "summary.json").exists():
         return evaluate_state_model(args.output, args.annotations, args.window)
     if (args.output / FILTER_DIRECTORY / "features").exists():
@@ -137,6 +154,12 @@ def main(argv=None):
     args = arguments(argv)
     if args.stage == "evaluate":
         result = evaluate_saved(args)
+    elif args.stage == "validate":
+        from .validation import run_validation
+        result = run_validation(args)
+    elif args.stage == "readout":
+        from .state_readout import run_readout
+        result = run_readout(args.output, args.annotations, args.window)
     elif args.stage == "prepare":
         settings = prepare(args)
         result = {"status": "prepared", "responses": len(settings["responses"]),

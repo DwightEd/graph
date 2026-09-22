@@ -1,5 +1,23 @@
 # 本轮实际验证
 
+## 固定分段的经验读出与新增 RAGTruth 入口（2026-09-22）
+
+```bash
+python -m pytest -q tests/test_state_readout.py tests/test_joint_state.py tests/test_native_support_evaluation.py
+```
+
+结果：22 passed。仅针对性 CPU 软件检查；无服务器 8B 或全量实验。
+
+- 固定 posterior 下只平均已观察的 R；恒定 R 保持原值，独立状态退化为原始分数。
+- 未来观测不改变过去；当前观测系数与保存的 E[1/n] 一致。
+- v4 的分段及所有旧分数保持不变；禁止状态重算后仍完成 readout。
+- 改变标签不影响新分数；readout/evaluate CLI 实际执行。
+- 来源选择与标签、输入文件行顺序无关，参考/测试/已检查 source 不重叠。
+- 使用随机小 Llama 和官方格式 fixture 跑通 prepare-only、前向、外部参考、评价、报告及断点复用。
+
+这里的 fixture 不是 RAGTruth 自然数据。当前环境没有用户服务器模型/数据或四答缓存，
+没有计算 joint_observed 的自然 AUROC。联合模型 0.756062 与普通均值 0.779200 来自用户报告。
+
 ## 多观测切换状态（2026-09-22）
 
 ```bash

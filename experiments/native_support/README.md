@@ -1,5 +1,29 @@
 # 原生路由与多观测切换状态
 
+## 当前结论与下一步入口
+
+四答真实 RAGTruth 结果：普通均值 AUROC/AP=0.779200/0.191355，joint_state=0.756062/0.170401。
+联合模型尚无有效增益。当前有限修正只去掉最终读出中的直接先验收缩，保留原分段与所有旧分数。
+方法和扩展验证协议见 [STATE_READOUT_VALIDATION](../../iclr/STATE_READOUT_VALIDATION.md)。
+
+```bash
+# 现有四答：只读 v4 小缓存，比较收缩前后，不运行模型。
+python -u main.py support --stage readout --output outputs/native_support_ragtruth4
+
+# 新增真实 QA：16 个 train source 作无标签参考，32 个 test source 作评价。
+python -u main.py support --stage validate \
+  --dataset /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset \
+  --exclude-output outputs/native_support_ragtruth4 \
+  --reference-count 16 --limit 32 --query-chunk-size 8 \
+  --output outputs/native_support_validation32 --resume
+```
+
+旧缓存报告在 `state_readout_v5/w16/report.html`；新增验证在
+`outputs/native_support_validation32/test/state_readout_v5/w16/report.html`。
+验证按固定 seed 选 source，不按正负标签平衡；参考/测试/已检查 source 分离。
+`--prepare-only` 仅准备；删掉该标志即可继续，保留 `--resume` 复用已采集文件。
+`--stage evaluate` 优先评价对应窗口已完成的 v5。新读出效果尚未得到自然验证。
+
 ## 统一模型候选
 
 ```bash
