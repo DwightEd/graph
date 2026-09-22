@@ -70,7 +70,7 @@ def summary_text(report, rows):
                   f"{row['before_end_detected']}/{row['spans']}",
                   f"{row['onset_alarms']}/{row['observed_onsets']}",
                   number(row["matched_normal_span_fpr"])]
-        lines.append("|" + "|".join(values) + "|")
+        lines.append("|" + "|".join(value.replace("|", " / ") for value in values) + "|")
     lines.extend(["", "细分 1–2、3–4、5–8 的结果见 metrics.csv；逐段与未决原因见 spans.csv。",
                   "正常匹配只控制长度、粗词面、位置和重复程度，不声称已控制实体/关系语义。",
                   "paired_spans.csv / audit.json 区分此前 15 步有错误的 recovery 与 clean_history。",
