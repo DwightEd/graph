@@ -13,7 +13,7 @@
 git pull --ff-only origin main
 python -u main.py support \
   --dataset /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset \
-  --limit 4 --balanced \
+  --limit 4 --balanced --query-chunk-size 8 \
   --output outputs/native_support_ragtruth4 --resume
 ```
 
@@ -50,6 +50,34 @@ python main.py support --stage score --output outputs/native_support_v1
 读旧 native_trace_audit 结果不会得到新分数：旧文件使用固定人工候选方向，需新的原生前向读出。
 原审计文件不会修改。
 
+## 采集速度与批量计算
+
+默认一次前向计算 8 个连续缺失位置，原生 causal mask 限制每行只能读取此前 token。
+这适用于已有回答的 teacher forcing；真正在线生成仍需等待前一个输出。
+206 个连续回答位置需要 26 次采集前向，另有分块 prompt prefill；不是每词单独调用模型。
+`--prefill-chunk-size` 管 prompt 预填充，`--query-chunk-size` 管回答位置的批量采集。
+显存余量允许时可把后者调到 16；长 prompt 显存紧张则减到 4。
+
+每个位置仍需自己的原生竞争词、逐头来源写入、FFN 和残差账本，不能用前一词的结果替代。
+这些投影在 GPU 按块完成，只传回标量；不再构造/搬运随后丢弃的完整逐头残差写入，
+也不采集 FFN 中间激活。每个来源的投影 value energy 只计算一次，随 KV cache 增量更新。
+attention、energy、熵等解释字段保留；核心 risk 的定义和历史递推没有改动。
+
+逐 token 缓存默认使用未压缩 NPZ，减少 CPU 压缩时间，但会增加磁盘占用。
+需要节省空间可加 `--compress-cache`；新旧 NPZ 都能直接读取，可在同一输出目录续跑。
+调整 query chunk 或压缩选项不会废弃已有文件，文件仍逐 token 原子写入。
+全部采集缓存已齐时，run 直接重算分数和评价，不再加载模型权重。
+
+每答结束打印本次新增/复用 token 数，以及 capture/write 秒数，并写入
+`responses/0000/capture_timing.json`。capture 含 Gram、prefill、原生前向、投影和 GPU→CPU；
+write 是 NPZ 写入；wall 是本答此次采集总耗时，不含载入模型及评分。
+每个新 token 文件记录实际 `query_chunk_size` 和块内均摊的 `capture_seconds`。
+续跑时计时文件描述最新一次补采集，不能与首次完整采集混为一谈。
+
+分块 GEMM 可能造成浮点末位差异，不承诺逐 bit 相同。软件验证覆盖 float32/bfloat16、
+与原 teaching 逐步账本的核对、块内未来 token 不影响早期结果、缺口续跑和新旧压缩缓存混用。
+未在服务器 8B 上测量加速倍数，不把前向调用次数减少等同于端到端提速倍数。
+
 ## 输出
 
 默认目录 `outputs/native_support_v1/`：
@@ -63,6 +91,7 @@ python main.py support --stage score --output outputs/native_support_v1
 | `evaluation.json` | 有真实标签时输出 AUROC/AP；包含样本选择协议和阳性比例 |
 | `evaluation_status.json` | 本次是否完成评价；缺标签时明确报告，不覆盖此前有效评价 |
 | `responses/0000/token_000000.npz` | 每层每头每来源 attention、signed write、value energy；残差账本 |
+| `responses/0000/capture_timing.json` | 本答最新一次补采集的批量大小、复用数量、采集和写盘耗时 |
 | `responses/0000/scores.npz` | 逐 token 分数、完整头模式、下三角历史边权、逐头 prompt 关注峰 |
 | `settings.json` | 实际模型、token 序列和边界，便于重算及续跑 |
 
@@ -110,7 +139,8 @@ ID 与回答 token 必须完全对应，1 表示幻觉；评分阶段不读取�
 
 ## 代码与验证
 
-- `state_audit/native_forward.py`：原生采集，自动竞争词与准确账本。
+- `state_audit/native_forward.py`：因果分块采集、增量 KV、逐 token 兼容缓存。
+- `state_audit/forward_ledger.py`：GPU 批量原生竞争词、消息投影和残差账本。
 - `score.py`：预算、保留头身份的模式、因果历史递推。
 - `pipeline.py`：按 token 保存/续跑/评分；`report.py` 输出可读结果。
 - `evaluate.py`：冻结分数后的独立标签评价。

@@ -139,6 +139,8 @@ def test_real_cli_prepares_scores_and_evaluates_without_placeholder(official_fix
     assert evaluated["methods"]["support_graph"]["all_error"]["auroc"] is not None
     assert (output / "annotations.json").is_file()
     with patch("state_audit.model.load_model", side_effect=AssertionError("GPU load forbidden")):
+        main(command + ["--query-chunk-size", "3", "--compress-cache"])
+        assert json.loads(capsys.readouterr().out) == result
         main(["--stage", "evaluate", "--output", str(output)])
     repeated = json.loads(capsys.readouterr().out)
     assert repeated == evaluated

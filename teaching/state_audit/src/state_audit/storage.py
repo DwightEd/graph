@@ -21,10 +21,11 @@ def write_json(path: Path, value: dict) -> None:
     temporary.replace(path)
 
 
-def write_arrays(path: Path, **arrays: np.ndarray) -> None:
+def write_arrays(path: Path, *, compressed: bool = True, **arrays: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(".partial.npz")
-    np.savez_compressed(temporary, **arrays)
+    save = np.savez_compressed if compressed else np.savez
+    save(temporary, **arrays)
     temporary.replace(path)
 
 

@@ -1,5 +1,6 @@
 """Capture once, then score the complete observed prefix in causal order."""
 
+import sys
 from collections import deque
 from contextlib import closing
 from time import perf_counter
@@ -12,24 +13,43 @@ from .inputs import validate_tokenizer
 from .score import prompt_focus, support_step
 
 
-def capture_response(model, tokenizer, response, directory, chunk_size):
+def pending_targets(response, directory):
+    count = len(response["token_ids"]) - response["prompt_length"]
+    return [index for index in range(count) if not (directory / f"token_{index:06d}.npz").exists()]
+
+
+def capture_response(
+    model, tokenizer, response, directory, chunk_size, *, query_chunk_size=8, compress_cache=False
+):
     from state_audit.native_forward import iter_forward_traces
 
     validate_tokenizer(response, tokenizer)
     count = len(response["token_ids"]) - response["prompt_length"]
-    pending = [index for index in range(count) if not (directory / f"token_{index:06d}.npz").exists()]
+    pending = pending_targets(response, directory)
     if not pending:
         return
     iterator = iter_forward_traces(
         model, response["token_ids"], response["prompt_length"], pending,
-        tokenizer.all_special_ids, prefill_chunk_size=chunk_size,
+        tokenizer.all_special_ids, prefill_chunk_size=chunk_size, query_chunk_size=query_chunk_size,
     )
+    started = perf_counter()
+    capture_seconds, write_seconds = 0.0, 0.0
     with closing(iterator):
         for index in tqdm(pending, desc=response["id"], leave=False):
-            started = perf_counter()
             arrays = next(iterator)
-            arrays["capture_seconds"] = np.asarray(perf_counter() - started)
-            write_arrays(directory / f"token_{index:06d}.npz", **arrays)
+            capture_seconds += float(arrays["capture_seconds"])
+            writing = perf_counter()
+            write_arrays(directory / f"token_{index:06d}.npz", compressed=compress_cache, **arrays)
+            write_seconds += perf_counter() - writing
+    timing = {
+        "captured_tokens": len(pending), "reused_tokens": count - len(pending),
+        "query_chunk_size": query_chunk_size, "compressed": compress_cache,
+        "capture_seconds": capture_seconds, "write_seconds": write_seconds,
+        "wall_seconds": perf_counter() - started,
+    }
+    write_json(directory / "capture_timing.json", timing)
+    tqdm.write(f"{response['id']}: captured {len(pending)}, reused {count - len(pending)}, "
+               f"capture {capture_seconds:.1f}s, write {write_seconds:.1f}s", file=sys.stderr)
 
 
 def score_response(response, directory, *, focus_width=8, focus_history=3, read_rise=0.1):

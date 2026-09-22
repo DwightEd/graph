@@ -5,9 +5,13 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 import torch
+from state_audit.attribution import _projection_gram
 from state_audit.model.adapter import ModelAdapter
+from state_audit.model.replay import attention_backend, prefill_cache
 from state_audit.native_forward import iter_forward_traces
-from state_audit.storage import read_arrays, write_json
+from state_audit.native_ledger import finish_ledger, readout_direction
+from state_audit.native_trace import layer_messages, native_hooks, source_masks
+from state_audit.storage import read_arrays, read_json, write_json
 from transformers import LlamaConfig, LlamaForCausalLM
 
 from experiments.native_support.evaluate import evaluate
@@ -120,7 +124,7 @@ def test_native_forward_matches_actual_logits_without_backward(model, dtype):
     assert all(parameter.grad is None for parameter in model.native.parameters())
 
 
-def test_targets_never_enter_own_input_and_future_does_not_change_scores(model):
+def test_queries_reuse_cache_and_saved_rows_exclude_future_keys(model):
     tokens = list(range(1, 18))
     calls = []
     original = model.native.model.forward
@@ -136,6 +140,74 @@ def test_targets_never_enter_own_input_and_future_does_not_change_scores(model):
     after = list(iter_forward_traces(model, altered, 7, [0, 1, 2], [1]))
     for left, right in zip(before, after):
         np.testing.assert_allclose(left["edge_logit_write"], right["edge_logit_write"], atol=1e-6)
+
+
+def audit_reference(model, tokens, prompt, target, groups):
+    """Original single-query teaching ledger is independent of the new GPU path."""
+    query = prompt + target - 1
+    with torch.no_grad(), attention_backend(model, "eager"):
+        cache = prefill_cache(model, tokens[:query], 3)
+        with native_hooks(model, with_grad=False) as records:
+            hidden = model.native.model(
+                input_ids=model.input_ids([tokens[query]]), past_key_values=cache,
+                use_cache=True, return_dict=True,
+            ).last_hidden_state[0, -1]
+            logits = model.native.lm_head(hidden).float()
+            observed = tokens[query + 1]
+            top = logits.topk(2).indices.tolist()
+            candidates = [observed, top[1] if top[0] == observed else top[0]]
+            direction, difference, scale = readout_direction(model, records[2]["residual_after"][-1], candidates)
+            grams = {layer: _projection_gram(model, layer) for layer in range(3)}
+            masks = source_masks(groups, 3, hidden.device)
+            arrays = layer_messages(model, records, cache, direction, grams, masks)
+            return finish_ledger(model, records, arrays, hidden, logits, candidates, direction, difference, scale)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+@pytest.mark.parametrize("chunk", [1, 3, 8])
+def test_batch_matches_original_audit_ledger_and_graph(model, dtype, chunk):
+    model.native.to(dtype)
+    tokens = list(range(1, 16))
+    batched = list(iter_forward_traces(model, tokens, 7, range(8), [1, 11], query_chunk_size=chunk))
+    support, fingerprints, expected_support, expected_fingerprints = [], [], [], []
+    tolerance = 2e-3 if dtype == torch.bfloat16 else 1e-6
+    for target, arrays in enumerate(batched):
+        reference = audit_reference(model, tokens, 7, target, arrays["group_ids"])
+        for name in set(arrays) & set(reference):
+            np.testing.assert_allclose(arrays[name], reference[name], atol=tolerance, rtol=0.01,
+                                       err_msg=f"{name} at target {target}, chunk {chunk}")
+        reference.update({name: arrays[name] for name in ("group_ids", "entropy", "surprisal")})
+        metrics, fingerprint, _ = support_step(arrays, 7, support, fingerprints)
+        expected, expected_fingerprint, _ = support_step(reference, 7, expected_support, expected_fingerprints)
+        assert metrics["risk"] == pytest.approx(expected["risk"], abs=tolerance)
+        support.append(metrics["support"])
+        fingerprints.append(fingerprint)
+        expected_support.append(expected["support"])
+        expected_fingerprints.append(expected_fingerprint)
+        assert abs(float(arrays["ledger_error"])) < 3e-6
+        assert arrays["attention"].shape[-1] == 7 + target
+
+
+def test_block_uses_fewer_forwards_and_cannot_read_future_within_block(model):
+    tokens = list(range(1, 16))
+    calls = []
+    original = model.native.model.forward
+
+    def observe(*args, **kwargs):
+        calls.append((model.native.config._attn_implementation, kwargs["input_ids"].shape[-1]))
+        return original(*args, **kwargs)
+
+    with patch.object(model.native.model, "forward", side_effect=observe):
+        before = list(iter_forward_traces(model, tokens, 7, range(8), [1],
+                                         prefill_chunk_size=3, query_chunk_size=3))
+    assert calls == [("sdpa", 3), ("sdpa", 3), ("eager", 3), ("eager", 3), ("eager", 2)]
+    altered = tokens[:8] + [30] * 7
+    after = list(iter_forward_traces(model, altered, 7, range(8), [1], query_chunk_size=3))
+    for name in ("candidate_logits", "edge_logit_write", "edge_value_energy", "mlp_score"):
+        np.testing.assert_allclose(before[0][name], after[0][name], atol=1e-6)
+    sparse = list(iter_forward_traces(model, tokens, 7, [0, 1, 4, 5, 6], [1], query_chunk_size=3))
+    for arrays in sparse:
+        np.testing.assert_allclose(arrays["edge_value_energy"], before[int(arrays["target"])]["edge_value_energy"], atol=1e-6)
 
 
 def test_hook_failure_restores_model_without_parameter_edits(model):
@@ -165,10 +237,15 @@ def response():
 def test_capture_resume_score_and_evaluate_are_separate(model, tmp_path):
     item = response()
     directory = tmp_path / "responses/0000"
-    capture_response(model, Tokenizer(), item, directory, 3)
+    capture_response(model, Tokenizer(), item, directory, 3, query_chunk_size=1, compress_cache=True)
     first = score_response(item, directory)
+    retained = (directory / "token_000000.npz").read_bytes()
     (directory / "token_000002.npz").unlink()
     capture_response(model, Tokenizer(), item, directory, 3)
+    assert (directory / "token_000000.npz").read_bytes() == retained
+    timing = read_json(directory / "capture_timing.json")
+    assert timing["captured_tokens"] == 1 and timing["reused_tokens"] == 5
+    assert timing["compressed"] is False
     second = score_response(item, directory)
     np.testing.assert_allclose([r["risk"] for r in first], [r["risk"] for r in second], atol=1e-7)
     saved = read_arrays(directory / "scores.npz")

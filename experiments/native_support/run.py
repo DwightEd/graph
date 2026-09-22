@@ -8,7 +8,7 @@ from state_audit.storage import read_json, start_stage, write_csv, write_json
 from tqdm import tqdm
 
 from .inputs import load_responses
-from .pipeline import capture_response, score_response
+from .pipeline import capture_response, pending_targets, score_response
 from .report import write_report
 
 EXAMPLE = Path(__file__).parent / "examples" / "prefixes.json"
@@ -23,6 +23,8 @@ def arguments(argv=None):
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--dtype", choices=("float32", "bfloat16"), default="bfloat16")
     parser.add_argument("--prefill-chunk-size", type=int, default=256)
+    parser.add_argument("--query-chunk-size", type=int, default=8, help="Causal query rows per GPU forward; execution setting, safe to change on resume")
+    parser.add_argument("--compress-cache", action="store_true", help="Compress token NPZ files to save disk space at the cost of CPU time")
     parser.add_argument("--annotations", type=Path, help="Evaluation only: response ID -> binary token labels")
     parser.add_argument("--dataset", type=Path, help="Official RAGTruth directory; prepare input and annotations automatically")
     parser.add_argument("--task", choices=("QA", "Summary", "Data2txt"), default="QA")
@@ -32,8 +34,8 @@ def arguments(argv=None):
     parser.add_argument("--balanced", action="store_true", help="Diagnostic cohort: equal positive/negative answer counts, using labels only for selection")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args(argv)
-    if args.prefill_chunk_size < 1:
-        parser.error("prefill chunk size must be positive")
+    if args.prefill_chunk_size < 1 or args.query_chunk_size < 1:
+        parser.error("prefill and query chunk sizes must be positive")
     if args.limit < 1 or (args.balanced and (args.limit < 2 or args.limit % 2)):
         parser.error("limit must be positive; balanced pilot needs an even limit of at least two")
     if args.stage == "prepare" and args.dataset is None:
@@ -71,10 +73,19 @@ def prepare(args):
 def run_capture(args, settings):
     from state_audit.model import load_model
 
-    model, tokenizer = load_model(settings["model"], device=args.device, dtype=args.dtype)
-    for index, response in enumerate(tqdm(settings["responses"], desc="natural prefixes")):
+    jobs = []
+    for index, response in enumerate(settings["responses"]):
         directory = args.output / "responses" / f"{index:04d}"
-        capture_response(model, tokenizer, response, directory, args.prefill_chunk_size)
+        if pending_targets(response, directory):
+            jobs.append((response, directory))
+    if not jobs:
+        return
+    model, tokenizer = load_model(settings["model"], device=args.device, dtype=args.dtype)
+    for response, directory in tqdm(jobs, desc="natural prefixes"):
+        capture_response(
+            model, tokenizer, response, directory, args.prefill_chunk_size,
+            query_chunk_size=args.query_chunk_size, compress_cache=args.compress_cache,
+        )
 
 
 def run_score(output, settings):

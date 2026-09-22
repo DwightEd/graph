@@ -7,7 +7,8 @@
 ## 问题与假设
 
 检测单位是每个已经观察到的回答 token。只知道 prompt、回答前缀和当前实际 token，
-不知道正确答案、幻觉标签、正确来源或未来回答。teacher forcing 输入严格止于当前 token 之前。
+不知道正确答案、幻觉标签或正确来源。teacher forcing 每个预测位置的可见输入严格止于
+当前 token 之前；离线分块前向可含后续行，但原生因果掩码禁止当前行访问它们。
 
 检验一个具体假设：相对模型自己的竞争输出，错误 token 的 prompt 净支持可能较低；
 后续 token 若以相似的逐头写入模式正向读取这些历史 token，可能延续这种来源支持不足。
@@ -126,9 +127,15 @@ registered 主分数是 R，对照是直接项 -a。不是运行多种组合后�
 
 ## 软件及样本边界
 
-复用 teaching 的 ModelAdapter、native_hooks、KV replay、projected_messages 和 residual ledger。
+复用 teaching 的 ModelAdapter、native_hooks 和 KV replay；批量 GPU 投影与原
+projected_messages/residual ledger 逐项核对，原机制审计保留原入口。
 新采集显式 with_grad=False，并在 no_grad 中执行；没有 autograd.grad、backward、删边或替换消息。
-逐 token 使用当前 query 一行的 attention；KV 只前进，不每个 token 重跑整个 prefix。
+默认每次前向 8 个连续 query，逐 token 保存当前行的 attention，并裁掉被因果屏蔽的后续列。
+KV 只前进；缺失目标之间的已有位置仅 prefill。投影后的来源 value energy 随 KV 增量缓存，
+不对每个 query 重算所有旧来源。完整残差、逐头残差向量和 FFN 中间激活不搬到 CPU，
+只保留所需投影及原有 head/source/group 标量字段。默认 NPZ 不压缩，压缩是可选的存储参数。
+query chunk 与压缩方式不进入科学设置的续跑身份，实际值写入缓存/计时；允许复用已有逐步结果。
+float32/bfloat16 软件核对覆盖分块数值误差、块内无未来泄漏及混合缓存续跑，不声称逐 bit 一致。
 默认提供 4 个原始自然前缀，322 个已观察回答 token，不拼接任何候选续写。
 这些前缀在此前审计的决策词之前截止，不能据此证明真实首错或错误后的传播。
 实际完整回答可以直接通过同一 token manifest 输入。
