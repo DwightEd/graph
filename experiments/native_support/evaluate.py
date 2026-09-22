@@ -9,7 +9,9 @@ def ranking(labels, scores):
     positive = int(labels.sum())
     both = 0 < positive < len(labels)
     return {
-        "tokens": len(labels), "positives": positive,
+        "tokens": len(labels), "positives": positive, "negatives": len(labels) - positive,
+        "prevalence": float(positive / len(labels)) if len(labels) else None,
+        "auroc_status": "available" if both else "requires_both_classes",
         "auroc": float(roc_auc_score(labels, scores)) if both else None,
         "ap": float(average_precision_score(labels, scores)) if positive else None,
     }
@@ -22,23 +24,50 @@ def load_evaluation(output, annotations):
     for index, response in enumerate(settings["responses"]):
         saved = read_arrays(output / "responses" / f"{index:04d}" / "scores.npz")
         annotation = labels_by_id[response["id"]]
-        values = np.asarray(annotation["labels"], dtype=np.int64)
         if not np.array_equal(annotation["token_ids"], saved["token_id"]):
             raise ValueError(f"{response['id']}: annotation token IDs differ from scored tokens")
-        if len(values) != len(saved["risk"]) or not np.isin(values, [0, 1]).all():
-            raise ValueError(f"{response['id']}: labels must align one-to-one and be binary")
-        onset = values.astype(bool) & ~np.r_[False, values[:-1].astype(bool)]
-        first = np.zeros(len(values), dtype=bool)
-        if values.any():
-            first[np.flatnonzero(values)[0]] = True
-        labels.append(values)
-        onsets.append(onset)
-        firsts.append(first)
-        scores.append(np.column_stack([saved[name] for name in ("risk", "direct_risk")]))
+        if "source_id" in annotation and annotation["source_id"] != response["source_id"]:
+            raise ValueError(f"{response['id']}: annotation source ID differs")
+        values, onset, first, valid = annotation_targets(annotation, len(saved["risk"]), response["id"])
+        labels.append(values[valid])
+        onsets.append(onset[valid])
+        firsts.append(first[valid])
+        scores.append(np.column_stack([saved[name][valid] for name in ("risk", "direct_risk")]))
     return tuple(np.concatenate(part) for part in (labels, onsets, firsts, scores))
 
 
-def evaluate(output, annotations):
+def annotation_targets(annotation, count, identity):
+    values = np.asarray(annotation["labels"], dtype=np.int64)
+    if values.shape != (count,) or not np.isin(values, [0, 1]).all():
+        raise ValueError(f"{identity}: labels must align one-to-one and be binary")
+    onset = values.astype(bool) & ~np.r_[False, values[:-1].astype(bool)]
+    onset = np.asarray(annotation.get("span_onsets", onset), dtype=bool)
+    valid = np.asarray(annotation.get("valid_tokens", np.ones(count)), dtype=bool)
+    if onset.shape != values.shape or valid.shape != values.shape or (onset & ~values.astype(bool)).any():
+        raise ValueError(f"{identity}: invalid onset/coverage alignment")
+    first = np.zeros(count, dtype=bool)
+    if (values.astype(bool) & valid).any():
+        first[np.flatnonzero(values.astype(bool) & valid)[0]] = True
+    return values, onset, first, valid
+
+
+def unavailable_evaluation(output, annotations):
+    result = {
+        "status": "unavailable", "reason": "missing_token_annotations",
+        "annotations_path": str(annotations), "auroc": None, "ap": None,
+        "message": "No real token annotations were found. The four default resampled prefixes "
+        "have no inherited official labels. Omit --annotations to use output/annotations.json "
+        "if already prepared. Otherwise use --dataset to prepare a small official-answer "
+        "pilot; annotations.json is then generated automatically. No scores were changed.",
+    }
+    write_json(output / "evaluation_status.json", result)
+    return result
+
+
+def evaluate(output, annotations=None):
+    annotations = output / "annotations.json" if annotations is None else annotations
+    if not annotations.is_file():
+        return unavailable_evaluation(output, annotations)
     labels, onset, first, scores = load_evaluation(output, annotations)
     normal = labels == 0
     continuation = labels.astype(bool) & ~onset
@@ -48,11 +77,17 @@ def evaluate(output, annotations):
         "first_error_vs_normal": (normal | first, first),
         "continuation_vs_normal": (normal | continuation, continuation),
     }
-    result = {"labels_used_for_scoring": False, "threshold_calibrated": False, "methods": {}}
+    settings = read_json(output / "settings.json")
+    result = {
+        "status": "evaluated", "annotations_path": str(annotations),
+        "labels_used_for_scoring": False, "threshold_calibrated": False, "methods": {},
+        "cohort": settings.get("cohort", {"selection": "supplied_responses"}),
+    }
     for column, method in enumerate(("support_graph", "direct_prompt")):
         result["methods"][method] = {
             name: ranking(target[mask], scores[mask, column])
             for name, (mask, target) in groups.items()
         }
     write_json(output / "evaluation.json", result)
+    write_json(output / "evaluation_status.json", {"status": "evaluated", "file": "evaluation.json"})
     return result

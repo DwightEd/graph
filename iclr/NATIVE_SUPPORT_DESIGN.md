@@ -132,3 +132,17 @@ registered 主分数是 R，对照是直接项 -a。不是运行多种组合后�
 默认提供 4 个原始自然前缀，322 个已观察回答 token，不拼接任何候选续写。
 这些前缀在此前审计的决策词之前截止，不能据此证明真实首错或错误后的传播。
 实际完整回答可以直接通过同一 token manifest 输入。
+
+## 官方标签评价接入修复
+
+`--dataset` 读取官方完整回答，复用 teaching 的 Example、encode_prompt、span 验证和 token_spans。
+原回答按 observer tokenizer 做 teacher forcing；字符标注按同一次编码的 offsets 对齐。
+模型输入单独写入 `input.json`，真实标签单独写入 `annotations.json`；评分函数不读取标签。
+分数落盘后自动评价；`--stage evaluate` 直接寻找输出目录的标签文件，不重跑模型。
+缺标签明确返回 unavailable，不造标签，也不覆盖原来有效的 evaluation.json。
+
+默认只取 4 个匹配官方 ID；`--balanced` 是显式的标签分层诊断选择，
+各取 2 个带错误标注/无错误标注的完整回答，不属于盲选总体测试。
+这种选择用到了评价标签，但不训练检测器、不调整参数或选头；结果记录选择协议和阳性比例。
+不能把这个小样本 AP/AUROC 称为整个 RAGTruth 的成绩。
+官方标注的相邻但不重叠 token span 保留各自 onset，特殊/空 offset token 不计入评价。

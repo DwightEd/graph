@@ -14,6 +14,17 @@ python -u main.py support --resume
 这几个前缀在原决策词之前结束；没有人工拼接候选，不能用它们报告首错或延续成绩。
 [完整定义与研究边界](iclr/NATIVE_SUPPORT_DESIGN.md)。当前是已实现的检测假设，尚无自然数据有效性结论。
 
+需要真实 AUROC/AP 时，使用少量官方完整回答，自动准备标注并在评分后评价：
+
+```bash
+python -u main.py support \
+  --dataset /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset \
+  --limit 4 --balanced --output outputs/native_support_ragtruth4 --resume
+```
+
+此处按标签分层选 2 个错误回答和 2 个无错误标注回答，仅为小样本诊断，标签不参与评分。
+输出目录自动生成 `annotations.json` 与 `evaluation.json`，不需要 `token_labels.json` 占位文件。
+
 教学与独立复用入口：[State Audit](teaching/state_audit/README.md)。
 短错误检验：[短 span 审计](experiments/short_span_audit/README.md)，分别提供已有冻结分数的 CPU 评价和复用 teaching 的逐目标贡献采集。
 可单独安装，包含生成回答、准确 token 回放、逐层状态保存、离线审计和四世界消息干预；

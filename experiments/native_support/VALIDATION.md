@@ -25,3 +25,18 @@ python -m pytest -q tests/test_native_support.py teaching/state_audit/tests/test
 
 默认真实档案只有 4 个自然前缀、322 个已观察回答 token。
 本轮没有计算它们的新检测分数，也没有把候选文本拼成“真实错误续写”。
+
+## 评价入口修复批次
+
+命令：`python -m pytest -q tests/test_native_support.py tests/test_native_support_evaluation.py`。
+结果：21 passed。未运行服务器 8B 或官方 RAGTruth 模型实验。
+
+- 复现不存在的 `token_labels.json`，现在返回明确 unavailable 状态，不造正常标签，也不加载模型。
+- 使用官方 JSONL 格式的合成 fixture 验证字符标注→token 标签，保留相邻 span 的不同起点。
+- 改变同一回答的标签不改变模型输入；分层选择行为单独记录。
+- 不同样本集合不能覆盖既有缓存；无标签状态不会覆盖之前有效的评价结果。
+- 真正调用 run 入口，以随机小模型完成四回答的准备、采集、评分及自动 AUROC/AP 评价。
+- 无需传 annotations 参数即可重新评价，且禁止模型加载时仍能完成。
+- 特殊位置按有效 token mask 排除；单一类别不会输出伪造的 AUROC。
+
+合成 fixture 的 AUROC 仅用于验证评价代码，不能作为自然检测效果。

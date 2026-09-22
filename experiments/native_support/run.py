@@ -16,7 +16,7 @@ EXAMPLE = Path(__file__).parent / "examples" / "prefixes.json"
 
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=("run", "score", "evaluate"), default="run")
+    parser.add_argument("--stage", choices=("prepare", "run", "score", "evaluate"), default="run")
     parser.add_argument("--input", type=Path, default=EXAMPLE)
     parser.add_argument("--output", type=Path, default=Path("outputs/native_support_v1"))
     parser.add_argument("--model")
@@ -24,17 +24,34 @@ def arguments(argv=None):
     parser.add_argument("--dtype", choices=("float32", "bfloat16"), default="bfloat16")
     parser.add_argument("--prefill-chunk-size", type=int, default=256)
     parser.add_argument("--annotations", type=Path, help="Evaluation only: response ID -> binary token labels")
+    parser.add_argument("--dataset", type=Path, help="Official RAGTruth directory; prepare input and annotations automatically")
+    parser.add_argument("--task", choices=("QA", "Summary", "Data2txt"), default="QA")
+    parser.add_argument("--split", choices=("train", "test"), default="test")
+    parser.add_argument("--generator", default="llama-2-7b-chat")
+    parser.add_argument("--limit", type=int, default=4, help="Maximum official answers; default is a small pilot")
+    parser.add_argument("--balanced", action="store_true", help="Diagnostic cohort: equal positive/negative answer counts, using labels only for selection")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args(argv)
     if args.prefill_chunk_size < 1:
         parser.error("prefill chunk size must be positive")
-    if args.stage == "evaluate" and args.annotations is None:
-        parser.error("evaluate requires --annotations")
+    if args.limit < 1 or (args.balanced and (args.limit < 2 or args.limit % 2)):
+        parser.error("limit must be positive; balanced pilot needs an even limit of at least two")
+    if args.stage == "prepare" and args.dataset is None:
+        parser.error("prepare requires --dataset pointing to the official RAGTruth directory")
+    if args.dataset is not None and args.stage in ("score", "evaluate"):
+        parser.error("--dataset prepares new inputs: use --stage prepare or run, with a new output directory")
     return args
 
 
 def prepare(args):
-    model_name, responses = load_responses(args.input)
+    manifest = None
+    if args.dataset is not None:
+        from .ragtruth import prepare_official
+        model_name = args.model or read_json(args.input)["model"]
+        manifest, annotations, cohort = prepare_official(args, model_name)
+        responses = manifest["responses"]
+    else:
+        model_name, responses = load_responses(args.input)
     settings = {
         "version": "native-support-v1", "model": args.model or model_name,
         "device": args.device, "dtype": args.dtype, "responses": responses,
@@ -42,7 +59,12 @@ def prepare(args):
         "readout": "observed_token_vs_native_highest_other", "labels_used": False,
         "gradients": False, "interventions": False,
     }
+    if manifest is not None:
+        settings["cohort"] = cohort
     start_stage(args.output / "settings.json", settings, args.resume)
+    if manifest is not None:
+        write_json(args.output / "input.json", manifest)
+        write_json(args.output / "annotations.json", annotations)
     return settings
 
 
@@ -79,12 +101,21 @@ def main(argv=None):
     if args.stage == "evaluate":
         from .evaluate import evaluate
         result = evaluate(args.output, args.annotations)
+    elif args.stage == "prepare":
+        settings = prepare(args)
+        result = {"status": "prepared", "responses": len(settings["responses"]),
+                  "annotations": str(args.output / "annotations.json"), "model_run": False}
     elif args.stage == "score":
         result = run_score(args.output, read_json(args.output / "settings.json"))
     else:
         settings = prepare(args)
         run_capture(args, settings)
         result = run_score(args.output, settings)
+    if args.stage in ("run", "score"):
+        from .evaluate import evaluate
+        result["evaluation"] = evaluate(args.output, args.annotations)
+        result["evaluation_performed_by_this_stage"] = result["evaluation"]["status"] == "evaluated"
+        write_json(args.output / "summary.json", result)
     print(json.dumps(result, ensure_ascii=False))
 
 
