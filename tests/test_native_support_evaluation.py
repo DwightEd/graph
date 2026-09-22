@@ -137,8 +137,9 @@ def test_real_cli_prepares_scores_and_evaluates_without_placeholder(official_fix
     evaluated = result["evaluation"]
     assert result["evaluation_performed_by_this_stage"] is True
     assert evaluated["status"] == "evaluated"
-    assert evaluated["methods"]["support_graph"]["all_error"]["positives"] == 2
-    assert evaluated["methods"]["support_graph"]["all_error"]["auroc"] is not None
+    assert evaluated["methods"]["routing_imbalance"]["all_error"]["positives"] == 2
+    assert evaluated["methods"]["routing_imbalance"]["all_error"]["auroc"] is not None
+    assert "route_state_filter" in evaluated["methods"]
     assert (output / "annotations.json").is_file()
     with patch("state_audit.model.load_model", side_effect=AssertionError("GPU load forbidden")):
         main(command + ["--query-chunk-size", "3", "--compress-cache"])

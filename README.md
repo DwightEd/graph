@@ -1,20 +1,20 @@
 # 原生路由检测与机制审计
 
-当前检测入口：[Native Route Comparison](experiments/native_support/README.md)。
-恢复历史约 0.7 的功能消息路由与 attention 路由基线，同缓存比较来源、头、时间的结构；
-保留 v1 的 signed support/history 分数作为失败对照，不再默认它是更好的检测方法。
-读取量、消息范数、候选方向写入分开保存；不消融、不反向传播、不用标签选择分数或方向。
-[重新设计依据及历史结果](iclr/NATIVE_ROUTE_REDESIGN.md)。
+当前检测入口：[Native Routing Filter](experiments/native_support/README.md)。
+固定功能路由基线，检验因果时间降噪；唯一新候选用逐头路由状态决定近期分数的权重。
+与当前路由、普通滑动均值、合并头后的滤波在相同 token 上比较，不自动选获胜方法。
+不消融、不反向传播、不用自然标签拟合、选头或调整方向。
+[当前公式及证据](iclr/ROUTE_FILTER_DESIGN.md)；[v2 历史比较](iclr/NATIVE_ROUTE_REDESIGN.md)。
 
 ```bash
-python -u main.py support --stage compare --output outputs/native_support_ragtruth4
+python -u main.py support --stage optimize --output outputs/native_support_ragtruth4
 ```
 
-以上命令只读取已有采集缓存，在 `route_comparison_v2/` 写入报告及 AUROC/AP；不运行模型。
-同时报告 pooled、来源等权、同一回答内的比较，避免不同口径互相替代。
-历史 routing imbalance 在 971 个来源上的 pooled AUROC 为 0.721235；
-用户四回答结果中 v1 support graph 为 0.572333。不同样本和模板不能直接作性能回退定量比较，
-但此前没有保留强基线就更换主方法不合理。本轮代码恢复比较条件，没有宣称新自然成绩。
+只读现有原生缓存，在 `route_filter_v3/w16/` 写报告、AUROC/AP 和相对基线的差值。
+首次提取紧凑逐头路由表；重跑只读小缓存。原始/v1/v2 结果保留。
+用户四回答同缓存实测：功能路由 AUROC 0.754983，旧支持传播 0.572333；
+另一个历史 QA 实验的因果均值达到 0.7404。后者为尝试时间降噪提供依据，
+不能视为新滤波器的成绩。本轮没有新自然 AUROC，也没有全量模型实验。
 
 需要真实 AUROC/AP 时，使用少量官方完整回答，自动准备标注并在评分后评价：
 
@@ -25,8 +25,9 @@ python -u main.py support \
 ```
 
 此处按标签分层选 2 个错误回答和 2 个无错误标注回答，仅为小样本诊断，标签不参与评分。
-输出目录自动生成 `annotations.json`；评价位于 `route_comparison_v2/evaluation.json`，
-不需要 `token_labels.json` 占位文件。`--stage score` 与 `compare` 都可从旧缓存重算。
+输出目录自动生成 `annotations.json`；评价位于 `route_filter_v3/w16/evaluation.json`，
+不需要 `token_labels.json` 占位文件。`--stage score` 与 `optimize` 同义；
+`--stage compare` 仍保留 v2 的 13 方法历史比较。
 不带 dataset/input 的 run 仍使用旧 322-token 自然前缀；其标签未知，不能用于首错成绩。
 
 教学与独立复用入口：[State Audit](teaching/state_audit/README.md)。

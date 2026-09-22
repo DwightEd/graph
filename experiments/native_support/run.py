@@ -1,4 +1,4 @@
-"""Native capture -> routing/structure comparison -> evaluation, without ablations."""
+"""Native capture -> causal routing estimates -> frozen-score evaluation."""
 
 import argparse
 import json
@@ -16,7 +16,7 @@ EXAMPLE = Path(__file__).parent / "examples" / "prefixes.json"
 
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=("prepare", "run", "score", "compare", "evaluate"), default="run")
+    parser.add_argument("--stage", choices=("prepare", "run", "score", "optimize", "compare", "evaluate"), default="run")
     parser.add_argument("--input", type=Path, default=EXAMPLE)
     parser.add_argument("--output", type=Path, default=Path("outputs/native_support_v1"))
     parser.add_argument("--model")
@@ -25,6 +25,7 @@ def arguments(argv=None):
     parser.add_argument("--prefill-chunk-size", type=int, default=256)
     parser.add_argument("--query-chunk-size", type=int, default=8, help="Causal query rows per GPU forward; execution setting, safe to change on resume")
     parser.add_argument("--compress-cache", action="store_true", help="Compress token NPZ files to save disk space at the cost of CPU time")
+    parser.add_argument("--window", type=int, default=16, help="Causal routing window; default retained from prior temporal code")
     parser.add_argument("--annotations", type=Path, help="Evaluation only: response ID -> binary token labels")
     parser.add_argument("--dataset", type=Path, help="Official RAGTruth directory; prepare input and annotations automatically")
     parser.add_argument("--task", choices=("QA", "Summary", "Data2txt"), default="QA")
@@ -36,11 +37,13 @@ def arguments(argv=None):
     args = parser.parse_args(argv)
     if args.prefill_chunk_size < 1 or args.query_chunk_size < 1:
         parser.error("prefill and query chunk sizes must be positive")
+    if args.window < 1:
+        parser.error("window must be positive")
     if args.limit < 1 or (args.balanced and (args.limit < 2 or args.limit % 2)):
         parser.error("limit must be positive; balanced pilot needs an even limit of at least two")
     if args.stage == "prepare" and args.dataset is None:
         parser.error("prepare requires --dataset pointing to the official RAGTruth directory")
-    if args.dataset is not None and args.stage in ("score", "compare", "evaluate"):
+    if args.dataset is not None and args.stage in ("score", "optimize", "compare", "evaluate"):
         parser.error("--dataset prepares new inputs: use --stage prepare or run, with a new output directory")
     return args
 
@@ -107,26 +110,38 @@ def run_score(output, settings):
     return summary
 
 
+def evaluate_saved(args):
+    from .comparison import DIRECTORY, evaluate_existing
+    from .evaluate import evaluate
+    from .optimize import DIRECTORY as FILTER_DIRECTORY
+    from .optimize import evaluate_optimization
+
+    if (args.output / FILTER_DIRECTORY / "features").exists():
+        return evaluate_optimization(args.output, args.annotations, args.window)
+    if (args.output / DIRECTORY / "summary.json").exists():
+        return evaluate_existing(args.output, args.annotations)
+    return evaluate(args.output, args.annotations)
+
+
 def main(argv=None):
-    from .comparison import DIRECTORY, evaluate_existing, run_comparison
+    from .comparison import run_comparison
+    from .optimize import run_optimization
 
     args = arguments(argv)
     if args.stage == "evaluate":
-        from .evaluate import evaluate
-        if (args.output / DIRECTORY / "summary.json").exists():
-            result = evaluate_existing(args.output, args.annotations)
-        else:
-            result = evaluate(args.output, args.annotations)
+        result = evaluate_saved(args)
     elif args.stage == "prepare":
         settings = prepare(args)
         result = {"status": "prepared", "responses": len(settings["responses"]),
                   "annotations": str(args.output / "annotations.json"), "model_run": False}
-    elif args.stage in ("score", "compare"):
+    elif args.stage == "compare":
         result = run_comparison(args.output, read_json(args.output / "settings.json"), args.annotations)
+    elif args.stage in ("score", "optimize"):
+        result = run_optimization(args.output, read_json(args.output / "settings.json"), args.annotations, args.window)
     else:
         settings = prepare(args)
         run_capture(args, settings)
-        result = run_comparison(args.output, settings, args.annotations)
+        result = run_optimization(args.output, settings, args.annotations, args.window)
     print(json.dumps(result, ensure_ascii=False))
 
 

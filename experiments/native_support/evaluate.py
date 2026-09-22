@@ -29,7 +29,7 @@ def evaluation_records(output, annotations, score_root, columns):
             raise ValueError(f"{response['id']}: annotation token IDs differ from scored tokens")
         if "source_id" in annotation and annotation["source_id"] != response["source_id"]:
             raise ValueError(f"{response['id']}: annotation source ID differs")
-        values, onset, first, valid = annotation_targets(annotation, len(saved["risk"]), response["id"])
+        values, onset, first, valid = annotation_targets(annotation, len(saved["token_id"]), response["id"])
         records.append({
             "id": response["id"], "source_id": response["source_id"],
             "labels": values[valid], "onsets": onset[valid], "firsts": first[valid],

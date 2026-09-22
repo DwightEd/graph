@@ -1,27 +1,72 @@
-# 原生路由比较：恢复历史信号
+# 原生路由：先检验 AUROC 增益
 
-固定主基线恢复为历史 `routing_imbalance`，从同一原生缓存同时计算 attention 路由、
-来源/头/时间结构和 v1 净支持对照。读取、消息范数、对实际输出的有符号写入分开保存。
-不消融、不反向传播、不需要正确候选或角色表；标签只在分数冻结后用于评价。
-[历史结果、公式及重新设计依据](../../iclr/NATIVE_ROUTE_REDESIGN.md)。
+固定 `routing_imbalance` 基线，以近期相似逐头路由状态加权平均原分数，检验时间降噪。
+唯一新候选为 `route_state_filter`；同窗口普通均值和先合并 head 的滤波是必要对照。
+不消融、不反向传播、不训练关系分类器；自然标签只在全部分数保存后用于评价。
+[当前公式及依据](../../iclr/ROUTE_FILTER_DESIGN.md)。新候选尚无自然成绩，不宣称机制成立。
 
 ## 已有四答结果直接重算
 
 ```bash
 git pull --ff-only origin main
-python -u main.py support --stage compare \
+python -u main.py support --stage optimize \
   --output outputs/native_support_ragtruth4
 ```
 
-只读已有 `settings.json`、逐词 NPZ 和官方来源文本，CPU 计算，不加载模型权重。
-首次恢复官方来源区间需要原模型的 tokenizer，随后复用 `source_regions.json`。
-新结果位于 `outputs/native_support_ragtruth4/route_comparison_v2/`；原始缓存及 v1 结果保留。
-`--stage score` 与 `compare` 同义；缺标签时仍保存分数，AUROC 明确 unavailable。
+首次读取旧 NPZ 中的 attention、value energy 及必要标量，提取紧凑的逐头分区表；
+之后只读小缓存，不重算 collapse、Gram、跨来源校正或旧 signed support。
+已存在 v2 的 source_regions 时直接复用，否则只载入 tokenizer 恢复官方来源区间。
+不载入模型权重。输出在 `outputs/native_support_ragtruth4/route_filter_v3/w16/`。
+原始 NPZ、v1 和 v2 文件保留。`score` 与 `optimize` 同义；`compare` 保留原 v2 比较。
 
-原四答的 v1 AUROC 是 0.572333、AP 是 0.103939；历史路由基线约 0.7 来自其他总体和协议。
-本轮恢复了历史公式并统一比较口径，没有提前宣称当前四答已恢复 0.7。
+四答已实测的基线为 AUROC 0.754983/AP 0.199373，旧支持传播为 0.572333/0.103939。
+不能保证滤波提高它；这次输出会直接给同样本差值，阴性结果也保留。
 
-## 如何读结果
+## 新版方法和输出
+
+每个物理 layer/head 保存 source、严格历史、response self、other 的消息范数，
+以每层全部头的总范数归一为 head×region 联合分布；全零层单列 inactive。
+比较逐层联合分布的 Hellinger 距离，给当前及此前最多 15 个分数加权。
+距离尺度只从已观察到的邻接行估计；状态相同时严格等于普通因果均值。
+状态变化大可降低旧分数权重，但不保证首错无延迟；分区相似也不代表来源地址或语义相同。
+图没有新增风险递推或因果边，滤波权重只是检测器对已测路由分数的平均权重。
+
+| 方法 | 用途 |
+|---|---|
+| `routing_imbalance` | 原始功能消息路由基线 |
+| `route_mean` | 同窗口普通因果均值，检验单纯平滑 |
+| `route_state_filter` | 唯一新候选；保留头身份的状态滤波 |
+| `route_pooled_filter` | 合并头后的同一滤波，检验 head 身份是否有增量 |
+| `attention_displacement` | 读取路由对照 |
+| `entropy` | 当前不确定性对照；不作为检测开关 |
+
+没有官方来源块时，上表两种原始路由改用明确命名的 prompt 版本，不冒称事实证据。
+
+`route_filter_v3/w16/` 中：
+
+| 文件 | 内容 |
+|---|---|
+| `report.html` | 各法 AUROC/AP、同答比较、增量及逐词轨迹 |
+| `evaluation.json` | 全错误、首错、span 起点、延续、前后半段；pooled/来源等权/同答 |
+| `comparisons.json` / `comparisons.csv` | 候选相对原路由、普通均值及合并头对照的差值 |
+| `onsets.csv` / `high_risk_normals.csv` | 每个起点及高风险正常词的同答排名 |
+| `recovery.csv` | 错误后第一个正常 token 的同答正常词排名，检查旧高分滞留 |
+| `tokens.csv` | 逐词分数、当前权重、有效平均词数和距离尺度 |
+| `responses/0000/scores.npz` | 完整分数和按 lag 保存的滤波权重；lag=0 为当前 |
+| `scoring_protocol.json` | 标签读取前保存的固定规则及来源协议 |
+| `summary.json` / `evaluation_status.json` | 本次是否完成评价，不自动宣布获胜方法 |
+
+紧凑缓存位于 `route_filter_v3/features/0000.npz`，保存 head_profile 的 `[T,L,H,5]` 表和原路由。
+默认窗口 16 来自历史代码默认值；不是在这四答上调出来的最优值。显式 `--window 8` 写 w8，
+不会覆盖 w16，也不会重新读大缓存。不同窗口不是默认搜索网格，不得根据同一测试集选最优窗口。
+
+优先看 `route_state_filter − routing_imbalance` 和 `route_state_filter − route_mean`。
+若只有总体增益但首错/恢复恶化，应报告时序滞留；不能把延续分数改善称为机制发现。
+
+## 历史 v2 比较的判读
+
+`--stage compare` 仍计算原来的 13 方法，写 `route_comparison_v2/`。
+[v2 公式与历史来源](../../iclr/NATIVE_ROUTE_REDESIGN.md)。它不再随默认 run/score 重算。
 
 1. 先看 `report.html` 的同样本方法表。主方法是 `routing_imbalance`；没有官方来源区间时，
    明确改名为 `prompt_routing_imbalance`，整个 prompt 不能冒充已核验的事实证据。
@@ -82,7 +127,7 @@ python -u main.py support --resume --model /path/to/Meta-Llama-3.1-8B-Instruct
 python main.py support --stage score --output outputs/native_support_v1
 ```
 
-采集可断点续跑，缺失文件才前向；评分始终按全部已观察回答 token 重建历史递推。
+采集可断点续跑，缺失文件才前向；评分按全部已观察回答 token 重建因果窗口。
 读旧 native_trace_audit 结果不会得到新分数：旧文件使用固定人工候选方向，需新的原生前向读出。
 原审计文件不会修改。
 
@@ -114,9 +159,9 @@ write 是 NPZ 写入；wall 是本答此次采集总耗时，不含载入模型�
 与原 teaching 逐步账本的核对、块内未来 token 不影响早期结果、缺口续跑和新旧压缩缓存混用。
 未在服务器 8B 上测量加速倍数，不把前向调用次数减少等同于端到端提速倍数。
 
-## 输出
+## 原始缓存与历史 v2 输出
 
-原始目录仍保存采集输入；所有新版派生结果位于其 `route_comparison_v2/` 子目录：
+以下 v2 文件只在 `--stage compare` 时计算；新版默认输出见上面的 `route_filter_v3/w16/`：
 
 | 文件 | 内容 |
 |---|---|
@@ -173,13 +218,17 @@ python main.py support --stage evaluate \
 只有已有外部标注文件时才传 `--annotations`，它不是要求新建一个空文件。
 外部标注格式为 `{"answer-1": {"token_ids": [4, 5], "labels": [0, 1]}}`。
 ID 与回答 token 必须完全对应，1 表示幻觉；评分阶段不读取此文件。
-已有 v2 结果时评价所有固定方法并刷新报告；只有旧 v1 分数时仍支持原两方法补评。
+已有 v3 时默认补评 w16；显式其他窗口需传相同 `--window`。没有 v3 时补评 v2，
+只有旧 v1 时仍支持原两方法补评。缺标签不覆盖之前有效的 evaluation.json。
 不翻转方向，不以当前测试标签选阈值。没有标签时不输出伪造的 AUROC 或告警准确率。
 
 ## 代码与验证
 
 - `state_audit/native_forward.py`：因果分块采集、增量 KV、逐 token 兼容缓存。
 - `state_audit/forward_ledger.py`：GPU 批量原生竞争词、消息投影和残差账本。
+- `filtering.py`：逐头分区、状态距离、因果滤波及两种直接对照。
+- `filter_features.py`：首次提取和重复使用紧凑缓存。
+- `optimize.py`：冻结评分后评价；`filter_evaluation.py` / `filter_report.py`：增量和恢复报告。
 - `routes.py`：历史消息范数/attention 路由、头来源结构及同窗口写入。
 - `calibration.py`：按来源分离的结构校正，明确 causal 与历史 offline。
 - `comparison.py` / `comparison_evaluation.py`：复用缓存、冻结评分、同口径比较。
@@ -193,7 +242,7 @@ ID 与回答 token 必须完全对应，1 表示幻觉；评分阶段不读取�
 
 ```bash
 python -m pytest -q tests/test_native_support.py tests/test_native_support_evaluation.py \
-  tests/test_native_routes.py teaching/state_audit/tests/test_native_trace.py
+  tests/test_native_routes.py tests/test_route_filter.py
 ```
 
 CPU 小型随机 Llama 的软件测试不能证明真实模型的检测有效性。
