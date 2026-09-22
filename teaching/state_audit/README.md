@@ -27,6 +27,7 @@ python -m pytest -q
 | `model/` | 原生模块与表征轴映射、forward、读出 | 数据集解析、特征设计 |
 | `state.py` | ModelState / LayerState，逐层读取与绝对位置查询 | 把所有状态同时装进内存 |
 | `capture.py` | 选择表征、观察、逐层保存、移除 hook | 写入干预、挑幻觉 token |
+| `attribution.py` | 一个目标的逐 head/来源有符号敏感度、消息能量 | 用真值拟合方向、跨层相加成因果总量 |
 | `operations/` | Target、Delete、Replace、Inject、Steer、ReplaceSource | 固定两个 head、固定来源类别 |
 | `intervention.py` | 将操作临时接入真实模型执行 | 规定具体研究假设 |
 | `generation.py` | 同题多次采样、原回答回放、身份与 seed | 继承旧答案的幻觉标签 |
@@ -38,6 +39,22 @@ python -m pytest -q
 
 先读 [架构与接口](docs/ARCHITECTURE.md)，再按 [教学顺序](docs/LESSON.md) 阅读代码。
 具体轴和文件契约见 [FORMATS](docs/FORMATS.md)。
+
+对一个已保存回答 token 计算显著性式贡献：
+
+```python
+from state_audit.attribution import capture_target_attribution
+
+result = capture_target_attribution(
+    model, answer["token_ids"], answer["prompt_length"], target=3,
+    layers=(8, 12, 16, 20), special_token_ids=answer["special_token_ids"],
+)
+```
+
+只输入目标之前的前缀，目标为实际 token 相对其余词表的 log-odds；
+`contribution[layer, head, key]` 是消息 gate 的一阶导数，保留正负。
+`aggregate_sources` 按调用者给出的来源分组，排除特殊 token 后汇总，不平均 heads。
+每个目标单独反传；参数和 hooks 在结束后恢复。这是目标敏感度测量，不是真伪概率。
 
 ## 数据与重采样
 

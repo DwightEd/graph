@@ -1,6 +1,7 @@
 # 候选内容与适用条件的功能一致性
 
 教学与独立复用入口：[State Audit](teaching/state_audit/README.md)。
+短错误检验：[短 span 审计](experiments/short_span_audit/README.md)，分别提供已有冻结分数的 CPU 评价和复用 teaching 的逐目标贡献采集。
 可单独安装，包含生成回答、准确 token 回放、逐层状态保存、离线审计和四世界消息干预；
 支持 Llama、Mistral、Qwen2，并提供无需下载模型的示例。
 
