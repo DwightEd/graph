@@ -47,7 +47,11 @@ bash experiments/native_trace_audit/run.sh --stage report
 
 `examples/reviewed_prefixes.json` 保存上传 `reanchor_review.tar(1).gz` 的原始
 `prefix_ids`、来源角色、解码片段与局部核验说明。启动时核对角色引文、互斥性、同 prompt
-及 tokenizer 解码。没有重新采样，也没有把包含其他错误的历史当作完全正常对照。
+及 tokenizer 解码。归档片段按原保存方式 `decode([token])` 逐项核对；不能要求其拼接
+等于整段解码，空格清理和跨 token 字节解码均可能破坏这种等价关系。自然候选的原始 IDs
+另在完整前缀后回放，核对是否准确追加声明文本；不重新编码已保存的前缀或候选。
+真正的前缀错配会报告位置、token ID 和两侧解码片段。没有重新采样，也没有把包含其他
+错误的历史当作完全正常对照。
 
 | 面板 | 输入 | 候选 | 能解释什么 |
 |---|---|---|---|

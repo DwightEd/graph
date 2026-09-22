@@ -9,7 +9,8 @@ import pytest
 import torch
 from state_audit.model.adapter import ModelAdapter
 from state_audit.storage import read_json, write_json
-from transformers import LlamaConfig, LlamaForCausalLM
+from tokenizers import Tokenizer, decoders, models, pre_tokenizers
+from transformers import LlamaConfig, LlamaForCausalLM, PreTrainedTokenizerFast
 
 from experiments.native_trace_audit.inputs import (
     compile_panels,
@@ -38,6 +39,71 @@ class PieceTokenizer:
 
     def decode(self, ids, clean_up_tokenization_spaces=False):
         return "".join(self.pieces[index] for index in ids)
+
+
+@pytest.fixture
+def byte_tokenizer():
+    """Real byte decoding and whitespace cleanup, without downloading a model."""
+    alphabet = sorted(pre_tokenizers.ByteLevel.alphabet())
+    vocab = {piece: index for index, piece in enumerate(alphabet)}
+    merges = [("Ġ", char) for char in ".abcfho"]
+    for left, right in merges:
+        vocab[left + right] = len(vocab)
+    backend = Tokenizer(models.BPE(vocab=vocab, merges=merges))
+    backend.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False)
+    backend.decoder = decoders.ByteLevel()
+    return PreTrainedTokenizerFast(
+        tokenizer_object=backend, clean_up_tokenization_spaces=True
+    )
+
+
+def archived_context(tokenizer, text, case_id="14315_headwear_scope"):
+    ids = tokenizer.encode(text, add_special_tokens=False)
+    candidate_texts = [" caps", " a headdress"]
+    return {
+        "case_id": case_id,
+        "prefix_ids": ids,
+        "token_text": [tokenizer.decode([token]) for token in ids],
+        "candidates": [
+            tokenizer.encode(text, add_special_tokens=False) for text in candidate_texts
+        ],
+        "reviewed_case": {"candidates": candidate_texts},
+    }
+
+
+@pytest.mark.parametrize("case_id", ["14315_headwear_scope", "14375_onion_stage"])
+@pytest.mark.parametrize("prefix_text", ["Hello . They wore", "中文 They wore"])
+def test_nonadditive_decoding_keeps_saved_ids(byte_tokenizer, case_id, prefix_text):
+    context = archived_context(byte_tokenizer, prefix_text, case_id)
+    prefix = context["prefix_ids"]
+    assert byte_tokenizer.decode(prefix, clean_up_tokenization_spaces=False) != (
+        "".join(context["token_text"])
+    )
+    with patch.object(byte_tokenizer, "encode", wraps=byte_tokenizer.encode) as encode:
+        natural, control = compile_panels(context, byte_tokenizer)
+    assert natural["token_ids"] is prefix
+    assert natural["candidates"] is context["candidates"]
+    assert control["token_ids"][: len(prefix)] == prefix
+    # Only new diagnostic text is encoded; archived prefixes are never retokenized.
+    assert [call.args[0] for call in encode.call_args_list] == [
+        control["suffix"],
+        *control["candidate_texts"],
+    ]
+
+
+def test_real_tokenizer_mismatch_reports_position_and_id(byte_tokenizer):
+    context = archived_context(byte_tokenizer, "Hello . They wore")
+    wrong_id = byte_tokenizer.encode("X", add_special_tokens=False)[0]
+    context["prefix_ids"][0] = wrong_id
+    with pytest.raises(ValueError, match=f"position 0, token ID {wrong_id}"):
+        compile_panels(context, byte_tokenizer)
+
+
+def test_saved_candidate_mismatch_is_rejected(byte_tokenizer):
+    context = archived_context(byte_tokenizer, "Hello . They wore")
+    context["candidates"][0] = byte_tokenizer.encode(" shoes", add_special_tokens=False)
+    with pytest.raises(ValueError, match="saved candidate 0 token IDs"):
+        compile_panels(context, byte_tokenizer)
 
 
 @pytest.mark.parametrize("case_id", ["14315_headwear_scope", "14375_onion_stage"])

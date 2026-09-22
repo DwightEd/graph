@@ -114,14 +114,36 @@ def partition_sources(context, prefix_ids, special_ids, recent):
     return groups.tolist()
 
 
+def validate_tokenizer(context, tokenizer):
+    """Compare like-for-like archived pieces, then replay the saved candidate IDs."""
+    prefix = context["prefix_ids"]
+    # reanchor_audit saves decode([token]) with the tokenizer's default cleanup.
+    # Those pieces need not concatenate to the full decode (cleanup / byte splits).
+    for position, (token, saved) in enumerate(zip(prefix, context["token_text"])):
+        observed = tokenizer.decode([token])
+        if observed != saved:
+            raise ValueError(
+                f"{context['case_id']}: observer tokenizer mismatch at prefix "
+                f"position {position}, token ID {token}: "
+                f"saved={saved!r}, decoded={observed!r}"
+            )
+    decoded = tokenizer.decode(prefix, clean_up_tokenization_spaces=False)
+    for index, (ids, text) in enumerate(
+        zip(context["candidates"], context["reviewed_case"]["candidates"])
+    ):
+        replay = tokenizer.decode(prefix + ids, clean_up_tokenization_spaces=False)
+        if replay != decoded + text:
+            raise ValueError(
+                f"{context['case_id']}: saved candidate {index} token IDs "
+                "do not append the declared text"
+            )
+    return decoded
+
+
 def compile_panels(context, tokenizer):
     """Preserve archived token IDs; forced text is recorded and never called a natural draw."""
     prefix = context["prefix_ids"]
-    decoded = tokenizer.decode(prefix, clean_up_tokenization_spaces=False)
-    if decoded != "".join(context["token_text"]):
-        raise ValueError(
-            f"{context['case_id']}: observer tokenizer does not match saved prefix"
-        )
+    decoded = validate_tokenizer(context, tokenizer)
     native = {
         "name": "natural",
         "token_ids": prefix,

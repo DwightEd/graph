@@ -45,6 +45,18 @@ PYTHONPATH=teaching/state_audit/src python -m pytest -q \
 
 报告图已实际生成并检查可读性。小模型输出属于软件验证，不代表 8B 或自然幻觉机制。
 
+## 前缀 tokenizer 校验修复
+
+原校验错误地要求关闭空格清理的整段解码，等于默认设置下逐 token 解码片段的拼接。
+现在按 `reanchor_audit` 归档的 `decode([token])` 方式逐项比对，并单独验证保存的候选
+IDs 在原始前缀后是否追加声明文本；不重新编码原始 IDs，也不修改归档或缓存格式。
+
+此次只运行 `tests/test_native_trace_audit.py`，**13 项通过**（含原有 7 项）：
+使用真实 ByteLevel BPE / `PreTrainedTokenizerFast` 复现空格清理和中文跨字节片段导致
+的非可加解码，覆盖两个案例面板；错误的前缀 ID 或候选 ID 仍被拒绝。
+原有小模型采集、续跑和离线报告检查也通过。Ruff 与 diff 格式检查通过。
+没有重跑全量检测，也没有新增 8B 结果。直接拉取代码后运行原脚本即可续跑。
+
 ## 仍需服务器执行
 
 当前工作环境没有用户的 Llama-3.1-8B 权重或 GPU，因此尚未采得这四段前缀的新 FFN、
