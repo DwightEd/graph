@@ -16,7 +16,9 @@
 ## 研究与运行约定
 
 修改代码前读取 `iclr/CODING_GUIDELINES.md` 与 `iclr/MECHANISM_FIRST.md`。
-当前原生前向检测是 `experiments/native_support`；先读 `iclr/ROUTE_FILTER_DESIGN.md`。
+当前原生前向检测是 `experiments/native_support`；先读 `iclr/JOINT_STATE_DESIGN.md`。
+`--stage model` 为多观测切换状态候选；默认 optimize 及 v3 保留，定义见 `iclr/ROUTE_FILTER_DESIGN.md`。
+R 固定风险方向，A/熵参与状态长度推断；不能把统计切换称作语义重锚，不能把状态均值称作幻觉概率。
 按同样本 AUROC/AP 优化，保留原路由与普通因果均值；没有自然成绩不宣称滤波有效。
 `iclr/NATIVE_ROUTE_REDESIGN.md` 保留 v2 历史基线定义。
 旧 `iclr/NATIVE_SUPPORT_DESIGN.md` 是 v1 对照定义，不再作为唯一检测主线；历史结果不能省略。

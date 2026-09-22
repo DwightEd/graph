@@ -16,7 +16,7 @@ EXAMPLE = Path(__file__).parent / "examples" / "prefixes.json"
 
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=("prepare", "run", "score", "optimize", "compare", "evaluate"), default="run")
+    parser.add_argument("--stage", choices=("prepare", "run", "score", "optimize", "model", "compare", "evaluate"), default="run")
     parser.add_argument("--input", type=Path, default=EXAMPLE)
     parser.add_argument("--output", type=Path, default=Path("outputs/native_support_v1"))
     parser.add_argument("--model")
@@ -26,6 +26,7 @@ def arguments(argv=None):
     parser.add_argument("--query-chunk-size", type=int, default=8, help="Causal query rows per GPU forward; execution setting, safe to change on resume")
     parser.add_argument("--compress-cache", action="store_true", help="Compress token NPZ files to save disk space at the cost of CPU time")
     parser.add_argument("--window", type=int, default=16, help="Causal routing window; default retained from prior temporal code")
+    parser.add_argument("--reference-output", type=Path, help="Independent cached reference for --stage model; default excludes each target source from input cohort")
     parser.add_argument("--annotations", type=Path, help="Evaluation only: response ID -> binary token labels")
     parser.add_argument("--dataset", type=Path, help="Official RAGTruth directory; prepare input and annotations automatically")
     parser.add_argument("--task", choices=("QA", "Summary", "Data2txt"), default="QA")
@@ -43,8 +44,10 @@ def arguments(argv=None):
         parser.error("limit must be positive; balanced pilot needs an even limit of at least two")
     if args.stage == "prepare" and args.dataset is None:
         parser.error("prepare requires --dataset pointing to the official RAGTruth directory")
-    if args.dataset is not None and args.stage in ("score", "optimize", "compare", "evaluate"):
+    if args.dataset is not None and args.stage in ("score", "optimize", "model", "compare", "evaluate"):
         parser.error("--dataset prepares new inputs: use --stage prepare or run, with a new output directory")
+    if args.reference_output is not None and args.stage != "model":
+        parser.error("--reference-output is only used by --stage model")
     return args
 
 
@@ -115,7 +118,11 @@ def evaluate_saved(args):
     from .evaluate import evaluate
     from .optimize import DIRECTORY as FILTER_DIRECTORY
     from .optimize import evaluate_optimization
+    from .state_model import DIRECTORY as STATE_DIRECTORY
+    from .state_model import evaluate_state_model
 
+    if (args.output / STATE_DIRECTORY / f"w{args.window}" / "summary.json").exists():
+        return evaluate_state_model(args.output, args.annotations, args.window)
     if (args.output / FILTER_DIRECTORY / "features").exists():
         return evaluate_optimization(args.output, args.annotations, args.window)
     if (args.output / DIRECTORY / "summary.json").exists():
@@ -136,6 +143,10 @@ def main(argv=None):
                   "annotations": str(args.output / "annotations.json"), "model_run": False}
     elif args.stage == "compare":
         result = run_comparison(args.output, read_json(args.output / "settings.json"), args.annotations)
+    elif args.stage == "model":
+        from .state_model import run_state_model
+        result = run_state_model(args.output, read_json(args.output / "settings.json"),
+                                 args.annotations, args.window, args.reference_output)
     elif args.stage in ("score", "optimize"):
         result = run_optimization(args.output, read_json(args.output / "settings.json"), args.annotations, args.window)
     else:

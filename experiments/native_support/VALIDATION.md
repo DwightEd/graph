@@ -1,5 +1,26 @@
 # 本轮实际验证
 
+## 多观测切换状态（2026-09-22）
+
+```bash
+python -m pytest -q tests/test_joint_state.py tests/test_route_filter.py \
+  tests/test_native_support_evaluation.py tests/test_native_routes.py
+```
+
+结果：34 passed；ruff 与 git diff --check 通过。未运行服务器 8B 或全量数据。
+
+- 共轭预测密度与 SciPy 多元 Student-t 独立实现一致。
+- 因果递推与枚举所有可能分段的后验一致；新段/延续贡献精确还原总分。
+- 修改目标未来不改变过去，改变辅助观测的单位并同步变换先验不改变推断。
+- A/熵改变分段后验，但不能在 R 恒为零、参考均值为零时单独创造风险方向。
+- 低熵持续高 R 不被清零；每词切换时严格退化为独立更新。
+- 同源回答全部排除，参考 source 等权；外部参考检查 observer 身份。
+- 真正运行 model/evaluate CLI；禁止原始缓存提取及模型加载仍完成小缓存评分与报告。
+- 修改标签不改变分数，旧 v3 评价保留，缺少标签不覆盖有效评价。
+
+合成输入仅验证数学和软件，不是自然机制证据。当前未取得四答 836-token 的原始/紧凑缓存，
+新模型尚无自然 AUROC；0.779200 是用户已报告的普通均值基线，不是新模型成绩。
+
 ## 因果状态滤波与紧凑缓存（2026-09-22）
 
 ```bash

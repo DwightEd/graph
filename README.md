@@ -1,5 +1,21 @@
 # 原生路由检测与机制审计
 
+当前统一模型候选：[多观测切换状态](iclr/JOINT_STATE_DESIGN.md)。
+功能路由确定风险方向；读取路由与熵参与“延续旧状态/开始新状态”的联合概率推断。
+完整协方差处理相关观测，模型保存所有可能状态长度的后验，无需手工指定错误片段。
+它复用已有紧凑缓存，在 CPU 运行；不重新前向、不使用自然标签拟合，也不把稀有状态当幻觉。
+
+```bash
+python -u main.py support --stage model --output outputs/native_support_ragtruth4
+```
+
+输出在 `joint_state_v4/w16/`，包括 report.html、AUROC/AP、同答与恢复比较、每词状态后验。
+默认从其他 source 估计无标签参考统计；同 source 全部排除。可用 `--reference-output` 指定独立缓存。
+同四答已实测：原路由 AUROC 0.754983，普通均值 0.779200，逐头滤波 0.777385。
+新模型以普通均值为主基线，同时保留原路由；本轮尚无新自然 AUROC。
+
+## 保留的 v3 路由比较
+
 当前检测入口：[Native Routing Filter](experiments/native_support/README.md)。
 固定功能路由基线，检验因果时间降噪；唯一新候选用逐头路由状态决定近期分数的权重。
 与当前路由、普通滑动均值、合并头后的滤波在相同 token 上比较，不自动选获胜方法。

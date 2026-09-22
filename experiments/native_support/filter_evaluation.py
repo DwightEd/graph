@@ -10,9 +10,10 @@ def difference(left, right):
     return left - right if left is not None and right is not None else None
 
 
-def ranking_deltas(evaluation, baseline):
-    pairs = [("route_mean", baseline), ("route_state_filter", baseline),
-             ("route_state_filter", "route_mean"), ("route_state_filter", "route_pooled_filter")]
+def ranking_deltas(evaluation, baseline, pairs=None):
+    if pairs is None:
+        pairs = [("route_mean", baseline), ("route_state_filter", baseline),
+                 ("route_state_filter", "route_mean"), ("route_state_filter", "route_pooled_filter")]
     rows = []
     for candidate, control in pairs:
         for phase, result in evaluation["methods"][candidate].items():
@@ -44,10 +45,10 @@ def recovery_rows(records, rows, methods):
     return result
 
 
-def write_deltas(output, destination, annotations, evaluation, baseline, methods, rows):
+def write_deltas(output, destination, annotations, evaluation, baseline, methods, rows, pairs=None):
     if evaluation["status"] != "evaluated":
         return {"status": "unavailable"}
-    deltas = ranking_deltas(evaluation, baseline)
+    deltas = ranking_deltas(evaluation, baseline, pairs)
     write_csv(destination / "comparisons.csv", deltas, list(deltas[0]))
     result = {"status": "evaluated", "automatic_method_selection": False, "comparisons": deltas}
     write_json(destination / "comparisons.json", result)

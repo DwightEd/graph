@@ -5,7 +5,7 @@ import sys
 HELP = """Usage: python main.py COMMAND [arguments]
 
   flow             Resampled claim pairs: head interactions, repair and persistence
-  support          Native routing and causal state filtering; cache-only optimize stage
+  support          Native routing, causal filters and joint switching state; cached CPU scoring
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis

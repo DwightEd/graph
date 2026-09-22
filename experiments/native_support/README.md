@@ -1,9 +1,59 @@
-# 原生路由：先检验 AUROC 增益
+# 原生路由与多观测切换状态
+
+## 统一模型候选
+
+```bash
+git pull --ff-only origin main
+python -u main.py support --stage model \
+  --output outputs/native_support_ragtruth4
+```
+
+复用 `route_filter_v3/features/` 的小缓存；仅在它尚不存在时提取原始 NPZ，不载入模型权重。
+详细架构、公式、假设和文献见 [JOINT_STATE_DESIGN](../../iclr/JOINT_STATE_DESIGN.md)。
+
+| 输入/状态 | 在同一个模型中的作用 |
+|---|---|
+| 功能路由 R | 提供已有实测支持的风险方向；输出为其潜在均值 |
+| attention 路由 A | 与 R 联合判断读取状态是否仍可由此前状态解释 |
+| log(1+熵) | 帮助判断统计状态改变，不直接作为正向风险或开关 |
+| 可能的段长度及其后验 | 决定各段历史对当前状态估计的影响 |
+| 完整 3×3 协方差 | 处理观测相关性，避免当作独立证据相乘 |
+
+新段与延续分支按预测概率竞争，参数积分为 Student-t 预测分布。
+`--window 16` 在模型里表示先验期望段长，同时是普通均值对照的窗口；不截断模型段长。
+保留所有可能起点，首行强制新段仅是初始化。状态切换不代表语义 reanchor。
+
+新输出 `joint_state_v4/w16/`，不会修改 v1/v2/v3 结果：
+
+| 文件 | 内容 |
+|---|---|
+| `report.html` | AUROC/AP、同答增量、逐词风险、切换概率及新段/延续贡献 |
+| `evaluation.json` / `comparisons.json` | 同 token 的完整评价和固定对照差值 |
+| `scoring_protocol.json` | 评分前冻结的参考均值/协方差、参考 source/回答 ID 及模型假设 |
+| `responses/0000/scores.npz` | 全部检测分数；`run_posterior[t,n-1]`、三维 `state_mean` 等 |
+| `tokens.csv` / `onsets.csv` / `recovery.csv` | 逐词轨迹、起点及错误结束后的正常词排名 |
+
+固定主候选 `joint_state`；主要比较基线 `route_mean` 已在四答达到 AUROC 0.779200。
+`route_state` 用完全相同的概率结构但只观察 R，检验 A/熵的贡献。
+`instant_state` 使用同一参考先验逐词独立更新，检验时间推断的增量。
+原 R、A、熵均保留，没有根据测试标签调整融合权重或自动选择方法。
+
+默认每个目标 source 的参考统计只用其他 source，各 source 等权，标签不进入统计。
+这是对现有四答的 source-held-out 诊断，不是外部独立训练。只有一个 source 时会明确报错。
+已有独立参考缓存可追加 `--reference-output outputs/native_support_reference`；参考的模型、
+task、generator 与来源定义必须一致，同 source 仍排除。无需额外神经网络训练。
+新模型输出为路由状态，不是幻觉概率；尚未得到自然数据 AUROC，不保证超过普通均值。
+
+`--stage evaluate` 会优先评价对应窗口已完成的 v4 模型结果；缺少标注时保留旧有效评价。
+`--stage optimize`/`score`/默认 `run` 继续使用 v3；`--stage compare` 保留 v2。
+
+## v3 原生路由：已有比较
 
 固定 `routing_imbalance` 基线，以近期相似逐头路由状态加权平均原分数，检验时间降噪。
 唯一新候选为 `route_state_filter`；同窗口普通均值和先合并 head 的滤波是必要对照。
 不消融、不反向传播、不训练关系分类器；自然标签只在全部分数保存后用于评价。
-[当前公式及依据](../../iclr/ROUTE_FILTER_DESIGN.md)。新候选尚无自然成绩，不宣称机制成立。
+[v3 公式及依据](../../iclr/ROUTE_FILTER_DESIGN.md)。四答已报告逐头滤波 AUROC 0.777385，
+普通均值 0.779200；未显示逐头加权的总体 AUROC 优势，不宣称机制成立。
 
 ## 已有四答结果直接重算
 
