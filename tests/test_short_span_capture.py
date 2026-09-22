@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import torch
 from state_audit.storage import read_json, write_json
 
 from experiments.short_span_audit import capture
@@ -16,6 +17,8 @@ from experiments.short_span_audit.capture_reporting import (
     source_means,
     write_report,
 )
+
+CPU_MODEL = SimpleNamespace(native=SimpleNamespace(device=torch.device("cpu")))
 
 
 def answer_and_entry():
@@ -81,6 +84,14 @@ def fake_attribution(model, token_ids, prompt_length, target, **kwargs):
     }
 
 
+def fake_stream(single_target):
+    def stream(model, token_ids, prompt_length, targets, **kwargs):
+        for target in targets:
+            yield single_target(model, token_ids, prompt_length, target, **kwargs)
+
+    return stream
+
+
 def test_source_groups_exclude_unseen_target_and_keep_self():
     assert capture.source_groups(3, 0, 2).tolist() == [0, 0, 0]
     assert capture.source_groups(3, 4, 2).tolist() == [0, 0, 0, 2, 2, 1, 1]
@@ -124,8 +135,8 @@ def test_capture_arguments_reject_empty_or_duplicate_layers():
 
 def test_raw_edges_and_excluded_specials_survive_aggregation(monkeypatch):
     answer, _ = answer_and_entry()
-    monkeypatch.setattr(capture, "capture_target_attribution", fake_attribution)
-    arrays = capture.target_arrays(None, answer, 2, [8], [0], 1)
+    raw = fake_attribution(None, answer.token_ids, answer.prompt_length, 2)
+    arrays = capture.add_source_arrays(raw, answer, 1)
     assert arrays["value_energy"].shape == (1, 2, 4)
     assert arrays["source_value_energy"].shape == (1, 2, 3)
     np.testing.assert_allclose(arrays["source_route_mass"].sum(-1), 0.75)
@@ -133,9 +144,7 @@ def test_raw_edges_and_excluded_specials_survive_aggregation(monkeypatch):
     np.testing.assert_allclose(arrays["source_contribution_negative"].sum(-1), 0.5)
 
 
-def test_nonfinite_derivative_cannot_be_saved_as_completed_target(
-    tmp_path, monkeypatch
-):
+def test_nonfinite_derivative_cannot_be_saved_as_completed_target(tmp_path, monkeypatch):
     answer, entry = answer_and_entry()
 
     def nonfinite(*args, **kwargs):
@@ -143,18 +152,16 @@ def test_nonfinite_derivative_cannot_be_saved_as_completed_target(
         arrays["contribution"][0, 0, 0] = np.nan
         return arrays
 
-    monkeypatch.setattr(capture, "capture_target_attribution", nonfinite)
+    monkeypatch.setattr(capture, "iter_target_attributions", fake_stream(nonfinite))
     settings = {"layers": [8], "local_window": 1, "model": "observer"}
     with pytest.raises(FloatingPointError, match="7 target 0: nonfinite"):
-        capture.capture_answer(None, answer, entry, tmp_path, settings, [0])
+        capture.capture_answer(CPU_MODEL, answer, entry, tmp_path, settings, [0])
     directory = capture.answer_directory(tmp_path, entry)
     assert not (directory / "000000.npz").exists()
     assert not read_json(directory / "answer.json")["complete"]
 
 
-def test_interrupted_capture_resumes_targets_and_preserves_identity(
-    tmp_path, monkeypatch
-):
+def test_interrupted_capture_resumes_targets_and_preserves_identity(tmp_path, monkeypatch):
     answer, entry = answer_and_entry()
     calls = []
 
@@ -166,16 +173,21 @@ def test_interrupted_capture_resumes_targets_and_preserves_identity(
         return fake_attribution(*args, **kwargs)
 
     settings = {"layers": [8], "local_window": 1, "model": "observer"}
-    monkeypatch.setattr(capture, "capture_target_attribution", interrupted)
+    monkeypatch.setattr(capture, "iter_target_attributions", fake_stream(interrupted))
     with pytest.raises(RuntimeError, match="interrupted"):
-        capture.capture_answer(None, answer, entry, tmp_path, settings, [0])
+        capture.capture_answer(CPU_MODEL, answer, entry, tmp_path, settings, [0])
     directory = capture.answer_directory(tmp_path, entry)
     assert not read_json(directory / "answer.json")["complete"]
     assert (directory / "000000.npz").exists()
-    monkeypatch.setattr(capture, "capture_target_attribution", fake_attribution)
-    capture.capture_answer(None, answer, entry, tmp_path, settings, [0])
+    monkeypatch.setattr(capture, "iter_target_attributions", fake_stream(fake_attribution))
+    capture.capture_answer(CPU_MODEL, answer, entry, tmp_path, settings, [0])
     assert read_json(directory / "answer.json")["complete"]
     assert calls == [0, 1]
+    with np.load(directory / "000001.npz") as saved:
+        assert saved["prefill_tokens"] == 2
+    with np.load(directory / "000002.npz") as saved:
+        assert saved["prefill_tokens"] == 0
+    assert not list(directory.glob("*.partial*"))
 
 
 def test_partial_pair_does_not_become_full_span_result():
@@ -206,8 +218,8 @@ def test_normal_history_is_the_same_fifteen_step_half_open_window_as_cpu_audit()
 def test_report_rejects_nonfinite_saved_targets(tmp_path, monkeypatch, field):
     answer, entry = answer_and_entry()
     settings = {"layers": [8], "local_window": 1, "model": "observer"}
-    monkeypatch.setattr(capture, "capture_target_attribution", fake_attribution)
-    capture.capture_answer(None, answer, entry, tmp_path, settings, [0])
+    monkeypatch.setattr(capture, "iter_target_attributions", fake_stream(fake_attribution))
+    capture.capture_answer(CPU_MODEL, answer, entry, tmp_path, settings, [0])
     directory = capture.answer_directory(tmp_path, entry)
     path = directory / "000000.npz"
     with np.load(path, allow_pickle=False) as saved:
@@ -232,9 +244,26 @@ def test_source_average_does_not_overweight_repeated_answers():
     np.testing.assert_allclose(means["error"], [5.0])
 
 
-def test_report_distinguishes_pending_targets_and_mechanism_audit(
-    tmp_path, monkeypatch
-):
+def test_legacy_npz_without_cost_is_reported_as_unmeasured(tmp_path, monkeypatch):
+    answer, entry = answer_and_entry()
+    settings = {"layers": [8], "local_window": 1, "model": "observer"}
+    monkeypatch.setattr(capture, "iter_target_attributions", fake_stream(fake_attribution))
+    capture.capture_answer(CPU_MODEL, answer, entry, tmp_path, settings, [0])
+    directory = capture.answer_directory(tmp_path, entry)
+    for path in directory.glob("*.npz"):
+        with np.load(path) as saved:
+            arrays = {
+                key: saved[key]
+                for key in saved.files
+                if key not in ("capture_seconds", "prefill_tokens")
+            }
+        np.savez_compressed(path, **arrays)
+    values, rows = load_targets(directory, entry)
+    assert len(values) == 4
+    assert all(row["capture_seconds"] is None and row["prefill_tokens"] is None for row in rows)
+
+
+def test_report_distinguishes_pending_targets_and_mechanism_audit(tmp_path, monkeypatch):
     answer, entry = answer_and_entry()
     settings = {
         "layers": [8],
@@ -247,12 +276,15 @@ def test_report_distinguishes_pending_targets_and_mechanism_audit(
     pending = write_report(tmp_path, [entry])
     assert pending["completed_targets"] == 0
     assert pending["expected_targets"] == 4
-    monkeypatch.setattr(capture, "capture_target_attribution", fake_attribution)
-    capture.capture_answer(None, answer, entry, tmp_path, settings, [0])
+    monkeypatch.setattr(capture, "iter_target_attributions", fake_stream(fake_attribution))
+    capture.capture_answer(CPU_MODEL, answer, entry, tmp_path, settings, [0])
     summary = write_report(tmp_path, [entry])
     assert summary["completed_answers"] == 1
     assert summary["completed_pair_phases"] == 2
     assert summary["detector_evaluation"] is False
+    assert summary["cost"]["timed_targets"] == 4
+    assert summary["cost"]["prefill_tokens"] == 1
+    assert summary["cost"]["cuda_peak_allocated_bytes"] is None
     records = read_json(tmp_path / "paired_records.json")
     assert {row["normal_history"] for row in records} == {"recovery"}
     with np.load(tmp_path / "paired_measurements.npz", allow_pickle=False) as saved:

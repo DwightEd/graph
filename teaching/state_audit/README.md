@@ -55,6 +55,8 @@ result = capture_target_attribution(
 `contribution[layer, head, key]` 是消息 gate 的一阶导数，保留正负。
 `aggregate_sources` 按调用者给出的来源分组，排除特殊 token 后汇总，不平均 heads。
 每个目标单独反传；参数和 hooks 在结束后恢复。这是目标敏感度测量，不是真伪概率。
+历史 KV 默认以 256 token 分块、无梯度预填充，只为最后预测位置保留梯度图；
+`prefill_chunk_size` 控制计算块大小，完整前缀仍参与读取，不是截断历史。
 
 ## 数据与重采样
 

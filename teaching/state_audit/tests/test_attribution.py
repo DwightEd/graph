@@ -99,7 +99,8 @@ def test_subset_preserves_derivatives_without_upstream_graph(attribution_model):
         subset = capture_target_attribution(model, token_ids, prompt, target, layers=(1,))
     finally:
         hook.remove()
-    assert early_requires_grad == [False]
+    # History prefill and the final query both stay outside the upstream graph.
+    assert early_requires_grad and not any(early_requires_grad)
     for name in ("head_gradient", "contribution", "head_readout", "attention", "value_energy"):
         np.testing.assert_array_equal(subset[name], full[name][1:], err_msg=name)
     np.testing.assert_array_equal(subset["logits"], full["logits"])

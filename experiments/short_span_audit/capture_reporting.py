@@ -15,6 +15,12 @@ SOURCE_METRICS = (
     "value_energy",
 )
 READOUT_METRICS = ("logit_entropy", "target_logp", "margin")
+COST_FIELDS = (
+    "capture_seconds",
+    "prefill_tokens",
+    "cuda_peak_allocated_bytes",
+    "cuda_peak_reserved_bytes",
+)
 GROUP_FIELDS = ("task", "generator", "split", "normal_history", "phase")
 NORMAL_HISTORY_STEPS = 15
 
@@ -34,24 +40,16 @@ def load_targets(directory, entry):
             continue
         with np.load(path, allow_pickle=False) as saved:
             current = {
-                "sources": np.stack(
-                    [saved["source_" + name] for name in SOURCE_METRICS]
-                ),
-                "readouts": np.asarray(
-                    [saved[name].item() for name in READOUT_METRICS]
-                ),
+                "sources": np.stack([saved["source_" + name] for name in SOURCE_METRICS]),
+                "readouts": np.asarray([saved[name].item() for name in READOUT_METRICS]),
                 "layers": saved["layers"],
             }
             scalars = {name: float(saved[name]) for name in READOUT_METRICS}
-        invalid = [
-            name
-            for name in ("sources", "readouts")
-            if not np.isfinite(current[name]).all()
-        ]
+            # Older completed NPZ files remain usable; their unmeasured cost stays null.
+            costs = {name: saved[name].item() if name in saved else None for name in COST_FIELDS}
+        invalid = [name for name in ("sources", "readouts") if not np.isfinite(current[name]).all()]
         if invalid:
-            raise FloatingPointError(
-                f"{record['id']} target {target}: nonfinite saved {invalid}"
-            )
+            raise FloatingPointError(f"{record['id']} target {target}: nonfinite saved {invalid}")
         values[target] = current
         start, end = entry["offsets"][target]
         readouts.append(
@@ -64,6 +62,7 @@ def load_targets(directory, entry):
                 target=target,
                 token=entry["text"][start:end],
                 **scalars,
+                **costs,
             )
         )
     return values, readouts
@@ -90,9 +89,7 @@ def phase_measurement(memberships, values, phase):
 def normal_history(gold_spans, start):
     """A normal interval with recent labelled errors is a recovery control."""
     history_start = max(0, start - NORMAL_HISTORY_STEPS)
-    recent_error = any(
-        left < start and right > history_start for left, right in gold_spans
-    )
+    recent_error = any(left < start and right > history_start for left, right in gold_spans)
     return "recovery" if recent_error else "clean_history"
 
 
@@ -115,9 +112,7 @@ def measured_pairs(entry, values):
                     phase=phase,
                     error=error,
                     normal=normal,
-                    normal_history=normal_history(
-                        entry["gold"], sides["normal"][0]["span_start"]
-                    ),
+                    normal_history=normal_history(entry["gold"], sides["normal"][0]["span_start"]),
                 )
             )
     return rows
@@ -131,8 +126,7 @@ def source_means(pairs, measure):
     means = {}
     for side in ("error", "normal"):
         sources = [
-            np.mean([pair[side][measure] for pair in group], axis=0)
-            for group in grouped.values()
+            np.mean([pair[side][measure] for pair in group], axis=0) for group in grouped.values()
         ]
         means[side] = np.mean(sources, axis=0)
     return means, len(grouped)
@@ -201,9 +195,7 @@ def save_pair_arrays(output, pairs, layers, names):
     }
     for side in ("error", "normal"):
         for measure in ("sources", "readouts"):
-            arrays[f"{side}_{measure}"] = np.asarray(
-                [pair[side][measure] for pair in pairs]
-            )
+            arrays[f"{side}_{measure}"] = np.asarray([pair[side][measure] for pair in pairs])
     write_arrays(output / "paired_measurements.npz", **arrays)
 
 
@@ -217,6 +209,7 @@ def write_tables(output, tokens, pairs, layers, names):
         "target",
         "token",
         *READOUT_METRICS,
+        *COST_FIELDS,
     ]
     write_csv(output / "token_readouts.csv", tokens, token_fields)
     common = [*GROUP_FIELDS, "pairs", "sources", "metric"]
@@ -228,6 +221,28 @@ def write_tables(output, tokens, pairs, layers, names):
     )
     write_csv(output / "paired_readouts.csv", readout_rows(pairs), common + values)
     save_pair_arrays(output, pairs, layers, names)
+
+
+def cost_summary(tokens):
+    measured = [row for row in tokens if row["capture_seconds"] is not None]
+    cuda = [row for row in tokens if row["cuda_peak_allocated_bytes"] is not None]
+    seconds = sum(row["capture_seconds"] for row in measured)
+    return {
+        "timed_targets": len(measured),
+        "targets_without_timing": len(tokens) - len(measured),
+        "capture_seconds": seconds,
+        "seconds_per_timed_target": seconds / len(measured) if measured else None,
+        "prefill_tokens": sum(row["prefill_tokens"] for row in measured),
+        "cuda_measured_targets": len(cuda),
+        "cuda_peak_allocated_bytes": max(
+            (row["cuda_peak_allocated_bytes"] for row in cuda), default=None
+        ),
+        "cuda_peak_reserved_bytes": max(
+            (row["cuda_peak_reserved_bytes"] for row in cuda), default=None
+        ),
+        "scope": "successful_targets_including_prefix_compute_excluding_model_load_and_disk_writes",
+        "failed_attempt_cost_included": False,
+    }
 
 
 def create_archive(output, destination):
@@ -265,9 +280,7 @@ def write_report(output, cohort):
         "purpose": settings["purpose"],
         "expected_answers": sum(bool(e["targets"]) for e in cohort),
         "completed_answers": complete_answers,
-        "expected_targets": sum(
-            len({t["target"] for t in e["targets"]}) for e in cohort
-        ),
+        "expected_targets": sum(len({t["target"] for t in e["targets"]}) for e in cohort),
         "completed_targets": len(tokens),
         "completed_pair_phases": len(pairs),
         "observer": settings["model"],
@@ -277,6 +290,7 @@ def write_report(output, cohort):
         "natural_labels_used_for_target_selection": True,
         "detector_evaluation": False,
         "normal_history_steps": NORMAL_HISTORY_STEPS,
+        "cost": cost_summary(tokens),
         "archive": str(archive),
     }
     write_json(output / "report.json", summary)
@@ -288,11 +302,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--audit", type=Path, required=True)
     args = parser.parse_args()
-    print(
-        write_report(
-            args.audit / "contributions", read_json(args.audit / "cohort.json")
-        )
-    )
+    print(write_report(args.audit / "contributions", read_json(args.audit / "cohort.json")))
 
 
 if __name__ == "__main__":

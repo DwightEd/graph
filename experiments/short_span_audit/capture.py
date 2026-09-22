@@ -2,10 +2,13 @@
 
 import argparse
 import hashlib
+from contextlib import closing
 from pathlib import Path
+from time import perf_counter
 
 import numpy as np
-from state_audit.attribution import aggregate_sources, capture_target_attribution
+import torch
+from state_audit.attribution import aggregate_sources, iter_target_attributions
 from state_audit.model.adapter import load_model
 from state_audit.storage import read_json, start_stage, write_arrays, write_json
 from state_audit.tokenization import special_token_ids
@@ -50,30 +53,18 @@ def verify_cohort_answer(answer, entry):
         and np.array_equal(answer.offsets, entry["offsets"])
     )
     if not identity_matches:
-        raise ValueError(
-            f"{record['id']}: cached answer differs from frozen short-span cohort"
-        )
+        raise ValueError(f"{record['id']}: cached answer differs from frozen short-span cohort")
 
 
 def verify_model_alignment(answer, tokenizer):
-    offsets = verified_offsets(
-        tokenizer, answer.token_ids, answer.prompt_length, answer.text
-    )
+    offsets = verified_offsets(tokenizer, answer.token_ids, answer.prompt_length, answer.text)
     if not np.array_equal(offsets, answer.offsets):
-        raise ValueError(
-            f"{answer.response_id}: observer tokenizer differs from cached response"
-        )
+        raise ValueError(f"{answer.response_id}: observer tokenizer differs from cached response")
 
 
-def target_arrays(model, answer, target, layers, excluded, local_window):
-    result = capture_target_attribution(
-        model,
-        answer.token_ids,
-        answer.prompt_length,
-        target,
-        layers=layers,
-        special_token_ids=excluded,
-    )
+def add_source_arrays(result, answer, local_window):
+    """Summarize a measured target without changing its native per-edge arrays."""
+    target = int(result["target"])
     groups = source_groups(answer.prompt_length, target, local_window)
     grouped = aggregate_sources(result, groups, len(SOURCE_NAMES))
     result.update({"source_" + name: values for name, values in grouped.items()})
@@ -90,10 +81,42 @@ def target_arrays(model, answer, target, layers, excluded, local_window):
         result["excluded_special_" + name] = values[..., special].sum(-1)
     invalid = [name for name, values in result.items() if not np.isfinite(values).all()]
     if invalid:
-        raise FloatingPointError(
-            f"{answer.response_id} target {target}: nonfinite {invalid}"
-        )
+        raise FloatingPointError(f"{answer.response_id} target {target}: nonfinite {invalid}")
     return result
+
+
+def measured_targets(model, answer, targets, settings, excluded, chunk_size):
+    """Time actual replay work, excluding disk writes; the first target pays for prefill."""
+    device = model.native.device
+    iterator = iter_target_attributions(
+        model,
+        answer.token_ids,
+        answer.prompt_length,
+        targets,
+        layers=settings["layers"],
+        special_token_ids=excluded,
+        prefill_chunk_size=chunk_size,
+    )
+    cached_tokens = 0
+    with closing(iterator):
+        for target in tqdm(targets, desc=f"targets {answer.response_id}", leave=False):
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+                torch.cuda.reset_peak_memory_stats(device)
+            started = perf_counter()
+            arrays = next(iterator)
+            arrays["capture_seconds"] = np.asarray(perf_counter() - started)
+            query = int(arrays["query"])
+            arrays["prefill_tokens"] = np.asarray(query - cached_tokens)
+            cached_tokens = query + 1
+            if device.type == "cuda":
+                arrays["cuda_peak_allocated_bytes"] = np.asarray(
+                    torch.cuda.max_memory_allocated(device)
+                )
+                arrays["cuda_peak_reserved_bytes"] = np.asarray(
+                    torch.cuda.max_memory_reserved(device)
+                )
+            yield add_source_arrays(arrays, answer, settings["local_window"])
 
 
 def save_answer(directory, answer, entry, observer, excluded, complete):
@@ -116,7 +139,7 @@ def save_answer(directory, answer, entry, observer, excluded, complete):
     write_json(directory / "answer.json", metadata)
 
 
-def capture_answer(model, answer, entry, output, settings, excluded):
+def capture_answer(model, answer, entry, output, settings, excluded, *, prefill_chunk_size=256):
     directory = answer_directory(output, entry)
     verify_cohort_answer(answer, entry)
     completed = directory / "answer.json"
@@ -126,21 +149,16 @@ def capture_answer(model, answer, entry, output, settings, excluded):
             raise ValueError(f"{answer.response_id}: saved capture token IDs changed")
     else:
         save_answer(directory, answer, entry, settings["model"], excluded, False)
-    for target in tqdm(
-        target_plan(entry), desc=f"targets {answer.response_id}", leave=False
-    ):
-        path = directory / f"{target:06d}.npz"
-        if path.exists():
-            continue
-        arrays = target_arrays(
-            model,
-            answer,
-            target,
-            settings["layers"],
-            excluded,
-            settings["local_window"],
+    pending = [
+        target for target in target_plan(entry) if not (directory / f"{target:06d}.npz").exists()
+    ]
+    if pending:
+        measurements = measured_targets(
+            model, answer, pending, settings, excluded, prefill_chunk_size
         )
-        write_arrays(path, **arrays)
+        with closing(measurements):
+            for arrays in measurements:
+                write_arrays(directory / f"{int(arrays['target']):06d}.npz", **arrays)
     save_answer(directory, answer, entry, settings["model"], excluded, True)
 
 
@@ -176,6 +194,7 @@ def run(args):
     cohort_path = args.audit / "cohort.json"
     cohort = read_json(cohort_path)
     original = read_json(args.audit / "input_settings.json")
+    args.model = args.model or original["tokenizer"]
     dataset, caches = input_locations(args, original, cohort)
     output = args.audit / "contributions"
     settings = capture_settings(args, cohort_path, dataset, caches)
@@ -196,12 +215,18 @@ def run(args):
             )
         answer = readers[root].load_answer(str(entry["record"]["id"]))
         if model is None:
-            model, tokenizer = load_model(
-                args.model, args.revision, args.device, args.dtype
-            )
+            model, tokenizer = load_model(args.model, args.revision, args.device, args.dtype)
             excluded = special_token_ids(tokenizer)
         verify_model_alignment(answer, tokenizer)
-        capture_answer(model, answer, entry, output, settings, excluded)
+        capture_answer(
+            model,
+            answer,
+            entry,
+            output,
+            settings,
+            excluded,
+            prefill_chunk_size=args.prefill_chunk_size,
+        )
     summary = write_report(output, cohort)
     print(summary, flush=True)
 
@@ -213,9 +238,7 @@ def parse_layers(value):
     else:
         layers = [int(layer) for layer in value.split(",")]
     if not layers or min(layers) < 0 or len(layers) != len(set(layers)):
-        raise argparse.ArgumentTypeError(
-            "layers must be nonempty, unique, nonnegative indices"
-        )
+        raise argparse.ArgumentTypeError("layers must be nonempty, unique, nonnegative indices")
     return layers
 
 
@@ -236,17 +259,23 @@ def nonnegative_int(value):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--audit", type=Path, required=True)
-    parser.add_argument("--model", required=True)
+    parser.add_argument(
+        "--model", help="Observer checkpoint; defaults to input_settings.json tokenizer"
+    )
     parser.add_argument("--revision", default="main")
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--dataset", type=Path)
     parser.add_argument("--layers", type=parse_layers, default=list(range(8, 24)))
     parser.add_argument("--local-window", type=nonnegative_int, default=10)
     parser.add_argument("--device", default="cuda")
-    parser.add_argument(
-        "--dtype", default="bfloat16", choices=("float32", "float16", "bfloat16")
-    )
+    parser.add_argument("--dtype", default="bfloat16", choices=("float32", "float16", "bfloat16"))
     parser.add_argument("--limit-answers", type=positive_int)
+    parser.add_argument(
+        "--prefill-chunk-size",
+        type=positive_int,
+        default=256,
+        help="Historical KV prefill chunk size; all prefix tokens remain available",
+    )
     parser.add_argument("--resume", action="store_true")
     run(parser.parse_args())
 
