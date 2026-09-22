@@ -1,0 +1,55 @@
+{
+  "purpose": "reviewed_input_validation_only",
+  "contexts": 4,
+  "rows": [
+    {
+      "case_id": "14315_headwear_scope",
+      "side": "supported",
+      "source_id": "14315",
+      "prefix_tokens": 469,
+      "prompt_tokens": 434,
+      "history_status": "contains_other_overgeneralization",
+      "natural_readout": "caps/a: determiner and number confounded; first-token wording contrast only",
+      "binding_probe": "Same headwear slot after a forced common determiner; new teacher-forced prefix.",
+      "role_quotes_verified": true,
+      "model_trajectory_measured": false
+    },
+    {
+      "case_id": "14315_headwear_scope",
+      "side": "unsupported",
+      "source_id": "14315",
+      "prefix_tokens": 469,
+      "prompt_tokens": 434,
+      "history_status": "not_fully_reviewed",
+      "natural_readout": "caps/a: determiner and number confounded; first-token wording contrast only",
+      "binding_probe": "Same headwear slot after a forced common determiner; new teacher-forced prefix.",
+      "role_quotes_verified": true,
+      "model_trajectory_measured": false
+    },
+    {
+      "case_id": "14375_onion_stage",
+      "side": "supported",
+      "source_id": "14375",
+      "prefix_tokens": 661,
+      "prompt_tokens": 535,
+      "history_status": "not_fully_reviewed",
+      "natural_readout": "over/for: different attribute slots; descriptive wording contrast only",
+      "binding_probe": "Before/after binding of the quoted interval; an appended diagnostic statement, not the original duration decision or a replacement answer.",
+      "role_quotes_verified": true,
+      "model_trajectory_measured": false
+    },
+    {
+      "case_id": "14375_onion_stage",
+      "side": "unsupported",
+      "source_id": "14375",
+      "prefix_tokens": 661,
+      "prompt_tokens": 535,
+      "history_status": "not_fully_reviewed",
+      "natural_readout": "over/for: different attribute slots; descriptive wording contrast only",
+      "binding_probe": "Before/after binding of the quoted interval; an appended diagnostic statement, not the original duration decision or a replacement answer.",
+      "role_quotes_verified": true,
+      "model_trajectory_measured": false
+    }
+  ],
+  "model_run": false
+}

@@ -10,6 +10,7 @@ AXES = {
     "attention": ("head", "position", "key"),
     "head_readout": ("position", "head", "feature"),
     "attention_write": ("position", "feature"),
+    "residual_mid": ("position", "feature"),
     "mlp_input": ("position", "feature"),
     "mlp_activation": ("position", "feature"),
     "mlp_write": ("position", "feature"),

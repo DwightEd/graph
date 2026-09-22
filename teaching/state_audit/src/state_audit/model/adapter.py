@@ -76,6 +76,7 @@ class ModelAdapter:
             "value": (block.self_attn.v_proj, "output"),
             "head_readout": (block.self_attn.o_proj, "input"),
             "attention_write": (block.self_attn.o_proj, "output"),
+            "residual_mid": (block.post_attention_layernorm, "input"),
             "mlp_input": (block.post_attention_layernorm, "output"),
             "mlp_activation": (block.mlp.down_proj, "input"),
             "mlp_write": (block.mlp, "output"),

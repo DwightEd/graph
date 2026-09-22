@@ -207,6 +207,12 @@ python examples/compare_messages.py --run runs/demo
 核心接口与计算公式见 [消息交互](docs/INTERACTIONS.md)。项目中的真实审计入口只是这些接口的调用方，
 实验专用的来源角色、头名单和标签不进入模型适配器。
 
+原始轨迹接口 `state_audit.native_trace.iter_native_traces` 复用同一 `ModelAdapter`，
+记录逐边实际写入、FFN 与 attention 前/后的残差，以及原始激活上的局部依赖。
+新增 `residual_mid` 对应 attention 残差相加后、FFN 归一化前的位置。
+它使用分块 KV 预填充和单查询求导，不修改模型消息，也不要求消融。
+真实案例、候选口径和一键运行见 [原始轨迹审计](../../experiments/native_trace_audit/README.md)。
+
 当前原生适配器支持 Llama、Mistral、Qwen2（共享 decoder 布局，包含 GQA 与滑窗 mask）；
 Transformers 4.57.x。其他布局需在 model 中显式映射，不声称任意 `AutoModel` 都支持。
 批大小为 1，支持单设备加载与逐层落盘；全 attention 内存成本仍为二次方。
