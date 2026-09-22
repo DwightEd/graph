@@ -1,9 +1,45 @@
-# 原生来源支持检测
+# 原生路由比较：恢复历史信号
 
-核心定义只有一个：`risk = direct_risk + inherited_risk`。
-先用原生 W_O A V 写入衡量 prompt 对实际输出的支持，再沿正向历史写入与相似头模式继承此前分数。
-不消融、不反向传播、不需要正确候选、角色表或幻觉标签。全程 teacher forcing。
-[公式、分析顺序与边界](../../iclr/NATIVE_SUPPORT_DESIGN.md)。
+固定主基线恢复为历史 `routing_imbalance`，从同一原生缓存同时计算 attention 路由、
+来源/头/时间结构和 v1 净支持对照。读取、消息范数、对实际输出的有符号写入分开保存。
+不消融、不反向传播、不需要正确候选或角色表；标签只在分数冻结后用于评价。
+[历史结果、公式及重新设计依据](../../iclr/NATIVE_ROUTE_REDESIGN.md)。
+
+## 已有四答结果直接重算
+
+```bash
+git pull --ff-only origin main
+python -u main.py support --stage compare \
+  --output outputs/native_support_ragtruth4
+```
+
+只读已有 `settings.json`、逐词 NPZ 和官方来源文本，CPU 计算，不加载模型权重。
+首次恢复官方来源区间需要原模型的 tokenizer，随后复用 `source_regions.json`。
+新结果位于 `outputs/native_support_ragtruth4/route_comparison_v2/`；原始缓存及 v1 结果保留。
+`--stage score` 与 `compare` 同义；缺标签时仍保存分数，AUROC 明确 unavailable。
+
+原四答的 v1 AUROC 是 0.572333、AP 是 0.103939；历史路由基线约 0.7 来自其他总体和协议。
+本轮恢复了历史公式并统一比较口径，没有提前宣称当前四答已恢复 0.7。
+
+## 如何读结果
+
+1. 先看 `report.html` 的同样本方法表。主方法是 `routing_imbalance`；没有官方来源区间时，
+   明确改名为 `prompt_routing_imbalance`，整个 prompt 不能冒充已核验的事实证据。
+2. 看 `evaluation.json` 的全错误、span 起点、每答首错、延续及前/后半段。
+   每项同时给 pooled、`source_balanced` 和 `within_answer`；只有两类都有的回答参与同答 AUROC。
+   `weighted_prevalence` 对应来源等权 AP 的基准。四答只有两个首错，不能据此认证普适能力。
+3. 看 `onsets.csv` 中每个首错/起点相对同答正常词的排名，和 `high_risk_normals.csv` 中的排序反例。
+   没有阈值，不把高分正常词直接称为已发生的误报。
+4. 比较 `functional_collapse` 与 `attention_collapse` 才能讨论 value 范数带来的增量。
+   `_offline` 两列恢复历史完整 prompt/最终回答长度协议，仅作离线对照；不能叫在线检测。
+   因果版本只使用普通 prompt、已观察到的位置和前 3 行。所有结构校正按 source 分开拟合、
+   校准和评价，不读标签；不足三个来源时缺测，四来源结果仍只用于诊断。
+5. `focus_*_write` 将读取峰窗口与同一头的正负写入对齐；FFN/残差账本仍保留。
+   它们用于解释，未按这四答标签拼权重或选择最佳头；支持实际输出不等于事实支持。
+
+消息路由使用 `sqrt(edge_value_energy) = ||A W_O V||`，不能用平方能量直接替代。
+结构先保留头身份再算来源支持、头 Gram 有效秩和历史锚点支持，衡量路由冗余而非证明因果协同。
+所有方向固定为高分高风险。`support_graph` 与 `direct_prompt` 保留原公式作为 v1 对照。
 
 ## 一键运行
 
@@ -61,7 +97,7 @@ python main.py support --stage score --output outputs/native_support_v1
 每个位置仍需自己的原生竞争词、逐头来源写入、FFN 和残差账本，不能用前一词的结果替代。
 这些投影在 GPU 按块完成，只传回标量；不再构造/搬运随后丢弃的完整逐头残差写入，
 也不采集 FFN 中间激活。每个来源的投影 value energy 只计算一次，随 KV cache 增量更新。
-attention、energy、熵等解释字段保留；核心 risk 的定义和历史递推没有改动。
+attention、energy、熵等字段保留；v1 对照 risk 的定义和历史递推没有改动。
 
 逐 token 缓存默认使用未压缩 NPZ，减少 CPU 压缩时间，但会增加磁盘占用。
 需要节省空间可加 `--compress-cache`；新旧 NPZ 都能直接读取，可在同一输出目录续跑。
@@ -80,23 +116,26 @@ write 是 NPZ 写入；wall 是本答此次采集总耗时，不含载入模型�
 
 ## 输出
 
-默认目录 `outputs/native_support_v1/`：
+原始目录仍保存采集输入；所有新版派生结果位于其 `route_comparison_v2/` 子目录：
 
 | 文件 | 内容 |
 |---|---|
-| `report.html` | 自包含的逐 token 曲线与表格 |
-| `tokens.csv` | 每个 token 的总分、直接项、历史项、熵、惊讶度、FFN 写入和读取增强 |
-| `summary.json` | 完成数量、账本误差、运行边界 |
+| `route_comparison_v2/report.html` | 方法比较、逐 token 路由曲线及读取/写入表格 |
+| `route_comparison_v2/tokens.csv` | 13 种固定方法分数及逐词解释字段 |
+| `route_comparison_v2/summary.json` | 主方法、来源协议、完成数量、账本误差及评价摘要 |
 | `annotations.json` | 使用 --dataset 时自动生成的真实评价标签，含字符区间、token IDs 和有效位置 |
-| `evaluation.json` | 有真实标签时输出 AUROC/AP；包含样本选择协议和阳性比例 |
-| `evaluation_status.json` | 本次是否完成评价；缺标签时明确报告，不覆盖此前有效评价 |
+| `route_comparison_v2/evaluation.json` | 各法、各答、各阶段 AUROC/AP，pooled/来源等权/同答比较 |
+| `route_comparison_v2/evaluation_status.json` | 本次评价状态；缺标签时不覆盖此前有效评价 |
+| `route_comparison_v2/onsets.csv` / `high_risk_normals.csv` | 逐答逐法起点排名及高风险正常词 |
+| `route_comparison_v2/calibration.json` | 按来源划分、无标签校正系数及 causal/offline 协议 |
+| `route_comparison_v2/source_regions.json` | 官方来源区间与已核对的 prompt IDs；只读 prompt |
 | `responses/0000/token_000000.npz` | 每层每头每来源 attention、signed write、value energy；残差账本 |
 | `responses/0000/capture_timing.json` | 本答最新一次补采集的批量大小、复用数量、采集和写盘耗时 |
-| `responses/0000/scores.npz` | 逐 token 分数、完整头模式、下三角历史边权、逐头 prompt 关注峰 |
+| `route_comparison_v2/responses/0000/scores.npz` | 新旧分数、每层结构量、头锚点、同窗口写入及 v1 历史边 |
 | `settings.json` | 实际模型、token 序列和边界，便于重算及续跑 |
 
-R 越高代表来源支持越弱；R 可正可负，0 不是分类阈值，R 不是幻觉概率。
-回看和熵不进入评分，不用它们挑选位置。FFN 正负写入不是正确/错误标签。
+路由主分数越高表示消息范数更偏向历史而非来源；分数不是幻觉概率，0 不是分类阈值。
+熵/惊讶度单独作为对照，不参与路由组合或挑选位置。FFN 正负写入不是正确/错误标签。
 
 ## 输入完整自然回答
 
@@ -134,14 +173,18 @@ python main.py support --stage evaluate \
 只有已有外部标注文件时才传 `--annotations`，它不是要求新建一个空文件。
 外部标注格式为 `{"answer-1": {"token_ids": [4, 5], "labels": [0, 1]}}`。
 ID 与回答 token 必须完全对应，1 表示幻觉；评分阶段不读取此文件。
-评价 `support_graph` 与 `direct_prompt` 的全错误、每答首错、span 起点和延续 AUROC/AP。
+已有 v2 结果时评价所有固定方法并刷新报告；只有旧 v1 分数时仍支持原两方法补评。
 不翻转方向，不以当前测试标签选阈值。没有标签时不输出伪造的 AUROC 或告警准确率。
 
 ## 代码与验证
 
 - `state_audit/native_forward.py`：因果分块采集、增量 KV、逐 token 兼容缓存。
 - `state_audit/forward_ledger.py`：GPU 批量原生竞争词、消息投影和残差账本。
-- `score.py`：预算、保留头身份的模式、因果历史递推。
+- `routes.py`：历史消息范数/attention 路由、头来源结构及同窗口写入。
+- `calibration.py`：按来源分离的结构校正，明确 causal 与历史 offline。
+- `comparison.py` / `comparison_evaluation.py`：复用缓存、冻结评分、同口径比较。
+- `source_regions.py`：复用 teaching offsets，从官方 prompt 恢复来源区间。
+- `score.py`：保留 v1 预算、头模式及历史递推作为对照。
 - `pipeline.py`：按 token 保存/续跑/评分；`report.py` 输出可读结果。
 - `evaluate.py`：冻结分数后的独立标签评价。
 - `ragtruth.py`：官方回答选择、复用 teaching tokenization 与字符标签对齐。
@@ -149,7 +192,8 @@ ID 与回答 token 必须完全对应，1 表示幻觉；评分阶段不读取�
 针对性验证：
 
 ```bash
-python -m pytest -q tests/test_native_support.py tests/test_native_support_evaluation.py
+python -m pytest -q tests/test_native_support.py tests/test_native_support_evaluation.py \
+  tests/test_native_routes.py teaching/state_audit/tests/test_native_trace.py
 ```
 
 CPU 小型随机 Llama 的软件测试不能证明真实模型的检测有效性。

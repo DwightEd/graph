@@ -16,7 +16,8 @@
 ## 研究与运行约定
 
 修改代码前读取 `iclr/CODING_GUIDELINES.md` 与 `iclr/MECHANISM_FIRST.md`。
-当前原生前向检测是 `experiments/native_support`；先读 `iclr/NATIVE_SUPPORT_DESIGN.md`。
+当前原生前向检测是 `experiments/native_support`；先读 `iclr/NATIVE_ROUTE_REDESIGN.md`。
+旧 `iclr/NATIVE_SUPPORT_DESIGN.md` 是 v1 对照定义，不再作为唯一检测主线；历史结果不能省略。
 历史固定图验证保留在 `experiments/unsupervised_token_graph/fixed_graph`，其协议见 `iclr/FIXED_GRAPH_VERIFICATION.md`。
 `span_audit` 保留为标签辅助解释；不再要求完成所有因果机制后才能检验无标签检测。
 先使用真实错误与正常对照，区分入口、复用、退出；不要启动来源错接训练来替代这个问题。

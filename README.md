@@ -1,18 +1,20 @@
-# 原生来源支持检测与机制审计
+# 原生路由检测与机制审计
 
-当前检测入口：[Native Support](experiments/native_support/README.md)。
-每个实际输出 token 只做原生前向，从同一个逐头写入账本计算局部 prompt 支持与历史复用：
-`risk = direct_risk + inherited_risk`。不做消融、反向传播或候选语义探针，不读取自然标签。
-回看、熵、FFN 正负写入是解释字段，不筛选检测位置。
+当前检测入口：[Native Route Comparison](experiments/native_support/README.md)。
+恢复历史约 0.7 的功能消息路由与 attention 路由基线，同缓存比较来源、头、时间的结构；
+保留 v1 的 signed support/history 分数作为失败对照，不再默认它是更好的检测方法。
+读取量、消息范数、候选方向写入分开保存；不消融、不反向传播、不用标签选择分数或方向。
+[重新设计依据及历史结果](iclr/NATIVE_ROUTE_REDESIGN.md)。
 
 ```bash
-python -u main.py support --resume
+python -u main.py support --stage compare --output outputs/native_support_ragtruth4
 ```
 
-默认仅回放已存的 4 个自然前缀、322 个已观察回答 token，不运行全量数据。
-输出 `outputs/native_support_v1/report.html`、`tokens.csv` 和逐 token NPZ。
-这几个前缀在原决策词之前结束；没有人工拼接候选，不能用它们报告首错或延续成绩。
-[完整定义与研究边界](iclr/NATIVE_SUPPORT_DESIGN.md)。当前是已实现的检测假设，尚无自然数据有效性结论。
+以上命令只读取已有采集缓存，在 `route_comparison_v2/` 写入报告及 AUROC/AP；不运行模型。
+同时报告 pooled、来源等权、同一回答内的比较，避免不同口径互相替代。
+历史 routing imbalance 在 971 个来源上的 pooled AUROC 为 0.721235；
+用户四回答结果中 v1 support graph 为 0.572333。不同样本和模板不能直接作性能回退定量比较，
+但此前没有保留强基线就更换主方法不合理。本轮代码恢复比较条件，没有宣称新自然成绩。
 
 需要真实 AUROC/AP 时，使用少量官方完整回答，自动准备标注并在评分后评价：
 
@@ -23,7 +25,9 @@ python -u main.py support \
 ```
 
 此处按标签分层选 2 个错误回答和 2 个无错误标注回答，仅为小样本诊断，标签不参与评分。
-输出目录自动生成 `annotations.json` 与 `evaluation.json`，不需要 `token_labels.json` 占位文件。
+输出目录自动生成 `annotations.json`；评价位于 `route_comparison_v2/evaluation.json`，
+不需要 `token_labels.json` 占位文件。`--stage score` 与 `compare` 都可从旧缓存重算。
+不带 dataset/input 的 run 仍使用旧 322-token 自然前缀；其标签未知，不能用于首错成绩。
 
 教学与独立复用入口：[State Audit](teaching/state_audit/README.md)。
 短错误检验：[短 span 审计](experiments/short_span_audit/README.md)，分别提供已有冻结分数的 CPU 评价和复用 teaching 的逐目标贡献采集。

@@ -24,7 +24,9 @@ def official_fixture(tmp_path):
     _, model = build_demo(tmp_path / "model_fixture", "llama")
     dataset = tmp_path / "dataset"
     dataset.mkdir()
-    source = {"source_id": "s1", "task_type": "QA", "prompt": "What does Mira wear?"}
+    source = {"source_id": "s1", "task_type": "QA",
+              "prompt": "question: What does Mira wear?\npassages:\nMira wears a blue coat.\noutput:",
+              "source_info": {"question": "What does Mira wear?", "passages": "Mira wears a blue coat."}}
     rows = []
     for index in range(4):
         text = "Mira wears a red coat." if index % 2 else "Mira wears a blue coat."

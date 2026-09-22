@@ -5,35 +5,43 @@ from sklearn.metrics import average_precision_score, roc_auc_score
 from state_audit.storage import read_arrays, read_json, write_json
 
 
-def ranking(labels, scores):
+def ranking(labels, scores, weights=None):
     positive = int(labels.sum())
     both = 0 < positive < len(labels)
     return {
         "tokens": len(labels), "positives": positive, "negatives": len(labels) - positive,
         "prevalence": float(positive / len(labels)) if len(labels) else None,
+        "weighted_prevalence": float(np.average(labels, weights=weights)) if len(labels) else None,
         "auroc_status": "available" if both else "requires_both_classes",
-        "auroc": float(roc_auc_score(labels, scores)) if both else None,
-        "ap": float(average_precision_score(labels, scores)) if positive else None,
+        "auroc": float(roc_auc_score(labels, scores, sample_weight=weights)) if both else None,
+        "ap": float(average_precision_score(labels, scores, sample_weight=weights)) if positive else None,
     }
 
 
-def load_evaluation(output, annotations):
+def evaluation_records(output, annotations, score_root, columns):
     settings = read_json(output / "settings.json")
     labels_by_id = read_json(annotations)
-    labels, onsets, firsts, scores = [], [], [], []
+    records = []
     for index, response in enumerate(settings["responses"]):
-        saved = read_arrays(output / "responses" / f"{index:04d}" / "scores.npz")
+        saved = read_arrays(score_root / "responses" / f"{index:04d}" / "scores.npz")
         annotation = labels_by_id[response["id"]]
         if not np.array_equal(annotation["token_ids"], saved["token_id"]):
             raise ValueError(f"{response['id']}: annotation token IDs differ from scored tokens")
         if "source_id" in annotation and annotation["source_id"] != response["source_id"]:
             raise ValueError(f"{response['id']}: annotation source ID differs")
         values, onset, first, valid = annotation_targets(annotation, len(saved["risk"]), response["id"])
-        labels.append(values[valid])
-        onsets.append(onset[valid])
-        firsts.append(first[valid])
-        scores.append(np.column_stack([saved[name][valid] for name in ("risk", "direct_risk")]))
-    return tuple(np.concatenate(part) for part in (labels, onsets, firsts, scores))
+        records.append({
+            "id": response["id"], "source_id": response["source_id"],
+            "labels": values[valid], "onsets": onset[valid], "firsts": first[valid],
+            "target": np.flatnonzero(valid), "response_length": len(valid),
+            "scores": np.column_stack([saved[name][valid] for name in columns]),
+        })
+    return records
+
+
+def load_evaluation(output, annotations):
+    records = evaluation_records(output, annotations, output, ("risk", "direct_risk"))
+    return tuple(np.concatenate([r[name] for r in records]) for name in ("labels", "onsets", "firsts", "scores"))
 
 
 def annotation_targets(annotation, count, identity):

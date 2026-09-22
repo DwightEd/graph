@@ -1,3 +1,10 @@
+# 历史 v1 定义（保留为对照）
+
+当前主设计见 [NATIVE_ROUTE_REDESIGN.md](NATIVE_ROUTE_REDESIGN.md)。
+用户四回答结果中，本方法全错误 AUROC 为 0.572333、每答首错为 0.392053；
+signed prompt support 不等于事实支持，后续默认入口已恢复历史路由基线及同样本比较。
+以下保留 v1 原始定义，不能作为新版的有效性结论。
+
 # 原生来源支持检测：统一定义
 
 2026-09-22。实现对应 `experiments/native_support` 与 `state_audit/native_forward.py`。

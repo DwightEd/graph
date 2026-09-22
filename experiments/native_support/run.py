@@ -1,4 +1,4 @@
-"""Forward capture -> signed support graph -> per-token scores, without ablations."""
+"""Native capture -> routing/structure comparison -> evaluation, without ablations."""
 
 import argparse
 import json
@@ -16,7 +16,7 @@ EXAMPLE = Path(__file__).parent / "examples" / "prefixes.json"
 
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=("prepare", "run", "score", "evaluate"), default="run")
+    parser.add_argument("--stage", choices=("prepare", "run", "score", "compare", "evaluate"), default="run")
     parser.add_argument("--input", type=Path, default=EXAMPLE)
     parser.add_argument("--output", type=Path, default=Path("outputs/native_support_v1"))
     parser.add_argument("--model")
@@ -40,7 +40,7 @@ def arguments(argv=None):
         parser.error("limit must be positive; balanced pilot needs an even limit of at least two")
     if args.stage == "prepare" and args.dataset is None:
         parser.error("prepare requires --dataset pointing to the official RAGTruth directory")
-    if args.dataset is not None and args.stage in ("score", "evaluate"):
+    if args.dataset is not None and args.stage in ("score", "compare", "evaluate"):
         parser.error("--dataset prepares new inputs: use --stage prepare or run, with a new output directory")
     return args
 
@@ -108,25 +108,25 @@ def run_score(output, settings):
 
 
 def main(argv=None):
+    from .comparison import DIRECTORY, evaluate_existing, run_comparison
+
     args = arguments(argv)
     if args.stage == "evaluate":
         from .evaluate import evaluate
-        result = evaluate(args.output, args.annotations)
+        if (args.output / DIRECTORY / "summary.json").exists():
+            result = evaluate_existing(args.output, args.annotations)
+        else:
+            result = evaluate(args.output, args.annotations)
     elif args.stage == "prepare":
         settings = prepare(args)
         result = {"status": "prepared", "responses": len(settings["responses"]),
                   "annotations": str(args.output / "annotations.json"), "model_run": False}
-    elif args.stage == "score":
-        result = run_score(args.output, read_json(args.output / "settings.json"))
+    elif args.stage in ("score", "compare"):
+        result = run_comparison(args.output, read_json(args.output / "settings.json"), args.annotations)
     else:
         settings = prepare(args)
         run_capture(args, settings)
-        result = run_score(args.output, settings)
-    if args.stage in ("run", "score"):
-        from .evaluate import evaluate
-        result["evaluation"] = evaluate(args.output, args.annotations)
-        result["evaluation_performed_by_this_stage"] = result["evaluation"]["status"] == "evaluated"
-        write_json(args.output / "summary.json", result)
+        result = run_comparison(args.output, settings, args.annotations)
     print(json.dumps(result, ensure_ascii=False))
 
 
