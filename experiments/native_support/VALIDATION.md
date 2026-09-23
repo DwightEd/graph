@@ -1,5 +1,30 @@
 # 本轮实际验证
 
+## 外部成熟研究驱动的值路径分解（2026-09-23）
+
+```bash
+python -m pytest -q tests/test_transport_pipeline.py tests/test_transport_audit.py \
+  tests/test_token_detection.py tests/test_native_support_evaluation.py \
+  tests/test_native_support.py tests/test_dynamics_pipeline.py
+```
+
+结果：50 passed，14.97 秒。使用本地随机小模型，未运行服务器 8B 或全量自然数据。
+
+- 原生候选 logits 保持；输入根有符号作用之和还原候选差；没有把多个层的作用重复相加。
+- 实际 Mistral 滑动窗口注意力与保存行一致，禁止边为零；使用原生掩码而非猜测模型属性。
+- 修改未来输入、分批候选反向、稀疏续跑不改变当前归因；关闭迭代器恢复钩子和参数状态。
+- 块内正负分开后再求和，改变自动分块宽度不改变总来源作用或根读出。
+- capture/score/evaluate 真正执行；修改标签不改变分数；完整缓存续跑不加载模型。
+- 原始 R/A/H、旧预算审计及独立 dynamics 的受影响路径通过回归。
+
+另行小模型精度检查：float32 输入根账本最大误差约 `6e-8`；一个两层 bfloat16
+检查的最大误差约 `9e-4`，不是可外推到 8B 的误差界。完整反向比旧单 query
+冻结 KV 的范围更大，FFN 重计算节省激活内存但增加计算；没有实测速度或 24GB 保证。
+`capture/*/timing.json` 保存真实运行耗时与 CUDA 峰值，`ledger_error` 保存每词误差。
+
+以下保留历史验证记录；其中退役实现与命令请查 Git `9d4ba17`，不代表当前入口。
+
+
 ## 固定分段的经验读出与新增 RAGTruth 入口（2026-09-22）
 
 ```bash

@@ -15,47 +15,32 @@
 
 ## 研究与运行约定
 
-修改代码前读取 `iclr/CODING_GUIDELINES.md` 与 `iclr/MECHANISM_FIRST.md`。
-当前原生前向检测是 `experiments/native_support`；先读 `iclr/TOKEN_DETECTION.md`。
-无需人工证据类型的来源状态候选见 `iclr/AUTOMATIC_SOURCE_TRANSPORT.md`，入口 `main.py transport`。
-该入口复用原生 dynamics token 缓存；保留层头来源向量，以逐头响应相似性和实际历史边建立共享token图，估计来源预算。
-不使用SVD、自然标签拟合或人工语义类型；块类型为unassigned，不冒称自动识别了适用约束。
-该版本是来源响应条件化的预算平滑候选，不是完整JVP因果传递或语义真假后验；旧R与均值必须同样本评价。
-只完成小模型和针对性软件验证，未产生新的自然AUROC/AP；默认support基线与旧dynamics保留。
-用户提供 transport 32答 AUROC/AP=0.718068/0.191248，raw=0.711559/0.185660，离线均值=0.731726/0.186802；不是本地重跑。
-`transport --stage audit` 只读已存分数/状态/标注，输出排名/AP账本、图端点/状态统计和source成对bootstrap；自动打包source_transport/audit_data.zip。
-审计不读取capture、不重算图/状态、不改分数；回答前后半不等于错误span前后半，query目标s与历史key词s-1的标签分别统计。
-用户已明确当前任务是离线检测，允许后续 token、FAI 和前后向平滑；不要再擅自限制为实时检测。
-输入驱动状态方案见 `iclr/NATIVE_STATE_DYNAMICS.md`；`main.py dynamics` 已接通采集/无标签拟合/离线评分/评价。
-用户提供的32答汇总：state_dynamics AUROC/AP=0.734881/0.171929，route_offline_mean=0.731726/0.186802。
-已收到32答audit_data.zip并核验其token/模式/评价一致性；本地仍没有原始capture和参考模型，不能声称重跑自然新方法。
-旧高分≥0.9内部含3757正常、538错误，另有末尾62正常/2错误；不能将历史保持直接解释为幻觉。
-条件状态概率不能自动提供真假语义；后续设计边界与高分正常数据见`iclr/DYNAMICS_STATE_IDENTIFIABILITY.md`。
-预测型新风险读出已按用户质疑撤回，未发布；不把原生状态可预测性或历史模式后验当作幻觉概率。
-`dynamics --stage audit` 仅复用观测、emission、分数与参考模型，输出CSV/NPZ/JSON和audit_data.zip。
-不新训真假分类器；标签只用于核验/分组。AP贡献按完整同分阈值计算；log odds只是数值同分诊断。
-该入口保留层头身份，使用当前query原生多方向导数、来源方向协方差与离线复用；不把它叫跨token完整因果归因。
-`state_forward` 也含离线FAI，只是前向模式消息的对照，不能叫实时检测；原始R/A/H仍独立保存比较。
-默认run/score是逐token的固定R/A/H检测，不执行消融、分段、参考拟合或融合。
-不能把检测以复杂机制审计为前提，不能把恢复原始基线包装为新AUROC提升。
-原始R为固定主分数，A/H独立评价；旧实验显式调用，不串入默认检测。
-修改历史联合状态模型时读 `iclr/JOINT_STATE_DESIGN.md`。
-联合模型的四答阴性结果及后续协议见 `iclr/STATE_READOUT_VALIDATION.md`。
-32答结果与当前直接风险融合见 `iclr/DIRECT_RISK_FUSION.md`；修改融合前先读。
-普通均值保留为基线，其四答优势没有在32答推广；v5去收缩也没有超过v4。
-`--stage fuse` 复用已有外部参考和v4缓存，不加载LLM；主对照为原路由与仅路由状态。
-v6通过冻结参考分位直接读出当前A/H和路由状态风险；不使用自然标签拟合，不将分位称为幻觉概率。
-融合评价须同时看AUROC/AP、补回错误与新增正常告警；没有自然成绩不宣称融合有效。
-`--stage model` 为历史多观测切换状态候选；optimize/v3仅显式运行，定义见 `iclr/ROUTE_FILTER_DESIGN.md`。
-v4的R固定风险方向，A/熵参与状态长度推断；不能把统计切换称作语义重锚，不能把状态均值称作幻觉概率。
-按同样本 AUROC/AP 优化，保留原路由与普通因果均值；没有自然成绩不宣称滤波有效。
-`iclr/NATIVE_ROUTE_REDESIGN.md` 保留 v2 历史基线定义。
-旧 `iclr/NATIVE_SUPPORT_DESIGN.md` 是 v1 对照定义，不再作为唯一检测主线；历史结果不能省略。
-历史固定图验证保留在 `experiments/unsupervised_token_graph/fixed_graph`，其协议见 `iclr/FIXED_GRAPH_VERIFICATION.md`。
-`span_audit` 保留为标签辅助解释；不再要求完成所有因果机制后才能检验无标签检测。
-先使用真实错误与正常对照，区分入口、复用、退出；不要启动来源错接训练来替代这个问题。
-最终无监督检测是后续独立任务，不能将金标构图/金标窗口的结果称为检测成绩。
-代码采用短函数、直接名字、空行分逻辑；不要一行多个语句、层层封装和散落的校验。
-复用已有缓存；不使用 `set -e`；不后台执行实验；不改用户模型和结果文件。
-不得用“source影响输出”“Q改变attention”等必然或过弱的现象宣称发现幻觉原因。
-计划和实际实现分开报告。仅有软件测试，不声称已运行自然数据或发现新机制。
+修改代码前读 `iclr/CODING_GUIDELINES.md`、`iclr/MECHANISM_FIRST.md`。
+原始逐 token R/A/H 基线是 `main.py support`，协议见 `iclr/TOKEN_DETECTION.md`。
+当前来源传递候选是 `main.py transport`，先读 `iclr/VALUE_PATH_TRANSPORT.md`。
+用户明确要求借鉴其他成熟研究，不只组合前几轮实验。采用 DecompX 的跨层来源分解思想、
+ALTI-Logit 的输出读出、乘法相关性分配和 Information Flow 的路径视角。
+原生前向不改；归因固定 attention pattern/RMS scale，SiLU 割线 + 乘法等分。
+这是指定的值路径分解，不是 native Jacobian，不包含 Q/K 路由变化的因果效应。
+当前布局要求 bias-free value/MLP/output 和 SiLU，其他布局必须明确适配。
+输入根作用按候选保存，保留层头消息诊断；层间作用不能当作独立贡献相加。
+FFN 已进入根归因，不把反向写入自动判为反证据，不把它重复加入风险。
+`value_transport/` 是新缓存/结果；不能从旧 detached-KV 缓存恢复根来源。
+一次完整前向，独立目标反向，SDPA + FFN checkpoint；默认梯度批量 1。
+不使用自然标签拟合、SVD、人工证据类型或自动指标选择；标签只在全部评分后读取。
+`root_route` 是检测候选，不是事实正确率；原始 R/A/H 和同窗口均值必须独立比较。
+只做小模型/针对性软件验证。没有真实 8B/自然新 AUROC，就明确说明。
+用户允许离线未来 token；不能擅自把方法限制为实时检测。
+旧 transport 32答 AUROC/AP=0.718068/0.191248，raw=0.711559/0.185660，
+离线均值=0.731726/0.186802；这些是用户提供的历史结果，不是新方法结果。
+`transport --stage audit` 保留旧 `source_transport/` 的只读排名/AP/图状态审计。
+审计不加载模型、不改分数；保存的 query 目标和 history key 标签应区分。
+旧 v3–v6 标量滤波/融合和共享预算图评分代码已清理；历史实现见 Git `9d4ba17`。
+`main.py dynamics` 是独立历史无标签状态实验，其概率不能自动解释成真假；
+输入格式/历史证据见 `iclr/NATIVE_STATE_DYNAMICS.md` 和 `iclr/DYNAMICS_STATE_IDENTIFIABILITY.md`。
+保留用户缓存、原始结果及研究证据，不为美化改写历史；不全量重跑。
+检测不以完成消融、所有因果机制或人工证据标注为前提。
+不把最大 attention、正向作用、状态稳定或易预测自动命名为正确证据。
+不另训真假分类器；若今后改为监督方法，必须明确改任务并分开汇报。
+代码短函数、直接命名、职责分离；不堆框架、备用路径、重复检查。
+复用 teaching 适配器；不使用 `set -e`，不后台跑实验，不改用户模型/结果文件。

@@ -3,8 +3,7 @@
 from copy import copy
 from hashlib import sha256
 
-from state_audit.dataset.jsonl import read_jsonl
-from state_audit.storage import read_json, start_stage, write_json
+from state_audit.storage import read_json, write_json
 
 from .ragtruth import encode_response
 
@@ -56,44 +55,3 @@ def prepare_cohort(args, name, rows, sources, tokenizer, model_name, excluded):
     write_json(current.output / "input.json", {"model": model_name, "responses": responses})
     write_json(current.output / "annotations.json", annotations)
     return current, settings
-
-
-def validation_plan(args, groups, excluded, model_name):
-    return {"dataset": str(args.dataset.resolve()), "model": model_name, "task": args.task,
-            "generator": args.generator, "selection_seed": args.selection_seed, "window": args.window,
-            "labels_used_for_selection": False, "excluded_source_ids": excluded,
-            "selection": "sha256(seed:source_id); one answer per source; no class balancing",
-            "groups": {name: [{"response_id": str(row["id"]), "source_id": str(row["source_id"])}
-                               for row in rows] for name, rows in groups.items()},
-            "primary_baseline": "route_mean", "candidate": "joint_observed",
-            "automatic_method_selection": False,
-            "scope": "excludes_supplied_inspected_sources; does_not_certify_unseen_in_all_historical_work"}
-
-
-def run_validation(args):
-    from transformers import AutoTokenizer
-
-    from .run import run_capture
-    from .state_inputs import load_features
-    from .state_model import run_state_model
-    from .state_readout import run_readout
-
-    sources = {str(row["source_id"]): row for row in read_jsonl(args.dataset / "source_info.jsonl")}
-    groups, excluded = select_cohorts(args, read_jsonl(args.dataset / "response.jsonl"), sources)
-    model_name = args.model or read_json(args.input)["model"]
-    plan = validation_plan(args, groups, excluded, model_name)
-    start_stage(args.output / "validation_plan.json", plan, args.resume)
-    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
-    prepared = {name: prepare_cohort(args, name, rows, sources, tokenizer, model_name, excluded)
-                for name, rows in groups.items()}
-    if args.prepare_only:
-        return {"status": "prepared", "model_run": False, **plan}
-    for current, settings in prepared.values():
-        run_capture(current, settings)
-        load_features(current.output, settings)
-    target_args, target_settings = prepared["test"]
-    run_state_model(target_args.output, target_settings, window=args.window, reference_output=args.output / "reference")
-    result = run_readout(target_args.output, window=args.window)
-    result["validation_plan"] = str(args.output / "validation_plan.json")
-    write_json(args.output / "summary.json", result)
-    return result

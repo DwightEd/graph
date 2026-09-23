@@ -63,8 +63,8 @@ python -u main.py support --stage score --output outputs/native_support_validati
 
 首次数据采集沿用 `--stage run --dataset ... --output ...`，其默认后处理现在也是上述检测。
 `--stage evaluate` 优先评价已完成的token_detection，不因旧融合文件存在而切回旧方法。
-旧v3可显式 `--stage optimize`；model/readout/fuse/compare/validate保留为历史复现实验，
-不会被默认run/score串联调用。原结果和缓存保留。
+旧 v3–v6 的 optimize/model/readout/fuse/validate 分支已清理，历史实现见 Git `9d4ba17`。
+来源归因候选改用 `main.py transport`；详见 `VALUE_PATH_TRANSPORT.md`。原缓存/结果保留。
 
 ## 验证边界
 

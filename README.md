@@ -1,55 +1,37 @@
-# 原生路由检测与机制审计
+# 原生来源传递检测与机制审计
 
-四答联合模型已报告阴性结果：AUROC 0.756062/AP 0.170401，低于普通均值 0.779200/0.191355。
-[当前修正与真实 RAGTruth 扩展验证](iclr/STATE_READOUT_VALIDATION.md)：
-`support --stage readout` 固定分段去掉直接先验收缩；`--stage validate` 使用分离的 train/test source，
-排除已检查样本，不按标签挑选。新的自然效果待运行，旧基线与结果保留。
+当前候选：[来源分解与最终选择](iclr/VALUE_PATH_TRANSPORT.md)。依据 DecompX、ALTI-Logit、
+AttnLRP 及 Information Flow 的具体算法思想，将 prompt 来源沿原生值路径传播到最终候选差，
+区分读取地址与输入根来源，并保留支持/抑制。FFN 使用明确的点态分解规则，不把负写入直接判错。
+这是指定归因规则下的检测候选，不是完整因果解释；当前没有新自然数据 AUROC。
 
-当前统一模型候选：[多观测切换状态](iclr/JOINT_STATE_DESIGN.md)。
-功能路由确定风险方向；读取路由与熵参与“延续旧状态/开始新状态”的联合概率推断。
-完整协方差处理相关观测，模型保存所有可能状态长度的后验，无需手工指定错误片段。
-它复用已有紧凑缓存，在 CPU 运行；不重新前向、不使用自然标签拟合，也不把稀有状态当幻觉。
+在已有四答输入目录中采集并评价：
 
 ```bash
-python -u main.py support --stage model --output outputs/native_support_ragtruth4
+python -u main.py transport --stage run --output outputs/native_support_ragtruth4 --resume
 ```
 
-输出在 `joint_state_v4/w16/`，包括 report.html、AUROC/AP、同答与恢复比较、每词状态后验。
-默认从其他 source 估计无标签参考统计；同 source 全部排除。可用 `--reference-output` 指定独立缓存。
-同四答已实测：原路由 AUROC 0.754983，普通均值 0.779200，逐头滤波 0.777385。
-新模型以普通均值为主基线，同时保留原路由；本轮尚无新自然 AUROC。
+结果在 `value_transport/`：`summary.json`、`evaluation.json`、`source_choices.csv`、
+`tokens.csv`、`high_risk_normals.csv`。原始路由、注意力、熵及同窗口均值独立比较。
+旧 detached-KV 缓存不能恢复输入根作用，首次需要新采集；之后 `--stage score` 只重算读出。
+使用 SDPA 和 FFN checkpoint，每答一次前向、每个目标/候选独立反向；8B 显存和速度尚未实测。
 
-## 保留的 v3 路由比较
-
-当前检测入口：[Native Routing Filter](experiments/native_support/README.md)。
-固定功能路由基线，检验因果时间降噪；唯一新候选用逐头路由状态决定近期分数的权重。
-与当前路由、普通滑动均值、合并头后的滤波在相同 token 上比较，不自动选获胜方法。
-不消融、不反向传播、不用自然标签拟合、选头或调整方向。
-[当前公式及证据](iclr/ROUTE_FILTER_DESIGN.md)；[v2 历史比较](iclr/NATIVE_ROUTE_REDESIGN.md)。
+原始逐 token R/A/H 基线仍用 `main.py support`。准备少量真实 RAGTruth 输入与自动标注时：
 
 ```bash
-python -u main.py support --stage optimize --output outputs/native_support_ragtruth4
-```
-
-只读现有原生缓存，在 `route_filter_v3/w16/` 写报告、AUROC/AP 和相对基线的差值。
-首次提取紧凑逐头路由表；重跑只读小缓存。原始/v1/v2 结果保留。
-用户四回答同缓存实测：功能路由 AUROC 0.754983，旧支持传播 0.572333；
-另一个历史 QA 实验的因果均值达到 0.7404。后者为尝试时间降噪提供依据，
-不能视为新滤波器的成绩。本轮没有新自然 AUROC，也没有全量模型实验。
-
-需要真实 AUROC/AP 时，使用少量官方完整回答，自动准备标注并在评分后评价：
-
-```bash
-python -u main.py support \
+python -u main.py support --stage prepare \
   --dataset /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset \
-  --limit 4 --balanced --output outputs/native_support_ragtruth4 --resume
+  --limit 4 --output outputs/native_support_new4
 ```
 
-此处按标签分层选 2 个错误回答和 2 个无错误标注回答，仅为小样本诊断，标签不参与评分。
-输出目录自动生成 `annotations.json`；评价位于 `route_filter_v3/w16/evaluation.json`，
-不需要 `token_labels.json` 占位文件。`--stage score` 与 `optimize` 同义；
-`--stage compare` 仍保留 v2 的 13 方法历史比较。
-不带 dataset/input 的 run 仍使用旧 322-token 自然前缀；其标签未知，不能用于首错成绩。
+输入准备不运行模型，标签只在评分后评价。已有输入无需重新准备。
+全部入口见 [运行说明](experiments/native_support/README.md)，实际软件核验见
+[验证记录](experiments/native_support/VALIDATION.md)。
+
+旧标量滤波/切换/融合和共享预算图评分已退役，源码见 Git `9d4ba17`；历史结果未删除。
+`transport --stage audit --output ...` 仍只读审核旧 `source_transport/` 结果。
+用户报告的旧 32 答预算图 AUROC/AP 为 0.718068/0.191248，普通离线均值为
+0.731726/0.186802；这些不是当前候选的成绩。
 
 教学与独立复用入口：[State Audit](teaching/state_audit/README.md)。
 短错误检验：[短 span 审计](experiments/short_span_audit/README.md)，分别提供已有冻结分数的 CPU 评价和复用 teaching 的逐目标贡献采集。
@@ -133,7 +115,7 @@ strict_post_first 和错误结束后正常 token 的误报。高 attention 可�
 - `python main.py supervised-s10 ...` 或 `python -m structural_detector.experiment ...`：S10。
 - `python -m structural_detector.audit ...`：对已经冻结的 S10 分数补评，不重训。
 
-旧命令 `main.py transport ...` 会停止并说明它是监督 S11，避免继续误运行。
+`main.py transport` 现为上面的值路径来源分解；旧监督 S11 必须使用 `supervised-s11`。
 [S10 结果](docs/S10_RESULTS_20260914.md) 的 .7492 是全错误、.7791 是**所有 span 起点**，
 不是每答第一次错误；这两项都不是新版无监督成绩。
 

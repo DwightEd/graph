@@ -14,9 +14,9 @@ from tqdm import tqdm
 
 from .comparison import evaluation_headlines
 from .comparison_evaluation import evaluate_comparison
-from .filter_features import cached_features
 from .report import curves, metric_table
 from .source_regions import compile_regions, region_mask
+from .token_features import cached_features
 
 DIRECTORY = "token_detection"
 POSITION_FIELDS = ("target", "query", "token_id", "ledger_error")
@@ -48,7 +48,7 @@ def score_tokens(output, settings, regions, protocol):
         old_cache = output / "route_filter_v3" / "features" / f"{index:04d}.npz"
         cache = old_cache if old_cache.is_file() else destination / "features" / f"{index:04d}.npz"
         features = cached_features(response, output / "responses" / f"{index:04d}", cache,
-                                   region_mask(regions, response), fields=fields, include_profile=False)
+                                   region_mask(regions, response), fields=fields)
         count = len(response["token_ids"]) - response["prompt_length"]
         expected_queries = np.arange(response["prompt_length"] - 1, len(response["token_ids"]) - 1)
         if not np.array_equal(features["target"], np.arange(count)) or not np.array_equal(features["query"], expected_queries):
@@ -113,7 +113,12 @@ def run_detection(output, settings, annotations=None):
 
 
 def evaluate_detection(output, annotations=None):
+    from .evaluate import unavailable_evaluation
+
     destination = output / DIRECTORY
+    annotations = annotations or output / "annotations.json"
+    if not annotations.is_file():
+        return unavailable_evaluation(destination, annotations)
     protocol = read_json(destination / "scoring_protocol.json")
     settings = read_json(output / "settings.json")
     rows = []

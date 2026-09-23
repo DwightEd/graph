@@ -17,7 +17,6 @@ from transformers import LlamaConfig, LlamaForCausalLM
 from experiments.native_support.evaluate import evaluate
 from experiments.native_support.inputs import load_responses
 from experiments.native_support.pipeline import capture_response, score_response
-from experiments.native_support.run import run_score
 from experiments.native_support.score import (
     NUMERIC_TERMS,
     head_fingerprint,
@@ -256,9 +255,7 @@ def test_capture_resume_score_and_evaluate_are_separate(model, tmp_path):
         assert saved["history_weights"][start:stop].sum() <= 1 + 1e-7
     settings = {"responses": [item]}
     write_json(tmp_path / "settings.json", settings)
-    summary = run_score(tmp_path, settings)
-    assert summary["scored_tokens"] == 6
-    assert (tmp_path / "report.html").is_file()
+    assert len(second) == 6
     annotations = tmp_path / "annotations.json"
     write_json(annotations, {"sample": {"token_ids": item["token_ids"][7:], "labels": [0, 1, 1, 0, 1, 0]}})
     result = evaluate(tmp_path, annotations)

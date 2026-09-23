@@ -1,167 +1,53 @@
-# 逐 token 原生检测
+# 原生逐 token 检测与来源传递
 
-默认流程：原生前向或已有缓存 → 全部token的固定R/A/H观测 → 保存分数 → 一次评价。
-不把消融、机制审计、状态分段或参考集拟合作为检测前置。
-设计与公式见 [TOKEN_DETECTION](../../iclr/TOKEN_DETECTION.md)。
+当前只保留明确分开的入口：
 
-新的离线状态动力学设计见 [NATIVE_STATE_DYNAMICS](../../iclr/NATIVE_STATE_DYNAMICS.md)。
-该设计允许后续 token，并处理来源不确定性和 FFN 方向传递。
-`main.py dynamics` 已实现原生敏感度采集、无标签状态拟合、离线评分、AUROC/AP 及层头报告；尚无新的自然 AUROC。
-
-已有独立 reference/test 输入时：
-
-```bash
-python -u main.py dynamics --stage run \
-  --reference-output outputs/native_support_validation32/reference \
-  --output outputs/native_support_validation32/test --resume
-```
-
-这次需要补采原缓存没有的多方向导数，会加载 LLM；每个 query 一次前向，默认 12 个读出方向，
-按 `--gradient-batch 4` 分批反传。**不是**只改旧分数的免费计算，也不是全量数据重跑。
-24GB GPU 的显存/时间尚未实测，实际峰值写入每答 `timing.json`；方向 batch 可减至 1。
-采集完成后 `--stage score` 只用缓存和小状态模型，不再加载 LLM。
-输出位于 test 的 `state_dynamics/`：`summary.json`、`evaluation.json`、`comparisons.csv`、
-`tokens.csv`、`report.html`，逐头原始观测在 `capture/`，训练模型在 reference 的 `state_dynamics/model/`。
-
-从官方 RAGTruth 准备独立新来源并一键运行（最后两项是 train/test 答案数）：
-
-```bash
-bash experiments/native_support/run_dynamics.sh \
-  /path/to/RAGTruth/dataset /path/to/Meta-Llama-3.1-8B-Instruct \
-  outputs/native_dynamics_v1 outputs/native_support_validation32/test 64 32
-```
-
-采样按 source ID 和 seed 排序，不用标签平衡；排除给定已审阅输出的来源。
-下面的 R/A/H 表和 support 命令继续作为原始基线。
-
-| 指标 | 测量 | 角色 |
+| 入口 | 作用 | 模型成本 |
 |---|---|---|
-| routing_imbalance | 投影消息范数的history-source预算差 | 固定主分数 |
-| attention_displacement | 注意力读取的history-source质量差 | 独立读取指标 |
-| entropy | 下一token输出分布熵 | 独立不确定性指标 |
+| `main.py support --stage score` | 原始 R/A/H 固定基线，复用缓存 | 不加载模型 |
+| `main.py transport --stage run` | 来源值路径分解、候选作用和评价 | 首次需要新采集 |
+| `main.py transport --stage score` | 复用 value-path 缓存读出 | 不加载模型 |
+| `main.py transport --stage evaluate` | 只评价保存的分数 | 不加载模型 |
+| `main.py transport --stage audit` | 只读旧 source_transport 预算结果 | 不重算图/状态 |
+| `main.py dynamics` | 独立历史状态模型与其审计 | 显式调用，非新方法依赖 |
 
-缺少官方source区间时，前两项明确改名为prompt_*。
-消息范数不是对正确答案的有符号支持；三项独立报告，不事后选择赢家或强制融合。
-R使用原公式，32答已报告AUROC=0.711589；本轮简化不意味着已有新的性能增益。
+## 来源传递
 
-## 已有32答：一条命令评分与评价
+详细公式、论文依据、近似范围和数据轴见 [VALUE_PATH_TRANSPORT.md](../../iclr/VALUE_PATH_TRANSPORT.md)。
+采用 DecompX/ALTI-Logit 的来源分解与输出相关读出思想；保留原生 attention、残差与 FFN 值路径。
+原生 forward 不改；归因固定 attention/RMS，并对 SwiGLU 使用割线与乘法等分。
+输入根的支持/抑制与当前层读取地址分别记录，不再先压成预算再统一平滑。
+该分解不包含 Q/K 路由变化；对实际答案的支持不自动等于事实正确。
+
+已有四答目录先运行：
 
 ```bash
 git pull --ff-only origin main
-python -u main.py support --stage score \
-  --output outputs/native_support_validation32/test
+python -u main.py transport --stage run --output outputs/native_support_ragtruth4 --resume
 ```
 
-直接复用route_filter_v3/features中的标量缓存，不加载模型、不需要16答参考集。
-若尚无标量缓存，只从已有原生NPZ提取一次，保存到新的token_detection/features。
-新提取不计算head_profile，不运行滤波或图传播；原始缓存不改写。
+新输出在 `value_transport/`：`summary.json`、`evaluation.json`、`comparisons.csv`、
+`tokens.csv`、`source_choices.csv`、`onsets.csv`、`high_risk_normals.csv` 和逐 token NPZ。
+旧 source_transport/state_dynamics 缓存保持不动；旧 detached-KV 数组不含完整根来源，不能直接转换。
+首次每答一个完整前向及多次独立候选反向；之后 `--stage score` 只读缓存。
+SDPA 与 FFN checkpoint 控制显存；默认 gradient-batch=1，可明确调大。没有真实 8B/24GB 实测承诺。
 
-## 结果
-
-均在输出目录的 `token_detection/`：
-
-| 文件 | 内容 |
-|---|---|
-| summary.json | 固定主方法、范围与AUROC/AP摘要 |
-| evaluation.json | 全错误、首错、段起点、延续、前后半段；来源等权、同答与逐答结果 |
-| tokens.csv | 每个token的三个观测、主risk、回答/source ID与预测位置 |
-| responses/0000/scores.npz | 对齐的标量观测；risk与原R逐值相等 |
-| report.html | 指标表与完整回答风险轨迹 |
-| onsets.csv / high_risk_normals.csv | 可选查看的起点及高分正常token |
-
-标签只在全部评分落盘后读取，默认使用已有annotations.json。
-无标签也能打分，但没有AUROC/AP。无阈值时不将高分正常词称为已判定误报。
-起点、首错、延续只是评价分组，检测时不访问它们。
-
-## 首次采集与补评
+## 原始基线与数据准备
 
 ```bash
-python -u main.py support --stage run \
-  --dataset /path/to/RAGTruth/dataset --model /path/to/observer \
-  --task QA --split test --generator llama-2-7b-chat \
-  --limit 32 --query-chunk-size 8 --output outputs/native_qa --resume
-
-python -u main.py support --stage evaluate \
-  --output outputs/native_support_validation32/test
+python -u main.py support --stage score --output outputs/native_support_validation32/test
 ```
 
-run使用已有teaching原生因果分块前向，然后执行同一个逐token检测器。
---resume复用已采集token；默认不按标签平衡抽样，样本不是全数据集。
-evaluate优先读取已完成的token_detection，不因目录中残留旧融合输出而改换方法。
+首次使用 `support --stage prepare --dataset ... --model ... --output ...` 准备官方回答与标注，
+或 `support --stage run` 采集原始 R/A/H。没有标注时保存分数，不伪造 AUROC。
+`support --stage compare` 保留历史同数据公式比较，`--stage evaluate` 只评价默认逐 token 基线。
+标签不进入采集与评分；人工语义证据类型不需要。
 
-## 历史复现入口
+## 清理
 
-以下为显式实验，不参与默认run/score；历史输出与原缓存保留。
+已删除旧 optimize/model/readout/fuse/validate 执行分支及其私有滤波/融合代码，
+删除旧共享预算图评分；历史实现见 Git `9d4ba17`。源隔离 cohort 准备函数仍供 dynamics 使用。
+用户模型、缓存和结果没有删除。历史预算审计命令保持可用。
 
-| stage | 历史方法与说明 |
-|---|---|
-| optimize | v3因果滤波，[ROUTE_FILTER_DESIGN](../../iclr/ROUTE_FILTER_DESIGN.md) |
-| model | v4联合状态，[JOINT_STATE_DESIGN](../../iclr/JOINT_STATE_DESIGN.md) |
-| readout / validate | v5去收缩与历史扩展协议，[STATE_READOUT_VALIDATION](../../iclr/STATE_READOUT_VALIDATION.md) |
-| fuse | v6分位最大值候选，[DIRECT_RISK_FUSION](../../iclr/DIRECT_RISK_FUSION.md)，尚无自然增益证据 |
-| compare | v2历史路由比较，[NATIVE_ROUTE_REDESIGN](../../iclr/NATIVE_ROUTE_REDESIGN.md) |
-
-## 核心代码
-
-- token_detection.py：读取缓存、固定读出、保存、调用统一评价。
-- routes.py：沿用原路由公式；filter_features.py：原生缓存到标量观测。
-- comparison_evaluation.py / evaluate.py：仅评分后读取自然标签。
-- run.py：统一入口；teaching/state_audit：模型采集和存储。
-
-本轮只做针对性软件验证，不要求重跑全量模型，也不将软件测试当作真实检测成绩。
-
-## Dynamics 缓存数据核验
-
-```bash
-python -u main.py dynamics --stage audit \
-  --output outputs/native_support_validation32/test
-```
-
-参考目录自动读取 `state_dynamics/scoring_protocol.json`；缓存移动后可用
-`--reference-output` 指定。读取已保存 observations、scores 和参考模型；不加载 LLM、
-不读巨大的逐 token 原始导数文件、不训练、不改原分数。标注仅用于诊断统计。
-
-输出：`state_dynamics/audit/`，同时打包为 `state_dynamics/audit_data.zip`。
-
-| 文件 | 数据 |
-|---|---|
-| checks.csv / coverage.csv / evaluation_recheck.csv | token/query/来源/形状/有限值/标签对齐；原 AUROC/AP 复算 |
-| posterior_replay.csv / score_distribution.csv | 已存 emission 后验重放误差；0/1、同分、分位数 |
-| metrics.csv / mode_bins.csv | 总体、首错、延续、前后半段、H 组内 AUROC/AP；各模式区间真假计数 |
-| ranking.csv / precision_recall.csv / top_budget.csv | 每个 token 排名范围、前置正常数、AP 贡献；完整 PR 阈值；固定预算检出量 |
-| ap_parts.csv / ap_deltas.csv | 按回答、阶段、前后半段分解全局 AP 与损失；每种划分的贡献之和等于总体 AP/差值 |
-| auc_pairs.csv | 错误所在半段 × 正常所在半段的 AUROC 对数与贡献 |
-| features.csv / projection.csv | 全部头通道、FFN 坐标及状态向量在正常/错误组的均值方差；H≥0.9 组内统计；投影能量损失 |
-| tokens.csv / event_windows.csv | 完整 token、上下文、分数、观测；标注起点±8位置的实际数据 |
-| representation_schema.json / representations/NNNN.npz | 真实字段、坐标顺序、维度；逐 token 的 z/v/u/h、联合观测、后验及 log 后验 |
-| model.json / summary.json | 已训练转移矩阵、模式持续长度、协方差谱、训练信息、核验状态 |
-
-默认一个预测 token 对应 z(8)、v(16)，联合观测为 24 维；u(8)、h(16) 为输入，
-不是每个 head 一个独立真假分类器。层/头原始 28 通道及 FFN 向量先拼接，再使用参考集 SVD。
-训练目标是无标签序列似然，主风险仍为 H 后验。本轮不加二分类器。
-`state_log_odds` 仅重放已存 emission 检查概率舍入丢失的顺序，不重新拟合、选方向或覆盖主方法。
-固定预算遇同分输出随机打散的期望和上下界，不用 token 顺序偷偷打破同分。
-H≥0.9 是固定诊断分层；特征差异是 token 加权描述统计，不是独立样本显著性或机制证明。
-# 无人工证据类型的来源状态入口
-
-已有 `state_dynamics/capture` 时，直接运行：
-
-```bash
-python -u main.py transport --stage score --output outputs/native_support_validation32/test
-```
-
-可加 `--score-device cuda:0` 批量计算逐头响应图。不需要 reference、SVD、证据类型表或真假训练；
-结果保存在 `source_transport/`，保留原路由与离线均值的 AUROC/AP 比较。
-来源块自动生成，语义类型未指定；本版是来源预算状态候选，不是已完成的语义冲突检测器。
-数学、缓存边界和文件职责见 [AUTOMATIC_SOURCE_TRANSPORT.md](../../iclr/AUTOMATIC_SOURCE_TRANSPORT.md)。
-
-完成 transport 评分后，审核 AP 损失、排名变化与图状态：
-
-```bash
-python -u main.py transport --stage audit --output outputs/native_support_validation32/test
-```
-
-只读现有分数、状态和官方幻觉标签；不读取 capture、不加载模型、不改评分。
-输出 `source_transport/audit/` 内的 CSV/NPZ，并自动打包 `source_transport/audit_data.zip`。
-默认按 source 成对重采样 1000 次；可用 `--bootstrap-replicates 0` 跳过区间估计。
-前后半指回答位置，历史 key 标签与查询目标标签分别报告；并列分数不任意打破。
+验证记录见 [VALIDATION.md](VALIDATION.md)。真实检测增量须看同样本 AUROC/AP，
+不能把小模型账本测试当成真实自然数据效果。

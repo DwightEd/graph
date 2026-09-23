@@ -18,6 +18,7 @@ from state_audit.storage import (
 from tqdm import tqdm
 
 from .comparison import evaluation_headlines
+from .comparison_deltas import write_deltas
 from .comparison_evaluation import evaluate_comparison
 from .dynamics_fit import (
     fit_coordinates,
@@ -32,7 +33,6 @@ from .dynamics_observations import (
     partition_prompt,
     project_source_covariance,
 )
-from .filter_evaluation import write_deltas
 from .inputs import validate_tokenizer
 from .source_regions import region_mask
 from .token_detection import source_regions
@@ -332,7 +332,7 @@ def finish(output, annotations, protocol, rows):
     annotations = annotations or output / "annotations.json"
     evaluation = evaluate_comparison(output, destination, annotations, protocol["methods"], rows)
     baseline = list(protocol["methods"])[2]
-    comparison = write_deltas(output, destination, annotations, evaluation, baseline, protocol["methods"], rows,
+    comparison = write_deltas(output, destination, annotations, evaluation, protocol["methods"], rows,
                               pairs=[("state_dynamics", baseline), ("state_dynamics", "route_offline_mean"),
                                      ("state_dynamics", "state_forward")])
     summary = {**protocol, "responses": len({row["response_id"] for row in rows}), "scored_tokens": len(rows),

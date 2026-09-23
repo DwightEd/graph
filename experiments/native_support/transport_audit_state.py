@@ -3,7 +3,21 @@
 import numpy as np
 
 from .routes import EPS
-from .transport_state import budget_risk
+
+
+def budget_risk(budget, source_count):
+    """Historical routing readout on pre-grouped per-edge message-norm budgets.
+
+    Groups are source groups, route history, then remaining mass. For the
+    evidence baseline, history includes answer self and answer special tokens;
+    the first query's prompt self belongs to remaining mass. The caller must
+    construct these roles from key positions, not reuse capture's B+4 roles.
+    """
+    source = budget[..., :source_count].sum(axis=-1)
+    history = budget[..., source_count]
+    difference = (history - source).sum(axis=-1)
+    total = budget.sum(axis=(-1, -2))
+    return (difference / np.maximum(total, EPS)).mean(axis=-1)
 
 
 def role_budgets(budget, source_count):

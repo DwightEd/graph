@@ -132,8 +132,7 @@ def test_real_cli_prepares_scores_and_evaluates_without_placeholder(official_fix
     command = ["--dataset", str(args.dataset), "--model", str(model), "--balanced",
                "--limit", "4", "--output", str(output), "--device", "cpu", "--dtype", "float32",
                "--prefill-chunk-size", "8", "--resume"]
-    with patch("experiments.native_support.filter_features.head_profile", side_effect=AssertionError("head profile not needed by detector")):
-        main(command)
+    main(command)
     result = json.loads(capsys.readouterr().out)
     evaluated = result["evaluation"]
     assert result["evaluation_performed_by_this_stage"] is True

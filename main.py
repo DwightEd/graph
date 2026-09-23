@@ -7,7 +7,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   flow             Resampled claim pairs: head interactions, repair and persistence
   support          Per-token routing and entropy detection; score cached data, evaluate once
   dynamics         Offline head/source responses, unlabelled state fitting and token AUROC/AP
-  transport        Automatic source blocks and vector-conditioned offline budget states
+  transport        Signed source provenance through native attention, residual and FFN value paths
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis

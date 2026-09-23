@@ -11,7 +11,7 @@ from state_audit.storage import read_json, write_arrays, write_json
 from experiments.native_support.comparison_evaluation import evaluate_comparison
 from experiments.native_support.dynamics import score_rows
 from experiments.native_support.dynamics_audit_rank import rank_ledger
-from experiments.native_support.transport import METHODS, main, offline_mean
+from experiments.native_support.transport import main
 from experiments.native_support.transport_audit_bootstrap import (
     paired_bootstrap,
     weighted_ranks,
@@ -21,10 +21,13 @@ from experiments.native_support.transport_audit_rank import (
     selection_weight,
 )
 from experiments.native_support.transport_audit_state import (
+    budget_risk,
     edge_rows,
     state_measurements,
 )
-from experiments.native_support.transport_state import budget_risk, infer_budget
+from experiments.native_support.transport_readout import offline_mean
+
+METHODS = ("transport_route", "raw_route", "route_offline_mean", "raw_attention", "entropy")
 
 
 def token_fixture():
@@ -100,8 +103,13 @@ def cached_state():
     budget = np.asarray([[[[1., 1., 0.]]], [[[2., 1., 1.]]], [[[1., 3., 1.]]], [[[4., 1., 0.]]]])
     edges = np.zeros((4, 4))
     edges[2, 1], edges[3, 2] = .2, .4
+    weights = edges + edges.T
+    degree = weights.sum(1)
+    precision = np.diag(1 + degree) - weights
+    inferred = np.linalg.solve(precision, budget.reshape(4, -1)).reshape(budget.shape)
     return {"observed_budget": budget, "edge_weight": edges, "reuse_weight": edges * 2,
-            "degree": (edges + edges.T).sum(axis=1), **infer_budget(budget, edges)}
+            "degree": degree, "inferred_budget": inferred, "retention_weight": degree / (1 + degree),
+            "posterior_variance": np.diag(np.linalg.inv(precision))}
 
 
 def test_saved_role_equation_and_key_labels_use_distinct_alignment():
@@ -153,9 +161,7 @@ def test_audit_cli_uses_only_saved_outputs_and_never_changes_scores(tmp_path):
     write_saved_audit_input(tmp_path)
     source = tmp_path / "source_transport"
     frozen = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
-    with patch("experiments.native_support.transport.build_graph", side_effect=AssertionError("rebuilt graph")), \
-         patch("experiments.native_support.transport.infer_budget", side_effect=AssertionError("solved state")), \
-         patch("state_audit.model.load_model", side_effect=AssertionError("loaded LLM")), \
+    with patch("state_audit.model.load_model", side_effect=AssertionError("loaded LLM")), \
          patch("transformers.AutoTokenizer.from_pretrained", side_effect=AssertionError("loaded tokenizer")):
         main(["--stage", "audit", "--output", str(tmp_path), "--bootstrap-replicates", "10"])
     summary = read_json(source / "audit/summary.json")

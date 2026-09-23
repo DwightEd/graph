@@ -1,3 +1,5 @@
+> 历史研究记录：对应评分实现已退出当前主线；需要复现时查看 Git `9d4ba17`。当前实现见 [VALUE_PATH_TRANSPORT.md](VALUE_PATH_TRANSPORT.md)。
+
 # 先优化排序：原生路由的因果状态滤波
 
 2026-09-22。目标是检验同样本 AUROC/AP 增益，不宣称已解释幻觉机制。
