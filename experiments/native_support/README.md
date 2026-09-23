@@ -76,9 +76,32 @@ evaluation 明确不可用。不要为了此命令重新运行 `transport --stag
 全部头读取、完整根历史边和未捕获候选质量均保留。
 `risk` 默认仍为 raw_route；新增分数是独立探索候选，没有自动替换主基线。
 
+评估结束自动生成旁边的 `choice_state_v2_review.zip`，包含结果、标注快照、逐回答
+状态、原始基线及全部已捕获 token 的逐头正负作用、FFN 作用和根归因。
+原始 dense attention/value-energy 转为精确组总量及 top-8 历史地址；这不是完整 attention 图。
+包内 `review_manifest.json` 列出覆盖量、保留字段和缺失结果，不改分数、不重新运行模型。
+新运行若使用 `--annotations`，会在全部评分后把实际使用的标注保存到结果目录。
+
+**已经跑完的本次结果，只打包：**
+
+```bash
+git pull --ff-only origin main
+python -u main.py transport-state --stage pack \
+  --input outputs/native_support_ragtruth4 \
+  --output outputs/native_support_ragtruth4/choice_state_v2
+```
+
+上传 `outputs/native_support_ragtruth4/choice_state_v2_review.zip` 即可。
+`--input` 也可为原有 value_transport ZIP。`--stage pack` 不重新评分或评价。
+同名包已存在时拒绝覆盖，可用 `--archive 新文件名.zip` 指定另一个名字。
+四答完整联合包实测约 485 MiB；体积主要来自已有逐头/候选作用数据。
+打包失败不发布最终 ZIP，评分结果保留，可修正路径后使用 `--stage pack`。
+
 四答探索中直接来源缺口 AUROC/AP 为 0.769226/0.218225；历史递推为
 0.752383/0.203478，未改善直接读出。这不是独立数据上的验证。
 公式、数据轴和限制见 [CONDITIONAL_CHOICE_STATE.md](../../iclr/CONDITIONAL_CHOICE_STATE.md)。
+本轮证据总结、正负作用的可辨识边界及条件异常检测方案见
+[DETECTION_FINDINGS_AND_NEXT_MODEL.md](../../iclr/DETECTION_FINDINGS_AND_NEXT_MODEL.md)。
 
 ## 原始基线与数据准备
 

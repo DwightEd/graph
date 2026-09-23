@@ -9,7 +9,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   dynamics         Offline head/source responses, unlabelled state fitting and token AUROC/AP
   transport        Signed source provenance through native attention, residual and FFN value paths
   transport-pack   Compact existing value-path captures for head and temporal audit; CPU only
-  transport-state  Conditional choice factors and history lineage from existing captures; CPU only
+  transport-state  Score/evaluate cached choice states and auto-pack; --stage pack reuses completed results
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis

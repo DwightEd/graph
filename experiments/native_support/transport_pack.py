@@ -50,14 +50,21 @@ def history_addresses(attention, prompt, query):
     }
 
 
-def compact_capture(path, prompt):
-    with np.load(path, allow_pickle=False) as saved:
-        packed = {name: saved[name] for name in saved.files
-                  if name not in ("attention", "edge_value_energy")}
+def compact_arrays(saved, prompt):
+    """Retain signed actions; only dense addresses/energy need compaction."""
+    packed = {name: saved[name] for name in saved
+              if name not in ("attention", "edge_value_energy")}
+    if "attention" in saved:
         attention = saved["attention"]
         packed.update(grouped_reads(attention, saved["edge_value_energy"],
                                     saved["group_ids"], len(saved["root_positive"])))
         packed.update(history_addresses(attention, prompt, int(saved["query"])))
+    return packed
+
+
+def compact_capture(path, prompt):
+    with np.load(path, allow_pickle=False) as saved:
+        packed = compact_arrays(saved, prompt)
     buffer = io.BytesIO()
     np.savez(buffer, **packed)
     return buffer.getvalue()

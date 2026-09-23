@@ -7,7 +7,7 @@ from pathlib import Path
 from time import perf_counter
 
 import numpy as np
-from state_audit.storage import write_arrays, write_csv, write_json
+from state_audit.storage import read_json, write_arrays, write_csv, write_json
 
 from .choice_cache import CaptureReader, validate_row
 from .choice_state import read_observations, read_state, summarize_states
@@ -148,8 +148,10 @@ def run(args):
             print(f"{response['id']}: cached conditional states saved", flush=True)
         write_csv(args.output / "tokens.csv", rows, list(rows[0]))
         # Annotation access begins only after every response has saved its scores.
-        annotations = args.annotations or args.output / "annotations.json"
-        if args.annotations is None and reader.exists("annotations.json"):
+        annotations = args.output / "annotations.json"
+        if args.annotations is not None:
+            write_json(annotations, read_json(args.annotations))
+        elif reader.exists("annotations.json"):
             write_json(annotations, reader.json("annotations.json"))
     scoring_seconds = perf_counter() - started
     result = evaluate(args.output, annotations, rows)
@@ -166,11 +168,22 @@ def run(args):
 
 
 def main(argv=None):
+    from .choice_state_pack import pack_results
+
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--stage", choices=("run", "pack"), default="run",
+                        help="run scores/evaluates then packs; pack only archives completed results")
     parser.add_argument("--input", required=True, type=Path, help="Existing run directory or transport-pack ZIP")
-    parser.add_argument("--output", required=True, type=Path, help="New result directory; never overwrite old results")
+    parser.add_argument("--output", required=True, type=Path,
+                        help="New result directory for run; existing result directory for pack")
     parser.add_argument("--annotations", type=Path, help="Optional token labels, read after scoring")
+    parser.add_argument("--archive", type=Path, help="Default: OUTPUT_review.zip beside the result directory")
     args = parser.parse_args(argv)
+    if args.stage == "pack":
+        pack_results(args.input, args.output, args.archive, args.annotations)
+        return
     result = run(args)
+    review = pack_results(args.input, args.output, args.archive)
     print(json.dumps({"output": str(args.output), "responses": result["responses"],
-                      "scored_tokens": result["scored_tokens"], "all_error": result["all_error"]}))
+                      "scored_tokens": result["scored_tokens"], "all_error": result["all_error"],
+                      "review_archive": review}))

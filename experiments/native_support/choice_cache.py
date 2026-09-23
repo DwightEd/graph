@@ -36,6 +36,11 @@ class CaptureReader:
             return json.loads(self.archive.read(name))
         return read_json(self.path / name)
 
+    def bytes(self, name):
+        if self.archive is not None:
+            return self.archive.read(name)
+        return (self.path / name).read_bytes()
+
     def arrays(self, name, fields=None):
         source = self.path / name
         if self.archive is not None:
