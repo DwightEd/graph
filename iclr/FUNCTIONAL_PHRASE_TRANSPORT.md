@@ -119,6 +119,12 @@ python -u main.py transport-functions \
 ```
 
 续跑添加 `--resume`，参数和 settings 必须相同；完整候选文件复用，完整单元不加载模型。
+候选按实际 token IDs 检查组内与跨组重复；发生冲突时，带具体冲突反馈重写一次。
+原 `proposal.json` 保留，修复输出另存 `proposal_repair.json`；已保存的修复可续跑复用。
+第二次仍不合格则在 `bank.json` 记录拒绝原因和冲突位置，继续后续单元，不做静默去重。
+`summary.json` 的 `rejection_reasons` 汇总原因；被拒绝单元不会产生概率或梯度读出。
+遇到旧版本的 `Candidate token sequences must be distinct` 报错可直接同参数加 `--resume`，
+无需删除结果目录；已完成采集不重算。
 仅修改读出/报表时：
 
 ```bash
@@ -140,7 +146,7 @@ python -u main.py transport-functions --stage report \
 | 文件 | 数据 |
 |---|---|
 | protocol.json / settings.json | 完整范围、观察模型、分组与梯度契约 |
-| responses/*/unit_*/proposal.json / validation.json | 自动候选原始请求/输出 |
+| responses/*/unit_*/proposal.json / proposal_repair.json / validation.json | 自动候选、可选修复与检查的原始请求/输出 |
 | bank.json | 精确 prefix、原始和替代 token IDs、意义分组、拒绝原因 |
 | candidate_*.npz | 每分支 prefix 根、后缀根、逐 query/layer/head/source 三通道、FFN write、RMS 分解 |
 | contrast_*.npz | 共同边界 query 的语义/表达对照；输入根仍逐位置保存 |
@@ -176,7 +182,8 @@ GQA/滑动窗口、纯 RMS 缩放、熵/KL 链式恒等式、准确 token 对齐
 - Tuned Lens: https://arxiv.org/abs/2303.08112
   跨层读出存在漂移；本实现只做最终 FFN 同一读出，不假称已训练逐层语义 lens。
 
-本次软件验证：10 项新功能测试通过；18 项旧 choice-state/pack 回归在独立进程通过。
+软件验证：本次 17 项功能测试通过，覆盖 token 重复、有限修复、旧失败缓存续跑、
+拒绝单元后继续采集和完成缓存复用。前次 18 项旧 choice-state/pack 回归在独立进程通过。
 旧测试含全局 `torch not in sys.modules` 断言，不能与加载小模型的测试混在同一进程。
 运行环境为 CPU PyTorch 2.14.0、Transformers 4.57.6；未下载或执行真实 8B 权重。
 新增核心代码按采集、候选、读出、编排拆分；没有修改旧基线公式。

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+from collections import Counter
 from contextlib import closing
 from pathlib import Path
 from time import perf_counter
@@ -120,6 +121,9 @@ def execute(args, settings, jobs):
         if bank is None:
             bank = prepare_bank(model, tokenizer, response, identity["start"], identity["stop"],
                                 directory, args.max_new_tokens)
+        if not bank["valid"]:
+            tqdm.write(f"{response['id']} [{identity['start']}:{identity['stop']}]: "
+                       f"bank rejected ({bank['reason']})")
         if bank["valid"] and args.stage != "prepare":
             capture_bank(model, response, sources, bank, directory, identity)
 
@@ -145,6 +149,7 @@ def summarize(destination, settings):
     banks = [read_json(path) for path in destination.glob("responses/*/unit_*/bank.json")]
     result.update(proposed_units=len(banks), accepted_units=sum(bank["valid"] for bank in banks),
                   rejected_units=sum(not bank["valid"] for bank in banks),
+                  rejection_reasons=dict(Counter(bank["reason"] for bank in banks if not bank["valid"])),
                   budget_skipped_units=len(list(destination.glob("responses/*/unit_*/skipped.json"))))
     write_json(destination / "summary.json", result)
     return result

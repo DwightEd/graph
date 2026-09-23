@@ -1,5 +1,6 @@
 """Small native models and exact identities; no natural-label performance claims."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -15,8 +16,8 @@ from state_audit.functional_readout import contrast_weights, distribution_change
 from state_audit.model.adapter import ModelAdapter
 from state_audit.model.replay import attention_backend
 from state_audit.storage import read_json, write_json
-from experiments.native_support.functional_bank import answer_units, compile_bank
-from experiments.native_support.functional_run import main
+from experiments.native_support.functional_bank import InvalidCandidateBank, answer_units, compile_bank, prepare_bank
+from experiments.native_support.functional_run import arguments, main, protocol
 
 
 @pytest.fixture
@@ -134,7 +135,74 @@ class TinyTokenizer:
         return ''.join({1: 'Q ', 5: 'P ', 7: 'a ', 9: 'b.'}[value] for value in ids)
 
     def encode(self, text, **kwargs):
-        return {'c.': [11], 'd.': [13], 'e.': [15]}[text]
+        return {'a b.': [7, 9], 'b.': [9], 'c.': [11], 'C.': [11], 'd.': [13], 'e.': [15]}[text]
+
+
+@pytest.fixture
+def bank_response():
+    return dict(id="a", source_id="s", prompt_length=2, token_ids=[1, 5, 7, 9],
+                token_text=['Q ', 'P ', 'a ', 'b.'])
+
+
+@pytest.mark.parametrize('paraphrase,polarity,collision', [
+    ('a b.', ['d.', 'e.'], (1, 0)),
+    ('c.', ['C.', 'e.'], (2, 1)),
+    ('c.', ['d.', 'd.'], (3, 2)),
+])
+def test_bank_rejects_token_collisions_within_and_across_groups(bank_response, paraphrase, polarity, collision):
+    with pytest.raises(InvalidCandidateBank) as failure:
+        compile_bank(bank_response, TinyTokenizer(), 0, 2,
+                     dict(paraphrase=paraphrase, polarity=polarity, binding=[]))
+    assert failure.value.reason == 'duplicate_candidate_tokens'
+    found, = failure.value.details['collisions']
+    assert (found['candidate'], found['duplicate_of']) == collision
+
+
+@pytest.mark.parametrize('cached_repair', [False, True])
+def test_prepare_repairs_saved_duplicate_and_reuses_interrupted_repair(tmp_path, bank_response, cached_repair):
+    duplicate = dict(paraphrase='a b.', polarity=['d.', 'e.'], binding=[])
+    repaired = dict(paraphrase='c.', polarity=['d.', 'e.'], binding=[])
+    original = tmp_path / 'proposal.json'
+    write_json(original, {'raw_output': json.dumps(duplicate)})
+    original_bytes = original.read_bytes()
+    if cached_repair:
+        write_json(tmp_path / 'proposal_repair.json', {'raw_output': json.dumps(repaired)})
+    def generate(model, tokenizer, instruction, payload, path, budget):
+        if path.name == 'proposal_repair.json':
+            assert payload['previous_proposal'] == duplicate
+            assert payload['structural_problem']['reason'] == 'duplicate_candidate_tokens'
+            result = repaired
+        else:
+            assert path.name == 'validation.json'
+            result = dict(valid=True, reason='fixture')
+        write_json(path, {'raw_output': json.dumps(result)})
+        return result
+    with patch('experiments.native_support.functional_bank.generate_json', side_effect=generate) as generation:
+        bank = prepare_bank(None, TinyTokenizer(), bank_response, 0, 2, tmp_path, 100)
+        assert generation.call_count == (1 if cached_repair else 2)
+    assert bank['valid'] and bank['proposal_attempts'] == 2
+    assert bank['candidates'][0]['token_ids'] == [7, 9]
+    assert len({tuple(row['token_ids']) for row in bank['candidates']}) == 4
+    assert original.read_bytes() == original_bytes
+    with patch('experiments.native_support.functional_bank.generate_json', side_effect=AssertionError('regenerated')):
+        assert prepare_bank(None, TinyTokenizer(), bank_response, 0, 2, tmp_path, 100) == bank
+
+
+def test_prepare_rejects_exhausted_repair_without_semantic_validation(tmp_path, bank_response):
+    duplicate = dict(paraphrase='c.', polarity=['C.', 'e.'], binding=[])
+    def generate(model, tokenizer, instruction, payload, path, budget):
+        assert path.name in ('proposal.json', 'proposal_repair.json')
+        write_json(path, {'raw_output': json.dumps(duplicate)})
+        return duplicate
+    with patch('experiments.native_support.functional_bank.generate_json', side_effect=generate) as generation:
+        bank = prepare_bank(None, TinyTokenizer(), bank_response, 0, 2, tmp_path, 100)
+        assert generation.call_count == 2
+    assert bank['valid'] is False and bank['proposal_attempts'] == 2
+    assert bank['reason'] == 'duplicate_candidate_tokens'
+    assert bank['structural_details']['collisions'][0]['duplicate_group'] == 'observed'
+    assert not (tmp_path / 'validation.json').exists()
+    with patch('experiments.native_support.functional_bank.generate_json', side_effect=AssertionError('regenerated')):
+        assert prepare_bank(None, TinyTokenizer(), bank_response, 0, 2, tmp_path, 100) == bank
 
 
 def test_bank_preserves_observed_tokenization_and_positions():
@@ -176,6 +244,51 @@ def test_run_resume_report_and_pack_without_label_reads(tmp_path, model):
     with patch('state_audit.model.load_model', side_effect=AssertionError('loaded model')):
         main(args + ['--resume'])
         main(['--stage', 'report', '--output', str(destination)])
+    assert read_json(destination / 'summary.json') == summary
+
+
+def test_resume_failed_proposal_skips_rejected_unit_and_captures_next(tmp_path, model):
+    source, destination = tmp_path / 'input', tmp_path / 'output'
+    item = dict(id='a', source_id='s', prompt_length=2, token_ids=[1, 5, 9, 9],
+                token_text=['Q ', 'P ', 'b.', 'b.'])
+    settings = dict(model='tiny', responses=[item])
+    sources = dict(blocks=[dict(id='p')], group_ids=[0, 0, 1, 1])
+    write_json(source / 'settings.json', settings)
+    write_json(source / 'value_transport/capture_settings.json', settings)
+    write_json(source / 'value_transport/capture/0000/sources.json', sources)
+    args = ['--input', str(source), '--output', str(destination), '--device', 'cpu', '--dtype', 'float32']
+    # Old failure left a protocol and proposal, but no bank or completed capture.
+    write_json(destination / 'protocol.json', protocol(arguments(args), settings))
+    write_json(destination / 'responses/0000/sources.json', sources)
+    rejected = destination / 'responses/0000/unit_000000'
+    duplicate = dict(paraphrase='b.', polarity=[], binding=[])
+    write_json(rejected / 'proposal.json', {'raw_output': json.dumps(duplicate)})
+    original_bytes = (rejected / 'proposal.json').read_bytes()
+    def generate(model, tokenizer, instruction, payload, path, budget):
+        if path.parent == rejected:
+            assert path.name == 'proposal_repair.json'
+            result = duplicate
+        elif path.name == 'proposal.json':
+            result = dict(paraphrase='c.', polarity=['d.', 'e.'], binding=[])
+        else:
+            assert path.name == 'validation.json'
+            result = dict(valid=True, reason='fixture')
+        write_json(path, {'raw_output': json.dumps(result)})
+        return result
+    with patch('state_audit.model.load_model', return_value=(model, TinyTokenizer())), \
+         patch('experiments.native_support.functional_bank.generate_json', side_effect=generate):
+        main(args + ['--resume'])
+    summary = read_json(destination / 'summary.json')
+    assert summary['completed_units'] == summary['accepted_units'] == summary['rejected_units'] == 1
+    assert summary['rejection_reasons'] == {'duplicate_candidate_tokens': 1}
+    assert not list(rejected.glob('candidate_*.npz'))
+    assert (rejected / 'proposal.json').read_bytes() == original_bytes
+    completed = destination / 'responses/0000/unit_000001/candidate_00.npz'
+    captured_bytes = completed.read_bytes()
+    assert (tmp_path / 'output_review.zip').is_file()
+    with patch('state_audit.model.load_model', side_effect=AssertionError('loaded model')):
+        main(args + ['--resume'])
+    assert completed.read_bytes() == captured_bytes
     assert read_json(destination / 'summary.json') == summary
 
 
