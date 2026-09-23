@@ -18,7 +18,9 @@
 修改代码前读取 `iclr/CODING_GUIDELINES.md` 与 `iclr/MECHANISM_FIRST.md`。
 当前原生前向检测是 `experiments/native_support`；先读 `iclr/TOKEN_DETECTION.md`。
 用户已明确当前任务是离线检测，允许后续 token、FAI 和前后向平滑；不要再擅自限制为实时检测。
-输入驱动状态新设计见 `iclr/NATIVE_STATE_DYNAMICS.md`；目前只有数学原型，没有自然检测成绩。
+输入驱动状态方案见 `iclr/NATIVE_STATE_DYNAMICS.md`；`main.py dynamics` 已接通采集/无标签拟合/离线评分/评价，尚无自然检测成绩。
+该入口保留层头身份，使用当前query原生多方向导数、来源方向协方差与离线复用；不把它叫跨token完整因果归因。
+`state_forward` 也含离线FAI，只是前向模式消息的对照，不能叫实时检测；原始R/A/H仍独立保存比较。
 默认run/score是逐token的固定R/A/H检测，不执行消融、分段、参考拟合或融合。
 不能把检测以复杂机制审计为前提，不能把恢复原始基线包装为新AUROC提升。
 原始R为固定主分数，A/H独立评价；旧实验显式调用，不串入默认检测。

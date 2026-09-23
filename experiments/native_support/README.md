@@ -5,7 +5,34 @@
 设计与公式见 [TOKEN_DETECTION](../../iclr/TOKEN_DETECTION.md)。
 
 新的离线状态动力学设计见 [NATIVE_STATE_DYNAMICS](../../iclr/NATIVE_STATE_DYNAMICS.md)。
-该设计允许后续 token，并处理来源不确定性和 FFN 方向传递；目前仅有数值原型，尚无自然 AUROC。
+该设计允许后续 token，并处理来源不确定性和 FFN 方向传递。
+`main.py dynamics` 已实现原生敏感度采集、无标签状态拟合、离线评分、AUROC/AP 及层头报告；尚无新的自然 AUROC。
+
+已有独立 reference/test 输入时：
+
+```bash
+python -u main.py dynamics --stage run \
+  --reference-output outputs/native_support_validation32/reference \
+  --output outputs/native_support_validation32/test --resume
+```
+
+这次需要补采原缓存没有的多方向导数，会加载 LLM；每个 query 一次前向，默认 12 个读出方向，
+按 `--gradient-batch 4` 分批反传。**不是**只改旧分数的免费计算，也不是全量数据重跑。
+24GB GPU 的显存/时间尚未实测，实际峰值写入每答 `timing.json`；方向 batch 可减至 1。
+采集完成后 `--stage score` 只用缓存和小状态模型，不再加载 LLM。
+输出位于 test 的 `state_dynamics/`：`summary.json`、`evaluation.json`、`comparisons.csv`、
+`tokens.csv`、`report.html`，逐头原始观测在 `capture/`，训练模型在 reference 的 `state_dynamics/model/`。
+
+从官方 RAGTruth 准备独立新来源并一键运行（最后两项是 train/test 答案数）：
+
+```bash
+bash experiments/native_support/run_dynamics.sh \
+  /path/to/RAGTruth/dataset /path/to/Meta-Llama-3.1-8B-Instruct \
+  outputs/native_dynamics_v1 outputs/native_support_validation32/test 64 32
+```
+
+采样按 source ID 和 seed 排序，不用标签平衡；排除给定已审阅输出的来源。
+下面的 R/A/H 表和 support 命令继续作为原始基线。
 
 | 指标 | 测量 | 角色 |
 |---|---|---|

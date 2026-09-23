@@ -6,6 +6,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
 
   flow             Resampled claim pairs: head interactions, repair and persistence
   support          Per-token routing and entropy detection; score cached data, evaluate once
+  dynamics         Offline head/source responses, unlabelled state fitting and token AUROC/AP
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis
@@ -13,7 +14,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   supervised-s10   Historical supervised baseline
   supervised-s11   Historical supervised baseline
 
-Read experiments/native_support/README.md for the current forward-only detector.
+Read experiments/native_support/README.md for detector inputs and execution costs.
 No command starts an experiment automatically. Each command accepts --help.
 """
 
@@ -24,10 +25,13 @@ def main(argv=None):
         print(HELP)
         return
     command, arguments = argv[0], argv[1:]
-    if command == "support":
+    if command in ("support", "dynamics"):
         from pathlib import Path
         sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
-        from experiments.native_support.run import main as run
+        if command == "dynamics":
+            from experiments.native_support.dynamics import main as run
+        else:
+            from experiments.native_support.run import main as run
         run(arguments)
     elif command == "flow":
         from experiments.path_conflict.paired import cli
