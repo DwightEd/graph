@@ -10,6 +10,7 @@
 | `main.py transport --stage evaluate` | 只评价保存的分数 | 不加载模型 |
 | `main.py transport --stage audit` | 只读旧 source_transport 预算结果 | 不重算图/状态 |
 | `main.py transport-pack` | 打包当前 value_transport 的逐头、来源与时间审计数据 | CPU；不加载模型 |
+| `main.py transport-state` | 条件来源读出、历史状态候选及同缓存对比 | CPU；不加载模型 |
 | `main.py dynamics` | 独立历史状态模型与其审计 | 显式调用，非新方法依赖 |
 
 ## 来源传递
@@ -55,6 +56,29 @@ python -u main.py transport-pack \
 
 当前熵、平滑和动态状态的实际范围，以及下一步设计见
 [VALUE_PATH_STATE_REVIEW.md](../../iclr/VALUE_PATH_STATE_REVIEW.md)。
+
+## 条件选择与历史状态：复用已采集数据
+
+```bash
+git pull --ff-only origin main
+python -u main.py transport-state \
+  --input outputs/native_support_ragtruth4 \
+  --output outputs/native_support_ragtruth4/choice_state_v2
+```
+
+输入需要已有 `value_transport/capture/` 与 `value_transport/responses/*/scores.npz`。
+也可把 `--input` 改为 `value_transport_head_review.zip`，直接读取打包文件，不必解压。
+输出目录必须为新目录；模型、原始分数、旧结果均不改动。标签缺失时仍保存状态和分数，
+evaluation 明确不可用。不要为了此命令重新运行 `transport --stage run`。
+
+结果在 `choice_state_v2/summary.json`、`evaluation.json`、`ranking_audit.json`、
+`state_audit.json` 及 `responses/*/state.npz`。FFN 不重复相加；实际候选 ID、
+全部头读取、完整根历史边和未捕获候选质量均保留。
+`risk` 默认仍为 raw_route；新增分数是独立探索候选，没有自动替换主基线。
+
+四答探索中直接来源缺口 AUROC/AP 为 0.769226/0.218225；历史递推为
+0.752383/0.203478，未改善直接读出。这不是独立数据上的验证。
+公式、数据轴和限制见 [CONDITIONAL_CHOICE_STATE.md](../../iclr/CONDITIONAL_CHOICE_STATE.md)。
 
 ## 原始基线与数据准备
 

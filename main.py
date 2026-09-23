@@ -9,6 +9,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   dynamics         Offline head/source responses, unlabelled state fitting and token AUROC/AP
   transport        Signed source provenance through native attention, residual and FFN value paths
   transport-pack   Compact existing value-path captures for head and temporal audit; CPU only
+  transport-state  Conditional choice factors and history lineage from existing captures; CPU only
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis
@@ -30,10 +31,12 @@ def main(argv=None):
     if command == "transport-pack":
         from experiments.native_support.transport_pack import main as run
         run(arguments)
-    elif command in ("support", "dynamics", "transport"):
+    elif command in ("support", "dynamics", "transport", "transport-state"):
         from pathlib import Path
         sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
-        if command == "transport":
+        if command == "transport-state":
+            from experiments.native_support.choice_state_run import main as run
+        elif command == "transport":
             from experiments.native_support.transport import main as run
         elif command == "dynamics":
             from experiments.native_support.dynamics import main as run

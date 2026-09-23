@@ -38,6 +38,10 @@ FFN 已进入根归因，不把反向写入自动判为反证据，不把它重�
 旧 v3–v6 标量滤波/融合和共享预算图评分代码已清理；历史实现见 Git `9d4ba17`。
 `main.py dynamics` 是独立历史无标签状态实验，其概率不能自动解释成真假；
 输入格式/历史证据见 `iclr/NATIVE_STATE_DYNAMICS.md` 和 `iclr/DYNAMICS_STATE_IDENTIFIABILITY.md`。
+`main.py transport-state` 复用当前缓存做条件来源/历史状态审计，协议见
+`iclr/CONDITIONAL_CHOICE_STATE.md`。`risk` 默认保持 raw_route，新增候选不自动替代。
+跨历史词的状态递推是额外检测假设，不能声称原生反传跨越了离散采样。
+保留候选实际 ID、未解析尾部、来源支持/反对及当前头读取；不把来源根作用当作新读取事件。
 保留用户缓存、原始结果及研究证据，不为美化改写历史；不全量重跑。
 检测不以完成消融、所有因果机制或人工证据标注为前提。
 不把最大 attention、正向作用、状态稳定或易预测自动命名为正确证据。
