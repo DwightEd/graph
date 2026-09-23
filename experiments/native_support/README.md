@@ -4,6 +4,9 @@
 不把消融、机制审计、状态分段或参考集拟合作为检测前置。
 设计与公式见 [TOKEN_DETECTION](../../iclr/TOKEN_DETECTION.md)。
 
+新的离线状态动力学设计见 [NATIVE_STATE_DYNAMICS](../../iclr/NATIVE_STATE_DYNAMICS.md)。
+该设计允许后续 token，并处理来源不确定性和 FFN 方向传递；目前仅有数值原型，尚无自然 AUROC。
+
 | 指标 | 测量 | 角色 |
 |---|---|---|
 | routing_imbalance | 投影消息范数的history-source预算差 | 固定主分数 |
