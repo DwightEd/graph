@@ -1,6 +1,6 @@
 # 完整短语的功能读出与 FFN 条件传递
 
-2026-09-23。入口 `main.py transport-functions`。这是已实现的机制测量与读出更新，
+2026-09-23，候选协议 v2。入口 `main.py transport-functions`。这是已实现的机制测量与读出更新，
 没有新自然数据 AUROC，不替换 `raw_route`，不对四答标签拟合系数。
 
 ## 问题与架构
@@ -12,7 +12,7 @@
 
 流程直接分成五步：
 
-1. 从已保存回答取 token 对齐的标点单元，冻结原始 token IDs 和共同 prefix。
+1. 从已保存回答取 token 对齐的标点单元，编号与后续句子合并，冻结原始 token IDs 和共同 prefix。
 2. 自动提出同义改写、极性/数量/范围变化、对象绑定变化；每个意义类别两种表达。
 3. 同一观察模型另外检查组内同义、组间差异和 prefix 适配性；保存原始输入与输出。
 4. 每个候选完整 teacher forcing，一次原生前向和一次独立短语目标反向。
@@ -21,6 +21,11 @@
 标点单元不是模型发现的 claim/reanchor，可能是不完整语义单元。候选可以被拒绝；
 拒绝数、长度预算跳过数和完整测量数均报告。没有人工证据类型、自然标签训练、
 SVD、消融或另训真假分类器。自动检查来自同一模型，不属于独立语义真值验证。
+
+候选任务只收到 `answer_prefix`（已生成回答）和当前 `unit`，不把原问答指令嵌套进去。
+payload 中的特殊 token 字面量使用可逆 JSON Unicode 转义，不能成为新的对话控制 token。
+这只改变候选生成/检查的输入；所有概率和导数仍使用完整、逐 ID 冻结的原生输入前缀。
+若仅凭回答前文无法消歧某个对象，自动分组仍可能不可靠，不能据此声称完整覆盖命题。
 
 ## 候选概率和功能作用
 
@@ -107,29 +112,41 @@ float32 恒等式误差和 native bfloat16 的 margin 舍入差单列。
 旧缓存没有这里的原生 Q/K/RMS 导数或语义候选，无法转换得到；首次需要补采集。
 原模型路径来自 settings，仍使用 teaching 的 Llama/Mistral/Qwen2 适配器。
 
-先核验已有重点回答，模型运行与旧四答评分分开：
+v1 的候选与切分协议已改变，v2 必须使用新结果目录；不能沿用 v1 的拒绝 bank 做 resume。
+先检查这一个回答的候选通过率，不运行梯度：
 
 ```bash
 git pull --ff-only origin main
-python -u main.py transport-functions \
+python -u main.py transport-functions --stage prepare \
   --input outputs/native_support_ragtruth4 \
-  --output outputs/native_support_ragtruth4/function_audit_v1 \
+  --output outputs/native_support_ragtruth4/function_audit_v2 \
   --response-ids 12219 \
   --device cuda:0 --dtype bfloat16
 ```
 
-续跑添加 `--resume`，参数和 settings 必须相同；完整候选文件复用，完整单元不加载模型。
-候选按实际 token IDs 检查组内与跨组重复；发生冲突时，带具体冲突反馈重写一次。
-原 `proposal.json` 保留，修复输出另存 `proposal_repair.json`；已保存的修复可续跑复用。
+`status=banks_prepared` 且 `accepted_units>0` 后，同参数采集：
+
+```bash
+python -u main.py transport-functions --stage capture --resume \
+  --input outputs/native_support_ragtruth4 \
+  --output outputs/native_support_ragtruth4/function_audit_v2 \
+  --response-ids 12219 \
+  --device cuda:0 --dtype bfloat16
+```
+
+v2 内续跑添加 `--resume`，参数和 settings 必须相同；完整候选复用，完整单元不加载模型。
+候选按实际 token IDs 检查组内与跨组重复；结构或语义检查失败时，带具体反馈重写一次。
+原 `proposal.json` / `validation.json` 保留，修复另存 `proposal_repair.json` /
+`validation_repair.json`；修复过的候选不复用原候选的语义判决。
 第二次仍不合格则在 `bank.json` 记录拒绝原因和冲突位置，继续后续单元，不做静默去重。
 `summary.json` 的 `rejection_reasons` 汇总原因；被拒绝单元不会产生概率或梯度读出。
-遇到旧版本的 `Candidate token sequences must be distinct` 报错可直接同参数加 `--resume`，
-无需删除结果目录；已完成采集不重算。
+零接受时记录 `status=no_valid_banks`，保存失败详情和 review ZIP 后返回非零退出码。
+完整 run 可用默认 `--stage run`；不能因进度条跑完而把零测量当作实验成功。
 仅修改读出/报表时：
 
 ```bash
 python -u main.py transport-functions --stage report \
-  --output outputs/native_support_ragtruth4/function_audit_v1
+  --output outputs/native_support_ragtruth4/function_audit_v2
 ```
 
 `--stage prepare` 只生成并检查候选；之后同参数 `--stage capture --resume` 补采集。
@@ -146,20 +163,30 @@ python -u main.py transport-functions --stage report \
 | 文件 | 数据 |
 |---|---|
 | protocol.json / settings.json | 完整范围、观察模型、分组与梯度契约 |
-| responses/*/unit_*/proposal.json / proposal_repair.json / validation.json | 自动候选、可选修复与检查的原始请求/输出 |
+| responses/*/unit_*/proposal*.json / validation*.json | 自动候选、可选修复与每次检查的原始请求/输出 |
 | bank.json | 精确 prefix、原始和替代 token IDs、意义分组、拒绝原因 |
 | candidate_*.npz | 每分支 prefix 根、后缀根、逐 query/layer/head/source 三通道、FFN write、RMS 分解 |
 | contrast_*.npz | 共同边界 query 的语义/表达对照；输入根仍逐位置保存 |
 | units.json / readout.json | 组间/组内熵及 KL、候选长度、数值误差 |
 | head_contrasts.csv | 物理层头来源对照，不平均头 |
 | observed_tokens.csv | 实际回答的 RMS/置信度变化，不把候选分支贴自然标签 |
-| summary.json | 接受、拒绝、跳过、完成数；new_auroc 明确为空 |
+| summary.json | 接受、拒绝、跳过、完成数；status 区分准备/采集/零接受；new_auroc 明确为空 |
 | annotations.json / baselines/*.npz | 所有测量完成后复制的既有标签/基线，仅供审阅，不进入新读出 |
 
-所有阶段结束后自动生成 `function_audit_v1_review.zip`（结果目录旁），包含上述数据。
+所有阶段结束后自动生成 `function_audit_v2_review.zip`（结果目录旁），包含上述数据。
 `--stage pack` 可重新打包。结果不修改输入缓存、旧风险分数或自然标注。
 
 ## 验证与尚未解决的问题
+
+用户上传的 v1 包（回答 12219）实际有 23 个单元、23 个原提案、11 个修复提案和
+13 次语义检查，总计 47 次生成调用；接受和完成均为 0。8 个单元最终因 token 重复拒绝，
+2 个因组内表达数不合格拒绝，13 个被语义检查拒绝，其中 7 次理由转向原问答的信息充足性。
+7 个独立编号 `1.` / `2.` 等被误当候选单元。包中的 baseline NPZ 是旧结果，不是新测量。
+这些数据不能说明 FFN 支持或抑制证据，也不能计算新的 AUROC。
+
+已修复嵌套角色控制 token、原问答指令混入候选任务、编号切分、语义拒绝无法反馈重写、
+零测量仍按成功退出的问题。修复后的真实 8B 候选接受率尚待 prepare 验证；没有降低
+组内同义要求来通过无效候选。该回答采用新编号切分后为 16 个单元，不改任何原始 token。
 
 小随机 Llama/Mistral 核验原生短语概率、有限差分根敏感性、原生 FFN Jacobian、
 GQA/滑动窗口、纯 RMS 缩放、熵/KL 链式恒等式、准确 token 对齐与钩子清理。
@@ -182,8 +209,10 @@ GQA/滑动窗口、纯 RMS 缩放、熵/KL 链式恒等式、准确 token 对齐
 - Tuned Lens: https://arxiv.org/abs/2303.08112
   跨层读出存在漂移；本实现只做最终 FFN 同一读出，不假称已训练逐层语义 lens。
 
-软件验证：本次 17 项功能测试通过，覆盖 token 重复、有限修复、旧失败缓存续跑、
-拒绝单元后继续采集和完成缓存复用。前次 18 项旧 choice-state/pack 回归在独立进程通过。
+软件验证：本次 22 项功能测试通过，新增真实 FastTokenizer 的控制 token 隔离、
+编号切分、候选任务与原生前缀分离、语义修复判决独立保存和零接受失败打包。
+保留 token 重复、有限修复、失败缓存续跑、拒绝后继续采集及完成缓存复用验证。
+前次 18 项旧 choice-state/pack 回归在独立进程通过。
 旧测试含全局 `torch not in sys.modules` 断言，不能与加载小模型的测试混在同一进程。
 运行环境为 CPU PyTorch 2.14.0、Transformers 4.57.6；未下载或执行真实 8B 权重。
 新增核心代码按采集、候选、读出、编排拆分；没有修改旧基线公式。

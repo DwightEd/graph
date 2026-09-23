@@ -16,7 +16,9 @@ from state_audit.functional_readout import contrast_weights, distribution_change
 from state_audit.model.adapter import ModelAdapter
 from state_audit.model.replay import attention_backend
 from state_audit.storage import read_json, write_json
-from experiments.native_support.functional_bank import InvalidCandidateBank, answer_units, compile_bank, prepare_bank
+from experiments.native_support.functional_bank import (
+    InvalidCandidateBank, answer_units, audit_messages, compile_bank, prepare_bank,
+)
 from experiments.native_support.functional_run import arguments, main, protocol
 
 
@@ -170,10 +172,10 @@ def test_prepare_repairs_saved_duplicate_and_reuses_interrupted_repair(tmp_path,
     def generate(model, tokenizer, instruction, payload, path, budget):
         if path.name == 'proposal_repair.json':
             assert payload['previous_proposal'] == duplicate
-            assert payload['structural_problem']['reason'] == 'duplicate_candidate_tokens'
+            assert payload['rejection']['reason'] == 'duplicate_candidate_tokens'
             result = repaired
         else:
-            assert path.name == 'validation.json'
+            assert path.name == 'validation_repair.json'
             result = dict(valid=True, reason='fixture')
         write_json(path, {'raw_output': json.dumps(result)})
         return result
@@ -212,6 +214,107 @@ def test_bank_preserves_observed_tokenization_and_positions():
                         dict(paraphrase='c.', polarity=['d.', 'e.'], binding=[]))
     assert bank["candidates"][0]["token_ids"] == [7, 9]
     assert bank["prefix_ids"] == [1, 5]
+
+
+def test_numbered_steps_remain_complete_token_aligned_units():
+    pieces = ['Prompt', '1', '.', ' Lay', ' it', ' flat.\n', '2', '.', ' Fold', ' it', '.']
+    response = dict(prompt_length=1, token_text=pieces)
+    units = list(answer_units(response))
+    assert units == [(0, 5), (5, 10)]
+    assert [''.join(pieces[1 + start:1 + stop]) for start, stop in units] == [
+        '1. Lay it flat.\n', '2. Fold it.']
+
+
+def test_control_delimiters_are_data_not_nested_chat_tokens():
+    from tokenizers import Tokenizer
+    from tokenizers.models import WordLevel
+    from tokenizers.pre_tokenizers import WhitespaceSplit
+    from transformers import PreTrainedTokenizerFast
+
+    specials = ['[UNK]', '<|begin_of_text|>', '<|eot_id|>',
+                '<|start_header_id|>', '<|end_header_id|>', '[INST]', '[/INST]']
+    backend = Tokenizer(WordLevel(dict(zip(specials, range(len(specials)))), unk_token='[UNK]'))
+    backend.pre_tokenizer = WhitespaceSplit()
+    tokenizer = PreTrainedTokenizerFast(tokenizer_object=backend, unk_token=specials[0],
+        bos_token=specials[1], eos_token=specials[2], additional_special_tokens=specials[3:])
+    tokenizer.chat_template = "{{ bos_token }}{% for m in messages %}{{ '<|start_header_id|>' + m['role'] + '<|end_header_id|>' + m['content'] + '<|eot_id|>' }}{% endfor %}"
+    payload = dict(answer_prefix=' '.join(specials[1:]) + ' Answer the old question.', unit='Original.')
+    messages = audit_messages(tokenizer, 'Compare meanings.', payload)
+    assert json.loads(messages[1]['content']) == payload
+    ids = tokenizer.apply_chat_template(messages, tokenize=True)
+    for special, expected in zip(specials[1:], (1, 2, 2, 2, 0, 0)):
+        assert ids.count(tokenizer.convert_tokens_to_ids(special)) == expected
+    # Reproduce the original boundary defect with this same actual tokenizer.
+    messages[1]['content'] = json.dumps(payload)
+    unsafe_ids = tokenizer.apply_chat_template(messages, tokenize=True)
+    assert unsafe_ids.count(tokenizer.eos_token_id) == 3
+
+
+def test_candidate_request_omits_original_question_but_capture_prefix_does_not(tmp_path, bank_response):
+    def generate(model, tokenizer, instruction, payload, path, budget):
+        assert payload['answer_prefix'] == 'a '
+        assert payload['unit'] == 'b.'
+        assert 'context' not in payload
+        if path.name == 'proposal.json':
+            return dict(paraphrase='c.', polarity=['d.', 'e.'], binding=[])
+        return dict(valid=True, reason='fixture')
+    with patch('experiments.native_support.functional_bank.generate_json', side_effect=generate):
+        bank = prepare_bank(None, TinyTokenizer(), bank_response, 1, 2, tmp_path, 100)
+    assert bank['prefix_ids'] == [1, 5, 7]
+    assert bank['candidates'][0]['token_ids'] == [9]
+
+
+def test_semantic_repair_keeps_distinct_verdicts_and_resumes_interrupted_validation(tmp_path, bank_response):
+    initial = dict(paraphrase='c.', polarity=['d.', 'e.'], binding=[])
+    repaired = dict(paraphrase='d.', polarity=['c.', 'e.'], binding=[])
+    def generate(model, tokenizer, instruction, payload, path, budget):
+        if path.name == 'proposal.json':
+            result = initial
+        elif path.name == 'validation.json':
+            result = dict(valid=False, reason='polarity members have different meanings')
+        elif path.name == 'proposal_repair.json':
+            assert payload['rejection']['reason'] == 'polarity members have different meanings'
+            assert payload['previous_proposal'] == initial
+            result = repaired
+        else:
+            assert path.name == 'validation_repair.json'
+            raise RuntimeError('interrupted validation')
+        write_json(path, {'raw_output': json.dumps(result)})
+        return result
+    with patch('experiments.native_support.functional_bank.generate_json', side_effect=generate), \
+         pytest.raises(RuntimeError, match='interrupted validation'):
+        prepare_bank(None, TinyTokenizer(), bank_response, 0, 2, tmp_path, 100)
+    old_verdict = (tmp_path / 'validation.json').read_bytes()
+    assert not (tmp_path / 'bank.json').exists()
+    with patch('experiments.native_support.functional_bank.generate_json', return_value=dict(valid=True, reason='fixture')) as generation:
+        bank = prepare_bank(None, TinyTokenizer(), bank_response, 0, 2, tmp_path, 100)
+    assert generation.call_count == 1
+    assert generation.call_args.args[-2].name == 'validation_repair.json'
+    assert bank['valid'] and bank['proposal_attempts'] == 2
+    assert bank['candidates'][1]['text'] == 'd.'
+    assert (tmp_path / 'validation.json').read_bytes() == old_verdict
+
+
+def test_prepare_with_zero_accepted_banks_archives_failure_and_returns_nonzero(tmp_path, bank_response):
+    source, destination = tmp_path / 'input', tmp_path / 'output'
+    settings = dict(model='tiny', responses=[bank_response])
+    sources = dict(blocks=[dict(id='p')], group_ids=[0, 0, 1, 1])
+    write_json(source / 'settings.json', settings)
+    write_json(source / 'value_transport/capture_settings.json', settings)
+    write_json(source / 'value_transport/capture/0000/sources.json', sources)
+    args = ['--input', str(source), '--output', str(destination), '--stage', 'prepare']
+    write_json(destination / 'protocol.json', protocol(arguments(args), settings))
+    write_json(destination / 'responses/0000/sources.json', sources)
+    write_json(destination / 'responses/0000/unit_000000/bank.json',
+               dict(start=0, stop=2, valid=False, reason='duplicate_candidate_tokens'))
+    with patch('state_audit.model.load_model', side_effect=AssertionError('loaded model')), \
+         pytest.raises(SystemExit, match='No valid candidate banks'):
+        main(args + ['--resume'])
+    summary = read_json(destination / 'summary.json')
+    assert summary['status'] == 'no_valid_banks' and summary['completed_units'] == 0
+    assert summary['accepted_units'] == 0 and summary['new_auroc'] is None
+    assert (tmp_path / 'output_review.zip').is_file()
+    assert not list(destination.rglob('candidate_*.npz'))
 
 
 def test_run_resume_report_and_pack_without_label_reads(tmp_path, model):
@@ -257,7 +360,7 @@ def test_resume_failed_proposal_skips_rejected_unit_and_captures_next(tmp_path, 
     write_json(source / 'value_transport/capture_settings.json', settings)
     write_json(source / 'value_transport/capture/0000/sources.json', sources)
     args = ['--input', str(source), '--output', str(destination), '--device', 'cpu', '--dtype', 'float32']
-    # Old failure left a protocol and proposal, but no bank or completed capture.
+    # An interrupted failure left a protocol/proposal but no completed bank/capture.
     write_json(destination / 'protocol.json', protocol(arguments(args), settings))
     write_json(destination / 'responses/0000/sources.json', sources)
     rejected = destination / 'responses/0000/unit_000000'

@@ -18,12 +18,15 @@ from .inputs import validate_tokenizer
 
 
 def protocol(args, settings):
-    return dict(version=1, model=settings["model"], responses=settings["responses"],
+    return dict(version=2, model=settings["model"], responses=settings["responses"],
         response_ids=args.response_ids, start_target=args.start_target, stop_target=args.stop_target,
         max_units=args.max_units, max_unit_tokens=args.max_unit_tokens, dtype=args.dtype,
         max_new_tokens=args.max_new_tokens, purpose="native_phrase_function_audit",
-        selection="token_aligned_punctuation_units; not_detected_reanchors",
+        selection="token_aligned_punctuation_units_with_list_markers; not_detected_reanchors",
         candidate_generation="observer_proposal_and_semantic_check; no_truth_judgment",
+        candidate_context="answer_prefix_and_unit_only; original_native_prefix_unchanged",
+        candidate_control_tokens="JSON_unicode_escaped_in_quoted_data",
+        candidate_repair="one_feedback_retry_for_structural_or_semantic_failure",
         gradients="native_QK_RMS_SwiGLU; whole_phrase_objective",
         root_readout="gradient_dot_embedding; local_sensitivity_not_additive_ledger",
         head_readout="receiver_OV_message_sensitivity; direct_residual_plus_current_FFN_mediated",
@@ -151,6 +154,14 @@ def summarize(destination, settings):
                   rejected_units=sum(not bank["valid"] for bank in banks),
                   rejection_reasons=dict(Counter(bank["reason"] for bank in banks if not bank["valid"])),
                   budget_skipped_units=len(list(destination.glob("responses/*/unit_*/skipped.json"))))
+    if result["accepted_units"] == 0:
+        result["status"] = "no_valid_banks"
+    elif result["completed_units"] == 0:
+        result["status"] = "banks_prepared"
+    elif result["completed_units"] < result["accepted_units"]:
+        result["status"] = "partial_capture"
+    else:
+        result["status"] = "captured"
     write_json(destination / "summary.json", result)
     return result
 
@@ -218,6 +229,9 @@ def main(argv=None):
         copy_review_context(args.input, args.output)
     result["review_archive"] = pack(args.output, args.archive)
     print(json.dumps(result, ensure_ascii=False))
+    if args.stage in ("run", "prepare", "capture") and result["accepted_units"] == 0:
+        raise SystemExit("No valid candidate banks; review archive saved, but no functional measurement. "
+                         "Inspect proposal/validation files before retrying.")
 
 
 if __name__ == "__main__":
