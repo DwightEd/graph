@@ -113,25 +113,23 @@ float32 恒等式误差和 native bfloat16 的 margin 舍入差单列。
 原模型路径来自 settings，仍使用 teaching 的 Llama/Mistral/Qwen2 适配器。
 
 v1 的候选与切分协议已改变，v2 必须使用新结果目录；不能沿用 v1 的拒绝 bank 做 resume。
-先检查这一个回答的候选通过率，不运行梯度：
+v2 一键运行／续跑，默认回答 12219：
 
 ```bash
-git pull --ff-only origin main
-python -u main.py transport-functions --stage prepare \
-  --input outputs/native_support_ragtruth4 \
-  --output outputs/native_support_ragtruth4/function_audit_v2 \
-  --response-ids 12219 \
-  --device cuda:0 --dtype bfloat16
+git pull --ff-only origin main &&
+bash experiments/native_support/run_functions.sh
 ```
 
-`status=banks_prepared` 且 `accepted_units>0` 后，同参数采集：
+脚本用当前环境的 `python` 在同一进程内准备缺失候选、采集有效单元、汇总并自动打包。
+默认 `--stage run --resume`，使用原 `function_audit_v2` 目录；已完成结果和拒绝记录复用。
+可以从任意目录调用脚本，额外 CLI 参数覆盖默认值；相对数据路径按项目根目录解析。
+如需指定解释器可设 `FUNCTION_AUDIT_PYTHON`。脚本透传失败退出码，不把错误当成功。
+
+只准备候选或只补采集仍可分别运行：
 
 ```bash
-python -u main.py transport-functions --stage capture --resume \
-  --input outputs/native_support_ragtruth4 \
-  --output outputs/native_support_ragtruth4/function_audit_v2 \
-  --response-ids 12219 \
-  --device cuda:0 --dtype bfloat16
+bash experiments/native_support/run_functions.sh --stage prepare
+bash experiments/native_support/run_functions.sh --stage capture
 ```
 
 v2 内续跑添加 `--resume`，参数和 settings 必须相同；完整候选复用，完整单元不加载模型。
@@ -142,6 +140,15 @@ v2 内续跑添加 `--resume`，参数和 settings 必须相同；完整候选�
 `summary.json` 的 `rejection_reasons` 汇总原因；被拒绝单元不会产生概率或梯度读出。
 零接受时记录 `status=no_valid_banks`，保存失败详情和 review ZIP 后返回非零退出码。
 完整 run 可用默认 `--stage run`；不能因进度条跑完而把零测量当作实验成功。
+
+遇到 `Unterminated string` 等生成 JSON 错误时，保留原始输出并作一次格式重试，
+输出另存 `*_json_retry.json`。续跑会复用成功的格式重试，不反复读取坏缓存后崩溃。
+仅接受完整 JSON（允许外包完整代码围栏）；不补齐截断字符串，不从半个对象猜测 `valid`。
+模型输出字段也在此边界检查：`valid` 必须是 JSON 布尔量，候选必须是文本／文本列表。
+格式重试仍失败则记录 `invalid_generated_json` 或 `invalid_generated_schema`，继续下个单元。
+原始输出另记实际生成长度及是否达到 token 预算；模型执行和文件读写错误仍正常抛出。
+这项修复兼容已有 v2 缓存，无需换目录或重跑已完成采集；它不保证语义候选通过率提高。
+
 仅修改读出/报表时：
 
 ```bash
@@ -209,8 +216,10 @@ GQA/滑动窗口、纯 RMS 缩放、熵/KL 链式恒等式、准确 token 对齐
 - Tuned Lens: https://arxiv.org/abs/2303.08112
   跨层读出存在漂移；本实现只做最终 FFN 同一读出，不假称已训练逐层语义 lens。
 
-软件验证：本次 22 项功能测试通过，新增真实 FastTokenizer 的控制 token 隔离、
-编号切分、候选任务与原生前缀分离、语义修复判决独立保存和零接受失败打包。
+软件验证：本次 33 项针对性测试通过，覆盖旧截断缓存的有限重试和复用、失败后继续下一单元、
+完整围栏 JSON 解析、不接受截断对象／字符串布尔值，以及脚本路径、参数和失败退出码。
+保留真实 FastTokenizer 的控制 token 隔离、编号切分、候选任务与原生前缀分离、
+语义修复判决独立保存和零接受失败打包验证。
 保留 token 重复、有限修复、失败缓存续跑、拒绝后继续采集及完成缓存复用验证。
 前次 18 项旧 choice-state/pack 回归在独立进程通过。
 旧测试含全局 `torch not in sys.modules` 断言，不能与加载小模型的测试混在同一进程。
