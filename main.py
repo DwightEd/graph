@@ -10,6 +10,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   transport        Signed source provenance through native attention, residual and FFN value paths
   transport-pack   Compact existing value-path captures for head and temporal audit; CPU only
   transport-state  Score/evaluate cached choice states and auto-pack; --stage pack reuses completed results
+  transport-functions  Automatic phrase contrasts, native FFN transfer and RMS separation; auto-pack
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis
@@ -31,10 +32,12 @@ def main(argv=None):
     if command == "transport-pack":
         from experiments.native_support.transport_pack import main as run
         run(arguments)
-    elif command in ("support", "dynamics", "transport", "transport-state"):
+    elif command in ("support", "dynamics", "transport", "transport-state", "transport-functions"):
         from pathlib import Path
         sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
-        if command == "transport-state":
+        if command == "transport-functions":
+            from experiments.native_support.functional_run import main as run
+        elif command == "transport-state":
             from experiments.native_support.choice_state_run import main as run
         elif command == "transport":
             from experiments.native_support.transport import main as run

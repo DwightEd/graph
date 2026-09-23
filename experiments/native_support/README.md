@@ -11,6 +11,7 @@
 | `main.py transport --stage audit` | 只读旧 source_transport 预算结果 | 不重算图/状态 |
 | `main.py transport-pack` | 打包当前 value_transport 的逐头、来源与时间审计数据 | CPU；不加载模型 |
 | `main.py transport-state` | 条件来源读出、历史状态候选及同缓存对比 | CPU；不加载模型 |
+| `main.py transport-functions` | 完整短语的语义/表达对照与原生 FFN 条件传递 | 首次补采集；report 不加载模型 |
 | `main.py dynamics` | 独立历史状态模型与其审计 | 显式调用，非新方法依赖 |
 
 ## 来源传递
@@ -122,3 +123,22 @@ python -u main.py support --stage score --output outputs/native_support_validati
 
 验证记录见 [VALIDATION.md](VALIDATION.md)。真实检测增量须看同样本 AUROC/AP，
 不能把小模型账本测试当成真实自然数据效果。
+
+## 完整短语功能审计
+
+新增 `main.py transport-functions`：自动构造同义、事实条件、对象绑定对照，
+沿原生 Q/K/RMS/FFN 导数读取来源与历史作用；分别保存残差直达和 FFN 转化通道、
+最终 RMS 缩放。复用 teaching 适配器，不改变既有分数，不训练真假分类器。
+
+```bash
+git pull --ff-only origin main
+python -u main.py transport-functions \
+  --input outputs/native_support_ragtruth4 \
+  --output outputs/native_support_ragtruth4/function_audit_v1 \
+  --response-ids 12219 --device cuda:0 --dtype bfloat16
+```
+
+首次需要模型补采集；续跑加 `--resume`。之后 `--stage report --output ...`
+仅重算读出并自动打包。结果旁生成 `function_audit_v1_review.zip`。
+小模型数值验证通过，未运行真实 8B，也没有新的自然数据 AUROC。
+方法、字段、成本和边界见 [FUNCTIONAL_PHRASE_TRANSPORT](../../iclr/FUNCTIONAL_PHRASE_TRANSPORT.md)。
