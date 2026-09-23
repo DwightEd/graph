@@ -17,6 +17,11 @@
 
 修改代码前读取 `iclr/CODING_GUIDELINES.md` 与 `iclr/MECHANISM_FIRST.md`。
 当前原生前向检测是 `experiments/native_support`；先读 `iclr/TOKEN_DETECTION.md`。
+无需人工证据类型的来源状态候选见 `iclr/AUTOMATIC_SOURCE_TRANSPORT.md`，入口 `main.py transport`。
+该入口复用原生 dynamics token 缓存；保留层头来源向量，以逐头响应相似性和实际历史边建立共享token图，估计来源预算。
+不使用SVD、自然标签拟合或人工语义类型；块类型为unassigned，不冒称自动识别了适用约束。
+该版本是来源响应条件化的预算平滑候选，不是完整JVP因果传递或语义真假后验；旧R与均值必须同样本评价。
+只完成小模型和针对性软件验证，未产生新的自然AUROC/AP；默认support基线与旧dynamics保留。
 用户已明确当前任务是离线检测，允许后续 token、FAI 和前后向平滑；不要再擅自限制为实时检测。
 输入驱动状态方案见 `iclr/NATIVE_STATE_DYNAMICS.md`；`main.py dynamics` 已接通采集/无标签拟合/离线评分/评价。
 用户提供的32答汇总：state_dynamics AUROC/AP=0.734881/0.171929，route_offline_mean=0.731726/0.186802。

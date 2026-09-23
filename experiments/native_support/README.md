@@ -142,3 +142,15 @@ python -u main.py dynamics --stage audit \
 `state_log_odds` 仅重放已存 emission 检查概率舍入丢失的顺序，不重新拟合、选方向或覆盖主方法。
 固定预算遇同分输出随机打散的期望和上下界，不用 token 顺序偷偷打破同分。
 H≥0.9 是固定诊断分层；特征差异是 token 加权描述统计，不是独立样本显著性或机制证明。
+# 无人工证据类型的来源状态入口
+
+已有 `state_dynamics/capture` 时，直接运行：
+
+```bash
+python -u main.py transport --stage score --output outputs/native_support_validation32/test
+```
+
+可加 `--score-device cuda:0` 批量计算逐头响应图。不需要 reference、SVD、证据类型表或真假训练；
+结果保存在 `source_transport/`，保留原路由与离线均值的 AUROC/AP 比较。
+来源块自动生成，语义类型未指定；本版是来源预算状态候选，不是已完成的语义冲突检测器。
+数学、缓存边界和文件职责见 [AUTOMATIC_SOURCE_TRANSPORT.md](../../iclr/AUTOMATIC_SOURCE_TRANSPORT.md)。

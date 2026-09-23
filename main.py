@@ -7,6 +7,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   flow             Resampled claim pairs: head interactions, repair and persistence
   support          Per-token routing and entropy detection; score cached data, evaluate once
   dynamics         Offline head/source responses, unlabelled state fitting and token AUROC/AP
+  transport        Automatic source blocks and vector-conditioned offline budget states
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis
@@ -25,10 +26,12 @@ def main(argv=None):
         print(HELP)
         return
     command, arguments = argv[0], argv[1:]
-    if command in ("support", "dynamics"):
+    if command in ("support", "dynamics", "transport"):
         from pathlib import Path
         sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
-        if command == "dynamics":
+        if command == "transport":
+            from experiments.native_support.transport import main as run
+        elif command == "dynamics":
             from experiments.native_support.dynamics import main as run
         else:
             from experiments.native_support.run import main as run

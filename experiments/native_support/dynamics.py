@@ -127,7 +127,7 @@ def prepare_capture(args, output, settings, special_ids):
     return jobs
 
 
-def capture_cohorts(args, cohorts):
+def capture_cohorts(args, cohorts, *, build_profiles=True):
     from state_audit.model import load_model
     from transformers import AutoTokenizer
 
@@ -142,9 +142,10 @@ def capture_cohorts(args, cohorts):
         for job in tqdm(jobs, desc="native response trajectories"):
             capture_one(args, model, tokenizer, job)
         del model
-    for response, directory, mask, _groups, blocks, _pending in jobs:
-        if not (directory / "observations.npz").is_file():
-            build_observations(response, directory, len(blocks), args.rank, mask, tokenizer.all_special_ids)
+    if build_profiles:
+        for response, directory, mask, _groups, blocks, _pending in jobs:
+            if not (directory / "observations.npz").is_file():
+                build_observations(response, directory, len(blocks), args.rank, mask, tokenizer.all_special_ids)
 
 
 def capture_one(args, model, tokenizer, job):
