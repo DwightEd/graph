@@ -35,13 +35,14 @@ METHODS = ("transport_route", "raw_route", "route_offline_mean", "raw_attention"
 
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=("capture", "score", "evaluate", "run"), default="score")
+    parser.add_argument("--stage", choices=("capture", "score", "evaluate", "audit", "run"), default="score")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--strength", type=float, default=1., help="Fixed graph precision; zero recovers raw routing")
     parser.add_argument("--score-device", default="cpu", help="Tensor graph computation: cpu or cuda:0")
     parser.add_argument("--head-batch", type=int, default=16)
     parser.add_argument("--cpu-threads", type=int, default=4)
     parser.add_argument("--annotations", type=Path, help="Evaluation only; scoring never reads labels")
+    parser.add_argument("--bootstrap-replicates", type=int, default=1000, help="Audit only: paired source resamples; zero skips intervals")
     parser.add_argument("--device", default="cuda:0", help="Native capture device")
     parser.add_argument("--dtype", choices=("float32", "bfloat16"), default="bfloat16")
     parser.add_argument("--rank", type=int, default=8, help="Capture only: common native response directions")
@@ -54,6 +55,8 @@ def arguments(argv=None):
     args = parser.parse_args(argv)
     if not np.isfinite(args.strength) or args.strength < 0:
         parser.error("--strength must be finite and nonnegative")
+    if args.bootstrap_replicates < 0:
+        parser.error("--bootstrap-replicates must be nonnegative")
     if min(args.head_batch, args.cpu_threads, args.rank, args.block_tokens,
            args.gradient_batch, args.prefill_chunk_size) < 1 or args.choices < 2:
         parser.error("Budgets must be positive and --choices must be at least two")
@@ -192,6 +195,10 @@ def main(argv=None):
             print(json.dumps(score(args, settings)))
         elif args.stage == "evaluate":
             print(json.dumps(evaluate(args, settings)))
+        elif args.stage == "audit":
+            from .transport_audit import audit
+
+            print(json.dumps(audit(args.output, args.annotations, args.bootstrap_replicates, args.seed)))
 
 
 if __name__ == "__main__":

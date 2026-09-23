@@ -154,3 +154,14 @@ python -u main.py transport --stage score --output outputs/native_support_valida
 结果保存在 `source_transport/`，保留原路由与离线均值的 AUROC/AP 比较。
 来源块自动生成，语义类型未指定；本版是来源预算状态候选，不是已完成的语义冲突检测器。
 数学、缓存边界和文件职责见 [AUTOMATIC_SOURCE_TRANSPORT.md](../../iclr/AUTOMATIC_SOURCE_TRANSPORT.md)。
+
+完成 transport 评分后，审核 AP 损失、排名变化与图状态：
+
+```bash
+python -u main.py transport --stage audit --output outputs/native_support_validation32/test
+```
+
+只读现有分数、状态和官方幻觉标签；不读取 capture、不加载模型、不改评分。
+输出 `source_transport/audit/` 内的 CSV/NPZ，并自动打包 `source_transport/audit_data.zip`。
+默认按 source 成对重采样 1000 次；可用 `--bootstrap-replicates 0` 跳过区间估计。
+前后半指回答位置，历史 key 标签与查询目标标签分别报告；并列分数不任意打破。

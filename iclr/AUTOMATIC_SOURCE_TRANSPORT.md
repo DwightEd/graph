@@ -139,3 +139,64 @@ capture 的 rank/choices/block-tokens/seed 必须与已有 capture_settings 一�
 小型真实 Llama 验证原生采集到评分评价；不需要 reference 或人工证据表。针对性检查来源/头身份、候选对齐、历史键偏移、原路由数值、首尾缺测、零强度、常数/非负保持、断边隔离；改变标签不改变分数；完整缓存评分不加载模型。
 
 未运行自然 RAGTruth 新成绩、未验证 GPU 峰值显存、未证明语义约束识别或新机制。本版应先在原 32 答缓存上与旧 R、均值和旧 dynamics 同样本比较，不启动全量重跑。
+
+## 7. 32 答结果与缓存审计
+
+用户随后提供同一 32 答、7176 token、604 错误的自然结果：transport AUROC/AP 为
+0.718068/0.191248，raw 为 0.711559/0.185660，离线均值为 0.731726/0.186802。
+transport 相对均值的回答前半段 AP 差为 -0.083156。上述结果来自用户运行，不能当作本地重跑。
+新版仅增加审核入口，不改检测公式、参数或已保存分数：
+
+```bash
+python -u main.py transport --stage audit \
+  --output outputs/native_support_validation32/test
+```
+
+输入只需现有 `settings.json`、`annotations.json`、`source_transport/scoring_protocol.json`、
+`evaluation.json` 和逐答 `scores.npz` / `state.npz` / `sources.json`。
+不读取原生 capture、不加载 tokenizer/LLM、不重新构图、不重新求解状态，不需要证据类型标注。
+官方幻觉标签只在审核时用于分组、评价和图端点分类；标签不反馈给检测。
+可用 `--annotations` 指定同 token 对齐的其他标注；若与旧评价不同，会在核对表中显示。
+
+输出目录 `source_transport/audit/`：
+
+| 文件 | 内容 |
+|---|---|
+| `tokens.csv` | token、上下文、首错/起点/延续、回答前后半、所有分数、预算/来源份额变化、图度数与邻接标签质量 |
+| `metrics.csv` | 全体及每条回答的绝对 AUROC/AP；含后续 span 起点、同答与来源等权 AUROC |
+| `ranking_changes.csv` | 对 raw/均值的分数变化、完整并列排名区间、同答排名改善、正常词排在前面的数量和 AP 信用变化 |
+| `ap_attribution.csv` | 按回答/阶段/位置分解全部、前半、后半各自的 AP 差；各分组贡献之和严格恢复该范围 AP 差 |
+| `top_budget.csv` | 同等 top-k 数量下的预期错误数、正常数、precision/recall；并列边界给出上下界 |
+| `budget_changes.csv` | 哪些 token 的 top-k 纳入权重增加或减少，附标签与位置；按回答/target 连接 tokens 表可取上下文 |
+| `auc_half_pairs.csv` | 错误位置半段 × 正常位置半段的四种比较，解释总体 AUC 与分组 AUC 差异 |
+| `score_similarity.csv` | transport 对 raw/均值的 Pearson、Spearman 及绝对分数改变量分布 |
+| `state_groups.csv` | 按阶段、标签×回答半段、回答统计度数、保持系数、预算改变量和风险改变量 |
+| `graph_edges.csv` | 逐答正常/错误/未知端点的实际复用质量与条件化后质量，分别按查询目标标签和历史 key 标签对齐 |
+| `state_checks.csv` | 预算读出、原路由重分组舍入、度数、保持系数和三类预算坐标的状态方程残差 |
+| `evaluation_checks.csv` | 与旧评价逐项核对 token 数、正负数、AUROC/AP |
+| `bootstrap.csv` / `.npz` | 按完整 source 成对重采样的差值、95% 区间、有效重采样数及全部重复结果 |
+| `responses/NNNN.npz` | 完整 token/query 对齐、有效掩码、标签、分数、两种边矩阵及逐 token 状态统计；不复制大型预算张量 |
+
+自动打包到 **`source_transport/audit_data.zip`**，只包含上述审核数据与 summary，保留原始结果。
+默认 `--bootstrap-replicates 1000 --seed 37`；`--bootstrap-replicates 0` 跳过区间估计。
+CPU 即可，保留逐答和重采样进度条。
+
+### 解释约定
+
+- `front_half/back_half` 按完整回答 token 位置切半，不是幻觉 span 的前后半。
+  `later_onset_vs_normal` 精确取 onset 且非 first；summary 另报首错不属于 onset 的数量。
+- AP 信用由完整同分阈值的 precision 分配给正例，分区之和等于该范围 AP；这是排名账本，
+  不表示某回答因果地造成其他回答的损失，也不同于各回答单独算 AP 后再平均。
+- top-k 边界同分按均匀随机顺序给出纳入概率；`selection_change` 是该概率的净变化，
+  不是任意打破同分后给出的唯一告警集合。没有校准阈值，不称为部署误报率。
+- receiver t 对应目标词 t，donor 查询状态 s 对应实际 key 词 s-1。查询目标标签审核状态
+  平滑连接，key 标签描述实际读取的历史词；无效标签记 -1。两种表均不证明因果错误传播。
+- 邻接错误比例、跨类边质量是缓存图与标签的关联；保持系数是条件邻居系数，方差是工作
+  模型方差。图状态和风险没有被标注修正。状态分组为 token 加权描述统计。
+- 同一 source 的所有回答/token 构成一个重采样簇；方法和阶段共享每次 source 抽样。
+  区间是 pooled 指标差的探索性 percentile 区间。无正例或单类重复分别记 AP/AUC 缺测，
+  并报有效次数，不补零。只有一个 source 时不报告置信区间。
+- 状态方程只检查最终读出所用 source/history/other 的逐层线性汇总坐标，
+  不声称逐个验证完整层头来源预算，也不会为检查而重新运行原生模型。
+
+软件验证使用人工构造缓存及小 Llama 的既有集成夹具；自然审核数字必须由用户缓存产生。

@@ -22,6 +22,9 @@
 不使用SVD、自然标签拟合或人工语义类型；块类型为unassigned，不冒称自动识别了适用约束。
 该版本是来源响应条件化的预算平滑候选，不是完整JVP因果传递或语义真假后验；旧R与均值必须同样本评价。
 只完成小模型和针对性软件验证，未产生新的自然AUROC/AP；默认support基线与旧dynamics保留。
+用户提供 transport 32答 AUROC/AP=0.718068/0.191248，raw=0.711559/0.185660，离线均值=0.731726/0.186802；不是本地重跑。
+`transport --stage audit` 只读已存分数/状态/标注，输出排名/AP账本、图端点/状态统计和source成对bootstrap；自动打包source_transport/audit_data.zip。
+审计不读取capture、不重算图/状态、不改分数；回答前后半不等于错误span前后半，query目标s与历史key词s-1的标签分别统计。
 用户已明确当前任务是离线检测，允许后续 token、FAI 和前后向平滑；不要再擅自限制为实时检测。
 输入驱动状态方案见 `iclr/NATIVE_STATE_DYNAMICS.md`；`main.py dynamics` 已接通采集/无标签拟合/离线评分/评价。
 用户提供的32答汇总：state_dynamics AUROC/AP=0.734881/0.171929，route_offline_mean=0.731726/0.186802。
