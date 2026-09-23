@@ -20,7 +20,10 @@
 用户已明确当前任务是离线检测，允许后续 token、FAI 和前后向平滑；不要再擅自限制为实时检测。
 输入驱动状态方案见 `iclr/NATIVE_STATE_DYNAMICS.md`；`main.py dynamics` 已接通采集/无标签拟合/离线评分/评价。
 用户提供的32答汇总：state_dynamics AUROC/AP=0.734881/0.171929，route_offline_mean=0.731726/0.186802。
-这只是收到的自然结果汇总；本地没有其原始缓存，不能声称完成逐token自然核验。
+已收到32答audit_data.zip并核验其token/模式/评价一致性；本地仍没有原始capture和参考模型，不能声称重跑自然新方法。
+旧高分≥0.9内部含3757正常、538错误，另有末尾62正常/2错误；不能将历史保持直接解释为幻觉。
+条件状态概率不能自动提供真假语义；后续设计边界与高分正常数据见`iclr/DYNAMICS_STATE_IDENTIFIABILITY.md`。
+预测型新风险读出已按用户质疑撤回，未发布；不把原生状态可预测性或历史模式后验当作幻觉概率。
 `dynamics --stage audit` 仅复用观测、emission、分数与参考模型，输出CSV/NPZ/JSON和audit_data.zip。
 不新训真假分类器；标签只用于核验/分组。AP贡献按完整同分阈值计算；log odds只是数值同分诊断。
 该入口保留层头身份，使用当前query原生多方向导数、来源方向协方差与离线复用；不把它叫跨token完整因果归因。

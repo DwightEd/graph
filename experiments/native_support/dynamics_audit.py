@@ -18,6 +18,7 @@ from .dynamics_audit_features import (
 )
 from .dynamics_audit_rank import ranking_tables
 from .dynamics_core import mode_posteriors
+from .dynamics_normals import normal_tables
 from .evaluate import annotation_targets
 
 DIRECTORY = "state_dynamics"
@@ -215,6 +216,7 @@ def audit(output, reference=None, annotations=None):
     tables.update(ranking_tables(tables["tokens"], (*model["methods"], "state_log_odds")))
     tables["features"] = feature_rows(moments)
     tables["event_windows"] = event_rows(tables["tokens"])
+    tables.update(normal_tables(tables["tokens"]))
     tables["evaluation_recheck"] = recheck_evaluation(tables["metrics"], read_json(source / "evaluation.json"))
     save_tables(destination, tables)
     write_json(destination / "model.json", model_data(model["parameters"], model["complete"], model["coordinates"]))

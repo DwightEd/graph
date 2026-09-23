@@ -148,7 +148,9 @@ def project_source_covariance(directory, count, sources, rank, components, scale
     results = []
     weights = (components / scale).reshape(len(components), -1, rank)
     for target in range(count):
-        raw = read_arrays(directory / f"token_{target:06d}.npz")["group_effect"]
+        # NPZ members are lazy: covariance needs no attention/value arrays.
+        with np.load(directory / f"token_{target:06d}.npz", allow_pickle=False) as saved:
+            raw = saved["group_effect"]
         effects = raw[..., :sources, :rank].reshape(-1, sources, rank)
         blocks = np.einsum("uhr,hbr->bu", weights, effects)
         moments = effect_source_moments(blocks[None])
