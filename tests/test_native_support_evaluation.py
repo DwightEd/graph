@@ -132,14 +132,16 @@ def test_real_cli_prepares_scores_and_evaluates_without_placeholder(official_fix
     command = ["--dataset", str(args.dataset), "--model", str(model), "--balanced",
                "--limit", "4", "--output", str(output), "--device", "cpu", "--dtype", "float32",
                "--prefill-chunk-size", "8", "--resume"]
-    main(command)
+    with patch("experiments.native_support.filter_features.head_profile", side_effect=AssertionError("head profile not needed by detector")):
+        main(command)
     result = json.loads(capsys.readouterr().out)
     evaluated = result["evaluation"]
     assert result["evaluation_performed_by_this_stage"] is True
     assert evaluated["status"] == "evaluated"
     assert evaluated["methods"]["routing_imbalance"]["all_error"]["positives"] == 2
     assert evaluated["methods"]["routing_imbalance"]["all_error"]["auroc"] is not None
-    assert "route_state_filter" in evaluated["methods"]
+    assert set(evaluated["methods"]) == {"routing_imbalance", "attention_displacement", "entropy"}
+    assert result["state_fitting"] is False
     assert (output / "annotations.json").is_file()
     with patch("state_audit.model.load_model", side_effect=AssertionError("GPU load forbidden")):
         main(command + ["--query-chunk-size", "3", "--compress-cache"])

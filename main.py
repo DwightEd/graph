@@ -5,7 +5,7 @@ import sys
 HELP = """Usage: python main.py COMMAND [arguments]
 
   flow             Resampled claim pairs: head interactions, repair and persistence
-  support          Native routing, causal states and direct risk fusion; cached CPU scoring
+  support          Per-token routing and entropy detection; score cached data, evaluate once
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis

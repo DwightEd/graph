@@ -1,4 +1,4 @@
-"""Native capture -> causal routing estimates -> frozen-score evaluation."""
+"""Native capture -> per-token observations -> frozen-score evaluation."""
 
 import argparse
 import json
@@ -137,7 +137,11 @@ def evaluate_saved(args):
     from .state_model import evaluate_state_model
     from .state_readout import DIRECTORY as READOUT_DIRECTORY
     from .state_readout import evaluate_readout
+    from .token_detection import DIRECTORY as TOKEN_DIRECTORY
+    from .token_detection import evaluate_detection
 
+    if (args.output / TOKEN_DIRECTORY / "summary.json").exists():
+        return evaluate_detection(args.output, args.annotations)
     if (args.output / FUSION_DIRECTORY / f"w{args.window}" / "summary.json").exists():
         return evaluate_fusion(args.output, args.annotations, args.window)
     if (args.output / READOUT_DIRECTORY / f"w{args.window}" / "summary.json").exists():
@@ -177,12 +181,16 @@ def main(argv=None):
         from .state_model import run_state_model
         result = run_state_model(args.output, read_json(args.output / "settings.json"),
                                  args.annotations, args.window, args.reference_output)
-    elif args.stage in ("score", "optimize"):
+    elif args.stage == "optimize":
         result = run_optimization(args.output, read_json(args.output / "settings.json"), args.annotations, args.window)
+    elif args.stage == "score":
+        from .token_detection import run_detection
+        result = run_detection(args.output, read_json(args.output / "settings.json"), args.annotations)
     else:
         settings = prepare(args)
         run_capture(args, settings)
-        result = run_optimization(args.output, settings, args.annotations, args.window)
+        from .token_detection import run_detection
+        result = run_detection(args.output, settings, args.annotations)
     print(json.dumps(result, ensure_ascii=False))
 
 

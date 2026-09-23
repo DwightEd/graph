@@ -16,14 +16,18 @@
 ## 研究与运行约定
 
 修改代码前读取 `iclr/CODING_GUIDELINES.md` 与 `iclr/MECHANISM_FIRST.md`。
-当前原生前向检测是 `experiments/native_support`；先读 `iclr/JOINT_STATE_DESIGN.md`。
+当前原生前向检测是 `experiments/native_support`；先读 `iclr/TOKEN_DETECTION.md`。
+默认run/score是逐token的固定R/A/H检测，不执行消融、分段、参考拟合或融合。
+不能把检测以复杂机制审计为前提，不能把恢复原始基线包装为新AUROC提升。
+原始R为固定主分数，A/H独立评价；旧实验显式调用，不串入默认检测。
+修改历史联合状态模型时读 `iclr/JOINT_STATE_DESIGN.md`。
 联合模型的四答阴性结果及后续协议见 `iclr/STATE_READOUT_VALIDATION.md`。
 32答结果与当前直接风险融合见 `iclr/DIRECT_RISK_FUSION.md`；修改融合前先读。
 普通均值保留为基线，其四答优势没有在32答推广；v5去收缩也没有超过v4。
 `--stage fuse` 复用已有外部参考和v4缓存，不加载LLM；主对照为原路由与仅路由状态。
 v6通过冻结参考分位直接读出当前A/H和路由状态风险；不使用自然标签拟合，不将分位称为幻觉概率。
 融合评价须同时看AUROC/AP、补回错误与新增正常告警；没有自然成绩不宣称融合有效。
-`--stage model` 为多观测切换状态候选；默认 optimize 及 v3 保留，定义见 `iclr/ROUTE_FILTER_DESIGN.md`。
+`--stage model` 为历史多观测切换状态候选；optimize/v3仅显式运行，定义见 `iclr/ROUTE_FILTER_DESIGN.md`。
 v4的R固定风险方向，A/熵参与状态长度推断；不能把统计切换称作语义重锚，不能把状态均值称作幻觉概率。
 按同样本 AUROC/AP 优化，保留原路由与普通因果均值；没有自然成绩不宣称滤波有效。
 `iclr/NATIVE_ROUTE_REDESIGN.md` 保留 v2 历史基线定义。

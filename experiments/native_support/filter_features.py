@@ -14,7 +14,7 @@ READ_FIELDS = (
 )
 
 
-def extract_features(response, directory, evidence):
+def extract_features(response, directory, evidence, include_profile=True):
     prompt = response["prompt_length"]
     count = len(response["token_ids"]) - prompt
     collected = []
@@ -24,9 +24,10 @@ def extract_features(response, directory, evidence):
         verify_position(arrays, response, target)
         magnitude = np.sqrt(np.maximum(arrays["edge_value_energy"], 0))
         measured = route_scores(arrays["attention"], magnitude, arrays["group_ids"], prompt, evidence)
-        profile = head_profile(magnitude, arrays["group_ids"], prompt, evidence)
-        collected.append({**measured, "head_profile": profile, "entropy": arrays["entropy"],
-                          "ledger_error": arrays["ledger_error"]})
+        measured.update(entropy=arrays["entropy"], ledger_error=arrays["ledger_error"])
+        if include_profile:
+            measured["head_profile"] = head_profile(magnitude, arrays["group_ids"], prompt, evidence)
+        collected.append(measured)
     result = {name: np.stack([row[name] for row in collected]) for name in collected[0]}
     result.update(all_token_ids=np.asarray(response["token_ids"]),
                   source_mask=np.asarray(evidence) if evidence is not None else np.empty(0, bool),
@@ -35,9 +36,9 @@ def extract_features(response, directory, evidence):
     return result
 
 
-def cached_features(response, raw_directory, cache_path, evidence, fields=None):
+def cached_features(response, raw_directory, cache_path, evidence, fields=None, include_profile=True):
     if not cache_path.is_file():
-        features = extract_features(response, raw_directory, evidence)
+        features = extract_features(response, raw_directory, evidence, include_profile)
         write_arrays(cache_path, **features)
         return features
     if fields is None:
