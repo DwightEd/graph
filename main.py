@@ -8,6 +8,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   support          Per-token routing and entropy detection; score cached data, evaluate once
   dynamics         Offline head/source responses, unlabelled state fitting and token AUROC/AP
   transport        Signed source provenance through native attention, residual and FFN value paths
+  transport-pack   Compact existing value-path captures for head and temporal audit; CPU only
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis
@@ -26,7 +27,10 @@ def main(argv=None):
         print(HELP)
         return
     command, arguments = argv[0], argv[1:]
-    if command in ("support", "dynamics", "transport"):
+    if command == "transport-pack":
+        from experiments.native_support.transport_pack import main as run
+        run(arguments)
+    elif command in ("support", "dynamics", "transport"):
         from pathlib import Path
         sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
         if command == "transport":

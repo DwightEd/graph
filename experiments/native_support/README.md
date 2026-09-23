@@ -9,6 +9,7 @@
 | `main.py transport --stage score` | 复用 value-path 缓存读出 | 不加载模型 |
 | `main.py transport --stage evaluate` | 只评价保存的分数 | 不加载模型 |
 | `main.py transport --stage audit` | 只读旧 source_transport 预算结果 | 不重算图/状态 |
+| `main.py transport-pack` | 打包当前 value_transport 的逐头、来源与时间审计数据 | CPU；不加载模型 |
 | `main.py dynamics` | 独立历史状态模型与其审计 | 显式调用，非新方法依赖 |
 
 ## 来源传递
@@ -31,6 +32,29 @@ python -u main.py transport --stage run --output outputs/native_support_ragtruth
 旧 source_transport/state_dynamics 缓存保持不动；旧 detached-KV 数组不含完整根来源，不能直接转换。
 首次每答一个完整前向及多次独立候选反向；之后 `--stage score` 只读缓存。
 SDPA 与 FFN checkpoint 控制显存；默认 gradient-batch=1，可明确调大。没有真实 8B/24GB 实测承诺。
+
+## 已完成采集：直接打包
+
+在项目根目录和现有 research 环境中运行，不需要下载额外脚本：
+
+```bash
+git pull --ff-only origin main
+python -u main.py transport-pack \
+  --output outputs/native_support_ragtruth4 \
+  --archive value_transport_head_review.zip
+```
+
+上传项目根目录的 `value_transport_head_review.zip`。输入目录必须已有完整采集和
+`settings.json`、`annotations.json`；此命令不启动模型、不改分数或原始文件。
+输出文件已存在时不覆盖；再次打包可明确更换 `--archive` 文件名。
+
+全部层/头、候选 ID、正负作用、FFN 作用、根归因、账本和评分均保留。
+完整 attention/value-energy 替换为精确的逐头来源组质量与消息范数总量；额外保存每头
+最强的 8 个历史 key、完整历史质量及 top-8 保留质量。没有历史时保存空边，不伪造端点。
+这不是完整历史边图。`audit_pack_schema.json` 记录省略范围及 key/query/target 对齐。
+
+当前熵、平滑和动态状态的实际范围，以及下一步设计见
+[VALUE_PATH_STATE_REVIEW.md](../../iclr/VALUE_PATH_STATE_REVIEW.md)。
 
 ## 原始基线与数据准备
 
