@@ -35,12 +35,17 @@ def extract_features(response, directory, evidence):
     return result
 
 
-def cached_features(response, raw_directory, cache_path, evidence):
+def cached_features(response, raw_directory, cache_path, evidence, fields=None):
     if not cache_path.is_file():
         features = extract_features(response, raw_directory, evidence)
         write_arrays(cache_path, **features)
         return features
-    features = read_arrays(cache_path)
+    if fields is None:
+        features = read_arrays(cache_path)
+    else:
+        with np.load(cache_path, allow_pickle=False) as saved:
+            names = tuple(dict.fromkeys((*fields, "all_token_ids", "source_mask")))
+            features = {name: saved[name] for name in names}
     mask = np.asarray(evidence) if evidence is not None else np.empty(0, bool)
     if not np.array_equal(features["all_token_ids"], response["token_ids"]):
         raise ValueError(f"{response['id']}: routing feature token IDs differ from saved input")

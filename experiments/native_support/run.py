@@ -16,7 +16,7 @@ EXAMPLE = Path(__file__).parent / "examples" / "prefixes.json"
 
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=("prepare", "run", "score", "optimize", "model", "readout", "validate", "compare", "evaluate"), default="run")
+    parser.add_argument("--stage", choices=("prepare", "run", "score", "optimize", "model", "readout", "fuse", "validate", "compare", "evaluate"), default="run")
     parser.add_argument("--input", type=Path, default=EXAMPLE)
     parser.add_argument("--output", type=Path, default=Path("outputs/native_support_v1"))
     parser.add_argument("--model")
@@ -26,7 +26,7 @@ def arguments(argv=None):
     parser.add_argument("--query-chunk-size", type=int, default=8, help="Causal query rows per GPU forward; execution setting, safe to change on resume")
     parser.add_argument("--compress-cache", action="store_true", help="Compress token NPZ files to save disk space at the cost of CPU time")
     parser.add_argument("--window", type=int, default=16, help="Causal routing window; default retained from prior temporal code")
-    parser.add_argument("--reference-output", type=Path, help="Independent cached reference for --stage model; default excludes each target source from input cohort")
+    parser.add_argument("--reference-output", type=Path, help="Independent cached reference for model/fuse; fuse defaults to the path saved by model")
     parser.add_argument("--annotations", type=Path, help="Evaluation only: response ID -> binary token labels")
     parser.add_argument("--dataset", type=Path, help="Official RAGTruth directory; prepare input and annotations automatically")
     parser.add_argument("--task", choices=("QA", "Summary", "Data2txt"), default="QA")
@@ -48,10 +48,10 @@ def arguments(argv=None):
         parser.error("limit must be positive; balanced pilot needs an even limit of at least two")
     if args.stage == "prepare" and args.dataset is None:
         parser.error("prepare requires --dataset pointing to the official RAGTruth directory")
-    if args.dataset is not None and args.stage in ("score", "optimize", "model", "readout", "compare", "evaluate"):
+    if args.dataset is not None and args.stage in ("score", "optimize", "model", "readout", "fuse", "compare", "evaluate"):
         parser.error("--dataset prepares new inputs: use --stage prepare or run, with a new output directory")
-    if args.reference_output is not None and args.stage != "model":
-        parser.error("--reference-output is only used by --stage model")
+    if args.reference_output is not None and args.stage not in ("model", "fuse"):
+        parser.error("--reference-output is only used by --stage model or fuse")
     if args.stage == "validate":
         if args.dataset is None or args.exclude_output is None:
             parser.error("validate requires --dataset and --exclude-output")
@@ -129,6 +129,8 @@ def run_score(output, settings):
 def evaluate_saved(args):
     from .comparison import DIRECTORY, evaluate_existing
     from .evaluate import evaluate
+    from .fusion import DIRECTORY as FUSION_DIRECTORY
+    from .fusion import evaluate_fusion
     from .optimize import DIRECTORY as FILTER_DIRECTORY
     from .optimize import evaluate_optimization
     from .state_model import DIRECTORY as STATE_DIRECTORY
@@ -136,6 +138,8 @@ def evaluate_saved(args):
     from .state_readout import DIRECTORY as READOUT_DIRECTORY
     from .state_readout import evaluate_readout
 
+    if (args.output / FUSION_DIRECTORY / f"w{args.window}" / "summary.json").exists():
+        return evaluate_fusion(args.output, args.annotations, args.window)
     if (args.output / READOUT_DIRECTORY / f"w{args.window}" / "summary.json").exists():
         return evaluate_readout(args.output, args.annotations, args.window)
     if (args.output / STATE_DIRECTORY / f"w{args.window}" / "summary.json").exists():
@@ -160,6 +164,9 @@ def main(argv=None):
     elif args.stage == "readout":
         from .state_readout import run_readout
         result = run_readout(args.output, args.annotations, args.window)
+    elif args.stage == "fuse":
+        from .fusion import run_fusion
+        result = run_fusion(args.output, args.annotations, args.window, args.reference_output)
     elif args.stage == "prepare":
         settings = prepare(args)
         result = {"status": "prepared", "responses": len(settings["responses"]),

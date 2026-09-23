@@ -1,10 +1,33 @@
-# 原生路由与多观测切换状态
+# 原生路由、状态估计与直接风险融合
 
 ## 当前结论与下一步入口
 
-四答真实 RAGTruth 结果：普通均值 AUROC/AP=0.779200/0.191355，joint_state=0.756062/0.170401。
-联合模型尚无有效增益。当前有限修正只去掉最终读出中的直接先验收缩，保留原分段与所有旧分数。
-方法和扩展验证协议见 [STATE_READOUT_VALIDATION](../../iclr/STATE_READOUT_VALIDATION.md)。
+32答真实 RAGTruth 结果：原路由 AUROC/AP=0.711589/0.185622；仅路由状态=0.716870/0.227373；
+联合状态=0.713602/0.215573；去收缩读出=0.712972/0.213283。
+四答的均值优势没有推广，联合观测和去收缩尚未证明增量。
+
+当前候选 `risk_envelope`：保留仅路由状态，把当前注意力和熵直接纳入风险读出。
+三项用固定外部无标签参考转成来源等权分位，再取最大值；不相加重复证据，也不按金标边界切换。
+**v6 尚无自然 AUROC；这是待验证的直接融合候选。** 设计、已知失败及完整公式见
+[DIRECT_RISK_FUSION](../../iclr/DIRECT_RISK_FUSION.md)。
+
+```bash
+git pull --ff-only origin main
+python -u main.py support --stage fuse \
+  --output outputs/native_support_validation32/test
+```
+
+复用刚跑过的32答及16个参考source，不加载大模型，不重算目标状态，不重跑全量数据。
+新结果写入 `outputs/native_support_validation32/test/risk_fusion_v6/w16/`：
+`report.html` 看排名和逐词分位；`complementarity.json` 看补检与误报；
+`alarm_changes.csv` 包含全部告警变化及首错/片段起点。95%参考分位阈值不等于正常词FPR=5%。
+`--stage evaluate` 优先评价同窗口已完成的v6。原始路由、仅路由状态、均值和v4/v5均保留。
+已有32答现在是开发集，后续不能将反复调试该批结果称为独立确认。
+
+## 历史读出与首次采集
+
+下面的 validate 是首次采集命令，当前32答已经完成时无需重跑。
+历史方法和扩展验证协议见 [STATE_READOUT_VALIDATION](../../iclr/STATE_READOUT_VALIDATION.md)。
 
 ```bash
 # 现有四答：只读 v4 小缓存，比较收缩前后，不运行模型。
@@ -22,7 +45,8 @@ python -u main.py support --stage validate \
 `outputs/native_support_validation32/test/state_readout_v5/w16/report.html`。
 验证按固定 seed 选 source，不按正负标签平衡；参考/测试/已检查 source 分离。
 `--prepare-only` 仅准备；删掉该标志即可继续，保留 `--resume` 复用已采集文件。
-`--stage evaluate` 优先评价对应窗口已完成的 v5。新读出效果尚未得到自然验证。
+不存在 v6 时，`--stage evaluate` 优先评价对应窗口已完成的 v5。
+v5 已在32答验证，总体 AUROC/AP 未超过 v4；阴性结果保留。
 
 ## 统一模型候选
 
@@ -57,7 +81,8 @@ python -u main.py support --stage model \
 | `responses/0000/scores.npz` | 全部检测分数；`run_posterior[t,n-1]`、三维 `state_mean` 等 |
 | `tokens.csv` / `onsets.csv` / `recovery.csv` | 逐词轨迹、起点及错误结束后的正常词排名 |
 
-固定主候选 `joint_state`；主要比较基线 `route_mean` 已在四答达到 AUROC 0.779200。
+v4的固定候选为 `joint_state`，其预注册基线为 `route_mean`；四答的优势未在32答推广。
+v6以仅路由状态和原始路由为主要比较对象，不覆盖v4的历史协议。
 `route_state` 用完全相同的概率结构但只观察 R，检验 A/熵的贡献。
 `instant_state` 使用同一参考先验逐词独立更新，检验时间推断的增量。
 原 R、A、熵均保留，没有根据测试标签调整融合权重或自动选择方法。
@@ -300,6 +325,9 @@ ID 与回答 token 必须完全对应，1 表示幻觉；评分阶段不读取�
 
 - `state_audit/native_forward.py`：因果分块采集、增量 KV、逐 token 兼容缓存。
 - `state_audit/forward_ledger.py`：GPU 批量原生竞争词、消息投影和残差账本。
+- `risk_envelope.py`：来源等权经验分位与直接风险融合。
+- `fusion.py` / `fusion_inputs.py`：外部参考、复用状态分数、评分落盘后再评价。
+- `fusion_audit.py` / `fusion_report.py`：固定参考阈值的补检、误报和精确AUROC贡献。
 - `filtering.py`：逐头分区、状态距离、因果滤波及两种直接对照。
 - `filter_features.py`：首次提取和重复使用紧凑缓存。
 - `optimize.py`：冻结评分后评价；`filter_evaluation.py` / `filter_report.py`：增量和恢复报告。
@@ -315,8 +343,7 @@ ID 与回答 token 必须完全对应，1 表示幻觉；评分阶段不读取�
 针对性验证：
 
 ```bash
-python -m pytest -q tests/test_native_support.py tests/test_native_support_evaluation.py \
-  tests/test_native_routes.py tests/test_route_filter.py
+python -m pytest -q tests/test_risk_fusion.py tests/test_joint_state.py tests/test_state_readout.py
 ```
 
 CPU 小型随机 Llama 的软件测试不能证明真实模型的检测有效性。

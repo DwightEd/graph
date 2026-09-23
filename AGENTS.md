@@ -18,9 +18,13 @@
 修改代码前读取 `iclr/CODING_GUIDELINES.md` 与 `iclr/MECHANISM_FIRST.md`。
 当前原生前向检测是 `experiments/native_support`；先读 `iclr/JOINT_STATE_DESIGN.md`。
 联合模型的四答阴性结果及后续协议见 `iclr/STATE_READOUT_VALIDATION.md`。
-普通均值仍是有效基线；新 readout 仅检验直接先验收缩，不能宣称已恢复多信号融合。
+32答结果与当前直接风险融合见 `iclr/DIRECT_RISK_FUSION.md`；修改融合前先读。
+普通均值保留为基线，其四答优势没有在32答推广；v5去收缩也没有超过v4。
+`--stage fuse` 复用已有外部参考和v4缓存，不加载LLM；主对照为原路由与仅路由状态。
+v6通过冻结参考分位直接读出当前A/H和路由状态风险；不使用自然标签拟合，不将分位称为幻觉概率。
+融合评价须同时看AUROC/AP、补回错误与新增正常告警；没有自然成绩不宣称融合有效。
 `--stage model` 为多观测切换状态候选；默认 optimize 及 v3 保留，定义见 `iclr/ROUTE_FILTER_DESIGN.md`。
-R 固定风险方向，A/熵参与状态长度推断；不能把统计切换称作语义重锚，不能把状态均值称作幻觉概率。
+v4的R固定风险方向，A/熵参与状态长度推断；不能把统计切换称作语义重锚，不能把状态均值称作幻觉概率。
 按同样本 AUROC/AP 优化，保留原路由与普通因果均值；没有自然成绩不宣称滤波有效。
 `iclr/NATIVE_ROUTE_REDESIGN.md` 保留 v2 历史基线定义。
 旧 `iclr/NATIVE_SUPPORT_DESIGN.md` 是 v1 对照定义，不再作为唯一检测主线；历史结果不能省略。

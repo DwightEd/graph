@@ -7,6 +7,7 @@ from tqdm import tqdm
 from .filter_features import cached_features
 from .optimize import DIRECTORY as FEATURE_DIRECTORY
 from .optimize import methods_for
+from .routes import ROUTE_SCORES
 from .source_regions import compile_regions, region_mask
 
 COVARIANCE_RIDGE = 1e-6
@@ -22,7 +23,8 @@ def load_features(output, settings):
     for index, response in enumerate(tqdm(settings["responses"], desc="joint state inputs")):
         features = cached_features(response, output / "responses" / f"{index:04d}",
                                    output / FEATURE_DIRECTORY / "features" / f"{index:04d}.npz",
-                                   region_mask(regions, response))
+                                   region_mask(regions, response),
+                                   fields=(*ROUTE_SCORES, "entropy", "ledger_error", "target", "query", "token_id"))
         observations = np.column_stack((features[baseline], features[attention], np.log1p(features["entropy"])))
         records.append({"response": response, "features": features, "observations": observations})
     return records, regions, baseline, attention
