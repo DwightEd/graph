@@ -1,8 +1,4 @@
-"""Numerical primitives for the offline state-dynamics DESIGN, not a detector.
-
-No natural-data extractor, model fitting protocol or hallucination classifier is
-implemented here. See iclr/NATIVE_STATE_DYNAMICS.md for the explicit boundary.
-"""
+"""Numerical primitives used by offline native-response dynamics."""
 
 import numpy as np
 from scipy.special import logsumexp, xlogy
@@ -152,6 +148,8 @@ def mode_posteriors(log_emission, transition, initial):
             log_transition + log_emission[position + 1] + backward[position + 1], axis=1
         ) - normalizers[position + 1]
     joint = forward + backward
-    smoothed = np.exp(joint - logsumexp(joint, axis=1, keepdims=True))
+    log_smoothed = joint - logsumexp(joint, axis=1, keepdims=True)
+    smoothed = np.exp(log_smoothed)
     return {"filtered": np.exp(forward), "smoothed": smoothed,
+            "log_filtered": forward, "log_smoothed": log_smoothed,
             "log_likelihood": float(normalizers.sum())}

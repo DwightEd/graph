@@ -42,7 +42,7 @@ DIRECTORY = "state_dynamics"
 
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--stage", choices=("prepare", "capture", "fit", "score", "evaluate", "run"), default="run")
+    parser.add_argument("--stage", choices=("prepare", "capture", "fit", "score", "evaluate", "audit", "run"), default="run")
     parser.add_argument("--output", type=Path, required=True, help="Existing support settings/manifest directory")
     parser.add_argument("--reference-output", type=Path, help="Disjoint natural training sources; labels never read by fit")
     parser.add_argument("--device", default="cuda:0")
@@ -354,6 +354,12 @@ def main(argv=None):
         prepare(args)
         return
     settings = read_json(args.output / "settings.json")
+    if args.stage == "audit":
+        from .dynamics_audit import audit
+
+        with threadpool_limits(limits=args.cpu_threads):
+            print(json.dumps(audit(args.output, args.reference_output, args.annotations)))
+        return
     if args.stage == "evaluate":
         protocol = read_json(args.output / DIRECTORY / "scoring_protocol.json")
         rows = [row for index, response in enumerate(settings["responses"])

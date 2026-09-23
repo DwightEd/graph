@@ -118,6 +118,9 @@ def test_capture_train_score_evaluate_and_resume_without_label_fitting(tmp_path,
     observation = read_arrays(directory / "capture/0000/observations.npz")
     np.testing.assert_array_equal(observation["future_query_count"], [8, 7, 6, 5, 4, 3, 2, 1, 0, 0])
     assert observation["profile"].shape[1:3] == (3, 4)
+    from test_dynamics_audit import verify_cached_audit
+
+    verify_cached_audit(target)
     labels = read_json(target / "annotations.json")
     labels["test-a"]["labels"] = [1, 1, 0, 0, 0, 0, 1, 0, 0, 1]
     write_json(target / "annotations.json", labels)

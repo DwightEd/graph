@@ -109,3 +109,36 @@ evaluate优先读取已完成的token_detection，不因目录中残留旧融合
 - run.py：统一入口；teaching/state_audit：模型采集和存储。
 
 本轮只做针对性软件验证，不要求重跑全量模型，也不将软件测试当作真实检测成绩。
+
+## Dynamics 缓存数据核验
+
+```bash
+python -u main.py dynamics --stage audit \
+  --output outputs/native_support_validation32/test
+```
+
+参考目录自动读取 `state_dynamics/scoring_protocol.json`；缓存移动后可用
+`--reference-output` 指定。读取已保存 observations、scores 和参考模型；不加载 LLM、
+不读巨大的逐 token 原始导数文件、不训练、不改原分数。标注仅用于诊断统计。
+
+输出：`state_dynamics/audit/`，同时打包为 `state_dynamics/audit_data.zip`。
+
+| 文件 | 数据 |
+|---|---|
+| checks.csv / coverage.csv / evaluation_recheck.csv | token/query/来源/形状/有限值/标签对齐；原 AUROC/AP 复算 |
+| posterior_replay.csv / score_distribution.csv | 已存 emission 后验重放误差；0/1、同分、分位数 |
+| metrics.csv / mode_bins.csv | 总体、首错、延续、前后半段、H 组内 AUROC/AP；各模式区间真假计数 |
+| ranking.csv / precision_recall.csv / top_budget.csv | 每个 token 排名范围、前置正常数、AP 贡献；完整 PR 阈值；固定预算检出量 |
+| ap_parts.csv / ap_deltas.csv | 按回答、阶段、前后半段分解全局 AP 与损失；每种划分的贡献之和等于总体 AP/差值 |
+| auc_pairs.csv | 错误所在半段 × 正常所在半段的 AUROC 对数与贡献 |
+| features.csv / projection.csv | 全部头通道、FFN 坐标及状态向量在正常/错误组的均值方差；H≥0.9 组内统计；投影能量损失 |
+| tokens.csv / event_windows.csv | 完整 token、上下文、分数、观测；标注起点±8位置的实际数据 |
+| representation_schema.json / representations/NNNN.npz | 真实字段、坐标顺序、维度；逐 token 的 z/v/u/h、联合观测、后验及 log 后验 |
+| model.json / summary.json | 已训练转移矩阵、模式持续长度、协方差谱、训练信息、核验状态 |
+
+默认一个预测 token 对应 z(8)、v(16)，联合观测为 24 维；u(8)、h(16) 为输入，
+不是每个 head 一个独立真假分类器。层/头原始 28 通道及 FFN 向量先拼接，再使用参考集 SVD。
+训练目标是无标签序列似然，主风险仍为 H 后验。本轮不加二分类器。
+`state_log_odds` 仅重放已存 emission 检查概率舍入丢失的顺序，不重新拟合、选方向或覆盖主方法。
+固定预算遇同分输出随机打散的期望和上下界，不用 token 顺序偷偷打破同分。
+H≥0.9 是固定诊断分层；特征差异是 token 加权描述统计，不是独立样本显著性或机制证明。
