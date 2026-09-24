@@ -10,7 +10,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   transport        Signed source provenance through native attention, residual and FFN value paths
   transport-pack   Compact existing value-path captures for head and temporal audit; CPU only
   transport-state  Score/evaluate cached choice states and auto-pack; --stage pack reuses completed results
-  transport-functions  Automatic phrase contrasts, native FFN transfer and RMS separation; auto-pack
+  transport-functions  Original-answer native FFN/RMS audit; no generated banks; coverage + auto-pack
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis

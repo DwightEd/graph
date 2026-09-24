@@ -1,101 +1,113 @@
-"""Functional contrast data: finite-bank meaning changes and native message paths."""
+"""Original-answer measurements and explicit coverage; no semantic acceptance gate."""
 
 import numpy as np
-from scipy.special import logsumexp
 
-from state_audit.functional_readout import (
-    contrast_effects, contrast_weights, distribution_change, entropy_partition,
+from state_audit.storage import read_arrays, read_json, write_csv, write_json
+
+TOKEN_FIELDS = (
+    "log_probability", "entropy", "pre_ffn_log_probability", "pre_ffn_entropy",
+    "rms_direct_margin", "rms_rescale_margin", "rms_margin_delta",
+    "rms_identity_error", "rms_native_rounding_error", "rms_foil_ids",
+    "rms_scale_before", "rms_scale_after",
 )
-from state_audit.storage import read_arrays, read_json, write_arrays, write_csv, write_json
-
-CHANNELS = ("head_total", "head_residual", "head_ffn_mediated")
-
-
-def summarize_bank(directory, source_groups, source_count):
-    bank = read_json(directory / "bank.json")
-    if bank != read_json(directory / "captured_bank.json"):
-        raise ValueError(f"{directory}: candidate bank changed after capture")
-    captures = [read_arrays(directory / f"candidate_{index:02d}.npz")
-                for index in range(len(bank["candidates"]))]
-    for candidate, captured in zip(bank["candidates"], captures):
-        if not np.array_equal(candidate["token_ids"], captured["candidate_ids"]):
-            raise ValueError(f"{directory}: captured candidate token IDs differ")
-    scores = np.array([row["log_probability"].sum(dtype=float) for row in captures])
-    previous = np.array([row["pre_ffn_log_probability"].sum(dtype=float) for row in captures])
-    names = [candidate["group"] for candidate in bank["candidates"]]
-    groups = np.array([list(dict.fromkeys(names)).index(name) for name in names])
-    summary = {**entropy_partition(scores, groups), **distribution_change(previous, scores, groups),
-        "max_rms_identity_error": max(float(np.abs(row["rms_identity_error"]).max()) for row in captures),
-        "max_rms_rounding_error": max(float(np.abs(row["rms_native_rounding_error"]).max()) for row in captures),
-        "max_head_reconstruction_error": max(float(row["head_reconstruction_error"].max()) for row in captures),
-        "candidate_lengths": [len(row["candidate_ids"]) for row in captures],
-        "candidate_log_scores": scores.tolist(), "group_names": list(dict.fromkeys(names))}
-    write_json(directory / "readout.json", summary)
-    contrasts = []
-    for negative in range(1, len(summary["group_names"])):
-        weights = contrast_weights(scores, groups, 0, negative)
-        name = "observed_vs_" + summary["group_names"][negative]
-        contrasts.extend(write_contrast(directory, name, weights, scores, captures, source_groups, source_count))
-    # Wording control uses the same observed meaning, without changing truth conditions.
-    weights = np.zeros(len(scores))
-    weights[:2] = (1, -1)
-    contrasts.extend(write_contrast(directory, "observed_wording", weights, scores,
-                                    captures, source_groups, source_count))
-    return summary, contrasts
+TOKEN_COLUMNS = ("response_id", "source_id", "start", "stop", "target", "query", "token_id", "token")
+COVERAGE_COLUMNS = ("response_id", "target", "token_id", "token", "planned", "captured")
+FFN_COLUMNS = ("response_id", "start", "stop", "target", "layer", "ffn_write_sensitivity")
 
 
-def write_contrast(directory, name, weights, scores, captures, source_groups, source_count):
-    roots = contrast_effects(weights, [row["prefix_root_sensitivity"] for row in captures])
-    prefix_groups = np.asarray(source_groups[:len(roots)])
-    arrays = dict(candidate_weights=weights, prefix_root_sensitivity=roots,
-                  prefix_group_ids=prefix_groups)
-    # Boundary query is identical across branches; later branch coordinates differ.
-    for channel in CHANNELS:
-        arrays[channel] = contrast_effects(weights, [row[channel][0] for row in captures])
-    group_count = source_count + 3
-    arrays["root_positive"] = np.bincount(prefix_groups, weights=np.maximum(roots, 0), minlength=group_count)
-    arrays["root_negative"] = np.bincount(prefix_groups, weights=np.maximum(-roots, 0), minlength=group_count)
-    positive, negative = weights > 0, weights < 0
-    arrays["log_odds"] = np.asarray(logsumexp(scores[positive]) - logsumexp(scores[negative]))
-    write_arrays(directory / f"contrast_{name}.npz", **arrays)
-    rows = []
-    for layer in range(arrays["head_total"].shape[0]):
-        for head in range(arrays["head_total"].shape[1]):
-            for group in range(arrays["head_total"].shape[2]):
-                rows.append(dict(contrast=name, layer=layer, head=head, group=group,
-                    **{channel: float(arrays[channel][layer, head, group]) for channel in CHANNELS}))
-    return rows
+def load_unit(directory, identity, response, sources):
+    """Check cache coordinates, not textual meaning; a mismatch is an error, not a skip."""
+    complete = read_json(directory / "complete.json")
+    if any(complete[key] != value for key, value in identity.items()):
+        raise ValueError(f"{directory}: completed interval differs from plan")
+    row = read_arrays(directory / "observed.npz")
+    prompt, start, stop = response["prompt_length"], identity["start"], identity["stop"]
+    targets = response["token_ids"][prompt + start:prompt + stop]
+    expected_groups = sources["group_ids"][:prompt + start]
+    expected_groups += [len(sources["blocks"]) + 3] * (stop - start - 1)
+    if not np.array_equal(row["target_ids"], targets):
+        raise ValueError(f"{directory}: observed target IDs differ")
+    if not np.array_equal(row["query"], np.arange(prompt + start - 1, prompt + stop - 1)):
+        raise ValueError(f"{directory}: prediction positions differ")
+    if not np.array_equal(row["key_group_ids"], expected_groups):
+        raise ValueError(f"{directory}: key groups differ")
+    if row["head_total"].shape[0] != stop - start:
+        raise ValueError(f"{directory}: not every observed query was captured")
+    if not all(np.isfinite(array).all() for array in row.values()):
+        raise ValueError(f"{directory}: nonfinite measurement")
+    return complete, row
 
 
-def write_observed_tokens(directory, response, bank, identity):
-    """Native observed branch only; candidate branches never inherit natural labels."""
-    capture = read_arrays(directory / "candidate_00.npz")
-    rows = []
-    for offset, target in enumerate(range(bank["start"], bank["stop"])):
-        rows.append(dict(**identity, target=target,
-            token=response["token_text"][response["prompt_length"] + target],
-            **{name: float(capture[name][offset]) for name in (
-                "rms_direct_margin", "rms_rescale_margin", "rms_margin_delta",
-                "rms_identity_error", "rms_native_rounding_error", "pre_ffn_entropy")},
-            log_probability=float(capture["log_probability"][offset])))
-    return rows
+def unit_rows(identity, response, captured):
+    tokens, ffn = [], []
+    common = {key: identity[key] for key in ("response_id", "source_id", "start", "stop")}
+    for offset, target in enumerate(range(identity["start"], identity["stop"])):
+        position = response["prompt_length"] + target
+        tokens.append(dict(**common, target=target, query=position - 1,
+            token_id=response["token_ids"][position], token=response["token_text"][position],
+            **{name: captured[name][offset].item() for name in TOKEN_FIELDS}))
+        for layer, value in enumerate(captured["ffn_write_sensitivity"][offset]):
+            ffn.append(dict(response_id=response["id"], start=identity["start"], stop=identity["stop"],
+                            target=target, layer=layer, ffn_write_sensitivity=float(value)))
+    return tokens, ffn
+
+
+def coverage_rows(settings, plan, completed):
+    rows, summaries = [], []
+    for index in plan["response_indices"]:
+        response = settings["responses"][index]
+        prompt = response["prompt_length"]
+        size = len(response["token_ids"]) - prompt
+        planned, measured = np.zeros(size, dtype=bool), np.zeros(size, dtype=bool)
+        for identity in plan["units"]:
+            if identity["response_index"] == index:
+                planned[identity["start"]:identity["stop"]] = True
+        for identity in completed:
+            if identity["response_index"] == index:
+                measured[identity["start"]:identity["stop"]] = True
+        summaries.append(dict(response_id=response["id"], answer_tokens=size,
+            planned_tokens=int(planned.sum()), captured_tokens=int(measured.sum()),
+            unselected_tokens=int((~planned).sum()),
+            missing_targets=np.flatnonzero(planned & ~measured).tolist()))
+        for target in range(size):
+            rows.append(dict(response_id=response["id"], target=target,
+                token_id=response["token_ids"][prompt + target],
+                token=response["token_text"][prompt + target],
+                planned=bool(planned[target]), captured=bool(measured[target])))
+    return rows, summaries
 
 
 def report(destination, settings):
-    units, heads, tokens = [], [], []
-    for directory in sorted((destination / "responses").glob("*/unit_*")):
+    if read_json(destination / "protocol.json")["version"] != 3:
+        raise ValueError("Native v3 report requires a v3 output directory; v1/v2 files stay unchanged")
+    plan = read_json(destination / "plan.json")
+    units, tokens, ffn = [], [], []
+    for identity in plan["units"]:
+        parent = destination / "responses" / f"{identity['response_index']:04d}"
+        directory = parent / f"unit_{identity['start']:06d}"
         if not (directory / "complete.json").is_file():
             continue
-        identity = read_json(directory / "complete.json")
         response = settings["responses"][identity["response_index"]]
-        sources = read_json(directory.parent / "sources.json")
-        summary, rows = summarize_bank(directory, sources["group_ids"], len(sources["blocks"]))
-        units.append({**identity, **summary})
-        heads.extend({**identity, **row} for row in rows)
-        tokens.extend(write_observed_tokens(directory, response, read_json(directory / "bank.json"), identity))
+        complete, captured = load_unit(directory, identity, response, read_json(parent / "sources.json"))
+        token_rows, ffn_rows = unit_rows(identity, response, captured)
+        units.append({**complete, "log_probability_sum": float(captured["log_probability"].sum(dtype=float)),
+            **{f"max_abs_{name}": float(np.abs(captured[name]).max()) for name in
+               ("rms_identity_error", "rms_native_rounding_error", "head_reconstruction_error")}})
+        tokens.extend(token_rows)
+        ffn.extend(ffn_rows)
+    coverage, responses = coverage_rows(settings, plan, units)
+    write_json(destination / "coverage.json", responses)
+    write_csv(destination / "coverage.csv", coverage, list(COVERAGE_COLUMNS))
     write_json(destination / "units.json", units)
-    if heads:
-        write_csv(destination / "head_contrasts.csv", heads, list(heads[0]))
-        write_csv(destination / "observed_tokens.csv", tokens, list(tokens[0]))
-    return dict(completed_units=len(units), observed_tokens=len(tokens),
-                detector_evaluation=False, new_auroc=None)
+    write_csv(destination / "observed_tokens.csv", tokens, list(TOKEN_COLUMNS + TOKEN_FIELDS))
+    write_csv(destination / "ffn_layers.csv", ffn, list(FFN_COLUMNS))
+    expected = sum(row["planned_tokens"] for row in responses)
+    status = "no_selected_tokens" if not expected else "partial_capture"
+    if expected and len(tokens) == expected:
+        status = "captured"
+    return dict(status=status, planned_units=len(plan["units"]), completed_units=len(units),
+        expected_tokens=expected, observed_tokens=len(tokens), missing_tokens=expected - len(tokens),
+        unselected_tokens=sum(row["unselected_tokens"] for row in responses),
+        candidate_generation=False, semantic_filter=False, labels_used_for_measurement=False,
+        gradient_objective="observed_unit_log_probability_sum; not_token_truth_score",
+        detector_evaluation=False, new_auroc=None)

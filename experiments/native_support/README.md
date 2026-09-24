@@ -126,19 +126,19 @@ python -u main.py support --stage score --output outputs/native_support_validati
 
 ## 完整短语功能审计
 
-新增 `main.py transport-functions`：自动构造同义、事实条件、对象绑定对照，
-沿原生 Q/K/RMS/FFN 导数读取来源与历史作用；分别保存残差直达和 FFN 转化通道、
-最终 RMS 缩放。复用 teaching 适配器，不改变既有分数，不训练真假分类器。
+`main.py transport-functions` v3：直接采集所选原始回答的所有 token，
+删除候选生成、语义自评和拒绝门槛。按原文区间总目标读取原生 Q/K/RMS/FFN 导数，
+保存所有物理头、来源、残差与 FFN 通道、最终 RMS 缩放及逐 token 覆盖报告。
+过长单元拆块，不跳过。复用 teaching 适配器，不改变既有检测分数。
 
 ```bash
-git pull --ff-only origin main
-python -u main.py transport-functions \
-  --input outputs/native_support_ragtruth4 \
-  --output outputs/native_support_ragtruth4/function_audit_v1 \
-  --response-ids 12219 --device cuda:0 --dtype bfloat16
+git pull --ff-only origin main &&
+bash experiments/native_support/run_functions.sh
 ```
 
-首次需要模型补采集；续跑加 `--resume`。之后 `--stage report --output ...`
-仅重算读出并自动打包。结果旁生成 `function_audit_v1_review.zip`。
+默认回答 12219，结果写入 `outputs/native_support_ragtruth4/function_audit_v3`，
+自动续跑并生成同级 `function_audit_v3_review.zip`。旧 v1/v2 不动。
+首次需要模型补采集，没有 prepare 阶段。之后 `--stage report --output ...`
+只重算报告并打包，不加载模型；中断时明确记录缺测，不补零。
 小模型数值验证通过，未运行真实 8B，也没有新的自然数据 AUROC。
 方法、字段、成本和边界见 [FUNCTIONAL_PHRASE_TRANSPORT](../../iclr/FUNCTIONAL_PHRASE_TRANSPORT.md)。

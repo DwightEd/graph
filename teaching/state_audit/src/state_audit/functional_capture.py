@@ -1,8 +1,8 @@
 """Whole-phrase native sensitivity with residual and FFN transfer channels.
 
-Each objective is a phrase log probability, not a token hallucination score.
-Q/K and RMS derivatives remain native. Branches run sequentially; no dense
-layer-by-source Jacobian is materialized.
+Each objective sums log probabilities over one saved original-answer interval.
+Its gradients may include later targets inside that interval. They are neither
+independent token gradients nor hallucination scores. Q/K and RMS stay native.
 """
 
 import numpy as np
@@ -96,14 +96,14 @@ def layer_effects(model, layer, record, gradients, rotary, queries, masks):
     return result
 
 
-def capture_candidate(model, prefix_ids, candidate_ids, groups, group_count, *, all_head_queries=True):
-    """Shared-prefix roots and per-branch query/head/group observations."""
-    tokens = prefix_ids + candidate_ids
+def capture_observed(model, prefix_ids, target_ids, groups, group_count):
+    """One native forward/backward for an exact interval of the original answer."""
+    tokens = prefix_ids + target_ids
     prefix_length = len(prefix_ids)
     device = model.native.device
     queries = torch.arange(prefix_length - 1, len(tokens) - 1, device=device)
-    targets = torch.tensor(candidate_ids, device=device)
-    key_groups = torch.tensor(groups + [group_count] * (len(candidate_ids) - 1), device=device)
+    targets = torch.tensor(target_ids, device=device)
+    key_groups = torch.tensor(groups + [group_count] * (len(target_ids) - 1), device=device)
     masks = torch.nn.functional.one_hot(key_groups, group_count + 1).float()
     with torch.inference_mode(False), torch.enable_grad(), frozen_parameters(model):
         embeddings = model.native.model.embed_tokens(model.input_ids(tokens[:-1])).detach().requires_grad_(True)
@@ -116,22 +116,23 @@ def capture_candidate(model, prefix_ids, candidate_ids, groups, group_count, *, 
                 sites.extend((record["head"], record["ffn"]))
             gradients = torch.autograd.grad(logp.sum(), sites)
             with torch.no_grad():
-                return collect_candidate(model, embeddings, records, gradients, logits, logp,
-                                         queries, targets, masks, prefix_length, all_head_queries)
+                return collect_observed(model, embeddings, records, gradients, logits, logp,
+                                        queries, targets, masks, prefix_length, key_groups)
 
 
-def collect_candidate(model, embeddings, records, gradients, logits, logp,
-                      queries, targets, masks, prefix_length, all_head_queries):
+def collect_observed(model, embeddings, records, gradients, logits, logp,
+                     queries, targets, masks, prefix_length, key_groups):
     positions = torch.arange(embeddings.shape[1], device=embeddings.device)[None]
     rotary = model.native.model.rotary_emb(embeddings, positions)
     roots = (embeddings.float() * gradients[0].float()).sum(-1)[0]
-    head_queries = queries if all_head_queries else queries[:1]
-    result = dict(log_probability=numpy(logp), candidate_ids=numpy(targets), query=numpy(queries),
-                  head_query=numpy(head_queries),
+    distribution = logits.log_softmax(-1)
+    result = dict(log_probability=numpy(logp), target_ids=numpy(targets), query=numpy(queries),
+                  key_group_ids=numpy(key_groups),
+                  entropy=numpy(-(distribution.exp() * distribution).sum(-1)),
                   prefix_root_sensitivity=numpy(roots[:prefix_length]),
-                  branch_root_sensitivity=numpy(roots[prefix_length:]))
+                  within_unit_root_sensitivity=numpy(roots[prefix_length:]))
     layers = [layer_effects(model, layer, record, gradients[1 + 2 * layer:3 + 2 * layer],
-                           rotary, head_queries, masks) for layer, record in records.items()]
+                           rotary, queries, masks) for layer, record in records.items()]
     result.update({name: np.stack([row[name] for row in layers], axis=1) for name in layers[0]})
     result["ffn_write_sensitivity"] = np.stack([
         numpy((gradients[2 + 2 * layer][0, queries].float()

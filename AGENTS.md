@@ -41,10 +41,12 @@ FFN 已进入根归因，不把反向写入自动判为反证据，不把它重�
 `main.py transport-state` 复用当前缓存做条件来源/历史状态审计，协议见
 `iclr/CONDITIONAL_CHOICE_STATE.md`。`risk` 默认保持 raw_route，新增候选不自动替代。
 `main.py transport-functions` 是独立的原生短语功能审计，协议见
-`iclr/FUNCTIONAL_PHRASE_TRANSPORT.md`。自动语义对照按完整短语计算原生梯度，
+`iclr/FUNCTIONAL_PHRASE_TRANSPORT.md`。v3 直接采集原始回答，不生成候选或用语义判断过滤原文。
+按记录的原文区间总 log probability 计算梯度，不能冒称独立逐 token 真值梯度。
+过长单元拆块不跳过；标题、标点、重复文本均测量，coverage 报告计划、实际与未选择 token。
 Q/K、RMS、SwiGLU 不采用旧 value-path 归因规则；根敏感性不是守恒账本。
 保留 residual/FFN-mediated 通道与末层 RMS 缩放，不能把任一负值直接叫反事实证据。
-自动分组来自同一观察模型，不是独立语义真值；不据此宣称已解耦全部信息或提高 AUROC。
+删除旧自动 bank 提案/评判链；v1/v2 的失败数据保留，不据原生敏感性宣称已解耦语义或提高 AUROC。
 跨历史词的状态递推是额外检测假设，不能声称原生反传跨越了离散采样。
 保留候选实际 ID、未解析尾部、来源支持/反对及当前头读取；不把来源根作用当作新读取事件。
 保留用户缓存、原始结果及研究证据，不为美化改写历史；不全量重跑。
