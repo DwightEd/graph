@@ -13,9 +13,15 @@
 | `main.py transport-state` | 条件来源读出、历史状态候选及同缓存对比 | CPU；不加载模型 |
 | `main.py transport-functions` | 原始回答的原生 FFN/RMS 审计，无候选生成或语义筛选 | 首次补采集；report 不加载模型 |
 | `main.py transport-observable` | 输出分布响应、多头结构条件异常检测与评价 | 首次补采集；score 不加载模型 |
+| `main.py transport-contrast` | 原回答有/无来源、完整/局部历史的四条件似然检测 | 首次分块前向；score/evaluate 不加载模型 |
 | `main.py dynamics` | 独立历史状态模型与其审计 | 显式调用，非新方法依赖 |
 
 ## 来源传递
+
+最新四条件候选：`bash experiments/native_support/run_contrast.sh`。
+复用已有 observable 目录或轻量 ZIP 的原 token、来源位置与基线，新增前向但不新增 Jacobian。
+公式、显存策略、分阶段命令和结果文件见 [EVIDENCE_CONTRAST.md](../../iclr/EVIDENCE_CONTRAST.md)。
+这是无真假标签训练的独立检测候选，尚无新的真实8B检测收益声明。
 
 详细公式、论文依据、近似范围和数据轴见 [VALUE_PATH_TRANSPORT.md](../../iclr/VALUE_PATH_TRANSPORT.md)。
 采用 DecompX/ALTI-Logit 的来源分解与输出相关读出思想；保留原生 attention、残差与 FFN 值路径。
