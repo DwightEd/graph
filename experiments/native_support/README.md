@@ -211,3 +211,19 @@ python -u main.py transport-readout \
 `feature_schema.json`、协议与模型，并自动生成同级 `_review_light.zip`（不包含模型文件）。
 这是监督表示诊断，不是无监督收益，也不证明事实支持。四答实测未获得整体改进。
 设计、已涵盖/缺失的信息及实际数字见 [SUPERVISED_RESPONSE_READOUT](../../iclr/SUPERVISED_RESPONSE_READOUT.md)。
+
+## 无标签当前／持续双状态读出
+
+```bash
+git pull --ff-only origin main &&
+bash experiments/native_support/run_dual.sh
+```
+
+CPU复用已有完整observable缓存，无新前向、无分类器训练；每个物理头按其他来源的
+同位置组校正方向，再分别计算当前状态和窗口持续状态，两者取max作为冻结候选。
+当前、持续、组合与同窗口标量基线全部独立评价；因果和离线对照并列，未来范围明确记录。
+默认输出 `outputs/native_support_ragtruth4/dual_heads_v1` 及同级 `_review_light.zip`。
+输出目录须为新目录；追加 `--output 路径` 可改名。`--reference 路径` 可使用独立来源参考。
+轻量包只支持 `--features scalar`，不能据其结果宣称完成了逐头方法的验证。
+输出包括首错/延续、逐答指标、固定排名预算的span覆盖/延迟、正常run误报和曲线。
+协议及四答实际标量结果见 [DUAL_STATE_READOUT](../../iclr/DUAL_STATE_READOUT.md)。

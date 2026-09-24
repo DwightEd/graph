@@ -13,6 +13,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   transport-functions  Original-answer native FFN/RMS audit; no generated banks; coverage + auto-pack
   transport-observable  Native cumulative distribution response and conditional structured anomaly
   transport-readout  Supervised source-held-out probes of cached responses; no model forward
+  transport-dual    Unlabelled current/persistent head readout; cache only, causal and offline
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis
@@ -34,10 +35,12 @@ def main(argv=None):
     if command == "transport-pack":
         from experiments.native_support.transport_pack import main as run
         run(arguments)
-    elif command in ("support", "dynamics", "transport", "transport-state", "transport-functions", "transport-observable", "transport-readout"):
+    elif command in ("support", "dynamics", "transport", "transport-state", "transport-functions", "transport-observable", "transport-readout", "transport-dual"):
         from pathlib import Path
         sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
-        if command == "transport-readout":
+        if command == "transport-dual":
+            from experiments.native_support.dual_state.run import main as run
+        elif command == "transport-readout":
             from experiments.native_support.readout.run import main as run
         elif command == "transport-observable":
             from experiments.native_support.observable_run import main as run
