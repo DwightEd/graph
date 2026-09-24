@@ -233,3 +233,11 @@ CPU复用已有完整observable缓存，无新前向、无分类器训练；每�
 轻量包只支持 `--features scalar`，不能据其结果宣称完成了逐头方法的验证。
 输出包括首错/延续、逐答指标、固定排名预算的span覆盖/延迟、正常run误报和曲线。
 协议及四答实际标量结果见 [DUAL_STATE_READOUT](../../iclr/DUAL_STATE_READOUT.md)。
+
+## 四条件缓存的同片段复核
+
+已完成 `run_contrast.sh` 后，运行 `bash experiments/native_support/run_contrast_analysis.sh`。
+仅CPU读缓存，输出到独立 `evidence_contrast_aggregation_v1` 并自动打包。
+完整/局部/对称来源分数与原路由、attention、熵采用完全相同的片段均值；
+同时报告token排序、单元等权评价、单元内部定位、整单元误报和离线分数可用时间。
+四答实测与边界见 [结果记录](../../iclr/EVIDENCE_CONTRAST_AGGREGATION.md)。

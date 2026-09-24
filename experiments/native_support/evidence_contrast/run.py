@@ -90,9 +90,9 @@ def finish(args, settings, protocol):
 
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, help="Existing observable directory or its light/full ZIP")
+    parser.add_argument("--input", type=Path, help="Observable input for capture; completed contrast directory/ZIP for analyze")
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--stage", choices=("run", "capture", "score", "evaluate", "pack"), default="run")
+    parser.add_argument("--stage", choices=("run", "capture", "score", "evaluate", "pack", "analyze"), default="run")
     parser.add_argument("--max-unit-tokens", type=int, default=64)
     parser.add_argument("--window", type=int, default=16)
     parser.add_argument("--prefill-chunk-size", type=int, default=256)
@@ -108,13 +108,17 @@ def arguments(argv=None):
         parser.error("Token windows, chunks and cpu-threads must be positive")
     if args.bootstrap < 0:
         parser.error("bootstrap must be nonnegative")
-    if args.stage in ("run", "capture") and args.input is None:
-        parser.error("--input is required for capture")
+    if args.stage in ("run", "capture", "analyze") and args.input is None:
+        parser.error("--input is required for capture or analysis")
     return args
 
 
 def main(argv=None):
     args = arguments(argv)
+    if args.stage == "analyze":
+        from .analyze import analyze
+        print(json.dumps(analyze(args), ensure_ascii=False))
+        return
     if args.stage == "pack":
         print(json.dumps(dict(review_archive=pack(args.output))))
         return

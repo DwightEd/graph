@@ -1,5 +1,9 @@
 # 原文来源／历史四条件检测
 
+2026-09-24结果续接：四答缓存已返回并完成CPU复核。新增独立 `--stage analyze`，
+比较三路来源作用与全部同片段基线；具体结果、定位限制和一键命令见
+[EVIDENCE_CONTRAST_AGGREGATION.md](EVIDENCE_CONTRAST_AGGREGATION.md)。以下原型设计记录保留。
+
 实现日期：2026-09-24。入口：`main.py transport-contrast`。
 这是研究方案第一阶段的独立采集/评分原型；没有真假分类器，没有新8B检测收益声明。
 
