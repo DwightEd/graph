@@ -11,7 +11,8 @@
 | `main.py transport --stage audit` | 只读旧 source_transport 预算结果 | 不重算图/状态 |
 | `main.py transport-pack` | 打包当前 value_transport 的逐头、来源与时间审计数据 | CPU；不加载模型 |
 | `main.py transport-state` | 条件来源读出、历史状态候选及同缓存对比 | CPU；不加载模型 |
-| `main.py transport-functions` | 完整短语的语义/表达对照与原生 FFN 条件传递 | 首次补采集；report 不加载模型 |
+| `main.py transport-functions` | 原始回答的原生 FFN/RMS 审计，无候选生成或语义筛选 | 首次补采集；report 不加载模型 |
+| `main.py transport-observable` | 输出分布响应、多头结构条件异常检测与评价 | 首次补采集；score 不加载模型 |
 | `main.py dynamics` | 独立历史状态模型与其审计 | 显式调用，非新方法依赖 |
 
 ## 来源传递
@@ -142,3 +143,24 @@ bash experiments/native_support/run_functions.sh
 只重算报告并打包，不加载模型；中断时明确记录缺测，不补零。
 小模型数值验证通过，未运行真实 8B，也没有新的自然数据 AUROC。
 方法、字段、成本和边界见 [FUNCTIONAL_PHRASE_TRANSPORT](../../iclr/FUNCTIONAL_PHRASE_TRANSPORT.md)。
+
+## 原生输出响应与条件状态检测
+
+借鉴残差动力学的累计 Jacobian 视角，`transport-observable` 保留真实完整上下文，
+测量每个头/来源消息对整个输出分布的随机 Fisher 响应。FFN 与残差路径分开，
+不把原词梯度正负当作事实支持。条件核比较完整多头响应 Gram 和读取结构，
+用其他来源中熵/位置等条件相近的状态作无标签参考；前驱状态进入参考权重。
+这是检测候选，不是论文全谱/社区复现，也不是事实正确概率。
+
+```bash
+git pull --ff-only origin main &&
+python -m pip install -r requirements.txt &&
+bash experiments/native_support/run_observable.sh
+```
+
+默认只补采集已有四答的所有 token，结果为
+`outputs/native_support_ragtruth4/observable_transport_v1`，自动生成同级 `_review.zip`。
+含 AUROC/AP、within-answer、首错/延续、算子和转移 CSV、逐头来源 NPZ、参考邻居及曲线图。
+首次每个 token 默认8个独立VJP；之后 `--stage score --output ... --resume` 不加载模型。
+已有标量缓存不能恢复这些方向；没有扩大为全量数据实验，也没有真实8B效果提升声明。
+完整公式、成本和适用范围见 [OBSERVABLE_TRANSPORT](../../iclr/OBSERVABLE_TRANSPORT.md)。

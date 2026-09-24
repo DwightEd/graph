@@ -234,3 +234,7 @@ X 为保留结构的观测，C 为阶段/位置等上下文；这是下一步候
 - [VALUE_PATH_TRANSPORT.md](VALUE_PATH_TRANSPORT.md)
 - [CONDITIONAL_CHOICE_STATE.md](CONDITIONAL_CHOICE_STATE.md)
 - [FUNCTIONAL_PHRASE_TRANSPORT.md](FUNCTIONAL_PHRASE_TRANSPORT.md)
+
+后续实现记录：`transport-observable` 已实现输出分布响应及来源隔离的条件核候选，
+见 [OBSERVABLE_TRANSPORT.md](OBSERVABLE_TRANSPORT.md)。它落实了部分条件状态比较，
+尚未识别语义阶段、解耦事实与表达或取得自然数据的新收益；上文实验账本保持原样。
