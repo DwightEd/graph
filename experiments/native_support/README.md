@@ -159,8 +159,22 @@ bash experiments/native_support/run_observable.sh
 ```
 
 默认只补采集已有四答的所有 token，结果为
-`outputs/native_support_ragtruth4/observable_transport_v1`，自动生成同级 `_review.zip`。
-含 AUROC/AP、within-answer、首错/延续、算子和转移 CSV、逐头来源 NPZ、参考邻居及曲线图。
+`outputs/native_support_ragtruth4/observable_transport_v1`，自动生成同级 `_review_light.zip`。
+轻量包含 AUROC/AP、标注快照、逐 token 分数、算子和转移 CSV、参考邻居及曲线图。
+逐头来源 `token_*.npz` 和结构矩阵 `state.npz` 保留在原目录，不放进默认上传包。
 首次每个 token 默认8个独立VJP；之后 `--stage score --output ... --resume` 不加载模型。
 已有标量缓存不能恢复这些方向；没有扩大为全量数据实验，也没有真实8B效果提升声明。
 完整公式、成本和适用范围见 [OBSERVABLE_TRANSPORT](../../iclr/OBSERVABLE_TRANSPORT.md)。
+
+已有结果过大时，只重新打包，无需重新采集、评分或安装依赖：
+
+```bash
+git pull --ff-only origin main &&
+python -u main.py transport-observable --stage pack \
+  --output outputs/native_support_ragtruth4/observable_transport_v1
+```
+
+上传 `outputs/native_support_ragtruth4/observable_transport_v1_review_light.zip`。
+终端报告实际 `archive_bytes`、排除体积及缺失结果文件；包内 `review_manifest.json`
+列明保留/排除文件。原来的 `_review.zip` 不变。显式 `--pack-mode full` 才打完整包。
+四答真实结果及退步原因见 [OBSERVABLE_FAILURE_REVIEW](../../iclr/OBSERVABLE_FAILURE_REVIEW.md)。

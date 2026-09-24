@@ -2,7 +2,8 @@
 
 实现入口：`python main.py transport-observable`。
 本文件区分外部研究依据、我们自己的检测设计和已完成的软件验证。
-没有自然数据上的新 AUROC/AP；不把候选自动替换为主基线。
+初次实现时未运行自然数据；用户随后提供的四答结果见
+[OBSERVABLE_FAILURE_REVIEW](OBSERVABLE_FAILURE_REVIEW.md)。候选退步，不替换主基线。
 
 ## 1. 外部依据及其适用范围
 
@@ -161,7 +162,13 @@ python -u main.py transport-observable --stage score \
 - `responses/*/state.npz`：实际进入结构核的矩阵、读取和条件变量。
 - `responses/*/neighbors.json`：参考回答/位置、权重、距离、有效邻居数及上下文距离。
 - `responses/*/trajectory.png`：读取、状态变化与检测分数曲线。
-- 自动生成旁边的 `observable_transport_v1_review.zip`，包含以上数据和标注快照。
+- 默认生成旁边的 `observable_transport_v1_review_light.zip`，保留结果、标注快照、
+  scores、neighbors、sources、CSV 和曲线图；不包含逐 token 原始张量与 `state.npz`。
+  包内 manifest 记录包含/排除的文件、体积和缺失结果；没有重建原始响应所需的全部数据。
+
+已有结果只需 `--stage pack --output 原目录`，不需要 input、resume 或 GPU；
+不重跑模型、评分、评价或诊断，不修改旧结果。终端打印实际压缩字节数。
+`--pack-mode full` 显式生成完整 `_review.zip`，默认轻量包不会覆盖已有完整包。
 
 raw_route/raw_attention/entropy 从同一新采集重新测量；与旧缓存可能有浮点差异。
 独立报告 observable_route、原始路由、相同离线窗口均值，默认 risk 仍为 raw_route。
@@ -176,6 +183,8 @@ raw_route/raw_attention/entropy 从同一新采集重新测量；与旧缓存可
 完整 capture→score→evaluate→打包和改变标签不改变分数。
 既有 v3 FFN 小模型测试同时回归。
 
-尚未运行本候选的真实8B/RAGTruth；不能给出提高了AUROC、已解耦语义或已证明因果机制的结论。
+本地没有运行真实8B/RAGTruth；用户提供的结果显示 conditional AUROC .679388，
+低于同采集 raw .755425 和 offline mean .784580。
+不能给出提高了AUROC、已解耦语义或已证明因果机制的结论。
 研究上的增量是“沿原生计算路径定义消息的输出可观测性，再对多头读取/传递状态作条件比较”。
 Fisher、随机估计和条件核本身都是数学工具，不应单独包装成新算法贡献。

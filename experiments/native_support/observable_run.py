@@ -11,7 +11,7 @@ from tqdm import tqdm
 from state_audit.storage import read_arrays, read_json, start_stage, write_arrays, write_csv, write_json
 
 from .choice_cache import CaptureReader
-from .functional_run import pack
+from .observable_pack import pack
 from .inputs import validate_tokenizer
 from .observable_state import (
     CHANNELS, CONTEXT, ROLES, context_features, observed_transitions, score_queries, state_features,
@@ -225,7 +225,7 @@ def finish(args, settings, rows):
     write_json(args.output / "summary.json", summary)
     return dict(output=str(args.output), scored_tokens=len(rows), evaluation_status=evaluation["status"],
                 all_error={name: value["all_error"] for name, value in evaluation.get("methods", {}).items()},
-                review_archive=pack(args.output, args.archive))
+                **pack(args.output, args.archive, args.pack_mode))
 
 
 def arguments(argv=None):
@@ -244,6 +244,8 @@ def arguments(argv=None):
     parser.add_argument("--cpu-threads", type=int, default=4)
     parser.add_argument("--annotations", type=Path)
     parser.add_argument("--archive", type=Path)
+    parser.add_argument("--pack-mode", choices=("light", "full"), default="light",
+                        help="Light review excludes raw token captures/state matrices; no rescoring")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args(argv)
     if min(args.rank, args.chunk_tokens, args.neighbors, args.cpu_threads) < 1:
@@ -256,7 +258,7 @@ def arguments(argv=None):
 def main(argv=None):
     args = arguments(argv)
     if args.stage == "pack":
-        print(json.dumps(dict(review_archive=pack(args.output, args.archive))))
+        print(json.dumps(pack(args.output, args.archive, args.pack_mode)))
         return
     import torch
     torch.set_num_threads(args.cpu_threads)

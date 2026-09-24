@@ -238,3 +238,9 @@ X 为保留结构的观测，C 为阶段/位置等上下文；这是下一步候
 后续实现记录：`transport-observable` 已实现输出分布响应及来源隔离的条件核候选，
 见 [OBSERVABLE_TRANSPORT.md](OBSERVABLE_TRANSPORT.md)。它落实了部分条件状态比较，
 尚未识别语义阶段、解耦事实与表达或取得自然数据的新收益；上文实验账本保持原样。
+
+后续四答评价已返回：conditional .679388/.193758，observable_route .753070/.205930，
+raw .755425/.199692，offline mean .784580/.193649（AUROC/AP，同一新采集）。
+条件异常候选未胜过方向性基线；不能把“保留基线作对照”称为将先验纳入主评分。
+相邻响应距离远大于读取距离，需先核验表示是否能够表达保持，再引入复杂转移模型。
+具体数据分母、解释边界与轻量审核文件见 [OBSERVABLE_FAILURE_REVIEW](OBSERVABLE_FAILURE_REVIEW.md)。

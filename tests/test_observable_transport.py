@@ -144,9 +144,12 @@ def test_one_command_capture_score_evaluate_and_pack(model, tmp_path):
     np.testing.assert_array_equal(scores["risk"], scores["raw_route"])
     neighbors = read_json(destination / "responses" / "0000" / "neighbors.json")
     assert all("0" not in row["reference_response"] for row in neighbors)
-    with ZipFile(destination.with_name("observable_review.zip")) as archive:
+    with ZipFile(destination.with_name("observable_review_light.zip")) as archive:
         assert "evaluation.json" in archive.namelist()
-        assert "responses/0000/token_000000.npz" in archive.namelist()
+        assert "responses/0000/scores.npz" in archive.namelist()
+        assert "responses/0000/neighbors.json" in archive.namelist()
+        assert "responses/0000/token_000000.npz" not in archive.namelist()
+        assert "responses/0000/state.npz" not in archive.namelist()
     # Changing truth labels cannot change already captured/scored observations.
     for annotation in labels.values():
         annotation["labels"] = [1, 0, 0]
