@@ -302,3 +302,15 @@ CPU复用已有完整observable缓存，无新前向、无分类器训练；每�
 该缓存无混合单元，尚不能验证内部定位；用户随后返回v2输入完整=.866748/.341315，
 去图=.881694/.367112，图未显示检测收益。
 公式、组件职责与完整失败结果见 [UNIFIED_TOKEN_READOUT.md](../../iclr/UNIFIED_TOKEN_READOUT.md)。
+
+## 来源与历史状态中介实验
+
+`python main.py transport-mediation --mode cache --input 完整carrier目录或ZIP --output 新目录`
+用已有单边/联合删除检验Shapley来源分配和多头非加性交互。v1四答主候选单元均值
+AUROC/AP=.846881/.333163，未胜local来源均值；没有据此选参或替换主线。
+
+`bash experiments/native_support/run_source_mediation.sh` 运行新的原生四世界采集：
+保持位置的source-key屏蔽，再独立交换prompt状态与历史K/V，计算受控效应和交互。
+多目标query按矩阵分块重放，所有头保留到原生W_O；没有逐token反传或图风险平滑。
+原生8B自然检测尚未运行；软件测试不能冒充检测结果。运行、公式、成本与失败记录见
+[SOURCE_HISTORY_MEDIATION.md](../../iclr/SOURCE_HISTORY_MEDIATION.md)。

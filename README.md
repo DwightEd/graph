@@ -9,6 +9,12 @@
 可加 `--select-on-train`，按官方 train 来源留出开发集的 AUROC 选读出及权重；
 这是明确标记的标签选参结果，与固定无标签基线分开，不在 test 上选参。
 
+新增方法试验：[来源与历史状态中介](iclr/SOURCE_HISTORY_MEDIATION.md)。
+`transport-mediation --mode cache` 已在上传v1四答检验Shapley来源分配和多头非加性交互，
+没有超过local来源均值；完整失败数字保留。`bash experiments/native_support/run_source_mediation.sh`
+采集保持位置的prompt×历史K/V四世界，按矩阵块重放目标，检验直接条件作用和历史状态作用。
+新中介仅完成软件验证，尚无真实8B自然检测成绩；它不替换全量强基线。
+
 逐 token 联合读出：[token 来源、软单元约束与 TV 连续性](iclr/UNIFIED_TOKEN_READOUT.md)。
 `bash experiments/native_support/run_unified_token.sh` 复用已完成的 carrier v2 缓存，
 保留逐 token 来源观测，允许单元均值移动与内部跳变，用稀疏矩阵联合求解，无新增大模型采集。

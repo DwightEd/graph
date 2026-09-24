@@ -18,6 +18,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   transport-carriers  Select history messages, measure conditional deletion, save per-token vectors
   transport-unified  Source/routing graph readout; optional soft token readout with --token-readout; CPU only
   transport-benchmark  Full RAGTruth source-first token detection; all tasks/generators, grouped evaluation
+  transport-mediation  Test cached head interactions or native prompt/history-KV factorial effects
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis
@@ -39,10 +40,12 @@ def main(argv=None):
     if command == "transport-pack":
         from experiments.native_support.transport_pack import main as run
         run(arguments)
-    elif command in ("support", "dynamics", "transport", "transport-state", "transport-functions", "transport-observable", "transport-readout", "transport-dual", "transport-contrast", "transport-carriers", "transport-unified", "transport-benchmark"):
+    elif command in ("support", "dynamics", "transport", "transport-state", "transport-functions", "transport-observable", "transport-readout", "transport-dual", "transport-contrast", "transport-carriers", "transport-unified", "transport-benchmark", "transport-mediation"):
         from pathlib import Path
         sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
-        if command == "transport-benchmark":
+        if command == "transport-mediation":
+            from experiments.native_support.source_mediation.run import main as run
+        elif command == "transport-benchmark":
             from experiments.native_support.ragtruth_benchmark.run import main as run
         elif command == "transport-unified":
             from experiments.native_support.unified.run import main as run
