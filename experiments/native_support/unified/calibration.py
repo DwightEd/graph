@@ -7,11 +7,15 @@ def unit_values(values, units):
     return np.asarray([values[unit["start"]:unit["stop"]].mean() for unit in units])
 
 
-def observations(record):
+def observations(record, include_tokens=False):
     units = record["views"]["units"]
-    return dict(route=record["scores"]["raw_route"],
+    measured = dict(route=record["scores"]["raw_route"],
         local=unit_values(record["scores"]["source_local"], units),
         carrier=unit_values(record["scores"][record["carrier_score"]], units))
+    if include_tokens:
+        measured.update(local_token=record["scores"]["source_local"],
+                        carrier_token=record["scores"][record["carrier_score"]])
+    return measured
 
 
 def fit_distribution(values, sources):
@@ -25,10 +29,10 @@ def fit_distribution(values, sources):
     return dict(values=sorted_values, cumulative=np.r_[0., np.cumsum(weights[order])])
 
 
-def fit_scales(records):
-    measured = [observations(record) for record in records]
+def fit_scales(records, include_tokens=False):
+    measured = [observations(record, include_tokens) for record in records]
     result = {}
-    for name in ("route", "local", "carrier"):
+    for name in measured[0]:
         values = np.concatenate([row[name] for row in measured])
         sources = np.concatenate([np.repeat(record["response"]["source_id"], len(row[name]))
                                   for record, row in zip(records, measured)])
@@ -44,9 +48,14 @@ def transform(values, distribution):
 
 
 def channels(record, scales):
-    raw = observations(record)
+    raw = observations(record, include_tokens="local_token" in scales)
     calibrated = {name: transform(values, scales[name]) for name, values in raw.items()}
     unit_ids = record["scores"]["unit_id"]
     local, carrier = calibrated["local"][unit_ids], calibrated["carrier"][unit_ids]
-    return dict(route=calibrated["route"], local_anchor=local, carrier_anchor=carrier,
-                source_anchor=.5 * (local + carrier))
+    result = dict(route=calibrated["route"], local_anchor=local, carrier_anchor=carrier,
+                  source_anchor=.5 * (local + carrier))
+    if "local_token" in calibrated:
+        result.update(local_token=calibrated["local_token"], carrier_token=calibrated["carrier_token"])
+        result["source_token"] = .5 * (result["local_token"] + result["carrier_token"])
+        result["token_observation"] = .5 * (result["source_token"] + result["route"])
+    return result

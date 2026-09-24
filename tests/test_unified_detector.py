@@ -86,7 +86,8 @@ def test_whole_answer_graph_is_not_reported_as_an_online_onset_alarm():
 
 
 @pytest.mark.parametrize("mode", ["unit", "token"])
-def test_cpu_pipeline_both_native_cache_versions_label_isolation_and_complete_ablations(tmp_path, mode):
+@pytest.mark.parametrize("token_readout", [False, True])
+def test_cpu_pipeline_both_native_cache_versions_label_isolation_and_complete_ablations(tmp_path, mode, token_readout):
     source, capture, output = tmp_path / "input", tmp_path / "capture", tmp_path / "joint"
     pieces, annotations = make_contrast_input(source)
     class Tokenizer:
@@ -107,6 +108,8 @@ def test_cpu_pipeline_both_native_cache_versions_label_isolation_and_complete_ab
         assert name != "annotations.json"
         return original_json(reader, name)
     args = ["--input", str(archive), "--output", str(output)]
+    if token_readout:
+        args.append("--token-readout")
     with patch("state_audit.model.load_model", side_effect=AssertionError("CPU cache stage loaded model")), \
             patch.object(CaptureReader, "bytes", read_bytes), patch.object(CaptureReader, "json", read_json_without_truth):
         main(args)
@@ -120,6 +123,14 @@ def test_cpu_pipeline_both_native_cache_versions_label_isolation_and_complete_ab
     np.testing.assert_allclose(operator @ (first["unified"] - components["source_anchor"]), 0, atol=1e-14)
     np.testing.assert_array_equal(first["unified_unit_mean"], components["source_anchor"])
     metrics = read_json(output / "evaluation.json")["methods"]
+    if token_readout:
+        assert read_json(output / "protocol.json")["primary_candidate"] == "unified_token"
+        assert "unified_token_random_graph" in metrics
+        np.testing.assert_allclose(operator @ first["unified_token"],
+                                   operator @ first["unified_token_unit_mean"])
+        assert read_json(output / "within_unit.json")["status"] in ("evaluated", "unavailable_no_mixed_units")
+        row = read_json(output / "diagnostics.json")[0]["token_readout"]["unified_token"]
+        assert row["optimality_max_error"] < 1e-7
     assert {"unified", "unified_no_graph", "unified_random_graph", "unified_local_anchor",
             "source_consensus", "flat_fusion", "raw_route", "source_local_unit_mean"} <= set(metrics)
     for annotation in annotations.values():

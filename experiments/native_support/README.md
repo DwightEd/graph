@@ -18,6 +18,7 @@
 | `main.py transport-carriers --mode token` | 每个原 token 独立竞争词目标、条件选边与精确 query 删除 | 每 token 梯度及有限删除；score/evaluate 不加载模型 |
 | `main.py transport-carriers --stage position` | 单元内输出位置 exp 聚合的独立对照 | CPU缓存重算；不改 attention |
 | `main.py transport-unified` | 来源锚点、token路由偏差与有限效应图的统一约束读出 | CPU完整v1/v2缓存；无新增模型前向 |
+| `main.py transport-unified --token-readout` | 逐token来源与路由、软单元先验、TV连续性及图修正 | CPU完整v1/v2缓存；保留旧硬约束对照 |
 | `main.py dynamics` | 独立历史状态模型与其审计 | 显式调用，非新方法依赖 |
 
 ## 来源传递
@@ -278,3 +279,11 @@ CPU复用已有完整observable缓存，无新前向、无分类器训练；每�
 新增向量分量、原始边效应、尺度与方程误差都保存，全部评分后读标签并自动打包。
 上传v1缓存联合AUROC/AP=.877475/.356279，低于最强local来源单元均值，真实图未胜随机图。
 模型、设计取舍、完整实测和命令见 [UNIFIED_ROUTE_SOURCE.md](../../iclr/UNIFIED_ROUTE_SOURCE.md)。
+
+`bash experiments/native_support/run_unified_token.sh` 新增逐 token 读出，输出 `unified_token_v2`。
+来源作用的 token 秩直接进入观测；单元先验改成软均值惩罚；一阶 TV 允许单元内部跳变；
+图平滑相对于 token 来源观测的修正量。主候选为 `unified_token`，旧分数及固定组件消融保留。
+默认参数在本轮评价前冻结，CPU稀疏矩阵共同求解，评分全部完成后才读标签。
+实际上传 v1 缓存 .871621/.355191，未胜旧联合 .877475/.356279；去图 .879854/.357251。
+该缓存无混合单元，尚不能验证内部定位；新读出在用户 v2 完整缓存上待运行。
+公式、组件职责与完整失败结果见 [UNIFIED_TOKEN_READOUT.md](../../iclr/UNIFIED_TOKEN_READOUT.md)。

@@ -16,7 +16,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   transport-dual    Unlabelled current/persistent head readout; cache only, causal and offline
   transport-contrast  Frozen source/history four-condition likelihood; no truth-label training
   transport-carriers  Select history messages, measure conditional deletion, save per-token vectors
-  transport-unified  Joint source anchors, token routing and finite-effect graph readout; CPU cache only
+  transport-unified  Source/routing graph readout; optional soft token readout with --token-readout; CPU only
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis

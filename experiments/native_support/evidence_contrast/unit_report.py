@@ -91,7 +91,7 @@ def plot_comparison(output, evaluation, token_methods=TOKEN_METHODS):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     names = token_methods
-    figure, axes = plt.subplots(1, 2, figsize=(12, 5.5))
+    figure, axes = plt.subplots(1, 2, figsize=(14, max(5.5, .5 * len(names))))
     for axis, metric in zip(axes, ("auroc", "ap")):
         for offset, suffix, label in ((-.2, "", "Individual token"), (.2, "_unit_mean", "Same text-unit mean")):
             values = [evaluation["methods"][name + suffix]["all_error"][metric] for name in names]

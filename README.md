@@ -1,16 +1,19 @@
 # 原生来源传递检测与机制审计
 
-联合检测入口：[来源锚点、token 路由与有限效应图](iclr/UNIFIED_ROUTE_SOURCE.md)。
-`bash experiments/native_support/run_unified.sh` 直接复用已完成的 carrier v2 缓存，
-用稀疏矩阵联合求解每个回答的 token 分数，不增加大模型采集。
-来源视图、路由和图均进入主候选，固定组件消融一同评价。
-上传 v1 四答实测 .8775/.3563（AUROC/AP），尚未胜过最强 local 来源均值；v2 联合成绩待运行。
+逐 token 联合读出：[token 来源、软单元约束与 TV 连续性](iclr/UNIFIED_TOKEN_READOUT.md)。
+`bash experiments/native_support/run_unified_token.sh` 复用已完成的 carrier v2 缓存，
+保留逐 token 来源观测，允许单元均值移动与内部跳变，用稀疏矩阵联合求解，无新增大模型采集。
+上传 v1 四答实测 .8716/.3552（AUROC/AP），未胜过旧联合 .8775/.3563 或最强 local 来源均值；
+去图 .8799/.3573。保留失败结果，新读出尚无 v2 输入的自然数据实测。
+旧硬约束入口 `run_unified.sh` 保留，用户已返回其 v2 输入成绩 .8792/.3420；
+协议见 [UNIFIED_ROUTE_SOURCE.md](iclr/UNIFIED_ROUTE_SOURCE.md)。
 
 最新历史消息候选：[逐 token 的条件选择回溯](iclr/TOKEN_CONDITIONAL_CARRIERS.md)。
 `bash experiments/native_support/run_carriers_token.sh` 为每个原 token 固定竞争词，
 按双来源选择梯度筛边，再做精确 query 的有限删除；保存7190维/token的固定层头表征（32×32模型）。
 `bash experiments/native_support/run_carriers_position.sh` 仅CPU比较现有缓存的普通均值与 exp 位置权重。
-上传四答的 exp(β=1) 结果有取舍，未替换主评分；新版逐 token 采集尚无真实8B检测成绩。
+上传四答的 exp(β=1) 结果有取舍，未替换主评分；用户已返回 token v2 单独检测成绩，
+selected source 逐 token .6445/.1499，单元均值 .8446/.4241，详见逐 token 协议。
 
 当前候选：[来源分解与最终选择](iclr/VALUE_PATH_TRANSPORT.md)。依据 DecompX、ALTI-Logit、
 AttnLRP 及 Information Flow 的具体算法思想，将 prompt 来源沿原生值路径传播到最终候选差，
