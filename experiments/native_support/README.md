@@ -19,9 +19,23 @@
 | `main.py transport-carriers --stage position` | 单元内输出位置 exp 聚合的独立对照 | CPU缓存重算；不改 attention |
 | `main.py transport-unified` | 来源锚点、token路由偏差与有限效应图的统一约束读出 | CPU完整v1/v2缓存；无新增模型前向 |
 | `main.py transport-unified --token-readout` | 逐token来源与路由、软单元先验、TV连续性及图修正 | CPU完整v1/v2缓存；保留旧硬约束对照 |
+| `main.py transport-benchmark` | 全量RAGTruth来源优先token检测，按任务/生成器/split评价 | 直接前向采集；可CPU复用contrast/carrier缓存 |
 | `main.py dynamics` | 独立历史状态模型与其审计 | 显式调用，非新方法依赖 |
 
 ## 来源传递
+
+当前全量验证请运行：
+
+```bash
+bash experiments/native_support/run_ragtruth_all.sh
+```
+
+默认全部三个任务、全部生成器、train/test，无四答上限和正负平衡抽样。
+脚本沿用已上传四答中的模型/数据目录，可用 `MODEL`、`RAGTRUTH_DATASET` 覆盖。
+`--select-on-train` 可按train来源留出的开发集AUROC选择路由权重，结果明确标为标签选参，
+固定无标签基线保留；test不挑权重。该入口不依赖observable/carrier的反传与删边链。
+输出 `metrics_by_dataset.csv`、`metrics.csv`、`summary.json`、`datasets.png` 与轻量汇总ZIP。
+公式、运行阶段与当前实测见 [RAGTRUTH_SOURCE_FIRST.md](../../iclr/RAGTRUTH_SOURCE_FIRST.md)。
 
 四条件候选：`bash experiments/native_support/run_contrast.sh`。
 复用已有 observable 目录或轻量 ZIP 的原 token、来源位置与基线，新增前向但不新增 Jacobian。
@@ -285,5 +299,6 @@ CPU复用已有完整observable缓存，无新前向、无分类器训练；每�
 图平滑相对于 token 来源观测的修正量。主候选为 `unified_token`，旧分数及固定组件消融保留。
 默认参数在本轮评价前冻结，CPU稀疏矩阵共同求解，评分全部完成后才读标签。
 实际上传 v1 缓存 .871621/.355191，未胜旧联合 .877475/.356279；去图 .879854/.357251。
-该缓存无混合单元，尚不能验证内部定位；新读出在用户 v2 完整缓存上待运行。
+该缓存无混合单元，尚不能验证内部定位；用户随后返回v2输入完整=.866748/.341315，
+去图=.881694/.367112，图未显示检测收益。
 公式、组件职责与完整失败结果见 [UNIFIED_TOKEN_READOUT.md](../../iclr/UNIFIED_TOKEN_READOUT.md)。

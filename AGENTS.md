@@ -149,5 +149,25 @@ token来源秩直接与route联合；单元来源均值只作软先验，不再�
 稀疏ADMM整答求解；平台精确同分并核验KKT，禁止数值尾差制造平台内部排序。
 旧硬约束、输入基线、随机图和固定组件消融完整保留，全部评分后读标签。
 上传v1四答新主候选=.871621/.355191，未胜旧联合=.877475/.356279；去图=.879854/.357251。
-四答无混合单元，不能证明内部定位；新读出仅小模型贯通v2输入，尚无用户v2完整缓存实测。
+四答无混合单元，不能证明内部定位；用户已返回v2输入完整=.866748/.341315，
+去图=.881694/.367112、随机图=.872962/.343077。完整v2缓存尚未上传，不能说v2未运行。
 矩阵读出不等于已批量化原生逐token采集。新分数不是事实概率，也没有训7190维分类器。
+
+## 2026-09-24：AUROC优先与全量RAGTruth验证
+
+用户要求先提高token AUROC、确定方案并重构，随后在全部RAGTruth按数据集验证。
+`main.py transport-benchmark` 是当前全量主线，协议见 `iclr/RAGTRUTH_SOURCE_FIRST.md`。
+默认三任务、全部生成器、官方train/test、无limit和标签平衡；ID与覆盖显式保存，不静默截断。
+单元均值广播也是token输出/评价，但不代表内部定位；四答最强既有基线=.914856/.451496。
+主候选source_local_unit_mean保留；source单元秩加lambda倍单元内route秩偏差，
+固定系列lambda={0,.1,.25,.5,1}，无图/TV/selected来源混入。不能把更复杂方法默认叫优化成功。
+本轮上传v1缓存lambda=.25最高AUROC=.916049、AP=.401025；答内AUROC下降，
+仅为四答探索性增益，不据此把.25认定全量最优；没有全量8B自然成绩。
+可选--select-on-train在官方train内按source整体留出20%开发集，仅按其AUROC选读出及权重；
+池中同时保留full/pair来源均值与raw/offline route，避免强迫所有任务沿用QA的local先验。
+明确labels_used_for_selection=true、unsupervised=false，与固定无标签候选分开报告。
+禁止test调参、按test生成器选权重；检查train/test source互斥，记录开发source/response IDs。
+直接两次来源条件prefill+完整/局部重放；路由按原始物理头W_O/V范数公式，无反传、无逐边干预。
+默认只落盘紧凑观测；--save-heads可保存逐层头范数/attention质量，不冒称保留完整逐key图。
+score冻结全部分数后停止；evaluate按任务/生成器/split报告token AUROC/AP及位置、答内与单元内指标。
+模型和数据由用户GPU环境运行；本环境只验证小模型、CPU缓存，不虚报全量执行。

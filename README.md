@@ -1,10 +1,20 @@
 # 原生来源传递检测与机制审计
 
+当前全量检测主线：[来源优先 token 检测](iclr/RAGTRUTH_SOURCE_FIRST.md)。
+`bash experiments/native_support/run_ragtruth_all.sh` 默认运行全部 QA/Summary/Data2txt、
+全部生成器、官方 train/test；直接采集四条件似然与消息范数路由，无反传或逐 token 删边链。
+固定主候选保留当前最强 `source_local_unit_mean`，另报告来源主导的路由收缩系列。
+上传 v1 四答基线 AUROC/AP=.914856/.451496；收缩权重 .25 得到 .916049/.401025，
+只是探索性小幅 AUROC 增益，尚无全量8B实测。分任务/生成器/split 自动评价与轻量打包。
+可加 `--select-on-train`，按官方 train 来源留出开发集的 AUROC 选读出及权重；
+这是明确标记的标签选参结果，与固定无标签基线分开，不在 test 上选参。
+
 逐 token 联合读出：[token 来源、软单元约束与 TV 连续性](iclr/UNIFIED_TOKEN_READOUT.md)。
 `bash experiments/native_support/run_unified_token.sh` 复用已完成的 carrier v2 缓存，
 保留逐 token 来源观测，允许单元均值移动与内部跳变，用稀疏矩阵联合求解，无新增大模型采集。
 上传 v1 四答实测 .8716/.3552（AUROC/AP），未胜过旧联合 .8775/.3563 或最强 local 来源均值；
-去图 .8799/.3573。保留失败结果，新读出尚无 v2 输入的自然数据实测。
+去图 .8799/.3573。用户随后返回 v2 输入：完整 .8667/.3413，去图 .8817/.3671；
+图正则未带来收益，保留失败结果，新全量主线不依赖该入口。
 旧硬约束入口 `run_unified.sh` 保留，用户已返回其 v2 输入成绩 .8792/.3420；
 协议见 [UNIFIED_ROUTE_SOURCE.md](iclr/UNIFIED_ROUTE_SOURCE.md)。
 
