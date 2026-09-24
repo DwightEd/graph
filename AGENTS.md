@@ -110,3 +110,17 @@ cohort条件核分数不入训练特征，避免其参考混入留出来源；�
 保存固定物理层头轴的逐token向量、未测mask及历史边身份，不将单元梯度冒称逐token梯度。
 SDPA稀疏消息减法保存重建误差，不能声称bf16与dense删边bit-exact。
 所有评分后读标签，risk仍为raw_route；新增实测前不声称8B或自然数据收益。
+
+## 2026-09-24：独立 token 的条件消息回溯
+
+`transport-carriers --mode token` 新增 v2；协议见 `iclr/TOKEN_CONDITIONAL_CARRIERS.md`。
+每个原 token 以有来源最高非原词为固定竞争词，两来源/全部删除共用，目标为独立 logit margin。
+默认按双来源边门导数差的绝对值选边，保留 magnitude 消融；不是语义或 sink 解耦证明。
+保留当前及有限早期 receiver，精确删除 layer/head/query/key，重算原生下游。
+早期 receiver 范数筛选不是完整因果图；仅测回答历史边，不冒称直接定位 prompt 证据。
+输出固定层头轴22+7LH维向量与两端点身份，未测mask明确；t=0重建误差是未测。
+原始 attention mass、投影消息能量、门导数和有限效应分别保留，不按符号定义真假。
+边界强效应不自动命名 attention sink；v1 总体收益可能完全来自跨回答排序，需分别报告。
+`--stage position` 只在缓存评分的输出单元内作固定 exp 聚合，不改 attention 或加入历史距离先验。
+四答 β=1 的总体/答内/AP结果有取舍，不能自动挑参替换主评分；新版仍无真实8B结果。
+旧 v1、原risk、原缓存、标签隔离和自动打包保留；新 token 候选无未来，单元读出允许未来。

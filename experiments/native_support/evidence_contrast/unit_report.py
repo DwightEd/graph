@@ -23,7 +23,7 @@ def load_records(output, settings, methods=METHODS):
     return records, predictions
 
 
-def unit_rows(records, predictions, token_methods=TOKEN_METHODS):
+def unit_rows(records, predictions, token_methods=TOKEN_METHODS, suffix="_unit_mean"):
     rows = []
     for record, scores in zip(records, predictions):
         response = record["response"]
@@ -37,7 +37,7 @@ def unit_rows(records, predictions, token_methods=TOKEN_METHODS):
                 fully_annotated=bool(valid.all()), error_tokens=errors,
                 error_fraction=errors / valid.sum() if valid.any() else None,
                 text="".join(pieces[start:stop]))
-            row.update({name: float(scores[f"{name}_unit_mean"][start]) for name in token_methods})
+            row.update({name: float(scores[name + suffix][start]) for name in token_methods})
             rows.append(row)
     return rows
 

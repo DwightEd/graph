@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 from pathlib import Path
 from time import perf_counter
 
@@ -87,9 +88,13 @@ def finish(args, settings, protocol):
 
 def arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, help="Completed contrast/aggregation directory or review ZIP")
+    parser.add_argument("--input", type=Path, help="Completed contrast/aggregation/carrier directory or review ZIP")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--stage", choices=("run", "capture", "score", "evaluate", "pack"), default="run")
+    parser.add_argument("--stage", choices=("run", "capture", "score", "evaluate", "pack", "position"), default="run")
+    parser.add_argument("--mode", choices=("unit", "token"), default="unit", help="V1 unit bundles or V2 independent token choices")
+    parser.add_argument("--selection", choices=("conditional", "magnitude"), default="conditional", help="V2 edge ranking; frozen before evaluation")
+    parser.add_argument("--receiver-budget", type=int, default=2, help="V2 receivers per head per condition; 1 = current query only")
+    parser.add_argument("--position-beta", type=float, default=1.0, help="position stage: exp weight on normalized OUTPUT position")
     parser.add_argument("--top-k", type=int, default=8, help="At most one history key per physical head")
     parser.add_argument("--seed", type=int, default=37)
     parser.add_argument("--device", default="cuda:0")
@@ -98,10 +103,12 @@ def arguments(argv=None):
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--annotations", type=Path, help="Evaluation only; opened after all scores are saved")
     args = parser.parse_args(argv)
-    if min(args.top_k, args.cpu_threads) < 1 or args.seed < 0:
-        parser.error("top-k/threads must be positive and seed nonnegative")
-    if args.stage in ("run", "capture") and args.input is None:
-        parser.error("--input is required for capture")
+    if min(args.top_k, args.cpu_threads, args.receiver_budget) < 1 or args.seed < 0:
+        parser.error("top-k/threads/receiver-budget must be positive and seed nonnegative")
+    if not math.isfinite(args.position_beta):
+        parser.error("position-beta must be finite")
+    if args.stage in ("run", "capture", "position") and args.input is None:
+        parser.error("--input is required for run/capture/position")
     return args
 
 
@@ -109,6 +116,16 @@ def main(argv=None):
     args = arguments(argv)
     if args.stage == "pack":
         print(json.dumps(dict(review_archive=pack(args.output))))
+        return
+    if args.stage == "position":
+        from .position import analyze_positions
+        print(json.dumps(analyze_positions(args), ensure_ascii=False))
+        return
+    token_mode = args.mode == "token" if args.stage in ("run", "capture") else (
+        read_json(args.output / "protocol.json")["version"] == "message-carriers-token-v2")
+    if token_mode:
+        from .token_run import run
+        print(json.dumps(run(args), ensure_ascii=False))
         return
     if args.stage in ("run", "capture"):
         settings, protocol = prepare(args)

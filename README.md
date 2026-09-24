@@ -1,5 +1,11 @@
 # 原生来源传递检测与机制审计
 
+最新历史消息候选：[逐 token 的条件选择回溯](iclr/TOKEN_CONDITIONAL_CARRIERS.md)。
+`bash experiments/native_support/run_carriers_token.sh` 为每个原 token 固定竞争词，
+按双来源选择梯度筛边，再做精确 query 的有限删除；保存7190维/token的固定层头表征（32×32模型）。
+`bash experiments/native_support/run_carriers_position.sh` 仅CPU比较现有缓存的普通均值与 exp 位置权重。
+上传四答的 exp(β=1) 结果有取舍，未替换主评分；新版逐 token 采集尚无真实8B检测成绩。
+
 当前候选：[来源分解与最终选择](iclr/VALUE_PATH_TRANSPORT.md)。依据 DecompX、ALTI-Logit、
 AttnLRP 及 Information Flow 的具体算法思想，将 prompt 来源沿原生值路径传播到最终候选差，
 区分读取地址与输入根来源，并保留支持/抑制。FFN 使用明确的点态分解规则，不把负写入直接判错。

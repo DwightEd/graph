@@ -2,6 +2,10 @@
 
 实现：2026-09-24。入口：`main.py transport-carriers`。
 
+本文描述保留的 v1 单元选边协议。新版 `--mode token` 的逐 token 选择目标、
+精确 query 删除、上传 v1 的机制复核和 exp 对照见
+[TOKEN_CONDITIONAL_CARRIERS.md](TOKEN_CONDITIONAL_CARRIERS.md)。
+
 输出是每个**原回答 token**一个固定维度向量，外加被选历史边的身份表。
 它是原生干预响应表征，不是训练得到的 embedding，也不直接表示推理步骤正确率。
 本次实现方法采集与冻结候选评分，没有新8B/自然数据 AUROC。

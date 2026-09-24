@@ -15,6 +15,8 @@
 | `main.py transport-observable` | 输出分布响应、多头结构条件异常检测与评价 | 首次补采集；score 不加载模型 |
 | `main.py transport-contrast` | 原回答有/无来源、完整/局部历史的四条件似然检测 | 首次分块前向；score/evaluate 不加载模型 |
 | `main.py transport-carriers` | 关键历史消息的条件删除与逐 token 固定层头表征 | 首次需要完整梯度及有限删除；score/evaluate 不加载模型 |
+| `main.py transport-carriers --mode token` | 每个原 token 独立竞争词目标、条件选边与精确 query 删除 | 每 token 梯度及有限删除；score/evaluate 不加载模型 |
+| `main.py transport-carriers --stage position` | 单元内输出位置 exp 聚合的独立对照 | CPU缓存重算；不改 attention |
 | `main.py dynamics` | 独立历史状态模型与其审计 | 显式调用，非新方法依赖 |
 
 ## 来源传递
@@ -251,3 +253,16 @@ CPU复用已有完整observable缓存，无新前向、无分类器训练；每�
 `risk` 仍为 raw_route；新候选和相同单元均值独立评价，自动打包完整表征与删除测量。
 旧概率缓存无法代替新采集。运行、公式、成本和数据轴见
 [MESSAGE_CARRIER_REPRESENTATION.md](../../iclr/MESSAGE_CARRIER_REPRESENTATION.md)。
+
+新版运行 `bash experiments/native_support/run_carriers_token.sh`，默认复用 v1 目录的输入，
+写入独立 `message_carriers_token_v2` 并自动打包。每个 token 独立固定一个竞争词，
+按来源条件下的 margin 门导数差选边，逐个 query 做单边/联合/同头同receiver随机删除。
+保留早期 receiver 的有限候选，以观察历史状态经过后续层对当前输出的作用。
+32层32头每个 token 为7190维，另存 key/receiver/foil 身份和未测 mask。
+每 token 的成本高于 v1 每单元采集，旧消息概率不能恢复新版梯度。
+
+`bash experiments/native_support/run_carriers_position.sh` 仅CPU复用 v1/v2完整结果，
+固定 β=1 比较输出单元内 exp 权重；它不是历史距离衰减或 attention sink 分类。
+四答缓存上 source_selected 的总体 AUROC .85597→.82587，答内 .94937→.96446，
+指标有取舍，主评分不自动更换。公式、实测与限制见
+[TOKEN_CONDITIONAL_CARRIERS.md](../../iclr/TOKEN_CONDITIONAL_CARRIERS.md)。
