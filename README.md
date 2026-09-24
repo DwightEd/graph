@@ -1,5 +1,11 @@
 # 原生来源传递检测与机制审计
 
+联合检测入口：[来源锚点、token 路由与有限效应图](iclr/UNIFIED_ROUTE_SOURCE.md)。
+`bash experiments/native_support/run_unified.sh` 直接复用已完成的 carrier v2 缓存，
+用稀疏矩阵联合求解每个回答的 token 分数，不增加大模型采集。
+来源视图、路由和图均进入主候选，固定组件消融一同评价。
+上传 v1 四答实测 .8775/.3563（AUROC/AP），尚未胜过最强 local 来源均值；v2 联合成绩待运行。
+
 最新历史消息候选：[逐 token 的条件选择回溯](iclr/TOKEN_CONDITIONAL_CARRIERS.md)。
 `bash experiments/native_support/run_carriers_token.sh` 为每个原 token 固定竞争词，
 按双来源选择梯度筛边，再做精确 query 的有限删除；保存7190维/token的固定层头表征（32×32模型）。

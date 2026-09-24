@@ -16,6 +16,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   transport-dual    Unlabelled current/persistent head readout; cache only, causal and offline
   transport-contrast  Frozen source/history four-condition likelihood; no truth-label training
   transport-carriers  Select history messages, measure conditional deletion, save per-token vectors
+  transport-unified  Joint source anchors, token routing and finite-effect graph readout; CPU cache only
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
   regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis
@@ -37,10 +38,12 @@ def main(argv=None):
     if command == "transport-pack":
         from experiments.native_support.transport_pack import main as run
         run(arguments)
-    elif command in ("support", "dynamics", "transport", "transport-state", "transport-functions", "transport-observable", "transport-readout", "transport-dual", "transport-contrast", "transport-carriers"):
+    elif command in ("support", "dynamics", "transport", "transport-state", "transport-functions", "transport-observable", "transport-readout", "transport-dual", "transport-contrast", "transport-carriers", "transport-unified"):
         from pathlib import Path
         sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
-        if command == "transport-carriers":
+        if command == "transport-unified":
+            from experiments.native_support.unified.run import main as run
+        elif command == "transport-carriers":
             from experiments.native_support.message_carriers.run import main as run
         elif command == "transport-contrast":
             from experiments.native_support.evidence_contrast.run import main as run

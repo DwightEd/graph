@@ -6,7 +6,7 @@ from ..dual_state.report import intervals
 from .aggregation import TOKEN_METHODS, select_whole_units
 
 
-def span_availability(record, units, selected, method):
+def span_availability(record, units, selected, method, offline=False):
     rows = []
     for start, stop in intervals(record, True):
         hits = [unit for unit, alarm in zip(units, selected)
@@ -18,12 +18,13 @@ def span_availability(record, units, selected, method):
             onset_unit_flagged=any(unit["start"] == onset["start"] for unit in hits),
             onset_unit_future_tokens=onset["stop"] - 1 - start,
             first_flagged_unit_end=first_end,
-            earliest_score_delay=first_end - start if first_end is not None else None,
-            score_available_before_span_end=first_end is not None and first_end < stop))
+            earliest_score_delay=first_end - start if first_end is not None and not offline else None,
+            score_available_before_span_end=not offline and first_end is not None and first_end < stop,
+            score_scope="completed_answer_and_reference" if offline else "unit_end"))
     return rows
 
 
-def unit_budgets(records, rows, token_methods=TOKEN_METHODS):
+def unit_budgets(records, rows, token_methods=TOKEN_METHODS, offline_methods=()):
     """Top-decile unit ranking; every selected unit flags its entire original interval."""
     summary, delays, alarms = {}, [], []
     # Ranking uses every measured unit. Missing truth affects evaluation, not selection.
@@ -49,7 +50,7 @@ def unit_budgets(records, rows, token_methods=TOKEN_METHODS):
             if valid.all() and not labels.any():
                 clean_answers += 1
                 clean_alarms += int(alarm.any())
-            method_delays.extend(span_availability(record, record["units"], flags, method))
+            method_delays.extend(span_availability(record, record["units"], flags, method, method in offline_methods))
         chosen = [row for row, hit in zip(eligible, selected) if hit]
         summary[method] = dict(eligible_units=len(eligible), selected_units=len(chosen),
             selected_unit_fraction=len(chosen) / len(eligible) if eligible else None,
@@ -65,4 +66,5 @@ def unit_budgets(records, rows, token_methods=TOKEN_METHODS):
                            selected=bool(hit), score=row[method]) for row, hit in zip(eligible, selected))
     return dict(unit_budget_fraction=.1, tie_policy="include_all_boundary_ties",
                 deployment_threshold=False, availability="earliest_after_reading_unit_end; excludes_boundary_lookahead",
+                offline_methods=list(offline_methods), offline_delay="not_an_online_detection_delay",
                 methods=summary), delays, alarms

@@ -106,7 +106,7 @@ def plot_comparison(output, evaluation, token_methods=TOKEN_METHODS):
 
 
 def evaluate_units(output, settings, methods=METHODS, token_methods=TOKEN_METHODS,
-                   comparisons=COMPARISONS):
+                   comparisons=COMPARISONS, offline_methods=()):
     if not (output / "annotations.json").is_file():
         result = dict(status="unavailable", reason="missing_token_annotations")
         write_json(output / "evaluation.json", result)
@@ -119,7 +119,7 @@ def evaluate_units(output, settings, methods=METHODS, token_methods=TOKEN_METHOD
         cohort=settings.get("cohort", {}), labels_used_for_scoring=False, automatic_model_selection=False)
     write_json(output / "evaluation.json", result)
     rows = unit_rows(records, predictions, token_methods)
-    budget, delays, alarms = unit_budgets(records, rows, token_methods)
+    budget, delays, alarms = unit_budgets(records, rows, token_methods, offline_methods)
     metrics = [dict(method=name, phase=phase, **{key: value[key] for key in ("tokens", "positives", "auroc", "ap")})
                for name, phases in result["methods"].items() for phase, value in phases.items()]
     tables = dict(units=rows, predictions=prediction_rows(records, predictions), metrics=metrics,

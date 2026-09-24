@@ -17,6 +17,7 @@
 | `main.py transport-carriers` | 关键历史消息的条件删除与逐 token 固定层头表征 | 首次需要完整梯度及有限删除；score/evaluate 不加载模型 |
 | `main.py transport-carriers --mode token` | 每个原 token 独立竞争词目标、条件选边与精确 query 删除 | 每 token 梯度及有限删除；score/evaluate 不加载模型 |
 | `main.py transport-carriers --stage position` | 单元内输出位置 exp 聚合的独立对照 | CPU缓存重算；不改 attention |
+| `main.py transport-unified` | 来源锚点、token路由偏差与有限效应图的统一约束读出 | CPU完整v1/v2缓存；无新增模型前向 |
 | `main.py dynamics` | 独立历史状态模型与其审计 | 显式调用，非新方法依赖 |
 
 ## 来源传递
@@ -266,3 +267,14 @@ CPU复用已有完整observable缓存，无新前向、无分类器训练；每�
 四答缓存上 source_selected 的总体 AUROC .85597→.82587，答内 .94937→.96446，
 指标有取舍，主评分不自动更换。公式、实测与限制见
 [TOKEN_CONDITIONAL_CARRIERS.md](../../iclr/TOKEN_CONDITIONAL_CARRIERS.md)。
+
+## 统一检测读出
+
+`bash experiments/native_support/run_unified.sh` 读取已完成的 `message_carriers_token_v2`，
+输出 `unified_route_source_v1`。两个来源条件读出确定单元风险，路由保留内部差异，
+逐头实际删除效应形成历史依赖约束；所有token通过稀疏矩阵共同求解。
+默认使用同cohort无标签来源等权尺度，属于离线transductive检测；可指定独立来源 `--reference`。
+主候选为 `unified`，去图/去路由/单来源/随机端点与直接融合固定比较，不按评价自动选优。
+新增向量分量、原始边效应、尺度与方程误差都保存，全部评分后读标签并自动打包。
+上传v1缓存联合AUROC/AP=.877475/.356279，低于最强local来源单元均值，真实图未胜随机图。
+模型、设计取舍、完整实测和命令见 [UNIFIED_ROUTE_SOURCE.md](../../iclr/UNIFIED_ROUTE_SOURCE.md)。
