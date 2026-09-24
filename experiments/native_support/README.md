@@ -178,3 +178,36 @@ python -u main.py transport-observable --stage pack \
 终端报告实际 `archive_bytes`、排除体积及缺失结果文件；包内 `review_manifest.json`
 列明保留/排除文件。原来的 `_review.zip` 不变。显式 `--pack-mode full` 才打完整包。
 四答真实结果及退步原因见 [OBSERVABLE_FAILURE_REVIEW](../../iclr/OBSERVABLE_FAILURE_REVIEW.md)。
+
+## 监督表示读出（用户授权的新任务）
+
+已有完整 observable 缓存：
+
+```bash
+git pull --ff-only origin main &&
+bash experiments/native_support/run_readout.sh
+```
+
+不重新采集8B，CPU读取缓存、按来源留出训练逻辑回归，评价 token AUROC/AP、
+起点/延续、前后半段、within-answer 和 top-decile。训练所得模型保存在 `models/`。
+包含位置、路由、逐层统计、逐头来源/FFN、原核完整响应因子和时序视图；不事后选最好模型。
+默认中间一半层用于逐头/原核因子；逐层统计对照保留所有层。`--layers all` 可明确改为全部层。
+
+只有轻量包时可运行统计视图与固定浅树对照：
+
+```bash
+python -u main.py transport-readout \
+  --input outputs/native_support_ragtruth4/observable_transport_v1_review_light.zip \
+  --output outputs/native_support_ragtruth4/readout_summary_v1
+```
+
+完整输入可追加 `--choice-input outputs/native_support_ragtruth4/choice_state_v2`，
+单独比较历史的来源正向作用缺口与反对量视图；严格核对模型、完整前缀、来源和目标 token。
+有更多已采集数据时，用 `--reference 另一份带标注的observable目录` 提供独立训练来源。
+若同时用历史choice特征，训练参考还需对应 `--reference-choice`；来源重叠直接报错。
+本命令要求新的输出目录，避免覆盖以前的成绩；再次运行需修改 `--output`。
+
+结果有 `metrics.csv`、`evaluation.json`、`predictions.csv`、逐答 scores、`folds.json`、
+`feature_schema.json`、协议与模型，并自动生成同级 `_review_light.zip`（不包含模型文件）。
+这是监督表示诊断，不是无监督收益，也不证明事实支持。四答实测未获得整体改进。
+设计、已涵盖/缺失的信息及实际数字见 [SUPERVISED_RESPONSE_READOUT](../../iclr/SUPERVISED_RESPONSE_READOUT.md)。
