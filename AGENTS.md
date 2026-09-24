@@ -100,3 +100,13 @@ cohort条件核分数不入训练特征，避免其参考混入留出来源；�
 来源删除改变长度/位置，不能称已隔离的事实因果效应；低来源作用不等于幻觉。
 使用原生SDPA、分块logits与单条件KV；每个局部单元前裁回prompt，禁止共享被回答污染的缓存。
 文本边界不是reanchor；单元/离线分数涉及未来文本。先验证实际检测收益，再考虑学生与大范围重构。
+
+## 2026-09-24：关键历史消息与节点表征
+
+`main.py transport-carriers` 复用 contrast/aggregation 的单元、原 token 与基线，协议见
+`iclr/MESSAGE_CARRIER_REPRESENTATION.md`。单元平均原文logp的完整原生梯度筛选历史消息；
+每头一个历史key、跨条件max绝对梯度选前K头，不读标签、不按符号判事实。
+同组边在两个来源条件分别做单边、联合与同层头随机删除，后续网络原生重算。
+保存固定物理层头轴的逐token向量、未测mask及历史边身份，不将单元梯度冒称逐token梯度。
+SDPA稀疏消息减法保存重建误差，不能声称bf16与dense删边bit-exact。
+所有评分后读标签，risk仍为raw_route；新增实测前不声称8B或自然数据收益。

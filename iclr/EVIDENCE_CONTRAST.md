@@ -5,6 +5,9 @@
 [EVIDENCE_CONTRAST_AGGREGATION.md](EVIDENCE_CONTRAST_AGGREGATION.md)。以下原型设计记录保留。
 
 实现日期：2026-09-24。入口：`main.py transport-contrast`。
+
+后续关键历史消息干预及逐 token 表征使用独立入口 `main.py transport-carriers`，
+复用这里的单元与基线，协议见 [MESSAGE_CARRIER_REPRESENTATION.md](MESSAGE_CARRIER_REPRESENTATION.md)。
 这是研究方案第一阶段的独立采集/评分原型；没有真假分类器，没有新8B检测收益声明。
 
 ## 目标与公式

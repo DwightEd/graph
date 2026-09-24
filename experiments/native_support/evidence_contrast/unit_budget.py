@@ -23,12 +23,12 @@ def span_availability(record, units, selected, method):
     return rows
 
 
-def unit_budgets(records, rows):
+def unit_budgets(records, rows, token_methods=TOKEN_METHODS):
     """Top-decile unit ranking; every selected unit flags its entire original interval."""
     summary, delays, alarms = {}, [], []
     # Ranking uses every measured unit. Missing truth affects evaluation, not selection.
     eligible = rows
-    for method in TOKEN_METHODS:
+    for method in token_methods:
         selected = select_whole_units([row[method] for row in eligible])
         lookup = {(row["response_id"], row["unit_id"]): bool(hit)
                   for row, hit in zip(eligible, selected)}

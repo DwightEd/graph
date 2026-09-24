@@ -14,11 +14,12 @@
 | `main.py transport-functions` | 原始回答的原生 FFN/RMS 审计，无候选生成或语义筛选 | 首次补采集；report 不加载模型 |
 | `main.py transport-observable` | 输出分布响应、多头结构条件异常检测与评价 | 首次补采集；score 不加载模型 |
 | `main.py transport-contrast` | 原回答有/无来源、完整/局部历史的四条件似然检测 | 首次分块前向；score/evaluate 不加载模型 |
+| `main.py transport-carriers` | 关键历史消息的条件删除与逐 token 固定层头表征 | 首次需要完整梯度及有限删除；score/evaluate 不加载模型 |
 | `main.py dynamics` | 独立历史状态模型与其审计 | 显式调用，非新方法依赖 |
 
 ## 来源传递
 
-最新四条件候选：`bash experiments/native_support/run_contrast.sh`。
+四条件候选：`bash experiments/native_support/run_contrast.sh`。
 复用已有 observable 目录或轻量 ZIP 的原 token、来源位置与基线，新增前向但不新增 Jacobian。
 公式、显存策略、分阶段命令和结果文件见 [EVIDENCE_CONTRAST.md](../../iclr/EVIDENCE_CONTRAST.md)。
 这是无真假标签训练的独立检测候选，尚无新的真实8B检测收益声明。
@@ -241,3 +242,12 @@ CPU复用已有完整observable缓存，无新前向、无分类器训练；每�
 完整/局部/对称来源分数与原路由、attention、熵采用完全相同的片段均值；
 同时报告token排序、单元等权评价、单元内部定位、整单元误报和离线分数可用时间。
 四答实测与边界见 [结果记录](../../iclr/EVIDENCE_CONTRAST_AGGREGATION.md)。
+
+## 关键历史消息与节点向量
+
+`bash experiments/native_support/run_carriers.sh` 复用 contrast 的原文单元与基线，
+新增单元梯度选边、有/无来源下的单边/联合删除和同层头随机对照。
+每个回答 token 保存一个固定层头轴向量、显式未测 mask 和对应历史边身份；32层32头为4107维。
+`risk` 仍为 raw_route；新候选和相同单元均值独立评价，自动打包完整表征与删除测量。
+旧概率缓存无法代替新采集。运行、公式、成本和数据轴见
+[MESSAGE_CARRIER_REPRESENTATION.md](../../iclr/MESSAGE_CARRIER_REPRESENTATION.md)。
