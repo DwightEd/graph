@@ -20,6 +20,7 @@
 | `main.py transport-unified` | 来源锚点、token路由偏差与有限效应图的统一约束读出 | CPU完整v1/v2缓存；无新增模型前向 |
 | `main.py transport-unified --token-readout` | 逐token来源与路由、软单元先验、TV连续性及图修正 | CPU完整v1/v2缓存；保留旧硬约束对照 |
 | `main.py transport-benchmark` | 全量RAGTruth来源优先token检测，按任务/生成器/split评价 | 直接前向采集；可CPU复用contrast/carrier缓存 |
+| `main.py transport-refine` | 来源锚点＋token/窗口内部细化，开发选参、三任务test及便携测量打包 | CPU复用source-first；不加载模型 |
 | `main.py dynamics` | 独立历史状态模型与其审计 | 显式调用，非新方法依赖 |
 
 ## 来源传递

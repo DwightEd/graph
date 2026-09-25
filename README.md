@@ -3,11 +3,17 @@
 当前全量检测主线：[来源优先 token 检测](iclr/RAGTRUTH_SOURCE_FIRST.md)。
 `bash experiments/native_support/run_ragtruth_all.sh` 默认运行全部 QA/Summary/Data2txt、
 全部生成器、官方 train/test；直接采集四条件似然与消息范数路由，无反传或逐 token 删边链。
-固定主候选保留当前最强 `source_local_unit_mean`，另报告来源主导的路由收缩系列。
-上传 v1 四答基线 AUROC/AP=.914856/.451496；收缩权重 .25 得到 .916049/.401025，
-只是探索性小幅 AUROC 增益，尚无全量8B实测。分任务/生成器/split 自动评价与轻量打包。
+固定主候选保留 `source_local_unit_mean`，另报告来源主导的路由收缩系列。
+用户已完成17,790答全量采集；train开发选择的test AUROC分别为
+Data2txt .784388、QA .878533、Summary .759659，三个任务均选中来源单元均值，内部AUROC=.5。
 可加 `--select-on-train`，按官方 train 来源留出开发集的 AUROC 选读出及权重；
 这是明确标记的标签选参结果，与固定无标签基线分开，不在 test 上选参。
+
+本轮优化：[来源排序与 token 内部细化](iclr/RAGTRUTH_TOKEN_REFINEMENT.md)。
+`bash experiments/native_support/run_ragtruth_refine.sh` 直接CPU复用上述完整缓存，
+比较local/full/pair锚点与token来源、窗口来源/路由；严格同分细化保留跨锚点排序，
+小幅残差候选允许跨单元修正。开发集选择后评价三个任务全部test，自动输出指标和便携测量包。
+支持逐回答断点；不覆盖source_first_v1，不重复大模型采集。新全量成绩尚待实际运行。
 
 新增方法试验：[来源与历史状态中介](iclr/SOURCE_HISTORY_MEDIATION.md)。
 `transport-mediation --mode cache` 已在上传v1四答检验Shapley来源分配和多头非加性交互，

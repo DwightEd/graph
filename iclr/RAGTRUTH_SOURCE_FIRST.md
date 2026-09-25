@@ -1,5 +1,10 @@
 # 面向全量 RAGTruth 的来源优先 token 检测
 
+2026-09-25更新：用户已完成全量运行并上传汇总。开发选择的test AUROC为
+Data2txt .784388、QA .878533、Summary .759659，具体基线与内部定位分析见
+[来源排序与token细化](RAGTRUTH_TOKEN_REFINEMENT.md)。下文四答与“未全量运行”描述保留为初版记录。
+后续CPU读出使用 `bash experiments/native_support/run_ragtruth_refine.sh`，不必重跑此采集入口。
+
 ## 本轮决策与最好结果
 
 用户当前优先目标是提高 token AUROC，并在全部 RAGTruth 按 QA/Summary/Data2txt 验证。
