@@ -19,6 +19,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   transport-unified  Source/routing graph readout; optional soft token readout with --token-readout; CPU only
   transport-benchmark  Full RAGTruth source-first token detection; all tasks/generators, grouped evaluation
   transport-refine  Refine cached source scores with token/window signals; CPU train-selection and test evaluation
+  probabilistic    Supervised conditional likelihood ratios on frozen native caches; CPU only
   transport-mediation  Test cached head interactions or native prompt/history-KV factorial effects
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
   population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
@@ -38,7 +39,12 @@ def main(argv=None):
         print(HELP)
         return
     command, arguments = argv[0], argv[1:]
-    if command == "transport-pack":
+    if command == "probabilistic":
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
+        from experiments.probabilistic_detection.run import main as run
+        run(arguments)
+    elif command == "transport-pack":
         from experiments.native_support.transport_pack import main as run
         run(arguments)
     elif command in ("support", "dynamics", "transport", "transport-state", "transport-functions", "transport-observable", "transport-readout", "transport-dual", "transport-contrast", "transport-carriers", "transport-unified", "transport-benchmark", "transport-refine", "transport-mediation"):

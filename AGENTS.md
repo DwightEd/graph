@@ -198,3 +198,14 @@ QA窗口route单元内AUROC=.831193，Data2txt/Summary=.560711/.555733，不能�
 固定候选无标签，选择结果标签辅助；本轮设计已参考旧test，明确为探索性复验。
 逐回答原子NPZ断点、CPU分任务评价及dev/test便携测量包；不覆盖原结果、不重跑模型。
 用户要求三个任务test复验；本环境只有全量轻量包与旧四答测量，不能声称已运行真实全量新检测。
+
+## 2026-09-28：条件响应监督检测已完整实验
+
+用户再次授权轻量监督或伪标签；`main.py probabilistic`为独立监督入口，见
+`iclr/PROBABILISTIC_DETECTION.md`和`experiments/probabilistic_detection/README.md`。
+复用完整source-first标量cache，source隔离fit/dev/test；仅train拟合、dev选型/阈值、全部test预测冻结后评价。
+两轮pilot+全量三任务已实际完成，无新LLM前向；test AUROC QA/Summary/Data2txt=.918765/.795918/.828858。
+旧test历史已暴露，探索复验；未显著胜同输入HGB，Summary对旧refine增量CI含0，不能声称顶会方法成立。
+QA单元内定位退化，Data2txt正常回答any-alarm80.06%，养老金/WiFi/时长等仍漏检；不改阈值掩盖失败。
+Bayes/Gaussian/二阶logistic是成熟方法；原生幅度加权−attention差的条件机制仍待新数据验证。
+原输出和用户档案保留；不要重启已完成实验或把fit错例当留出成功。
