@@ -1,5 +1,7 @@
 # 原生来源传递检测与机制审计
 
+最新：[完整逐头路由补充](experiments/route_complement/README.md)与[48答实测](experiments/route_complement/RESULTS_20260928.md)。保留全部头/key/V与Gram；net替换降低部分误报但AUROC下降，不替换原固定来源＋路由。逐头相反变化进入机制研究，未用于标签选头。
+
 最新无监督实验：[JS、残差/FFN 与完整输出响应](experiments/message_js/README.md)，
 见[三轮实际结果](experiments/message_js/RESULTS_20260928.md)。重算 84 答 JS、48 答原生算子，
 另对 16 条自然采样做历史消息干预；保留层/头/key、完整 4096 维输出状态响应。
