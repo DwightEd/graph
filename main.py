@@ -20,6 +20,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   transport-benchmark  Full RAGTruth source-first token detection; all tasks/generators, grouped evaluation
   transport-refine  Refine cached source scores with token/window signals; CPU train-selection and test evaluation
   probabilistic    Supervised conditional likelihood ratios on frozen native caches; CPU only
+  probabilistic-test  One-command full test of frozen legacy supervised models; not risk_response
   entropy-detect   Entropy events and supervised temporal readouts; exposed sources excluded
   source-refine    CPU source-first token refinement; fixed and dev-selected scores
   graph-anomaly    Unlabelled 123D temporal-graph contrast; explicit dev selection and frozen test
@@ -55,10 +56,13 @@ def main(argv=None):
         sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
         from experiments.unsupervised_graph.run import main as run
         run(arguments)
-    elif command == "probabilistic":
+    elif command in ("probabilistic", "probabilistic-test"):
         from pathlib import Path
         sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
-        from experiments.probabilistic_detection.run import main as run
+        if command == "probabilistic-test":
+            from experiments.probabilistic_detection.retest import main as run
+        else:
+            from experiments.probabilistic_detection.run import main as run
         run(arguments)
     elif command == "transport-pack":
         from experiments.native_support.transport_pack import main as run

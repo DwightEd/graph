@@ -81,6 +81,28 @@ visible in the reports.
 
 From the repository root, with the existing scientific Python environment:
 
+To test the already-trained legacy conditional detector and HGB in one command:
+
+```bash
+python main.py probabilistic-test
+```
+
+Defaults use `outputs/probabilistic_detection_20260928_full` and the original
+`outputs/native_support_ragtruth_all/source_first_v1` annotation cache. All three
+official test tasks and all six generators are included. The command checks full
+test coverage and source separation, copies frozen model/selection files to a
+new timestamped directory, links existing test packs, scores every task before
+loading evaluation labels, and writes `summary.json` plus full per-task metrics.
+It uses four CPU threads and 300 source bootstrap repeats; it does not retrain
+or call the language model. `--check` validates paths/coverage without writing.
+Use `--frozen`, `--cache`, or `--output` to change locations; output must be new.
+The model/cache artifacts are required locally and are not installed by Git.
+
+This command **does not run the new risk-response proposal**. That proposal has
+untrained mathematical primitives but no fitted model or native-gradient cache.
+
+To reproduce training and development as well, use the existing phase commands:
+
 ```bash
 python main.py probabilistic --phase prepare-train --output outputs/my_run
 python main.py probabilistic --phase develop --output outputs/my_run
