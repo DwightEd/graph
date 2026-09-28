@@ -252,3 +252,13 @@ CPU入口 `main.py source-refine`，协议 `iclr/SOURCE_REFINEMENT_V2.md`；原�
 四通道事件并集41.42%，正确洋葱起点也触发；层分歧正确大于错误，不能宣称统一规律或检测成功。
 后续原生下游J/剂量验证/条件真假模型仍为方案，无新AUROC，不声称解决全部9段历史漏检。
 完整研究方案、结果、执行追踪存共享research `refine-logs/role_free_flow_20260928/`。
+
+## 2026-09-28：风险与选择双响应研究及必要条件反例
+
+最新研究见共享`refine-logs/decision_risk_flow_20260928/`，代码协议`iclr/DECISION_RISK_FLOW.md`。
+`role_free_flow.diagnostics`对两题四局部声明31token实际CPU审计：18错token中15个原生margin正、
+12个熵<1bit、9个未触发旧事件；洋葱错误6/7 token的prompt净直接写入正。不同候选、局部标签、
+原生与重放provenance分开，不能当新检测结果；v3原始数值同agent另一实现复算一致。
+`risk_response`实现未训练候选条件probe与双响应收缩；3项toy科学契约检查通过，不是8B采集。
+方法主路径为自然标签轻量监督；不标prompt实体/证据，风险梯度不是真值或语义因果证明。
+8B双响应、来源留出训练、正常FPR及全量检测仍未运行，无新AUROC，不重启已完成历史任务。
