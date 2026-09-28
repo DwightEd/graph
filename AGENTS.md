@@ -209,3 +209,14 @@ QA窗口route单元内AUROC=.831193，Data2txt/Summary=.560711/.555733，不能�
 QA单元内定位退化，Data2txt正常回答any-alarm80.06%，养老金/WiFi/时长等仍漏检；不改阈值掩盖失败。
 Bayes/Gaussian/二阶logistic是成熟方法；原生幅度加权−attention差的条件机制仍待新数据验证。
 原输出和用户档案保留；不要重启已完成实验或把fit错例当留出成功。
+
+## 2026-09-28：无标签图实验已完整结束
+
+用户效果优先，授权正负样本迭代和全测试；入口 `main.py graph-anomaly`，见
+`iclr/UNSUPERVISED_GRAPH_EXPERIMENT.md`。复用既有标量缓存，无新LLM前向。
+图/IsolationForest均不使用自然标签拟合；fixed_unsupervised固定无标签，selected_dev明确开发标签辅助。
+两轮开发及全2700答test actual exit0；新选择AUROC=.890665/.767623/.785537，
+QA较旧refine提升、Summary差CI含0、Data2txt退化；图本身约.4且低于打乱图，不支持图收益。
+养老金/时长/WiFi等仍漏，正常对照存在误报，不替换旧监督检测器。
+原有41测试及新增8测试通过，156指标与官方span同agent独立实现复算一致，不冒充fresh评审。
+无活动实验；保留原结果及用户archives，不从旧TODO自动重启。
