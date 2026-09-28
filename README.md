@@ -1,6 +1,13 @@
 # 原生来源传递检测与机制审计
 
-最新指定样本实验：[原生 Fisher 响应拓扑](experiments/decision_risk_flow/README.md)。
+最新无监督实验：[JS、残差/FFN 与完整输出响应](experiments/message_js/README.md)，
+见[三轮实际结果](experiments/message_js/RESULTS_20260928.md)。重算 84 答 JS、48 答原生算子，
+另对 16 条自然采样做历史消息干预；保留层/头/key、完整 4096 维输出状态响应。
+无标签条件机制组合在 8 答检出 40/134 错词、误报 320/1353，未达标，不替换默认检测。
+`python -m experiments.message_js.operator_run --output outputs/message_operator_new`
+复用已完成的 v1 测量，运行新算子、无标签校准、评价与数值复算；不是全测试入口。
+
+上一轮监督实验：[原生 Fisher 响应拓扑](experiments/decision_risk_flow/README.md)。
 完整保留 prompt，用原生消息门控导数构建 Fisher 核和功能相似图，
 配合来源交叉拟合的轻量监督读出；同来源排除的 8 个已暴露回答用于回归。
 `python -m experiments.decision_risk_flow.run --phase all --output outputs/transport_topology_new`

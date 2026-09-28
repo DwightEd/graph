@@ -106,7 +106,10 @@ class QueryReplay:
         return hook
 
     def save_mlp(self, module, args, output):
+        if self.gate is not None and 'scales' in self.gate:
+            output = output * self.gate['scales'][2]
         self.mlp_writes.append(output)
+        return output
 
     def attention(self, index):
         def forward(module, hidden_states, position_embeddings, attention_mask, **kwargs):
@@ -127,7 +130,16 @@ class QueryReplay:
             scores = scores.masked_fill(~visible, -torch.inf)
             self_scores = (query_compute * key.to(compute_dtype)).sum(-1, keepdim=True) * module.scaling
             weights = torch.cat((scores, self_scores), -1).softmax(-1)
-            if self.gate is not None and index == self.gate['layer']:
+            if self.gate is not None and 'scales' in self.gate:
+                scales = self.gate['scales']
+                prompt = self.gate['prompt_length']
+                key_positions = torch.arange(past_key.shape[-2], device=query.device)
+                multiplier = torch.where(key_positions < prompt, scales[0], scales[1])
+                multiplier = multiplier[None].expand(len(self.positions), -1)
+                own = torch.where(self.positions < prompt, scales[0], scales[1])
+                multiplier = torch.cat((multiplier, own[:, None]), -1)
+                weights = weights * multiplier[None, None]
+            elif self.gate is not None and index == self.gate['layer']:
                 multiplier = torch.ones_like(weights)
                 multiplier[:, self.gate['head'], :, self.gate['key']] = self.gate['scale']
                 weights = weights * multiplier

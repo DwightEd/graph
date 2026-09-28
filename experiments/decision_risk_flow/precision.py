@@ -15,7 +15,21 @@ class FrozenLinear(torch.autograd.Function):
     @staticmethod
     def backward(ctx, gradient):
         (weight,) = ctx.saved_tensors
-        return gradient.float() @ weight.float(), None
+        return FrozenTranspose.apply(gradient, weight), None
+
+
+class FrozenTranspose(torch.autograd.Function):
+    """Keep BF16 weights across the double backward used for exact JVPs."""
+
+    @staticmethod
+    def forward(ctx, inputs, weight):
+        ctx.save_for_backward(weight)
+        return inputs.float() @ weight.float()
+
+    @staticmethod
+    def backward(ctx, gradient):
+        (weight,) = ctx.saved_tensors
+        return FrozenLinear.apply(gradient, weight), None
 
 
 def linear_forward(module, inputs):
