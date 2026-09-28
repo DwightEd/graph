@@ -1,5 +1,7 @@
 # 原生来源传递检测与机制审计
 
+最新：[实际消息边、无硬起点聚合与三轮小样本结果](experiments/receiver_graph/RESULTS_20260929.md)。48答完整头缓存审计＋288有限干预测量点已完成；新候选未胜旧双起点，养老金/时长仍漏，不替换默认、不重跑全量。
+
 最新：[完整三任务与重复模式实验结果](experiments/context_response/FULL_RESULTS_20260929.md)。9轮局部迭代、5套全量评价已完成（新8B采集为2700答/424408token一次）；重复模式可补部分span，但未统一提高AUROC，不替换原固定无监督基线。当前无活动实验。
 
 最新：[来源关系、消息几何与统一校准五轮实验](experiments/source_relation/README.md)，[具体错误状态与完整结果](experiments/source_relation/RESULTS_20260928.md)。新增36个prompt完整Q/K；来源JS融合40/134错、50/1353误报，消息MMD36/38，统一融合67/85。头饰反向关系局部AUC .9182但统一校准未保留报警；尚未达近乎全检，不替换默认。
