@@ -1,5 +1,7 @@
 # 原生来源传递检测与机制审计
 
+最新：[完整头JS/Jacobian四轮读出](experiments/head_state_readout/README.md)及[逐token误报、漏检实测](experiments/head_state_readout/RESULTS_20260928.md)。v3融合95/134错、147/1353误报，部分改善但头饰/养老金等仍漏；保留默认。
+
 最新：[完整逐头路由补充](experiments/route_complement/README.md)与[48答实测](experiments/route_complement/RESULTS_20260928.md)。保留全部头/key/V与Gram；net替换降低部分误报但AUROC下降，不替换原固定来源＋路由。逐头相反变化进入机制研究，未用于标签选头。
 
 最新无监督实验：[JS、残差/FFN 与完整输出响应](experiments/message_js/README.md)，
