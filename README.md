@@ -1,5 +1,11 @@
 # 原生来源传递检测与机制审计
 
+最新指定样本实验：[原生 Fisher 响应拓扑](experiments/decision_risk_flow/README.md)。
+完整保留 prompt，用原生消息门控导数构建 Fisher 核和功能相似图，
+配合来源交叉拟合的轻量监督读出；同来源排除的 8 个已暴露回答用于回归。
+`python -m experiments.decision_risk_flow.run --phase all --output outputs/transport_topology_new`
+从新目录运行准备、采集、训练、评价和数值复核；这不是旧模型的 2,700 答复跑。
+
 当前全量检测主线：[来源优先 token 检测](iclr/RAGTRUTH_SOURCE_FIRST.md)。
 `bash experiments/native_support/run_ragtruth_all.sh` 默认运行全部 QA/Summary/Data2txt、
 全部生成器、官方 train/test；直接采集四条件似然与消息范数路由，无反传或逐 token 删边链。
