@@ -140,9 +140,13 @@ class QueryReplay:
                 multiplier = torch.cat((multiplier, own[:, None]), -1)
                 weights = weights * multiplier[None, None]
             elif self.gate is not None and index == self.gate['layer']:
-                multiplier = torch.ones_like(weights)
-                multiplier[:, self.gate['head'], :, self.gate['key']] = self.gate['scale']
-                weights = weights * multiplier
+                if 'attention_delta' in self.gate:
+                    weights = weights.clone()
+                    weights[:, self.gate['head'], :, :-1] += self.gate['dose'] * self.gate['attention_delta']
+                else:
+                    multiplier = torch.ones_like(weights)
+                    multiplier[:, self.gate['head'], :, self.gate['key']] = self.gate['scale']
+                    weights = weights * multiplier
             head = weights[..., :-1] @ past_value.to(compute_dtype) + weights[..., -1:] * value.to(compute_dtype)
             write = module.o_proj(head.transpose(1, 2).reshape(*hidden_states.shape[:-1], -1).to(hidden_states.dtype))
             self.writes.append(write)
