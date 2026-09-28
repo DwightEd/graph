@@ -220,3 +220,14 @@ QA较旧refine提升、Summary差CI含0、Data2txt退化；图本身约.4且低�
 养老金/时长/WiFi等仍漏，正常对照存在误报，不替换旧监督检测器。
 原有41测试及新增8测试通过，156指标与官方span同agent独立实现复算一致，不冒充fresh评审。
 无活动实验；保留原结果及用户archives，不从旧TODO自动重启。
+
+## 2026-09-28：来源 token 细化 v2 已完整验证
+
+CPU入口 `main.py source-refine`，协议 `iclr/SOURCE_REFINEMENT_V2.md`；原标量核心从图模型拆出，
+旧fixed分数保持。新source5不跨单元/回答并尊重原始token位置；居中残差与严格同分二元阈值分开。
+34固定候选先开发选型再冻结全test；固定无标签主候选与dev标签选择严格分报。
+完整2700答/424408token已actual exit0；本轮dev选型QA/Summary/Data2txt AUROC
+.890665/.761094/.787538，Summary较上轮退化、Data2txt小幅改善，不能称整体提升。
+养老金/WiFi/时长仍漏，不覆盖旧Summary/监督结果，不在test上重挑权重；不重启已完成实验。
+56测试通过，官方标签复算105数组/330指标一致，same-agent复核，不冒充fresh外审。
+原始输出 `outputs/source_refinement_20260928_v2`，新报告及手接记录仍保存在共享research目录。

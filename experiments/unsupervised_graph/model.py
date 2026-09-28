@@ -7,6 +7,7 @@ from sklearn.ensemble import IsolationForest
 
 from experiments.probabilistic_detection.data import source_weights
 from .data import NodeFeatures, matched_donors, neighbor_mean
+from .scalar import fit_ranks, rank_scores, scalar_scores
 
 
 class PairNetwork(nn.Module):
@@ -82,30 +83,12 @@ def fit_models(pack):
 
 def raw_scores(models, pack):
     matrix = models["transform"].transform(pack["context"], pack["observations"])
-    context, observed = pack["context"], pack["observations"]
-    scores = dict(local=context[:, 0], full=context[:, 1], pair=context[:, :2].mean(axis=1),
-                  route=observed[:, 7], token_source=(context[:, :2] + observed[:, :2]).mean(axis=1),
-                  isolation=-models["forest"].score_samples(matrix))
+    scores = scalar_scores(pack)
+    scores["isolation"] = -models["forest"].score_samples(matrix)
     for name, shuffled in (("graph", False), ("shuffled", True)):
         neighbors = neighbor_mean(matrix, pack["answer_index"], shuffled=shuffled)
         scores[name] = contrast_scores(models[name], matrix, neighbors)
     return scores
-
-
-def fit_ranks(scores):
-    return {name: np.quantile(values, np.linspace(0, 1, 10001)) for name, values in scores.items()}
-
-
-def rank_scores(scores, references):
-    # Midrank handles exact ties without giving constant features an extreme rank.
-    result = {}
-    for name, values in scores.items():
-        reference = references[name]
-        left = np.searchsorted(reference, values, side="left")
-        right = np.searchsorted(reference, values, side="right")
-        result[name] = (left + right) / (2 * len(reference))
-    result["fixed_unsupervised"] = .75 * result["pair"] + .25 * result["route"]
-    return result
 
 
 def fusion_scores(scores):

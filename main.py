@@ -20,6 +20,7 @@ HELP = """Usage: python main.py COMMAND [arguments]
   transport-benchmark  Full RAGTruth source-first token detection; all tasks/generators, grouped evaluation
   transport-refine  Refine cached source scores with token/window signals; CPU train-selection and test evaluation
   probabilistic    Supervised conditional likelihood ratios on frozen native caches; CPU only
+  source-refine    CPU source-first token refinement; fixed and dev-selected scores
   graph-anomaly    Unlabelled 123D temporal-graph contrast; explicit dev selection and frozen test
   transport-mediation  Test cached head interactions or native prompt/history-KV factorial effects
   flow-edges       Earlier final-target edge experiment with branch-correct restoration
@@ -40,7 +41,12 @@ def main(argv=None):
         print(HELP)
         return
     command, arguments = argv[0], argv[1:]
-    if command == "graph-anomaly":
+    if command == "source-refine":
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
+        from experiments.unsupervised_graph.refine_run import main as run
+        run(arguments)
+    elif command == "graph-anomaly":
         from pathlib import Path
         sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
         from experiments.unsupervised_graph.run import main as run
