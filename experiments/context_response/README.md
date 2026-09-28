@@ -1,5 +1,7 @@
 # 原生上下文补全响应与逐头稀疏检测
 
+当前：所有实验完成，见[完整结果与失败分析](FULL_RESULTS_20260929.md)和[逐token局部结果](RECURRENCE_RESULTS_20260929.md)。保留原基线，不把局部span覆盖改善当作全量AUROC提升。
+
 `measure.py` 复用完整source Q/K、回答source attention和message-gate梯度：每个物理头构造来源严格向前关联 B 与行归一化 Bᵀ，以 `E = normalize(D B)`、`deltaA = M E - A` 保持来源总读取量。当前原词相对固定最强竞争词的响应为 `sum((g/A) * deltaA)`。反向邻接不是原生因果流；响应符号也不是真假标签。
 
 所有32层×32头分别保存两向响应、来源身份打乱对照、相对响应、特异响应、两向JS及source质量/绝对门效应。`finite.py` 在原始past KV下，对单头作0/.01/.05/.25剂量凸组合并重算下游。实际560个重放点：0.01剂量140项符号一致，中位相对误差0.2%；0.25剂量4项变号。没有有限重放sham，打乱图仅在一阶测量中完成。
@@ -90,3 +92,17 @@ python -m experiments.context_response.full_audit --output outputs/context_respo
 ```
 
 全量新入口仍是探索复验。`propagation_tokens.csv`列出新增/丢失TP、FP和路径起点；`propagation_head_paths.json`保存每条路径的边可靠度及逐头贡献。`propagation_audit.json`中的相同FP预算阈值是事后排序诊断，未写回检测器。官方RAGTruth内部量为观察器重放，不能把养老金`taxed`原词margin −6.543误说成该观察器仍选择了taxed：它更偏好`not`，但原回答来自别的生成器。
+
+
+原风险起点追加对照可复用上一版全部图和分数：
+
+```bash
+python -m experiments.context_response.recurrence_original --stage full \
+  --previous outputs/context_response_recurrence_full_20260929_v2 \
+  --pilot outputs/context_response_recurrence_20260929_v3 \
+  --output outputs/context_response_original_seed_full_new
+python -m experiments.context_response.full_audit --output outputs/context_response_original_seed_full_new
+python -m experiments.context_response.full_analysis --output outputs/context_response_original_seed_full_new
+```
+
+新计算两项，其余控制逐数组核对后复用。原8个回归样本只有4个属于官方test，`full_analysis.py`仅比较真实ID交集并列出不属于test的4个ID；最大分数差2.97e-5、52数组报警差0。最终分析包含连续错误段覆盖、6个生成器分组和来源簇bootstrap，不据test选择阈值或按任务更换默认方法。原全量采集完成后的评价SIGTERM和报告检查失败均保留日志，恢复仅用CPU，全部最终指标与报告已完成。

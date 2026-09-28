@@ -16,6 +16,7 @@ def audit(output):
     truth = {(r['key'], int(r['position'])): int(r['label']) for r in tokens}
     methods = read_json(output/'scores_frozen.json')['methods']
     changes, edges, all_scores, targets = [], [], {m: [] for m in methods}, []
+    miss_causes = []
     for key in dict.fromkeys(r['key'] for r in tokens):
         row = records[key]
         positions = sorted(t for k, t in truth if k==key)
@@ -33,6 +34,7 @@ def audit(output):
             if method not in graph:
                 continue
             alarm = score[method]>thresholds[row['task']][method]
+            seeds = np.flatnonzero(base>thresholds[row['task']][method])
             for t, label in zip(positions, labels):
                 origin = int(graph[method][t])
                 change = ('recovered' if label else 'new_false_alarm') if alarm[t] and not old_alarm[t] else (
@@ -43,6 +45,12 @@ def audit(output):
                     origin=origin, origin_label=truth.get((key, origin), -1), origin_text=text.get(origin, ''),
                     raised=bool(score[method][t]>base[t]),
                     threshold=float(thresholds[row['task']][method])))
+                if method=='recurrence_offline' and label and not alarm[t]:
+                    near = seeds[np.abs(seeds-t)<=24]
+                    reason = 'no_seed_in_answer_at_new_threshold' if not len(seeds) else (
+                        'no_seed_within_24_tokens' if not len(near) else 'no_3hop_path_above_threshold')
+                    miss_causes.append(dict(key=key, token=t, text=text[t], reason=reason,
+                                            nearby_seeds=near.tolist()))
         for lag in range(1, 9):
             for start, weight in enumerate(graph[f'lag_{lag}']):
                 end = start+lag
@@ -78,6 +86,9 @@ def audit(output):
     report = dict(changes=summary, edge_label_patterns=edge_stats, matched_FP_posthoc=matched,
         warning='labels only in evaluation; mixed-task pooled ordering and oracle threshold are diagnostics, not deployment')
     write_json(output/'propagation_audit.json', report)
+    write_json(output/'remaining_miss_causes.json', dict(tokens=miss_causes,
+        counts={reason: sum(r['reason']==reason for r in miss_causes) for reason in
+                ('no_seed_in_answer_at_new_threshold', 'no_seed_within_24_tokens', 'no_3hop_path_above_threshold')}))
     print(report)
 
 

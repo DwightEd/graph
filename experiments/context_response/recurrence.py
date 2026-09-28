@@ -178,7 +178,7 @@ def full(args):
     write_json(args.output/'thresholds.json', thresholds)
     fitted = joblib.load(args.pilot/'frozen_readout.joblib')
     # Both geometry and score thresholds were frozen before these predictions.
-    for row in manifest['records']:
+    for index, row in enumerate(manifest['records']):
         task = row['task']
         assert row['source_id'] not in {r['source_id'] for r in pilot_manifest['records']
                                        if r['role'] in ('fit', 'dev')}
@@ -199,6 +199,10 @@ def full(args):
         np.savez_compressed(directory/'scores.npz', **scores, token_ids=ids)
         np.savez_compressed(directory/'recurrence.npz', **origins,
                             **{f'lag_{lag}': edge for lag, edge in enumerate(edges, 1)})
+        if (index+1)%100==0 or index+1==len(manifest['records']):
+            write_json(args.output/'progress.json', dict(completed=index+1, total=len(manifest['records']),
+                                                        task=task, labels_used=False))
+            print('recurrence scored', index+1, '/', len(manifest['records']), task, flush=True)
     write_json(args.output/'test_frozen.json', dict(status='complete', answers=len(manifest['records']),
                tokens=sum(r['tokens'] for r in manifest['records']), labels_used=False))
     evaluate(args)
