@@ -1,5 +1,7 @@
 # 原生来源传递检测与机制审计
 
+最新：[来源关系、消息几何与统一校准五轮实验](experiments/source_relation/README.md)，[具体错误状态与完整结果](experiments/source_relation/RESULTS_20260928.md)。新增36个prompt完整Q/K；来源JS融合40/134错、50/1353误报，消息MMD36/38，统一融合67/85。头饰反向关系局部AUC .9182但统一校准未保留报警；尚未达近乎全检，不替换默认。
+
 最新：[完整头JS/Jacobian四轮读出](experiments/head_state_readout/README.md)及[逐token误报、漏检实测](experiments/head_state_readout/RESULTS_20260928.md)。v3融合95/134错、147/1353误报，部分改善但头饰/养老金等仍漏；保留默认。
 
 最新：[完整逐头路由补充](experiments/route_complement/README.md)与[48答实测](experiments/route_complement/RESULTS_20260928.md)。保留全部头/key/V与Gram；net替换降低部分误报但AUROC下降，不替换原固定来源＋路由。逐头相反变化进入机制研究，未用于标签选头。
