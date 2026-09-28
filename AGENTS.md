@@ -231,3 +231,24 @@ CPU入口 `main.py source-refine`，协议 `iclr/SOURCE_REFINEMENT_V2.md`；原�
 养老金/WiFi/时长仍漏，不覆盖旧Summary/监督结果，不在test上重挑权重；不重启已完成实验。
 56测试通过，官方标签复算105数组/330指标一致，same-agent复核，不冒充fresh外审。
 原始输出 `outputs/source_refinement_20260928_v2`，新报告及手接记录仍保存在共享research目录。
+
+## 2026-09-28：主线回到原生内部读取—整合—利用
+
+用户明确要求比较正确/错误生成的内部状态；外部compiler/checker不作为当前主线。
+新增`experiments.internal_flow`，协议`iclr/INTERNAL_FLOW.md`：完整来源、原生逐头A/V/W_O与4096维残差；
+固定来源总质量的单头重分配，原生下游和完整候选评分。7局部对比/5来源已175次前向actualexit0，
+35相关测试通过；发现字段名/值与限定词的读取不均，但不把attention当语义证明或将observer当原生成器。
+错误与等价改写对照、sham、随机方向/头均保留；3个偏错的完整候选均未修复，无新AUROC。
+输出`outputs/internal_flow_20260928`，不重跑历史任务。下一步是同词项/同输出/同位置的来源绑定四世界，
+分离QK寻址、OV载荷与残差/MLP使用；现有候选/证据/选头是人工辅助机制发现，不是无监督检测。
+
+## 2026-09-28：不依赖人工 prompt 标注的内部轨迹读出
+
+用户明确禁止前置实体/证据/约束标注；当前主线见`iclr/ROLE_FREE_INTERNAL_FLOW.md`。
+`experiments.role_free_flow`只读原生token/A/hidden/logits和模型参数；人工局部标签仅在冻结后评价。
+16答原生成轨迹及2答完整A/V图的CPU读出已结束，新增6项、相关共14项测试通过，无新LLM前向。
+区分原采样、经校验逐步重放hidden、同原文完整前向、异生成器observer；不能混称原生轨迹。
+具体地址JS、自动竞争词层轨迹、signed直接写入已实现；写入正负不是事实真假或原生下游因果效应。
+四通道事件并集41.42%，正确洋葱起点也触发；层分歧正确大于错误，不能宣称统一规律或检测成功。
+后续原生下游J/剂量验证/条件真假模型仍为方案，无新AUROC，不声称解决全部9段历史漏检。
+完整研究方案、结果、执行追踪存共享research `refine-logs/role_free_flow_20260928/`。
