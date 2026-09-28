@@ -61,3 +61,16 @@ def test_native_source_reallocation_matches_gate_derivative():
     scores = model.lm_head(changed)
     actual = (scores[0,13]-scores[0,17]-margin.detach())/.01
     torch.testing.assert_close(actual,expected,atol=2e-5,rtol=.03)
+
+
+def test_request_null_keeps_lag_and_copy_mass_and_singletons():
+    import numpy as np
+    from .request_anchor import matched_endpoint_mean
+    source = np.arange(5)
+    prompt = np.array([3, 3, 7, 9, 3, 1, 3, 7])
+    reading = np.array([[[.01, .09, .06, .14, .2], [.05, .15, .1, .1, .1]]])
+    expected = matched_endpoint_mean(reading, np.array([6, 7]), source, prompt)
+    np.testing.assert_allclose(expected.sum(-1), reading.sum(-1))
+    # Query 6: lag 5/6 copied keys share one group; lag 3/4 non-copied another.
+    np.testing.assert_allclose(expected[0, 0], [.05, .05, .1, .1, .2])
+    assert expected[0, 0, 4] == reading[0, 0, 4]

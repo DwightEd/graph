@@ -1,6 +1,6 @@
 # 原生来源传递检测与机制审计
 
-最新：[上下文响应与稀疏逐头读出](experiments/context_response/README.md)。3轮局部迭代完成，全2700答新内部实验正在执行；尚无完整新测试成绩，详见输出progress.json。
+最新：[上下文响应与稀疏逐头读出](experiments/context_response/README.md)。6轮上下文读出及2轮重复状态迭代完成。重复路径64/134错、81/1353误报，双起点63/70；养老金/时长等仍漏。全2700答新内部实验运行中，完成后以冻结新重复方法复验；尚无完整新测试成绩。
 
 最新：[来源关系、消息几何与统一校准五轮实验](experiments/source_relation/README.md)，[具体错误状态与完整结果](experiments/source_relation/RESULTS_20260928.md)。新增36个prompt完整Q/K；来源JS融合40/134错、50/1353误报，消息MMD36/38，统一融合67/85。头饰反向关系局部AUC .9182但统一校准未保留报警；尚未达近乎全检，不替换默认。
 

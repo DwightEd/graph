@@ -73,7 +73,7 @@ def report(output):
             fields = [value[key] for key in ('auroc', 'ap', 'within_answer_auroc', 'token_recall', 'token_fpr', 'normal_answer_false_alarm')]
             lines.append('|'+task+'|'+name+'|'+'|'.join('NA' if x is None else f'{x:.6f}' for x in fields)+'|')
         interval = read_json(output/task/'bootstrap.json')
-        notes.extend(['', f"{task} 主方法为 `{manifest['main']}`。来源簇bootstrap差的95%区间：同参考基线 {interval['same_reference']['auroc_delta_95ci']}；此前完整训练参考基线 {interval['original_full_reference']['auroc_delta_95ci']}。", ''])
+        notes.extend(['', f"{task} 主方法为 `{manifest['main']}`。来源簇bootstrap差的95%区间：四来源参考基线 {interval['same_reference']['auroc_delta_95ci']}；此前完整训练参考基线 {interval['original_full_reference']['auroc_delta_95ci']}。", ''])
     lines.extend(notes)
     lines.extend(['', '评分没有自然标签拟合或测试阈值搜索。4 fit/4 dev来源只是小参考分布，混合95分位不保证正常FPR=5%。逐答数字见answer_metrics.csv；官方原span与另一个数值实现复算见full_verification.json。', '',
         '归因度量描述当前原词相对自动竞争词的改变，不能直接解释为事实反证；固定过去KV不是跨离散生成的完整因果轨迹。纯内部方法与融合方法分别列出，来源关联反向邻接不冒充原生因果流。'])
