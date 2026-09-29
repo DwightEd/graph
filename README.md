@@ -1,3 +1,7 @@
+## 2026-09-29：片段维持状态与标点对照两轮完成
+
+新增 [span_maintenance](experiments/span_maintenance/README.md)：18答4292 token、1024头逐token读取记忆与软成员权重，包含固定锚点/平移续写/地址刷新/距离控制，保留标点硬重置与软确认。内部连续性识别标点代理边界平均AUC .802，但新检测候选未胜旧base或简单标点分块；自然18错仍全漏、GSM首错0/3，不替换默认。8测试与真实前缀检查通过，无新模型前向。[完整结果](experiments/span_maintenance/RESULTS.md)。
+
 ## 2026-09-29：强基线回接与消息约束修正两轮完成
 
 新增 `experiments/anchored_flow`，补齐自然配对与GSM来源/全层路由观测，18个案例4292token完整消息边读出。官方8答旧基线逐元素一致；第二轮同阈值19TP/58FP→23TP/57FP，但AUROC .808717→.796963，GSM首错仍0/3，同权重分布打乱控制近似相同。局部有净收益，整体优化未通过；可达性检查表明受限修正无法覆盖自然18个错误及3个首错，不替换默认。见[方法与一键运行](experiments/anchored_flow/README.md)、[完整结果和具体失败](experiments/anchored_flow/RESULTS.md)。
