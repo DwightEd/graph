@@ -1,5 +1,7 @@
 # 原生来源传递检测与机制审计
 
+最新：[GSM8K步骤边界与attention重复实测](experiments/gsm8k_recurrence/RESULTS_20260929.md)。找到400份单层32头缓存并完成CPU试验；步骤内重复AUROC .6457低于无图.6736，未改善首错检测。
+
 最新：[实际消息边、无硬起点聚合与三轮小样本结果](experiments/receiver_graph/RESULTS_20260929.md)。48答完整头缓存审计＋288有限干预测量点已完成；新候选未胜旧双起点，养老金/时长仍漏，不替换默认、不重跑全量。
 
 最新：[完整三任务与重复模式实验结果](experiments/context_response/FULL_RESULTS_20260929.md)。9轮局部迭代、5套全量评价已完成（新8B采集为2700答/424408token一次）；重复模式可补部分span，但未统一提高AUROC，不替换原固定无监督基线。当前无活动实验。
