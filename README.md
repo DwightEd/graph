@@ -1,3 +1,7 @@
+## 2026-09-29：约束传播、零和地址交换与同值角色诊断
+
+新增 [constraint_uptake](experiments/constraint_uptake/README.md)：RAGTruth正负局部配对及六个GSM回答完成三轮读出、密集复验、真实消息干预和完整hidden路径。发现弱头比例/BOS混杂及正确中间值被错误复用的路径，统一检测仍未通过，不替换默认。[完整结果](experiments/constraint_uptake/RESULTS_20260929.md)。
+
 ## 2026-09-29：GSM8K全层步骤状态与LDA错误定位
 
 新增 `experiments/gsm8k_states`，400答真实8B全32层状态重放、两轮首错步骤实验已完成。margin/JS/谱标量未胜attention；固定读取/选择组合AUC .6920但首错仍9/127，不能宣称解决。历史LDA高AUROC仍有边界漏检；全部具体错误及方法见 [结果报告](experiments/gsm8k_states/RESULTS_20260929.md)，[运行说明](experiments/gsm8k_states/README.md)。监督仅作独立诊断，原默认不变。
