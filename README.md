@@ -1,3 +1,7 @@
+## 2026-09-29：强基线回接与消息约束修正两轮完成
+
+新增 `experiments/anchored_flow`，补齐自然配对与GSM来源/全层路由观测，18个案例4292token完整消息边读出。官方8答旧基线逐元素一致；第二轮同阈值19TP/58FP→23TP/57FP，但AUROC .808717→.796963，GSM首错仍0/3，同权重分布打乱控制近似相同。局部有净收益，整体优化未通过；可达性检查表明受限修正无法覆盖自然18个错误及3个首错，不替换默认。见[方法与一键运行](experiments/anchored_flow/README.md)、[完整结果和具体失败](experiments/anchored_flow/RESULTS.md)。
+
 ## 2026-09-29：约束传播、零和地址交换与同值角色诊断
 
 新增 [constraint_uptake](experiments/constraint_uptake/README.md)：RAGTruth正负局部配对及六个GSM回答完成三轮读出、密集复验、真实消息干预和完整hidden路径。发现弱头比例/BOS混杂及正确中间值被错误复用的路径，统一检测仍未通过，不替换默认。[完整结果](experiments/constraint_uptake/RESULTS_20260929.md)。
