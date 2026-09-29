@@ -32,8 +32,8 @@ def prepare(output):
         for index, source_id in enumerate(sources):
             candidates = [row for row in metadata['records'] if row['source_id'] == source_id
                           and row['generator'] == generators[index % len(generators)]]
-            row = dict(min(candidates, key=lambda row: order(row['id'])),
-                       root=metadata['source_cache'], kind='observer', key=candidates[0]['id'])
+            selected = min(candidates, key=lambda row: order(row['id']))
+            row = dict(selected, root=metadata['source_cache'], kind='observer', key=selected['id'])
             prompt, response = inputs(row)
             source = read_json(Path(row['root']) / row['source_file'])
             records.append(dict(key=row['id'], dataset='ragtruth', task=task, role='heldout',

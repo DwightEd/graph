@@ -50,8 +50,10 @@ QA新增12答只有1个错误回答（59个错误词），旧0.9987不能外推�
 
 ## 数值验证、审计和原件
 
-5项tiny-Llama契约测试通过；原基线官方8答精确复现AUROC .8087169474、19TP/58FP，90组评价流中有双类的AUROC均做独立秩公式核对。74答所有分数/候选有限、原token id一致。
+5项tiny-Llama契约及1项未知标签定位回归测试通过（6项；tests.log，exit0）；原基线官方8答精确复现AUROC .8087169474、19TP/58FP，90组评价流中有双类的AUROC均做独立秩公式核对。74答所有分数/候选有限、原token id一致。
 
 执行时完整logit一致性检查覆盖t=0..15，最大误差.00095415；审计发现批处理跳过t=16，且max未显式拒绝NaN。已修复后续采集入口，**没有把修订声称为本轮已执行代码**。本轮保存分数/目标logp另核查t=0..16全部74答，最大差.00014114；这不替代t=16的全词表logit核查。执行版源码保存在 executed_capture_code/，于采集中留存，非事前哈希承诺。
 
 原件：graph/outputs/token_evidence_20260929_v1/{capture_complete.json, scores_frozen.json, thresholds.json, summary.json, bootstrap.json, units.csv, errors.csv, artifact_verification.json, TOKEN_AUDIT.html}。所有12候选、旧base、同dev阈值base及旧原始token来源都保留，未择优改名主方法。fresh same-family审计为暂定意见，见EXPERIMENT_AUDIT.md。既有未提交routing_likelihood及用户压缩档案未修改。
+
+审计后修正：首次报警精确命中仅在已标注位置计算，所有位置的首报警另列为含删失的描述。原评价存 evaluation_before_localization_fix/；重新评价的阈值、全部分数、AUROC/AP/TP/FP及bootstrap逐字节或逐字段不变，仅local full_cad_tail/full_cad_nll的首报警精确命中0→1。prepare的多回答潜在key错误已改为所选记录自身ID，本轮36记录原先一致、不受影响。审计仍为same-family WARN/provisional，source末query残差及未做事前不可变评价快照等限制保留。

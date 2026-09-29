@@ -127,7 +127,8 @@ def localization(rows, method, thresholds):
         known = [row for row in selected if row['gold'] >= 0]
         y = np.array([row['gold'] for row in known])
         values = np.array([row[method] for row in known])
-        alarms = [row['position'] for row in selected if row[method] > thresholds[row['task']][method]]
+        alarms = [row['position'] for row in known if row[method] > thresholds[row['task']][method]]
+        all_alarms = [row['position'] for row in selected if row[method] > thresholds[row['task']][method]]
         errors = [row['position'] for row in known if row['gold'] == 1]
         if len(set(y)) == 2:
             pairs = int(y.sum()) * int((y == 0).sum())
@@ -142,6 +143,7 @@ def localization(rows, method, thresholds):
             normal.append(bool(alarms))
         answers.append(dict(key=key, gold_first=errors[0] if errors else -1,
             predicted_first=min(alarms) if alarms else -1,
+            predicted_first_all_positions=min(all_alarms) if all_alarms else -1,
             unknown=sum(row['gold'] < 0 for row in selected)))
     return dict(within_answer_auroc=within_numerator / within_denominator if within_denominator else None,
         first_error_hits=int(sum(firsts)), error_answers=len(firsts),

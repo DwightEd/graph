@@ -59,6 +59,15 @@ class TokenEvidenceTest(unittest.TestCase):
         np.testing.assert_allclose(result['source_tail'].numpy(), np.log(2), atol=1e-6)
         np.testing.assert_allclose(result['cad_tail'].numpy(), result['confidence_tail'].numpy(), atol=1e-6)
 
+    def test_unknown_alarm_does_not_count_as_certified_first(self):
+        from .evaluate import localization
+        rows = [dict(key='a', task='QA', position=t, gold=gold, risk=risk)
+                for t, gold, risk in [(0, -1, 10.), (1, 1, 10.), (2, 0, 0.)]]
+        result = localization(rows, 'risk', {'QA': {'risk': 5.}})
+        self.assertEqual(result['answers'][0]['predicted_first'], 1)
+        self.assertEqual(result['answers'][0]['predicted_first_all_positions'], 0)
+        self.assertEqual(result['first_alarm_exact_hits'], 1)
+
 
 if __name__ == '__main__':
     unittest.main()
