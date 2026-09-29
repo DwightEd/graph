@@ -1,6 +1,6 @@
 # Automatic evidence-span experiment
 
-Inputs are full original prompts/responses, source-format masks, cached independent-token root gradients and full current-query message derivatives. No manual evidence, entities, semantic constraints, gold answer boundaries or correctness labels enter preparation/capture/scoring. These eight answers are previously exposed development diagnostics, not new blind evaluation.
+Inputs are full original prompts/responses, source-format masks, cached per-target full-history embedding-gradient summaries (positionwise norm and gradient·embedding, not full Jacobian tensors or gradient vectors) and full current-query message derivatives. No manual evidence, entities, semantic constraints, gold answer boundaries or correctness labels enter preparation/capture/scoring. These eight answers are previously exposed development diagnostics, not new blind evaluation.
 
 Source candidates cover every source token and are split only by text punctuation. Source root norm and centered per-head message effects propose associations. Every candidate is then excluded as keys at all layers in a new native Llama-3.1-8B forward, retaining positions and teacher-forced answer text. Save complete token × source-span full-vocabulary JS, signed log-probability changes, final-hidden changes and layer/head message changes. Attribution is influence under a specified intervention, not entailment or the original generator's mechanism.
 
