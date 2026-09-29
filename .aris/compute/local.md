@@ -1,3 +1,11 @@
+## 2026-09-30 — automatic evidence attribution completed
+
+Warm reuse of the unchanged research environment (spec03909e02), no package/model modifications. Seeded CUDA witness passed; fresh document witness executed automatic_evidence capture once, exit0: 8 answers/1487 targets/304 automatic source spans/352 native forwards, 17.38GiB peak, maximum sham logp error5.53e-5. Full root Jacobians and current-query message derivatives were reused, not newly recaptured. Two CPU readouts both failed to improve detection (.552876 and .594150 AUROC vs historical .808717); defaults unchanged, no new full-test run. 13 current scientific/compatibility tests passed. All GPU work exited, GPU readback1MiB/0%. Canonical plan/results/witness: lys/codex/research/refine-logs/automatic_evidence_20260930/. State-path spans are automatic provenance regimes, not validated semantic or truth spans. Scientific audit tracked in the canonical report separately from this execution witness.
+
+## 2026-09-30 — token_backtrace warm reuse completed
+
+Unchanged research Python environment and Llama-3.1-8B-Instruct weights; no installs or environment rebuild. New experiments/token_backtrace: 8 full answers, 1487 independent target backwards, 859.84 backward seconds, 20.76 GiB process peak. 20 finite-difference/prefix-check forwards and 8 source-relation contrast forwards. Full official test2700 answers/424408 valid tokens rescored from existing native scalar caches on CPU, not full-test gradient recapture. 8 targeted tests passed. Goal not achieved; all candidate variants remain experimental and default unchanged. GPU readback after runs: 1 MiB / 0%. Shared result/execution/audit: lys/codex/research/refine-logs/token_iteration_20260930/. No active GPU jobs from this round; historical RUNNING entries below are not restart instructions.
+
 # Existing research environment
 
 Python: /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python
