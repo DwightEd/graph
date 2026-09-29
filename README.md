@@ -1,3 +1,7 @@
+## 2026-09-29：GSM8K全层步骤状态与LDA错误定位
+
+新增 `experiments/gsm8k_states`，400答真实8B全32层状态重放、两轮首错步骤实验已完成。margin/JS/谱标量未胜attention；固定读取/选择组合AUC .6920但首错仍9/127，不能宣称解决。历史LDA高AUROC仍有边界漏检；全部具体错误及方法见 [结果报告](experiments/gsm8k_states/RESULTS_20260929.md)，[运行说明](experiments/gsm8k_states/README.md)。监督仅作独立诊断，原默认不变。
+
 # 原生来源传递检测与机制审计
 
 最新：[GSM8K步骤边界与attention重复实测](experiments/gsm8k_recurrence/RESULTS_20260929.md)。找到400份单层32头缓存并完成CPU试验；步骤内重复AUROC .6457低于无图.6736，未改善首错检测。
