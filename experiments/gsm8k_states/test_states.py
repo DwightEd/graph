@@ -39,3 +39,48 @@ def test_top_fraction_never_crosses_step_boundaries():
     values = np.array([100.,1.,2.,3.,4.,-1.,-2.])
     pooled = top_fraction(values,np.array([[0,5],[5,7]]))
     np.testing.assert_array_equal(pooled,[100.,-1.])
+
+
+def test_energy_rank_centering_scaling_and_known_spectrum():
+    from .readout import energy_rank
+    matrix = np.array([[1.,0.],[-1.,0.],[0.,1.],[0.,-1.]])
+    result = energy_rank(matrix)
+    np.testing.assert_allclose(result['rank'], 2.)
+    np.testing.assert_allclose(result['normalized'], 1.)
+    np.testing.assert_allclose(energy_rank(matrix*3+20)['rank'], result['rank'])
+    assert energy_rank(np.ones((3,2)))['rank']==0
+    assert energy_rank(np.ones((1,2)))['rank'] is None
+
+
+def test_attention_geometry_uses_prediction_query_and_visible_normalization():
+    from .readout import attention_geometry
+    attention = np.zeros((2,5,5))
+    for query in range(5):
+        attention[:,query,:query+1] = 1/(query+1)
+    measured = attention_geometry(attention, 2, 4)
+    np.testing.assert_allclose(measured['attention_entropy'], [1.,1.])
+    np.testing.assert_allclose(measured['prior_mass'], [1.,2/3])
+    np.testing.assert_allclose(measured['head_disagreement'], 0., atol=1e-14)
+
+
+def test_first_error_geometry_pairs_exclude_unknown_and_match_same_answer():
+    from .evaluate import adjacent_geometry_pairs
+    rows = [dict(id='x',problem='p',role='evaluation',step=i,label=y,length=5,value=v)
+            for i,y,v in [(0,0,1.),(1,1,3.),(2,-1,100.)]]
+    pairs = adjacent_geometry_pairs(rows,'value',1)
+    assert len(pairs)==1
+    assert pairs[0]['difference']==2.
+
+
+def test_equal_count_prefix_does_not_mix_later_state_changes(tmp_path):
+    from .evaluate import equal_length_hidden_pairs
+    base = np.array([[1.,0.],[0.,1.],[-1.,0.],[0.,-1.]])
+    states = np.vstack((base,base,base*5,np.zeros((1,2))))
+    path = tmp_path/'hidden.npz'
+    np.savez(path, activation=states, step_ranges=np.array([[1,5],[5,13]]))
+    rows = [dict(id='x',problem='p',role='evaluation',step=step,label=step,
+                 hidden_cache=str(path)) for step in (0,1)]
+    pairs = equal_length_hidden_pairs(rows)
+    prefix = next(row for row in pairs if row['method']=='state_prefix')
+    assert prefix['matched_count']==4
+    np.testing.assert_allclose(prefix['difference'],0.,atol=1e-12)

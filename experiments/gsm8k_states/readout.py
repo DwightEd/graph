@@ -15,6 +15,119 @@ UNSUPERVISED = ('attention_base','final_margin','final_nll','final_entropy','fin
 VIEWS = ('end','delta','trajectory','position')
 
 
+def energy_rank(matrix, center=True):
+    """Energy-spectrum effective rank; rows are observations, columns coordinates."""
+    values = np.asarray(matrix, dtype=np.float64)
+    maximum = min(len(values) - int(center), values.shape[1])
+    if maximum < 1:
+        return dict(rank=None, normalized=None, participation=None)
+    if center:
+        values = values - values.mean(0)
+    energy = np.maximum(np.linalg.eigvalsh(values @ values.T), 0)
+    if energy.sum() == 0:
+        return dict(rank=0., normalized=0., participation=0.)
+    probability = energy / energy.sum()
+    effective = float(np.exp(-np.sum(probability * np.log(np.maximum(probability, 1e-300)))))
+    return dict(rank=effective, normalized=effective / maximum,
+                participation=float(1 / np.sum(probability ** 2)))
+
+
+def entropy(probability):
+    return -np.sum(probability * np.log(np.maximum(probability, 1e-30)), axis=-1)
+
+
+def attention_geometry(attention, start, stop):
+    """Use the prediction queries start-1:stop-1, retaining physical heads."""
+    weights = attention[:, start-1:stop-1, :stop-1].astype(np.float64)
+    weights /= weights.sum(-1, keepdims=True)
+    visible = np.arange(start, stop)
+    total_entropy = entropy(weights)
+    prior = weights[:, :, :start]
+    prior_mass = prior.sum(-1)
+    prior = np.divide(prior, prior_mass[:, :, None],
+                      out=np.zeros_like(prior), where=prior_mass[:, :, None] > 0)
+    return dict(attention_entropy=(total_entropy / np.log(np.maximum(visible, 2))).mean(0),
+                prior_entropy=(entropy(prior) / np.log(max(start, 2))).mean(0),
+                prior_mass=prior_mass.mean(0),
+                head_disagreement=(entropy(weights.mean(0))-total_entropy.mean(0))/np.log(len(weights)))
+
+
+def hidden_geometry(states):
+    """Within-step token geometry; token increments are not layer-block updates."""
+    rank = energy_rank(states)
+    changes = energy_rank(np.diff(states.astype(float), axis=0), center=False)
+    early_count = max(1, int(np.ceil(len(states) * .25)))
+    early = energy_rank(states[:early_count])
+    return dict(hidden_rank=rank['rank'], hidden_rank_normalized=rank['normalized'],
+                hidden_participation=rank['participation'],
+                token_change_rank_normalized=changes['normalized'],
+                early_hidden_rank_normalized=early['normalized'])
+
+
+def geometry_record(row, output, hidden_path):
+    with np.load(row['cache']) as saved:
+        first = int(saved['response_idx'])
+        ranges = saved['step_ranges']
+        ids = saved['token_ids']
+        attention = saved['attention'][0]
+    activation = None
+    if hidden_path is not None:
+        with np.load(hidden_path) as saved:
+            np.testing.assert_array_equal(ids, saved['token_ids'])
+            np.testing.assert_array_equal(ranges, saved['step_ranges'])
+            assert int(saved['activation_layer']) == 15
+            activation = saved['activation']
+    with np.load(output / (row['id']+'.npz')) as saved:
+        end = saved['end'].astype(float)
+    rows = []
+    for step, (start, stop) in enumerate(ranges):
+        signals = attention_geometry(attention, start, stop)
+        early_count = max(1, int(np.ceil((stop-start)*.25)))
+        result = dict(id=row['id'], problem=row['problem'], role=row['role'],
+                      generator=row['generator'], step=step, length=int(stop-start),
+                      position=int(start-first), hidden_cache=str(hidden_path) if hidden_path else None)
+        for name, values in signals.items():
+            result[name] = float(values.mean())
+            result['early_'+name] = float(values[:early_count].mean())
+        result['end_layer_update_rank'] = energy_rank(np.diff(end[:, step], axis=0), center=False)['rank']
+        if activation is not None:
+            result.update(hidden_geometry(activation[start-1:stop-1]))
+        rows.append(result)
+    return rows
+
+
+def measure_geometry(output, hidden_cache):
+    """Read caches only; freeze every feature before opening official error labels."""
+    import hashlib
+    from time import perf_counter
+    destination = output / 'geometry_features.json'
+    if destination.exists():
+        raise FileExistsError(destination)
+    manifest = json.loads((output/'manifest.json').read_text())
+    hidden_files = {}
+    for path in sorted(hidden_cache.glob('*.npz')):
+        with np.load(path) as saved:
+            hidden_files[str(saved['sample_id'])] = path.resolve()
+    protocol = dict(status='measuring', direction='higher dispersion/rank predicts first error',
+                    labels_used_for_features=False, new_llm_forwards=0,
+                    prediction_query='response position minus one', early_fraction=.25,
+                    rank='entropy of squared singular values, centered across tokens',
+                    rank_scope='HS15 within-token geometry for 61; step-end cross-layer control for 400',
+                    source_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                    hidden_cache=str(hidden_cache.resolve()))
+    write_json(output/'geometry_protocol.json', protocol)
+    started = perf_counter()
+    rows = []
+    for index, row in enumerate(manifest['records']):
+        rows.extend(geometry_record(row, output, hidden_files.get(row['id'])))
+        if (index+1) % 25 == 0:
+            print('geometry measured', index+1, 'seconds', round(perf_counter()-started, 1), flush=True)
+    write_json(destination, dict(status='frozen', rows=rows, labels_used=False,
+                                answers=len(manifest['records']), hidden_answers=len(hidden_files),
+                                seconds=perf_counter()-started))
+    print('geometry features frozen', len(rows), flush=True)
+
+
 def average_steps(value, ranges):
     return np.stack([value[...,a:b].mean(-1) for a,b in ranges])
 
@@ -102,7 +215,14 @@ def train_diagnostics(rows,features,originals,output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--geometry',action='store_true')
+    parser.add_argument('--hidden-cache',type=Path)
     args = parser.parse_args()
+    if args.geometry:
+        if args.hidden_cache is None:
+            parser.error('--geometry requires --hidden-cache')
+        measure_geometry(args.output, args.hidden_cache)
+        return
     json.loads((args.output/'capture_complete.json').read_text())
     manifest = json.loads((args.output/'manifest.json').read_text())
     rows = manifest['records']

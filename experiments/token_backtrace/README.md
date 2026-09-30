@@ -82,3 +82,82 @@ python -m pytest -q experiments/token_backtrace/test_readout.py experiments/toke
 `trace.npz`, numerical checks, counterfactual records, constraint witnesses,
 frozen test NPZs, and `test_results.json` retain separate measurement scopes.
 The shared handoff is `lys/codex/research/refine-logs/token_iteration_20260930/`.
+
+## Whole-answer graph anomaly pilot, 2026-09-30
+
+The existing `benchmark.py` now supports `graph-score` and `graph-evaluate`.
+These reuse all eight answers' independent root gradients and saved final
+normalized 4096-dimensional hidden states. There are no new LLM forwards.
+Every original token receives a score. This is a cached-observer graph
+anomaly experiment, not the full native-path/finite-intervention model.
+
+The primary model is signed, directed conditional ridge reconstruction.
+Node targets comprise a fixed seed-17 Gaussian projection of hidden states
+to 32 dimensions plus NLL, entropy, negative margin, log root-gradient norm,
+and positive/negative source fractions. Source-excluded standardization is
+followed by equal weighting of hidden and scalar reconstruction losses.
+Predictors include position, lexical format, task, signed history mass,
+and separate positive/negative weighted ancestor attributes. The weights
+are total root sensitivities; they are used for one-hop feature context,
+never recursively multiplied as if they were direct neural edges. Feature
+aggregation does not broadcast neighbouring risk scores.
+
+Controls use no graph (conditional ridge and Isolation Forest), expected
+endpoints within log2-lag/repeated-token-ID strata, and three randomized
+endpoint assignments (seeds 17/29/43). Nulls preserve receiver-stratum signed
+mass; randomization also preserves weight multisets, but not every sender's
+outgoing degree. They test endpoint identity beyond the retained lag/repetition
+structure, not whether all graph structure is useless.
+
+Fitting holds out the entire source. Inner source-held predictions from the
+remaining sources calibrate an equal-source empirical percentile. Alarm is
+percentile > .95; this is not a calibrated error probability or a guaranteed
+normal FPR. Inner fits have six sources and final outer fits seven, so their
+score distributions can differ. Only eight historically exposed sources
+are available, including just one Summary source; task shift and small-data
+effects remain. Natural labels are opened only in `graph-evaluate`.
+
+```bash
+python -m experiments.token_backtrace.benchmark --stage graph-score --output outputs/token_backtrace_readout_20260930_v2/graph_nodes_v1
+python -m experiments.token_backtrace.benchmark --stage graph-evaluate --output outputs/token_backtrace_readout_20260930_v2/graph_nodes_v1
+python -m pytest experiments/token_backtrace/test_readout.py -q
+```
+
+Run commands in the existing research environment with four BLAS/OpenMP
+threads. Scoring refuses to overwrite its output. `graph.npz` preserves
+full history/prompt root responses, attributes and predictor matrices;
+`tokens.csv` and `TOKEN_GRAPH.html` expose every token, method score, raw
+error, official span membership and top history/prompt roots. The common
+79-token alarm budget is a ranking diagnostic separate from frozen alarms.
+Shared protocol, execution, results and audit are in the existing
+`lys/codex/research/refine-logs/gsm8k_states_20260929/TOKEN_GRAPH_*` files.
+
+The exposed pilot contains 1487 valid tokens (134 official span members):
+`graph_ridge` AUROC/AP = 0.516395/0.098217, TP7/FP60; `node_ridge`
+0.520921/0.101166, TP8/FP58; historical `base` 0.808717/0.279095,
+TP19/FP58. Neither a useful detector nor an endpoint-structure advantage
+was established. All graph-vs-node/temporal/shuffled source-bootstrap
+intervals include zero. Official span membership is not independently
+annotated key-token truth.
+
+One explicitly posthoc ablation preserves raw signed edge mass instead of
+normalizing each channel. All five graph/null variants are reported, with
+no label-based selection. `graph_mass` AUROC 0.541365 (TP9/FP61), expected
+endpoints 0.535317, and randomized endpoints 0.538816/0.540507/0.539338 do
+not establish an endpoint advantage either. Original files remain frozen.
+The original seven methods' scores reproduce bit-exact after this optional
+parameter refactor; see `refactor_verification.json`.
+
+```bash
+python -m experiments.token_backtrace.benchmark --stage graph-mass-score --output outputs/token_backtrace_readout_20260930_v2/graph_nodes_v1
+python -m experiments.token_backtrace.benchmark --stage graph-mass-evaluate --output outputs/token_backtrace_readout_20260930_v2/graph_nodes_v1
+```
+
+Supplemental outputs use `mass_` prefixes in the same directory.
+`graph_structure_diagnostics` computes exchangeable edge mass and rank
+correlations; its tiny-mass cutoff is descriptive and never used to score.
+Only five QA, one Summary and two Data2txt sources are available (four
+official train and four official test). Source-held cross-fitting here is
+an exploratory protocol, not the official held-out benchmark. The baseline
+uses a larger historical calibration set; its comparison is same-token,
+not equal-training-budget. No new full-test run or default replacement.

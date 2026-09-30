@@ -48,3 +48,18 @@ python -m pytest experiments/gsm8k_states/test_states.py -q
 `readout`同时生成明确标记的监督诊断，不属于无监督主候选。`audit_previous`只读原历史QA LDA冻结分数/阈值和旧条件模型案例，输出每个FN/FP原节点位置；历史存档路径当前在本机Trash目录，未移动或恢复。新旧节点索引不可直接混用。
 
 结果位置：`outputs/gsm8k_states_20260929_v1`（1.6GB新状态及全量读出），`outputs/gsm8k_states_20260929_v2`（聚合消融），`outputs/supervised_location_audit_20260929`（历史监督审计）。每轮 `errors.csv` 包含全部评价FN/FP步骤全文；`steps.csv` 包含未知后续步骤分数；原始大文件不进Git。
+
+## 2026-09-30：首错分散度与步骤内有效秩（CPU缓存诊断）
+
+新增既有入口的 `--geometry` 模式。复用400答layer14完整attention、全层步骤摘要，以及61答HS15逐token状态，不跑模型。全层步骤摘要不能恢复步骤内token秩；61答结果单列，不能称400答全层残差分析。
+
+来源包含题目和此前步骤：每头完整可见key熵除以log可见key数；另算条件于当前步骤之前key的熵、质量，以及头间JSD。步骤前25%为组织阶段的时间代理，无真实语义阶段标注。HS15取预测原词前的位置，中心化token×4096矩阵，用Gram特征值的能量分布计算effective rank、participation ratio与按可达秩归一化值；跨token状态差不是跨层MLP更新。步骤末端跨层更新秩是另一个控制定义。
+
+全部特征先冻结，随后读取官方首错标签。沿用问题隔离评价，报告高值=首错的固定方向AUROC、dev混合95阈值首错定位、长度相关、首错减同答前一步的差及1000次问题簇区间。61答另作同样本量状态子采样；正常→正常转移作参考。标签用于机制诊断，未训练真假分类器；区间未做多重校正，不能据单项显著性宣称因果或部署收益。
+
+```bash
+OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python -m experiments.gsm8k_states.readout --geometry --output outputs/gsm8k_states_20260929_v1 --hidden-cache ../demo/outputs/attention_traces/gsm8k_llama31_layer14_nocap_hidden_hs15_matched_Llama-3.1-8B-Instruct/balanced
+OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python -m experiments.gsm8k_states.evaluate --geometry --output outputs/gsm8k_states_20260929_v1
+```
+
+新原件为同一目录下geometry_protocol.json、geometry_features.json、geometry_evaluation.json、geometry_pairs.json、geometry_steps.csv。测量拒绝覆盖已冻结features；旧scores/evaluation均不改。此模式不能称MIRAGE复现、原生成轨迹或真实来源干预。

@@ -137,12 +137,120 @@ def evaluate_test(output, methods=METHODS, primary=PRIMARY):
     write_json(output / 'test_results.json', results)
 
 
+def load_graph_records(preserve_mass=False):
+    from .diagnose import TRACES
+    from .readout import graph_designs
+
+    rows = read_json('outputs/token_evidence_20260929_v1/manifest.json')['records']
+    records, inputs = [], []
+    for row in (row for row in rows if row['key'] in CASES):
+        trace_path = next(root / row['key'] / 'trace.npz' for root in TRACES if (root / row['key']).exists())
+        state_path = Path('outputs/automatic_evidence_20260930_v2') / row['key'] / 'effects.npz'
+        with np.load(trace_path) as trace, np.load(state_path) as states:
+            np.testing.assert_array_equal(trace['token_ids'], row['response']['answer_ids'])
+            np.testing.assert_array_equal(states['token_ids'], trace['token_ids'])
+            prompt = len(row['prompt'])
+            for target, effect in enumerate(trace['root_effect']):
+                assert not np.any(effect[prompt + target:]), 'future response root'
+            attributes, designs, weights = graph_designs(row, trace, states['original_hidden'], preserve_mass)
+            source_effect = trace['root_effect'][:, :prompt].copy()
+        offsets = np.asarray(row['response']['offsets'])
+        valid = (offsets[:, 1] > offsets[:, 0]) & ~np.isin(
+            row['response']['answer_ids'], row['response']['special_ids'])
+        records.append(dict(key=row['key'], source_id=row['original']['source_id'], row=row,
+            attributes=attributes, designs=designs, weights=weights, valid=valid,
+            source_effect=source_effect))
+        inputs.extend((trace_path, state_path))
+    assert len(records) == 8 and sum(len(r['valid']) for r in records) == 1487
+    return records, inputs
+
+
+def score_graph(output, preserve_mass=False):
+    import hashlib
+    from time import perf_counter
+    from .readout import GRAPH_METHODS, MASS_METHODS
+    from .readout import crossfit_graph
+
+    prefix = 'mass_' if preserve_mass else ''
+    methods = MASS_METHODS if preserve_mass else GRAPH_METHODS
+    if preserve_mass:
+        read_json(output / 'scores_frozen.json')
+        assert not (output / 'mass_protocol.json').exists(), 'refuse to overwrite mass experiment'
+    else:
+        output.mkdir(parents=True, exist_ok=False)
+    protocol = dict(primary='graph_ridge', methods=[*GRAPH_METHODS, 'base'], seeds=[17, 29, 43],
+        fit='outer source exclusion, inner held-source calibration; source-balanced scaling/ridge/IF',
+        threshold=.95, high_score_is_anomalous=True, labels_used=False,
+        hidden='cached final normalized 4096-state projected to 32 dimensions, fixed seed17',
+        graph='signed history root-gradient total-response edges, one-hop contexts; no path rollout',
+        source='full prompt root responses saved; source signed mass attributes, not semantic evidence',
+        null='within log2-lag and repeated-current-token strata; signed row multiset preserved',
+        score='equal mean squared standardized reconstruction error of hidden and six scalar blocks',
+        ridge_alpha=1., forest_trees=100, forest_max_samples=256,
+        natural_cases_previously_exposed=True, independent_test=False,
+        model='Llama-3.1-8B-Instruct observer replay', new_llm_forwards=0,
+        risk_averaging=False, cross_answer_edges=False,
+        projection='fixed Gaussian; no claim of exact distance preservation',
+        calibration_caveat='inner models fit six sources, outer fit seven; percentile not calibrated truth probability')
+    if preserve_mass:
+        protocol.update(primary='graph_mass', methods=[*GRAPH_METHODS, *MASS_METHODS, 'base'],
+            posthoc_after_first_evaluation=True,
+            context='raw signed channel @ attributes, without row normalization')
+    write_json(output / (prefix + 'protocol.json'), protocol)
+    started = perf_counter()
+    records, inputs = load_graph_records(preserve_mass)
+    code = [Path(__file__), Path(__file__).with_name('readout.py')]
+    hashes = {str(path.resolve()): hashlib.sha256(path.read_bytes()).hexdigest() for path in (*inputs, *code)}
+    write_json(output / (prefix + 'inputs.json'), hashes)
+    baseline = cached_baselines({row['key'] for row in records})
+    scores = {row['key']: dict(base=baseline[row['key']]) for row in records}
+    if preserve_mass:
+        for key in scores:
+            with np.load(output / key / 'scores.npz') as original:
+                scores[key] = {name: original[name] for name in original.files
+                               if name not in ('valid', 'token_ids')}
+    folds = {}
+    for method in methods:
+        predictions, folds[method] = crossfit_graph(records, method)
+        for key, values in predictions.items():
+            scores[key][method] = values['score']
+            scores[key]['raw_' + method] = values['raw']
+        print('graph scores', method, round(perf_counter()-started, 2), flush=True)
+    write_json(output / (prefix + 'calibration.json'), folds)
+    for record in records:
+        key = record['key']
+        directory = output / key
+        directory.mkdir(exist_ok=preserve_mass)
+        for values in scores[key].values():
+            assert np.isfinite(values[record['valid']]).all()
+        np.savez_compressed(directory / (prefix + 'scores.npz'), **scores[key],
+            token_ids=record['row']['response']['answer_ids'], valid=record['valid'])
+        np.savez_compressed(directory / (prefix + 'graph.npz'), attributes=record['attributes'],
+            history_effect=record['weights'], prompt_effect=record['source_effect'],
+            **record['designs'])
+    if not preserve_mass:
+        write_json(output / 'manifest.json', dict(records=[record['row'] for record in records]))
+    write_json(output / (prefix + 'scores_frozen.json'), dict(status='complete', labels_accessed=False,
+        answers=len(records), tokens=sum(len(r['valid']) for r in records),
+        seconds=perf_counter()-started, methods=protocol['methods']))
+    print('FROZEN', round(perf_counter()-started, 2), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stage', choices=('fit', 'pilot', 'score-test', 'evaluate-test'), required=True)
+    parser.add_argument('--stage', choices=('fit', 'pilot', 'score-test', 'evaluate-test',
+        'graph-score', 'graph-evaluate', 'graph-mass-score', 'graph-mass-evaluate'), required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
-    {'fit': fit, 'pilot': pilot_scores, 'score-test': score_test, 'evaluate-test': evaluate_test}[args.stage](args.output)
+    if args.stage in ('graph-evaluate', 'graph-mass-evaluate'):
+        from .diagnose import evaluate_graph
+        evaluate_graph(args.output, preserve_mass=args.stage == 'graph-mass-evaluate')
+        return
+    if args.stage == 'graph-mass-score':
+        score_graph(args.output, preserve_mass=True)
+        return
+    {'fit': fit, 'pilot': pilot_scores, 'score-test': score_test,
+     'evaluate-test': evaluate_test, 'graph-score': score_graph}[args.stage](args.output)
 
 
 if __name__ == '__main__':
