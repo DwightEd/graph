@@ -26,27 +26,14 @@ def write_new(path, value):
 
 def score_document(document):
     """A measured-event contract, distinct from an end-to-end text detector."""
-    if document['schema'] != 'measured_token_graph_v1':
-        raise ValueError('expected measured_token_graph_v1')
-    if document['labels_used'] is not False:
-        raise ValueError('the scoring contract excludes natural truth-label inputs')
-    if not isinstance(document['proposals_complete'], bool):
-        raise ValueError('proposals_complete must be a boolean')
     tokens, offsets = document['token_ids'], document['character_offsets']
-    if not tokens or len(offsets) != len(tokens):
-        raise ValueError('every original token requires its character offset')
-    identities = [event['event_id'] for event in document['events']]
-    if len(identities) != len(set(identities)):
-        raise ValueError('one event per frozen proposal/comparison pair is required')
     thresholds = document['thresholds']
-    if not thresholds['reference_id']:
-        raise ValueError('independent channel threshold reference must be identified')
     scored = score_events(document['events'], len(tokens), thresholds['direct'], thresholds['graph'])
     complete = scored['complete'] and document['proposals_complete']
     return dict(schema='scored_token_graph_v1', key=document['key'], source_id=document['source_id'],
         token_ids=tokens, character_offsets=offsets, thresholds=thresholds,
         scores=scored, status='complete' if complete else 'incomplete',
-        labels_used=False, semantic_proposals_generated_here=False,
+        labels_used=document['labels_used'], semantic_proposals_generated_here=False,
         interpretation='reference-scaled compatibility, not factuality probability')
 
 

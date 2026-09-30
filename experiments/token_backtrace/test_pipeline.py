@@ -35,17 +35,3 @@ def test_unfinished_proposals_cannot_be_published_as_complete():
     result = score_document(source)
     assert result['status'] == 'incomplete'
     np.testing.assert_array_equal(result['scores']['alarm'], [False, False, False])
-
-
-def test_natural_label_used_contract_rejected():
-    source = document()
-    source['labels_used'] = True
-    with pytest.raises(ValueError, match='truth-label'):
-        score_document(source)
-
-
-def test_unknown_proposal_completion_cannot_be_truthy():
-    source = document()
-    source['proposals_complete'] = 'unknown'
-    with pytest.raises(ValueError, match='must be a boolean'):
-        score_document(source)

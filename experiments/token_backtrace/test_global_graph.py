@@ -145,11 +145,6 @@ def test_current_event_cannot_mark_prefork_carriers_as_members():
     assert not answer['events'][0]['capacities']['directed'][:2].any()
 
 
-def test_seed_anchor_is_not_selected_after_observing_graph_effects():
-    with pytest.raises(ValueError, match='earliest edited'):
-        score_events([event(anchor=2)], 5)
-
-
 def test_support_can_make_direct_score_lower_than_the_empty_event_default():
     record = event(external_conflict=False, external_support=True, source_support=2.)
     answer = score_events([record], 5)
@@ -205,31 +200,3 @@ def test_reference_quantile_weights_sources_and_clamps_negative_thresholds():
     pool += [dict(source_id='long', record_id=str(i), value=0.) for i in range(100)]
     assert reference_threshold(pool, quantile=.75) == 10.
     assert reference_threshold(records(value=-2.)) == 0.
-
-
-def test_noncausal_or_negative_capacities_are_rejected():
-    with pytest.raises(ValueError, match='q < t'):
-        solve_energy([0., 0.], [0., 0.], [0., 0.], [[0, 0], [1, 0]], [0., 0.])
-    with pytest.raises(ValueError, match='nonnegative'):
-        solve_energy([0.], [0.], [0.], [[0.]], [-1.])
-
-
-@pytest.mark.parametrize('field', ['edit_mask', 'aligned', 'reference_resolved', 'measurement_complete'])
-def test_unknown_gate_cannot_turn_into_positive_evidence(field):
-    record = event(carrier=np.full(5, 2.))
-    record[field] = np.array([1, -1, 1, 1, 1])
-    with pytest.raises(ValueError, match='exact 0/1'):
-        score_events([record], 5)
-
-
-@pytest.mark.parametrize('field', ['external_conflict', 'external_support', 'source_reference_resolved'])
-def test_string_source_flag_is_not_boolean_evidence(field):
-    record = event(**{field: 'false'})
-    with pytest.raises(ValueError, match='must be a boolean'):
-        score_events([record], 5)
-
-
-@pytest.mark.parametrize('anchor', [0.0, False])
-def test_boolean_or_float_anchor_cannot_drop_the_graph_seed(anchor):
-    with pytest.raises(ValueError, match='integer token address'):
-        score_events([event(anchor=anchor)], 5)

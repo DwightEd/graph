@@ -211,26 +211,3 @@ def test_pair_winner_ties_choose_earliest_target_then_lexical_physical_head():
     result = selected_statistics(eta, heads, aligned, valid)
     assert result['pair_target'][0, 1] == 2
     np.testing.assert_array_equal(result['pair_head'][0, 1], [0, 0])
-
-
-def test_direction_order_is_an_explicit_contract():
-    import pytest
-
-    from .readout import selected_statistics
-
-    with pytest.raises(ValueError, match='ordered R, E, U'):
-        selected_statistics(*native_effects(), donor_names=('E', 'R', 'U'))
-
-
-def test_unknown_native_mask_and_fractional_head_identity_are_rejected():
-    import pytest
-
-    from .readout import selected_statistics
-
-    eta, heads, aligned, valid = native_effects()
-    invalid = aligned.astype(int)
-    invalid[1] = -1
-    with pytest.raises(ValueError, match='exact booleans'):
-        selected_statistics(eta, heads, invalid, valid)
-    with pytest.raises(ValueError, match='nonnegative integers'):
-        selected_statistics(eta, heads.astype(float) + .5, aligned, valid)

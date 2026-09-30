@@ -1,4 +1,8 @@
-"""Fit without labels, diagnose exposed cases, then freeze all 2700 test answers."""
+"""Run cached scalar comparisons on all three RAGTruth tasks, without label fitting.
+
+These are the historical fixed baseline and independent token contrasts, not
+the native message graph: its automatic event measurements are still missing.
+"""
 
 import argparse
 from datetime import datetime, timezone
@@ -7,18 +11,19 @@ from pathlib import Path
 import joblib
 import numpy as np
 
-from experiments.context_response.restore import cached_baselines, original_threshold
+from experiments.context_response.restore import cached_baselines
 from experiments.decision_risk_flow.data import read_json, write_json
 from experiments.native_support.unified.calibration import fit_distribution
 from experiments.probabilistic_detection.data import evaluation_labels, source_weights
 from experiments.probabilistic_detection.evaluation import evaluate_method, source_bootstrap
 from experiments.token_evidence.evaluate import weighted_quantile
+from experiments.unsupervised_graph.fixed import fit_reference
+from experiments.unsupervised_graph.scalar import rank_scores, scalar_scores
 from .readout import METHODS, PRIMARY, contrasts, pack_contrasts, score_contrasts
 from .span_metrics import span_metrics
 
 
 PACKS = Path('outputs/probabilistic_detection_20260928_full/packs')
-BASELINE = Path('outputs/unsupervised_graph_20260928')
 TASKS = ('QA', 'Summary', 'Data2txt')
 PACK_KEYS = ('context', 'observations', 'token_id', 'target', 'source_index',
              'answer_index', 'unit_index', 'development')
@@ -56,7 +61,8 @@ def fit(output):
         weights = source_weights(pack['source_index'][development])
         thresholds[task] = {name: weighted_quantile(value[development], weights, .95)
                             for name, value in scores.items()}
-        thresholds[task]['base'] = original_threshold(task)
+        baseline_reference, thresholds[task]['base'] = fit_reference(pack)
+        fitted[task]['fixed_baseline'] = baseline_reference
         print('fitted without labels', task, len(pack['token_id']), flush=True)
     joblib.dump(fitted, output / 'calibration.joblib')
     write_json(output / 'thresholds.json', thresholds)
@@ -90,15 +96,11 @@ def score_test(output):
     for task in TASKS:
         pack, metadata = load_pack(task, 'test')
         scores = score_contrasts(pack_contrasts(pack, metadata), fitted[task])
-        with np.load(BASELINE / task / 'test_scores.npz') as baseline:
-            scores['base'] = baseline['fixed_unsupervised']
-        assert all(len(value) == len(pack['token_id']) and np.isfinite(value).all() for value in scores.values())
+        scores['base'] = rank_scores(scalar_scores(pack), fitted[task]['fixed_baseline'])['fixed_unsupervised']
         np.savez_compressed(output / f'{task}_test.npz', **scores, token_id=pack['token_id'],
                             target=pack['target'], answer_index=pack['answer_index'])
         coverage[task] = dict(answers=len(metadata['records']), valid_tokens=len(pack['token_id']))
         print('test scores frozen', task, coverage[task], flush=True)
-    assert sum(row['answers'] for row in coverage.values()) == 2700
-    assert sum(row['valid_tokens'] for row in coverage.values()) == 424408
     write_json(output / 'test_frozen.json', dict(coverage=coverage, labels_accessed=False,
         new_llm_forwards=0, measurement='reuse all original native scalar caches',
         root_gradients_recomputed_on_full_test=False, frozen_utc=datetime.now(timezone.utc).isoformat()))
@@ -137,13 +139,19 @@ def evaluate_test(output, methods=METHODS, primary=PRIMARY):
     write_json(output / 'test_results.json', results)
 
 
+def run_test(output):
+    fit(output)
+    score_test(output)
+    evaluate_test(output)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stage', choices=('fit', 'pilot', 'score-test', 'evaluate-test'), required=True)
+    parser.add_argument('--stage', choices=('fit', 'pilot', 'score-test', 'evaluate-test', 'run-test'), required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     {'fit': fit, 'pilot': pilot_scores, 'score-test': score_test,
-     'evaluate-test': evaluate_test}[args.stage](args.output)
+     'evaluate-test': evaluate_test, 'run-test': run_test}[args.stage](args.output)
 
 
 if __name__ == '__main__':

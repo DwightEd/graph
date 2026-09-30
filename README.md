@@ -32,6 +32,10 @@ python main.py --help
 # 原有有效无监督基线：从标量缓存重算，核对所有任务/分区的分数及阈值
 python main.py baseline fixed --report outputs/my_verification/fixed.json
 
+# 三任务完整test：重算无标签参考、冻结全部分数，再评价官方标注
+# 运行旧fixed与独立token对照；不是尚未接通的新消息图
+python main.py token baseline --stage run-test --output outputs/my_token_test
+
 # 已有逐 token 对比基线，拟合和评价分开
 python main.py token baseline --stage fit --output outputs/my_token_run
 python main.py token baseline --stage pilot --output outputs/my_token_run
@@ -47,6 +51,8 @@ python main.py graph lineage --trace trace.npz --prompt-length 100 --output line
 另外保留 `evidence prepare/capture/score/evaluate`、`baseline source-capture/js/mmd/score/evaluate` 和 `history capture/verify/evaluate`。`evidence` 是既有自动来源实验；`history` 含已暴露样本的机制诊断。它们不冒充新方案的全自动语义提案器。旧监督、图重构、固定局部邻域训练入口已删除；对应的原始结果不删除。
 
 旧 fixed 基线保留历史 unit/window 聚合，仅作强对照。新核心没有把固定窗口风险平均作为逐 token 检测，也没有把 attention 重复、高秩或 hidden 重构误差当作真假。
+
+2026-09-30 全测试重算完成：三个任务各900答，共424,408有效token。fixed 的 QA/Summary/Data2txt AUROC 为 .890665/.752177/.758040，独立token的 odds_full 为 .799441/.689958/.620336；后者完整span覆盖为0/235、0/244、6/1054。分数与历史逐值一致，无新模型前向、无test调参；不是新图结果。详见 [验证记录](docs/REFACTOR_VALIDATION.md)。
 
 ## 研究约束
 

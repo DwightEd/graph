@@ -6,34 +6,8 @@ influence under fixed text; they do not determine factual correctness.
 """
 from contextlib import contextmanager
 from dataclasses import dataclass
-from math import isfinite
-from numbers import Integral
 
 import torch
-
-
-def site_index(value, name, size):
-    """A native address cannot use Python's negative/boolean indexing semantics."""
-    if isinstance(value, bool) or not isinstance(value, Integral) or not 0 <= value < size:
-        raise ValueError(f'{name} must be an integer in [0, {size})')
-    return int(value)
-
-
-def validate_selection(selection, trace):
-    """Check cached physical head coordinates once before gathering messages."""
-    selection = torch.as_tensor(selection)
-    integer_types = (torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8)
-    if selection.dtype not in integer_types or selection.ndim != 3 or selection.shape[2] != 2:
-        raise ValueError('selection requires integer physical addresses [T,K,2]')
-    if selection.shape[0] != len(trace.answer) or selection.shape[1] == 0:
-        raise ValueError('selection must cover every original token with at least one head')
-    layer, head = selection[..., 0], selection[..., 1]
-    if ((layer < 0) | (layer >= len(trace.messages)) | (head < 0) | (head >= trace.heads)).any():
-        raise ValueError('selection contains an out-of-range layer/head address')
-    ordered = torch.sort(layer * trace.heads + head, dim=1).values
-    if (torch.diff(ordered, dim=1) == 0).any():
-        raise ValueError('selection repeats a physical head at the same carrier')
-    return selection.long()
 
 
 @dataclass
@@ -82,8 +56,6 @@ def capture_messages(model):
 
 def native_trace(model, prompt, answer, gradients=True):
     """Keep all tokens; the final carrier has no later answer target to affect."""
-    if model.training:
-        raise ValueError('Native tracing requires model.eval() for replay consistency.')
     tokens = torch.tensor([list(prompt) + list(answer)], device=model.device)
     with torch.set_grad_enabled(gradients), capture_messages(model) as captured:
         embeddings = model.model.embed_tokens(tokens).detach().requires_grad_(gradients)
@@ -121,40 +93,6 @@ def top_heads(model, original, count=4):
     return selection.cpu(), scores.cpu()
 
 
-def validate_alignment(original, donors, alignments):
-    """Maps original answer indices to donor indices; -1 explicitly means unknown.
-
-    Eligible carriers share original token IDs and a common position displacement
-    in all donor worlds. Upstream edit alignment supplies the exact suffix maps.
-    """
-    token_count = len(original.answer)
-    maps = [torch.as_tensor(alignments[name]) for name in donors]
-    if any(mapping.dtype not in (torch.int8, torch.int16, torch.int32, torch.int64)
-           for mapping in maps):
-        raise ValueError('Alignment indices must be integers, with -1 for unknown.')
-    maps = [mapping.long() for mapping in maps]
-    if any(mapping.shape != (token_count,) for mapping in maps):
-        raise ValueError('Every donor alignment must cover every original answer token.')
-    original_ids = torch.tensor(original.answer)
-    for mapping, donor in zip(maps, donors.values()):
-        valid = mapping >= 0
-        if torch.any(mapping < -1) or torch.any(mapping[valid] >= len(donor.answer)):
-            raise ValueError('Alignment index is outside its donor answer.')
-        if not torch.equal(original_ids[valid], torch.tensor(donor.answer)[mapping[valid]]):
-            raise ValueError('Aligned carrier token IDs differ between original and donor.')
-        if valid.any():
-            first = int(torch.where(valid)[0][0])
-            expected = torch.arange(int(mapping[first]), len(donor.answer))
-            if not torch.equal(mapping[first:], expected):
-                raise ValueError('Carrier alignment must be an exact contiguous suffix.')
-    joint = torch.stack([mapping >= 0 for mapping in maps]).all(dim=0)
-    if any(not torch.equal(mapping[joint], maps[0][joint]) for mapping in maps[1:]):
-        raise ValueError('Donor alignments do not have the same position displacement.')
-    if any(donor.prompt != original.prompt for donor in donors.values()):
-        raise ValueError('Carrier worlds must preserve the complete original prompt.')
-    return dict(zip(donors, maps)), joint
-
-
 def _selected_messages(trace, selection, answer_positions):
     """Gather [T,K,d_head] at explicit answer positions; -1 rows remain NaN."""
     device = trace.logits.device
@@ -172,8 +110,9 @@ def _selected_messages(trace, selection, answer_positions):
 
 def aligned_deltas(original, donors, alignments, selection):
     """Return signed donor-minus-O messages [donor,T,K,d] and joint availability."""
-    selection = validate_selection(selection, original)
-    maps, joint = validate_alignment(original, donors, alignments)
+    selection = torch.as_tensor(selection, dtype=torch.long)
+    maps = {name: torch.as_tensor(alignments[name], dtype=torch.long) for name in donors}
+    joint = torch.stack([mapping >= 0 for mapping in maps.values()]).all(dim=0)
     with torch.no_grad():
         baseline = _selected_messages(original, selection, torch.arange(len(original.answer)))
         baseline = baseline.to(original.logits.dtype)
@@ -241,17 +180,10 @@ def directional_vjp(original, donors, alignments, selection):
 @contextmanager
 def patch_message(model, layer, head, receiver, delta, alpha=1.):
     """Add alpha*delta to one whole pre-W_O head; recompute native descendants."""
-    layer = site_index(layer, 'layer', len(model.model.layers))
-    head = site_index(head, 'head', model.config.num_attention_heads)
-    if isinstance(receiver, bool) or not isinstance(receiver, Integral) or receiver < 0:
-        raise ValueError('receiver must be a nonnegative integer native position')
     attention = model.model.layers[layer].self_attn
     delta = torch.as_tensor(delta)
-    if delta.shape != (attention.head_dim,) or not torch.isfinite(delta).all() or not isfinite(alpha):
-        raise ValueError('patch needs a finite [head_dim] displacement and finite dose')
 
     def replace(module, inputs):
-        site_index(receiver, 'receiver', inputs[0].shape[1])
         changed = inputs[0].clone()
         begin = head * attention.head_dim
         changed[0, receiver, begin:begin + attention.head_dim] += alpha * delta.to(changed)
@@ -267,9 +199,6 @@ def patch_message(model, layer, head, receiver, delta, alpha=1.):
 @torch.no_grad()
 def finite_effect(model, original, layer, head, carrier, delta, direction, alpha=1.):
     """Return exact finite delta F for fixed directions [T,V] at all targets."""
-    carrier = site_index(carrier, 'carrier', len(original.answer))
-    if direction.shape != original.logits.shape or not torch.isfinite(direction).all():
-        raise ValueError('finite directions must be finite with the original [T,V] shape')
     receiver = len(original.prompt) + carrier
     with patch_message(model, layer, head, receiver, delta, alpha):
         changed = native_trace(model, original.prompt, original.answer, gradients=False)

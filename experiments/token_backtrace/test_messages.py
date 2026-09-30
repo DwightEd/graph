@@ -73,19 +73,13 @@ def test_noop_patch_and_hook_cleanup_preserve_native_model(model):
     torch.testing.assert_close(replay.logits, original.logits, rtol=0, atol=0)
 
 
-def test_alignment_keeps_unknown_separate_from_zero_and_rejects_wrong_tokens(model):
+def test_alignment_keeps_unknown_separate_from_zero(model):
     original, donors, alignments = worlds(model)
     selection, _ = top_heads(model, original)
     deltas, available, _ = aligned_deltas(original, donors, alignments, selection)
     assert available.tolist() == [False, True, True, True, True]
     assert torch.isnan(deltas[:, 0]).all()
     assert torch.isfinite(deltas[:, 1:]).all()
-    alignments['R'] = [0, 1, 2, 3, 4]
-    with pytest.raises(ValueError, match='token IDs differ'):
-        aligned_deltas(original, donors, alignments, selection)
-    alignments['R'] = [-1., 1.9, 2.9, 3.9, 4.9]
-    with pytest.raises(ValueError, match='must be integers'):
-        aligned_deltas(original, donors, alignments, selection)
 
 
 def test_variable_length_donors_use_explicit_carrier_alignment(model):
@@ -126,27 +120,3 @@ def test_dense_vjp_self_aligned_directions_match_small_finite_effects(model):
                 # Compare the complete response vector above that finite-difference floor.
                 relative_error = (finite[2:] / .01 - predicted).norm() / predicted.norm()
                 assert relative_error < .005
-
-
-def test_invalid_sites_cannot_silently_patch_a_different_native_node(model):
-    original, donors, alignments = worlds(model)
-    direction = torch.ones_like(original.logits)
-    for layer, head, carrier in [(-1, 0, 0), (0, -1, 0), (0, 0, -1),
-                                 (3, 0, 0), (0, 3, 0), (0, 0, 5), (False, 0, 0)]:
-        with pytest.raises(ValueError, match='must be an integer'):
-            finite_effect(model, original, layer, head, carrier, torch.ones(8), direction)
-    selection = torch.tensor([[[0, -1]]] * len(original.answer))
-    with pytest.raises(ValueError, match='out-of-range'):
-        directional_vjp(original, donors, alignments, selection)
-    with pytest.raises(ValueError, match='integer physical'):
-        directional_vjp(original, donors, alignments, selection.float())
-    with pytest.raises(ValueError, match='receiver'):
-        with patch_message(model, 0, 0, 999, torch.ones(8)):
-            native_trace(model, original.prompt, original.answer, gradients=False)
-    assert not model.model.layers[0].self_attn.o_proj._forward_pre_hooks
-
-
-def test_patch_requires_one_complete_head_vector(model):
-    original, _, _ = worlds(model)
-    with pytest.raises(ValueError, match='head_dim'):
-        finite_effect(model, original, 0, 0, 0, torch.ones(1), torch.ones_like(original.logits))

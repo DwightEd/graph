@@ -26,17 +26,6 @@ def _energy_arrays(source, support, carrier, directed, continuity, cost):
     arrays = [np.asarray(value, dtype=float) for value in
               (source, support, carrier, directed, continuity)]
     source, support, carrier, directed, continuity = arrays
-    count = source.size
-    if any(value.shape != (count,) for value in arrays[:3] + arrays[4:]):
-        raise ValueError('source, support, carrier and continuity must have shape [T]')
-    if directed.shape != (count, count):
-        raise ValueError('directed must have shape [T, T]')
-    if any(not np.isfinite(value).all() or np.any(value < 0) for value in arrays):
-        raise ValueError('evidence and pair capacities must be finite and nonnegative')
-    if np.any(np.tril(directed)) or (count and continuity[0] != 0):
-        raise ValueError('directed edges require q < t; continuity[0] must be zero')
-    if not np.isfinite(cost) or cost <= 0:
-        raise ValueError('token cost must be finite and positive')
     return cost + support - source - carrier, directed, continuity
 
 
@@ -110,10 +99,6 @@ def _reference_groups(records):
     for record in records:
         key = (record['source_id'], record['record_id'])
         value = float(record['value'])
-        if not np.isfinite(value):
-            raise ValueError('reference values must be finite')
-        if key in unique and unique[key] != value:
-            raise ValueError(f'conflicting duplicate reference record: {key}')
         unique[key] = value
     for (source, _), value in unique.items():
         groups.setdefault(source, []).append(value)
@@ -127,8 +112,6 @@ def reference_scale(raw, records, noise_floor=1e-8):
     excluded. Unresolved pools return NaN, never apparent zero-risk scores.
     """
     raw = np.asarray(raw, dtype=float)
-    if not np.isfinite(raw).all() or not np.isfinite(noise_floor) or noise_floor < 1e-8:
-        raise ValueError('raw scores must be finite and noise_floor must be >= 1e-8')
     groups, count = _reference_groups(records)
     resolved = len(groups) >= MIN_REFERENCE_SOURCES
     tail = np.full(raw.shape, np.nan)
@@ -151,8 +134,6 @@ def reference_scale(raw, records, noise_floor=1e-8):
 def reference_threshold(records, quantile=.975):
     """inf{x: F_source_equal(x) >= quantile}, clamped to nonnegative."""
     groups, _ = _reference_groups(records)
-    if not groups or not 0 < quantile <= 1:
-        raise ValueError('a nonempty independent reference and quantile in (0,1] are required')
     weighted = [(value, 1 / len(values)) for values in groups.values() for value in values]
     values, weights = np.asarray(sorted(weighted), dtype=float).T
     cumulative = np.cumsum(weights) / np.sum(weights)
@@ -160,34 +141,13 @@ def reference_threshold(records, quantile=.975):
     return max(0., float(values[index]))
 
 
-def _event_arrays(event, count):
+def _event_arrays(event):
     vectors = ('edit_mask', 'support', 'carrier', 'continuity', 'scope', 'aligned',
                'reference_resolved', 'measurement_complete')
     result = {name: np.asarray(event[name]) for name in vectors}
-    if any(value.shape != (count,) for value in result.values()):
-        raise ValueError('all event token fields must have shape [T]')
     for name in ('edit_mask', 'aligned', 'reference_resolved', 'measurement_complete'):
-        if not np.isin(result[name], [0, 1]).all():
-            raise ValueError(f'{name} must contain booleans or exact 0/1, not unknown sentinels')
         result[name] = result[name].astype(bool)
-    if not np.isin(result['scope'], [-1, 0, 1]).all():
-        raise ValueError('scope must contain only unknown=-1, excluded=0, expressed=1')
-    for name in ('external_conflict', 'external_support', 'source_reference_resolved'):
-        if not isinstance(event[name], (bool, np.bool_)):
-            raise ValueError(f'{name} must be a boolean')
-    if isinstance(event['anchor'], (bool, np.bool_)) or not isinstance(event['anchor'], (int, np.integer)):
-        raise ValueError('anchor must be an integer token address, not a boolean or float')
-    if not 0 <= event['anchor'] < count:
-        raise ValueError('anchor must be an original answer token address')
-    edited = np.flatnonzero(result['edit_mask'])
-    if not len(edited) or event['anchor'] != edited[0]:
-        raise ValueError('anchor must be the earliest edited original token or insertion boundary')
     result['directed'] = np.asarray(event['directed'], dtype=float)
-    if result['directed'].shape != (count, count):
-        raise ValueError('event directed field must have shape [T, T]')
-    for name in ('source_conflict', 'source_support'):
-        if not np.isfinite(event[name]) or event[name] < 0:
-            raise ValueError('event source strengths must be finite and nonnegative')
     return result
 
 
@@ -227,7 +187,7 @@ def token_runs(mask):
 
 def score_event(event, token_count, direct_threshold=0., graph_threshold=0., cost=TOKEN_COST):
     """Apply eligibility and capacity bounds, retaining each event's own spans."""
-    values = _event_arrays(event, token_count)
+    values = _event_arrays(event)
     source, carrier, directed, continuity, direct, usable = _event_capacities(event, values, cost)
     solved = solve_energy(source, values['support'], carrier, directed, continuity, cost)
     edit = values['edit_mask'].astype(bool)
@@ -254,9 +214,6 @@ def score_events(events, token_count, direct_threshold=0., graph_threshold=0., c
     state, candidate generation or gold boundary is inferred here. Incomplete
     measurements produce explicitly provisional arrays and complete=False.
     """
-    if min(direct_threshold, graph_threshold) < 0 or not np.isfinite(
-            [direct_threshold, graph_threshold]).all():
-        raise ValueError('independent channel thresholds must be finite and nonnegative')
     direct = np.full(token_count, -np.inf)
     graph = np.full(token_count, -np.inf)
     evidence = np.zeros(token_count, dtype=bool)

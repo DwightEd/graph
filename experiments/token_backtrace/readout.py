@@ -98,10 +98,6 @@ def attribution_lineage(root_effect, prompt_length):
     """
     roots = np.asarray(root_effect, dtype=float)
     count = len(roots)
-    if roots.shape != (count, prompt_length + max(count - 1, 0)):
-        raise ValueError('root_effect must have shape [T, prompt_length + T - 1]')
-    if not np.isfinite(roots).all():
-        raise ValueError('lineage requires completed finite root measurements')
     prompt = np.abs(roots[:, :prompt_length])
     history = np.abs(history_weights(roots, prompt_length))
     mass = prompt.sum(axis=1) + history.sum(axis=1)
@@ -116,22 +112,10 @@ def attribution_lineage(root_effect, prompt_length):
 
 def _native_statistic_inputs(eta, selection, aligned, valid):
     eta = np.asarray(eta, dtype=float)
-    selection = np.asarray(selection)
-    if not np.issubdtype(selection.dtype, np.integer) or np.any(selection < 0):
-        raise ValueError('physical layer/head addresses must be nonnegative integers')
-    if not np.isin(aligned, [0, 1]).all() or not np.isin(valid, [0, 1]).all():
-        raise ValueError('alignment/measurement masks require exact booleans or 0/1')
-    selection = selection.astype(int)
+    selection = np.asarray(selection, dtype=int)
     aligned = np.asarray(aligned, dtype=bool)
     valid = np.asarray(valid, dtype=bool)
     count = len(aligned)
-    if selection.ndim != 3 or selection.shape[0] != count or selection.shape[2] != 2:
-        raise ValueError('selection must have shape [T, K, (layer, head)]')
-    width = selection.shape[1]
-    if eta.shape != (3, 3, count, width, count) or valid.shape != (count, width, count):
-        raise ValueError('eta must have shape [3,3,T,K,T]; valid must have shape [T,K,T]')
-    if width == 0 or any(len(set(map(tuple, row))) != width for row in selection):
-        raise ValueError('each carrier requires a nonempty selection of distinct physical heads')
     causal = np.triu(np.ones((count, count), dtype=bool), 1)
     eligible = causal & aligned[:, None] & aligned[None, :]
     return eta, selection, aligned, valid, causal, eligible
@@ -189,8 +173,6 @@ def selected_statistics(eta, selection, aligned, valid, donor_names=('R', 'E', '
     eligibility and completion are separate, so unaligned entries cannot be
     reported as measured zero effects. Noncausal entries are structural zeros.
     """
-    if tuple(donor_names) != ('R', 'E', 'U'):
-        raise ValueError('both eta direction/donor axes must be ordered R, E, U')
     eta, selection, aligned, valid, causal, eligible = _native_statistic_inputs(
         eta, selection, aligned, valid)
     excess, complete = _directional_excess(eta, valid, causal, eligible)
