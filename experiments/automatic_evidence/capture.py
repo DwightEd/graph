@@ -19,7 +19,8 @@ def message_capture(model, prompt_length, reference=None):
     handles = []
     def hook(index):
         def observe(module, inputs):
-            current = inputs[0][0, prompt_length - 1:].detach().reshape(-1, 32, 128)
+            heads = model.config.num_attention_heads
+            current = inputs[0][0, prompt_length - 1:].detach().reshape(-1, heads, model.config.head_dim)
             if reference is None:
                 messages.append(current.clone())
             else:
@@ -64,6 +65,25 @@ def source_mask(tokens, keys):
     mask = torch.ones_like(tokens)
     mask[:, keys] = 0
     return mask
+
+
+@torch.no_grad()
+def measure_intervention(model, tokens, prompt_length, targets, baseline, mask):
+    """Reuse the same native measurement for key masks and source text edits."""
+    hidden, messages = forward(model, tokens, prompt_length, mask, baseline['messages'])
+    changed = distributions(model, hidden)
+    logp, divergence = distribution_effect(baseline['distribution'], changed, targets)
+    denominator = hidden.norm(dim=-1) + baseline['hidden'].norm(dim=-1)
+    change = (hidden-baseline['hidden']).norm(dim=-1) / denominator.clamp_min(1e-30)
+    return dict(logp=logp, js=divergence, hidden_change=change.cpu().numpy(),
+                message_change=np.asarray(messages, dtype=np.float32))
+
+
+def edited_tokens(row, candidate, variant, device):
+    start, stop = candidate['keys']
+    prompt = row['prompt'][:start] + candidate[variant+'_ids'] + row['prompt'][stop:]
+    tokens = torch.tensor([prompt+row['response']['answer_ids'][:-1]], device=device)
+    return tokens, len(prompt)
 
 
 def receiver_mask(tokens, receiver, keys):
@@ -121,16 +141,14 @@ def capture_record(model, row, output):
     del empty_distribution, empty_hidden
     logp, divergence, hidden_changes, message_changes = [], [], [], []
     started = perf_counter()
+    measurement_baseline = dict(hidden=original_hidden, messages=original_messages, distribution=original_distribution)
     for index, group in enumerate(groups):
-        hidden, changes = forward(model, tokens, len(prompt), source_mask(tokens, group['keys']), original_messages)
-        changed_distribution = distributions(model, hidden)
-        target_logp, js = distribution_effect(original_distribution, changed_distribution, targets)
-        logp.append(target_logp)
-        divergence.append(js)
-        denominator = hidden.norm(dim=-1) + original_hidden.norm(dim=-1)
-        hidden_changes.append(((hidden-original_hidden).norm(dim=-1) / denominator.clamp_min(1e-30)).cpu().numpy())
-        message_changes.append(changes)
-        del hidden, changed_distribution
+        measured = measure_intervention(model, tokens, len(prompt), targets, measurement_baseline,
+                                        source_mask(tokens, group['keys']))
+        logp.append(measured['logp'])
+        divergence.append(measured['js'])
+        hidden_changes.append(measured['hidden_change'])
+        message_changes.append(measured['message_change'])
         if index % 5 == 0:
             print(dict(key=row['key'], span=index+1, total=len(groups), seconds=round(perf_counter()-started, 1)), flush=True)
     baseline = dict(hidden=original_hidden, logp=original_logp)
@@ -154,6 +172,120 @@ def capture_record(model, row, output):
         peak_cuda_bytes=torch.cuda.max_memory_allocated(), labels_read=False, sham_logp_error=error))
 
 
+def pack_measurements(measurements, targets, model):
+    arrays = {}
+    for name in ('logp', 'js', 'hidden_change'):
+        arrays[name] = np.asarray([item[name] for item in measurements], dtype=np.float32).reshape(-1, targets).T
+    shape = (-1, model.config.num_hidden_layers, model.config.num_attention_heads, targets)
+    arrays['message_change'] = np.asarray([item['message_change'] for item in measurements], dtype=np.float32).reshape(shape)
+    return arrays
+
+
+def matching_edits(candidates, previous, variant):
+    """Cache only exactly identical source addresses and replacement token IDs."""
+    def identity(candidate):
+        return (candidate['source'], tuple(candidate['keys']), tuple(candidate[variant+'_ids']))
+    lookup = {identity(candidate): index for index, candidate in enumerate(previous)}
+    return [lookup.get(identity(candidate), -1) for candidate in candidates]
+
+
+def cached_measurement(arrays, variant, index):
+    item = {name: arrays[variant+'_'+name][:, index] for name in ('logp', 'js', 'hidden_change')}
+    item['message_change'] = arrays[variant+'_message_change'][index]
+    return item
+
+
+def reusable_measurements(row, candidates, reuse_path):
+    if reuse_path is None:
+        return None, {name: [-1]*len(candidates['edits']) for name in ('flip', 'equivalent')}
+    manifest = read_json(reuse_path/'manifest.json')
+    original = next(item for item in manifest['records'] if item['key'] == row['key'])
+    assert original['prompt'] == row['prompt']
+    assert original['response']['answer_ids'] == row['response']['answer_ids']
+    previous = read_json(reuse_path/row['key']/'candidates.json')
+    assert previous['repeated_sets'] == candidates['repeated_sets']
+    read_json(reuse_path/row['key']/'capture_complete.json')
+    with np.load(reuse_path/row['key']/'relation_effects.npz') as saved:
+        arrays = {name: saved[name] for name in saved.files}
+    matches = {name: matching_edits(candidates['edits'], previous['edits'], name)
+               for name in ('flip', 'equivalent')}
+    return arrays, matches
+
+
+@torch.no_grad()
+def capture_relations(model, row, input_path, output, reuse_path=None):
+    directory = output / row['key']
+    candidates = read_json(directory / 'candidates.json')
+    cached, matches = reusable_measurements(row, candidates, reuse_path)
+    fresh_edits = sum(index < 0 for indices in matches.values() for index in indices)
+    groups = read_json(input_path / row['key'] / 'sources.json')
+    prompt_length = len(row['prompt'])
+    answer = row['response']['answer_ids']
+    targets = torch.tensor(answer, device=model.device)
+    tokens = torch.tensor([row['prompt']+answer[:-1]], device=model.device)
+    needs_forward = cached is None or fresh_edits > 0
+    if needs_forward:
+        hidden, messages = forward(model, tokens, prompt_length, torch.ones_like(tokens))
+        baseline = dict(hidden=hidden, messages=messages, distribution=distributions(model, hidden))
+        original_logp = baseline['distribution'].gather(1, targets[:, None])[:, 0].cpu().numpy()
+    else:
+        original_logp = cached['original_logp']
+    with np.load(input_path / row['key'] / 'effects.npz') as previous:
+        np.testing.assert_array_equal(previous['token_ids'], answer)
+        error = float(np.max(np.abs(previous['original_logp']-original_logp)))
+        assert error < 2e-4, (row['key'], error)
+    arrays = dict(original_logp=original_logp, token_ids=answer)
+    started = perf_counter()
+    for variant in ('flip', 'equivalent'):
+        measured = []
+        for candidate, previous_index in zip(candidates['edits'], matches[variant]):
+            if previous_index >= 0:
+                measured.append(cached_measurement(cached, variant, previous_index))
+            else:
+                changed, length = edited_tokens(row, candidate, variant, model.device)
+                measured.append(measure_intervention(model, changed, length, targets, baseline, torch.ones_like(changed)))
+        arrays.update({variant+'_'+name: value for name, value in pack_measurements(measured, len(answer), model).items()})
+        print(dict(key=row['key'], variant=variant, candidates=len(measured), seconds=perf_counter()-started), flush=True)
+    if cached is None:
+        repeat_measurements(model, tokens, prompt_length, targets, baseline, groups, candidates, arrays)
+    else:
+        arrays.update({name: value for name, value in cached.items() if name.startswith('repeat')})
+    if needs_forward:
+        sham = measure_intervention(model, tokens, prompt_length, targets, baseline, receiver_mask(tokens, prompt_length-1, []))
+        sham_error = float(np.max(np.abs(sham['logp']-original_logp)))
+    else:
+        sham_error = float(cached['sham_error'])
+    assert sham_error < 2e-4, sham_error
+    arrays['sham_error'] = sham_error
+    arrays['baseline_error'] = error
+    np.savez_compressed(directory / 'relation_effects.npz', **arrays)
+    write_json(directory / 'capture_complete.json', dict(status='complete', labels_read=False,
+        forward_calls=2*int(needs_forward)+fresh_edits+(2*len(candidates['repeated_sets']) if cached is None else 0),
+        reused_edits=2*len(candidates['edits'])-fresh_edits, reused_sets=cached is not None,
+        fresh_baseline_and_sham=needs_forward, reuse_path=str(reuse_path) if reuse_path is not None else None,
+        candidates=len(candidates['edits']), repeated_sets=candidates['repeated_sets'],
+        seconds=perf_counter()-started, peak_cuda_bytes=torch.cuda.max_memory_allocated(),
+        baseline_logp_error=error, sham_logp_error=sham_error))
+
+
+def repeat_measurements(model, tokens, prompt_length, targets, baseline, groups, candidates, arrays):
+    all_keys = np.array([key for group in groups for key in group['keys']])
+    measurements = {'repeat': [], 'repeat_control': []}
+    rng = np.random.default_rng(42)
+    for group in candidates['repeated_sets']:
+        keys = sorted({key for source in group['sources'] for key in groups[source]['keys']})
+        other_keys = np.setdiff1d(all_keys, keys)
+        assert len(other_keys) >= len(keys), 'Insufficient disjoint keys for size-matched control'
+        control = sorted(rng.choice(other_keys, len(keys), replace=False).tolist())
+        group.update(keys=keys, control_keys=control)
+        for name, selected in (('repeat', keys), ('repeat_control', control)):
+            measurements[name].append(measure_intervention(model, tokens, prompt_length, targets,
+                                                           baseline, source_mask(tokens, selected)))
+    for name, values in measurements.items():
+        packed = pack_measurements(values, len(targets), model)
+        arrays.update({name+'_'+field: value for field, value in packed.items()})
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
@@ -161,6 +293,7 @@ def main():
     args = parser.parse_args()
     read_json(args.output / 'prepared.json')
     manifest = read_json(args.output / 'manifest.json')
+    protocol = read_json(args.output / 'protocol.json')
     records = manifest['records']
     if args.keys:
         records = [row for row in records if row['key'] in args.keys]
@@ -168,7 +301,11 @@ def main():
     for row in records:
         if (args.output / row['key'] / 'capture_complete.json').exists():
             raise FileExistsError('Capture already completed: ' + row['key'])
-        capture_record(model, row, args.output)
+        if protocol.get('mode') == 'relation':
+            reuse = Path(protocol['reuse_effects']) if 'reuse_effects' in protocol else None
+            capture_relations(model, row, Path(protocol['input']), args.output, reuse)
+        else:
+            capture_record(model, row, args.output)
         print('CAPTURED', row['key'], flush=True)
     write_json(args.output / 'capture_complete.json', dict(keys=[row['key'] for row in records],
         labels_read=False, status='complete'))

@@ -35,3 +35,42 @@ OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 HF_HUB_OFFLINE=1 TOKE
 This second experiment produced 172 regimes but also failed detection (TP7/FP72, AUROC .594150). Regimes are not validated semantic boundaries. Both outputs and negative results are preserved; no default replacement or new full-test run. See [actual results](RESULTS.md).
 
 State-input provenance: hidden adjacency uses this run's `effects.npz:original_hidden`. Message adjacency reuses `outputs/span_maintenance_20260929_v2/<key>/payload_changes.npz:head_value_change[:,0,...]`: source-group, pre-W_O adjacent message-vector changes, aggregated across physical layers/heads by RMS. The producer is `experiments/span_maintenance/payload.py`, reading `outputs/route_complement_20260928/<key>/head_vectors.npy`. Newly captured per-source intervention `effects.npz:message_change` is diagnostic-only and does not enter scoring or transitions. The state output includes a post-audit `state_input_provenance.json` inventory and SHA256 hashes for all eight reused payloads; this is not a pre-run freeze.
+
+## Continue in this module: automatic relation controls
+
+The existing prepare/capture/score/evaluate/report entry points now accept a relation run. The runner reuses the old source capture and native measurement functions; it does not copy the old experiment into another code package. Original outputs stay immutable; new raw arrays go in a run-specific child directory. Generic boolean/negation/bounded-duration edits and repeated numeric field-value sets use no manual evidence positions. Controls are assumed paraphrases/orthographic equivalents, not certified semantic labels; text edits can change prompt length. Uncovered selected sources cause explicit abstention, not a correctness verdict.
+
+From graph, use the existing environment:
+
+```bash
+OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python -m experiments.automatic_evidence.prepare --mode relation --input outputs/automatic_evidence_20260930_v2 --output outputs/automatic_evidence_20260930_v2/relation_v1
+OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python -m experiments.automatic_evidence.capture --output outputs/automatic_evidence_20260930_v2/relation_v1
+OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python -m experiments.automatic_evidence.score --output outputs/automatic_evidence_20260930_v2/relation_v1
+OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python -m experiments.automatic_evidence.evaluate --output outputs/automatic_evidence_20260930_v2/relation_v1
+OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python -m experiments.automatic_evidence.report --output outputs/automatic_evidence_20260930_v2/relation_v1
+```
+
+Preparation requires a new destination. Capture refuses completed answers. Reruns must use a fresh result destination; code stays in this module. Canonical continuation protocol: shared `refine-logs/automatic_evidence_20260930/RELATION_PLAN.md`.
+
+### Control-quality iteration with exact measurement reuse
+
+The archived `relation_v1/executed_python.zip` preserves the first executed implementation. Current code uses ordinary case controls and adds an automatic exact-boundary alternative for every bounded duration. The primary takes the maximum corrected relation gain within the selected source; the mean remains an ablation. This design followed exposed development diagnostics. No output-token risk averaging or label fitting occurs.
+
+```bash
+OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python -m experiments.automatic_evidence.prepare --mode relation --input outputs/automatic_evidence_20260930_v2 --reuse-effects outputs/automatic_evidence_20260930_v2/relation_v1 --output outputs/automatic_evidence_20260930_v2/relation_v2
+OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python -m experiments.automatic_evidence.capture --output outputs/automatic_evidence_20260930_v2/relation_v2
+```
+
+Then run the existing score/evaluate/report/verify commands with `--output outputs/automatic_evidence_20260930_v2/relation_v2`. Reuse requires exactly matching original prompt/answer, source addresses and replacement token IDs; changed replacements alone trigger new forwards. Metadata separates actual new forwards, reused conditions and reused shams. No source/evidence arrays or historical scores are overwritten.
+
+### CPU comparison without new capture or a new directory
+
+```bash
+OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python -m experiments.automatic_evidence.score --output outputs/automatic_evidence_20260930_v2/relation_v2 --readout all
+OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python -m experiments.automatic_evidence.evaluate --output outputs/automatic_evidence_20260930_v2/relation_v2 --readout all
+OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 HF_HUB_OFFLINE=1 TOKENIZERS_PARALLELISM=false /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python -m experiments.automatic_evidence.report --output outputs/automatic_evidence_20260930_v2/relation_v2 --readout all
+```
+
+This creates separate `all_*` outputs beside the original scores; frozen all-candidate scoring refuses reruns. The exploratory primary uses raw log-probability contrast over all candidates; odds and message-gated variants are separate. It followed the exposed v2 result and is not a blind confirmation. Current code/source archives distinguish execution versions: v1/v2 main `input_freeze.json` describes their captured source archives, while `all_readout_input_freeze.json` describes the later optional CPU extension. Historical hash verification requires its archived implementation; do not expect evolving code to match an old freeze.
+
+Actual continuation: 116 + 44 new 8B forwards, 74 condition forwards reused in the second run, 19 final tests. Main v2 AUROC .514989; exploratory all-candidate raw-logp .474507; historical fixed .808717. Local key-token recovery did not produce a better full detector. See the continuation section in [RESULTS.md](RESULTS.md). Future iterations should extend these functions rather than create parallel experiment packages.
