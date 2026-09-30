@@ -1,3 +1,5 @@
+> 2026-09-30: Current implementation and status are in [the architecture document](../../docs/ARCHITECTURE.md). Reconstruction graph commands described below are retired; their cached results remain historical evidence. Current commands: `python main.py --help`.
+
 # Independent token backtraces and exposed-case iterations
 
 This experiment did **not** meet the detection objective. It preserves the

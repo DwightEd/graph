@@ -8,7 +8,6 @@ import torch
 from experiments.role_free_flow.features import (candidate_ids, lens_readouts,
     routing_layer, source_balanced_percentile)
 from experiments.role_free_flow.run import candidate_lens
-from experiments.role_free_flow.messages import project_messages, signed_stats
 
 
 class RoleFreeFlowTests(unittest.TestCase):
@@ -55,21 +54,6 @@ class RoleFreeFlowTests(unittest.TestCase):
         values = source_balanced_percentile(np.array([0., 0., 0., 10.]),
                                            np.array(['a', 'a', 'a', 'b']), np.array([0., 1., 11.]))
         np.testing.assert_allclose(values, [0., .5, 1.])
-
-    def test_signed_message_projection_matches_native_linear_sum_with_gqa(self):
-        rng = np.random.default_rng(11)
-        attention = rng.random((4, 3, 7))
-        values = rng.normal(size=(7, 2, 2))
-        output = rng.normal(size=(8, 8))
-        direction = rng.normal(size=(3, 8))
-        messages = project_messages(attention, values, output, direction)
-        expanded = np.repeat(values, 2, axis=1)
-        joined = np.einsum('htk,khd->thd', attention, expanded).reshape(3, 8)
-        expected = np.einsum('td,td->t', joined @ output.T, direction)
-        np.testing.assert_allclose(messages.sum((0, 2)), expected, rtol=1e-12)
-        stats = signed_stats(messages, attention, [np.ones(7, bool)])
-        np.testing.assert_allclose(stats[..., 0] - stats[..., 1], stats[..., 2], atol=1e-12)
-        np.testing.assert_allclose(stats[..., 0] + stats[..., 1], stats[..., 3], atol=1e-12)
 
 
 if __name__ == '__main__':

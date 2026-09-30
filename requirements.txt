@@ -4,3 +4,10 @@ scikit-learn
 threadpoolctl
 pytest
 matplotlib
+networkx>=3,<4
+torch>=2.8,<2.9
+transformers==4.57.1
+safetensors
+joblib
+tqdm
+pandas

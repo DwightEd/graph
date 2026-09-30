@@ -1,8 +1,6 @@
 """Checks that affect the meaning of Fisher sketches and functional graphs."""
-import numpy as np
 import torch
 
-from experiments.decision_risk_flow.geometry import describe
 from experiments.decision_risk_flow.kernel import fisher_seeds, node_addresses
 
 
@@ -20,16 +18,3 @@ def test_window_addresses_preserve_self_identity_and_special_priority():
     assert nodes[0, 0].item() == 3  # Special takes priority over prompt.
     assert nodes[0, -1].item() == 0  # First query self is still a prompt key.
     assert nodes[1, -1].item() == 1  # Later query self is prior answer content.
-
-
-def test_response_geometry_is_invariant_to_output_coordinate_rotation():
-    rng = np.random.default_rng(10)
-    sketch = rng.normal(size=(2, 9, 4))
-    choice = rng.normal(size=(2, 9))
-    attention = rng.uniform(size=(2, 9))
-    rotation, _ = np.linalg.qr(rng.normal(size=(4, 4)))
-    original, _ = describe(choice, sketch, attention, 2)
-    rotated, _ = describe(choice, sketch @ rotation, attention, 2)
-    for key in original:
-        if not key.startswith('shuffled_'):
-            np.testing.assert_allclose(original[key], rotated[key], atol=1e-10)

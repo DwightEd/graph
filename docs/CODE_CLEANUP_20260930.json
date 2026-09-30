@@ -1,0 +1,3458 @@
+{
+  "date": "2026-09-30",
+  "public_base_commit": "193d1fdb22b9afd1da227cb22e3adbd3885629ef",
+  "local_base_commit": "4c59648da7faace77153f0c4c5811a0589fdcebc",
+  "scope": "Retire unused source and tests; raw results, datasets, caches and pre-existing user changes are preserved",
+  "deleted": [
+    {
+      "path": "binding_detector/__init__.py",
+      "sha256": "33936152d4eb74c335bf0f247e66cca07fdd17b6fd6f6e0eb48fa63730913ebd",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 86
+    },
+    {
+      "path": "binding_detector/evaluation.py",
+      "sha256": "f63093f458b7782e779a348fe6144288fc24370cc2425dfbca02d3d7ab286694",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8669
+    },
+    {
+      "path": "binding_detector/projection.py",
+      "sha256": "8b5f961954c0d33e5711d824aa5e0d285a1049ef92f262e2fa11bd55cde45a10",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8112
+    },
+    {
+      "path": "binding_detector/run.py",
+      "sha256": "bbfb05129ff40aa8a2c9b6cd01f82f036321ef60b986ac4bf068b8fea0492ebf",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 14469
+    },
+    {
+      "path": "experiments/anchored_flow/audit.py",
+      "sha256": "1441d62583e0c7ddeba2d92d9522aacd627745377f42487a95127863a2b0f2c0",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3833
+    },
+    {
+      "path": "experiments/anchored_flow/capture.py",
+      "sha256": "b0506e50c54384cd5cbf173f750a1a0c5a0c3d6f8bef7400717f745f6996f752",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2604
+    },
+    {
+      "path": "experiments/anchored_flow/controls.py",
+      "sha256": "1dccc6b557dca162ace74ccf4777379cf4e78019338b653ec961e03abc4b7641",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2534
+    },
+    {
+      "path": "experiments/anchored_flow/evaluate.py",
+      "sha256": "9c1bae6f97ab80cd64543967de336b02837849698e1c1891b2dc8a4de7bc7541",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6723
+    },
+    {
+      "path": "experiments/anchored_flow/prepare.py",
+      "sha256": "198ddbf839f6250aa960b388bbc1a7eb97c391b3cbe585c0b6354c4164bb97b5",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4751
+    },
+    {
+      "path": "experiments/anchored_flow/report.py",
+      "sha256": "657fd87d012e5d9827f5d6482fcb277bba2582e901a18f1ba45b3459434c6f1b",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2460
+    },
+    {
+      "path": "experiments/anchored_flow/revise.py",
+      "sha256": "322d52b92cb2a4f18817d2cce27135db92e892cf5e32ae43d6d8686d7bd162bf",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2751
+    },
+    {
+      "path": "experiments/anchored_flow/run.py",
+      "sha256": "f12d31453fabfacd62fe336129b0c79eb5300b3f2764d162552d0cfc471b190f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1402
+    },
+    {
+      "path": "experiments/anchored_flow/score.py",
+      "sha256": "1a85bec56197614586f7cf725a2889e51a37e9f9fe4f359d547558cb9a3b69f1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5009
+    },
+    {
+      "path": "experiments/charm_structure_audit/__init__.py",
+      "sha256": "54d9c9156b60a04c7659be287927f48036cd55d8fd60e30c9f82b8436b0c0277",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 89
+    },
+    {
+      "path": "experiments/charm_structure_audit/ablations.py",
+      "sha256": "b86784efaace03d1810276e85937396d8f28a5a3f94b06bcda0c2c8660f07543",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4446
+    },
+    {
+      "path": "experiments/charm_structure_audit/annotation_population.py",
+      "sha256": "d3ff0e0905f2bee3421881a3ffde8d2c40f6515965eb26b5688621f05f65f90c",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5959
+    },
+    {
+      "path": "experiments/charm_structure_audit/boundary_transition_audit.py",
+      "sha256": "0df9ee67ee6f71aef018050a5ee5d30d76af3d972bc2f238552d68eef28cd8a2",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11836
+    },
+    {
+      "path": "experiments/charm_structure_audit/circuit.py",
+      "sha256": "d677de770400a322cb7e3d8425dedfa53fec408a59bed4c93e6ed9b909d2c9f3",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 10967
+    },
+    {
+      "path": "experiments/charm_structure_audit/circuit_math.py",
+      "sha256": "9f7c368f24dee33f0ec95985f4658de013eabbf61051ca0639dcb2cce4c8ed0b",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5546
+    },
+    {
+      "path": "experiments/charm_structure_audit/compare_fixed_scores.py",
+      "sha256": "bb5a3c70c69ff84b51f52c38f23452d1ae1eaa31085b73d9d9ce6eb2d30ec034",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5483
+    },
+    {
+      "path": "experiments/charm_structure_audit/compare_models.py",
+      "sha256": "39966f50948ec3338c47a9f04a5a7d25e0934f9484d488e78583f92bea43290d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9187
+    },
+    {
+      "path": "experiments/charm_structure_audit/continuity.py",
+      "sha256": "c89569eb983c1f565fcc365af33c9eeeedfc35c2fcd7e219dbf3e26b034a5546",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 10853
+    },
+    {
+      "path": "experiments/charm_structure_audit/continuity_history.py",
+      "sha256": "1b0d184d8705f186941a8ac384cac26652f5fc1b4ae2ca36dd5ed0f8b2e86b8c",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 15884
+    },
+    {
+      "path": "experiments/charm_structure_audit/continuity_train.py",
+      "sha256": "b3d5f5732cb8b90c97bb4727a94df8ceb787d7690f0dcc9c999d471359677a6f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 16997
+    },
+    {
+      "path": "experiments/charm_structure_audit/continuity_units.py",
+      "sha256": "b95d45f28c853529cef66f0113458d7dfb083b3b0cbbed3b41db6e6519320344",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11706
+    },
+    {
+      "path": "experiments/charm_structure_audit/continuity_weights.py",
+      "sha256": "00e058e03a473b6be90284b888da15b1a08a1495504269a781eb5a9af112a04d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2551
+    },
+    {
+      "path": "experiments/charm_structure_audit/data.py",
+      "sha256": "82ad4ec5fafa4214e54a41d71376ed65dd5d63e42a216b7fd7ca1ea52fd2a06d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4565
+    },
+    {
+      "path": "experiments/charm_structure_audit/evaluate.py",
+      "sha256": "d196d590c8cbed2a2f38618fe3f1302f74ab3937982266c50cbffa5ce85c5ea0",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8026
+    },
+    {
+      "path": "experiments/charm_structure_audit/export_circuit_inputs.py",
+      "sha256": "e2769efe922e3460b0fe9413fb8544931d25db54f094afbe34211723e0d770b6",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1729
+    },
+    {
+      "path": "experiments/charm_structure_audit/head_audit.py",
+      "sha256": "0c9ec63d2d8b3bab4928f88cab141f4c4af1ba672a5f91f744dd8fe3b9392e02",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 12258
+    },
+    {
+      "path": "experiments/charm_structure_audit/history_math.py",
+      "sha256": "a3defdc69507160b696e209ece767c62fcc8e80de9c5e399c799025d114a6c08",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2515
+    },
+    {
+      "path": "experiments/charm_structure_audit/lda_audit.py",
+      "sha256": "dc4c29987ab3374ffef61ff7a2ccd01082eeee4b408832dc8091c138123ed117",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8582
+    },
+    {
+      "path": "experiments/charm_structure_audit/lda_data.py",
+      "sha256": "e66b5a1390bfc61cf49afdb762267a047892f9205edbb0a52ee9465433a6b114",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5078
+    },
+    {
+      "path": "experiments/charm_structure_audit/lda_math.py",
+      "sha256": "c06151e2ea75ffad584d2565bc8defb0e04b16d35b551efb76611abdea8a3072",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5101
+    },
+    {
+      "path": "experiments/charm_structure_audit/lda_report.py",
+      "sha256": "582718d66ad41592dbddab1865cd7efc92af3873f6c987d25bf5b599091f068a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 20330
+    },
+    {
+      "path": "experiments/charm_structure_audit/localization.py",
+      "sha256": "a93ad7da103a12522f3410ba90106531aab3ab45b9fb7a029f8ba857c1fe95cb",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 12327
+    },
+    {
+      "path": "experiments/charm_structure_audit/lockin.py",
+      "sha256": "bb389ba00314df0ccf6e00ceb02270c2f39b605e13acbc6cba0338a512516c7f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7243
+    },
+    {
+      "path": "experiments/charm_structure_audit/lockin_forward.py",
+      "sha256": "34f36839821ec8d9da40928e488c33f16a5dc1ef435b769a673c98a811a38117",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8908
+    },
+    {
+      "path": "experiments/charm_structure_audit/lockin_report.py",
+      "sha256": "940dc03b6c80492d7b0bfe757ba686182f99e6a901db0e673c72f4ba59cdae20",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 17405
+    },
+    {
+      "path": "experiments/charm_structure_audit/main.py",
+      "sha256": "4b154c209f8146cab8b9f24727d289ae69d8825bfc4c64fa3c931f202086f482",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 19064
+    },
+    {
+      "path": "experiments/charm_structure_audit/matching.py",
+      "sha256": "312faa7f6afc28cd42fce35898ded1cc9fb0d5fe0d154db3667110c30bf123bf",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6711
+    },
+    {
+      "path": "experiments/charm_structure_audit/mixture.py",
+      "sha256": "f599bb5a9f90a9e7a01c30d7cd78adbf23ee57e91850cefffdebb49e93508572",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6434
+    },
+    {
+      "path": "experiments/charm_structure_audit/mixture_math.py",
+      "sha256": "5f04853172328d21cd27ec288d9f53aefa25a9f0abbe675ffa5f22241995df7a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5317
+    },
+    {
+      "path": "experiments/charm_structure_audit/mixture_report.py",
+      "sha256": "e457759e2c542f3312941d61fe7954f80e38bab7fc25e483e56f9be2378370c9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 15693
+    },
+    {
+      "path": "experiments/charm_structure_audit/model.py",
+      "sha256": "15897989b925076f3346819154c63f2f63cb38e27fe5aa74eba6ae1395f78935",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5251
+    },
+    {
+      "path": "experiments/charm_structure_audit/node_plots.py",
+      "sha256": "cb9f3222f3a95db7f436f42c0a8474b9812b599117641149ca2ab0264294f443",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5344
+    },
+    {
+      "path": "experiments/charm_structure_audit/node_signal.py",
+      "sha256": "0934ec43759acc6806d6786aa52432c436b0bad6a487da7e736da1ccab5038c7",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 13087
+    },
+    {
+      "path": "experiments/charm_structure_audit/positions.py",
+      "sha256": "b857f18f4302b42371866da3f697b509d40c37794596ed597fc880bb2795fb0a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3466
+    },
+    {
+      "path": "experiments/charm_structure_audit/review_results.py",
+      "sha256": "25395b13ac9aa4732f0cc1e14b686eb5e06131f67dd93c748ec7e79f45f6a49b",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7899
+    },
+    {
+      "path": "experiments/charm_structure_audit/routes.py",
+      "sha256": "00704873e2857a64de7728777ab1465d9b744b6b543c4fd68b8a210b44c736c9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 14195
+    },
+    {
+      "path": "experiments/charm_structure_audit/score_groups.py",
+      "sha256": "6efd60d5b1ef702bec84470f7c76c67bdfdff02658f3967642731c4455f38b35",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 16626
+    },
+    {
+      "path": "experiments/charm_structure_audit/score_onsets.py",
+      "sha256": "6bb807f736b49a7a9a9216075f273faf17605c52857c2b0aa621ffa65b6c763e",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7269
+    },
+    {
+      "path": "experiments/charm_structure_audit/score_plots.py",
+      "sha256": "5e528e5fc2154b10ddf0121ff0deb1f6ba578c8c67274e45a103de9472b8db34",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2544
+    },
+    {
+      "path": "experiments/charm_structure_audit/sentences.py",
+      "sha256": "1cbc93f6a488d2fe34b02956394d3992d53bf0ee7dead518faf75fd91126f56f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4733
+    },
+    {
+      "path": "experiments/charm_structure_audit/state_context_audit.py",
+      "sha256": "13a3ec0e64959e695b747f1d38e83a15c55008e413e0ab1541920b2e066407b9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7463
+    },
+    {
+      "path": "experiments/charm_structure_audit/supervised_head_roles.py",
+      "sha256": "267749f3cee9a8dbdcd7334eb9470c66fb00067b426948d0763190b0e7045051",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4318
+    },
+    {
+      "path": "experiments/charm_structure_audit/train.py",
+      "sha256": "e82350376fc116b827465d99f59044e9f4dbd291fb5e6056194310d2bd9b0657",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5449
+    },
+    {
+      "path": "experiments/charm_structure_audit/unit_data.py",
+      "sha256": "c44acdcd3299a80835c9e503a7c004bd532010db171cd2f70c10c19ab91d3ff7",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2541
+    },
+    {
+      "path": "experiments/charm_structure_audit/visualize.py",
+      "sha256": "18ae4b37ac43654fefb6311a4c626a53be1caa34056b673a98bcd6f372613a68",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9804
+    },
+    {
+      "path": "experiments/charm_structure_audit/whitebox.py",
+      "sha256": "3af4e75964843dc29022e5d462cab206f87331dbe265421425afa3e4eb0c9c56",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8266
+    },
+    {
+      "path": "experiments/charm_structure_audit/whitebox_math.py",
+      "sha256": "8a596e148c0ed4a646ff18a02f107af857447cdff52e4d29798bf1c605d07cf2",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7676
+    },
+    {
+      "path": "experiments/charm_structure_audit/whitebox_report.py",
+      "sha256": "07827d8410e20610c71494bb68eaacadae2b69ca51cf4b56196bd6b59969fb46",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 17228
+    },
+    {
+      "path": "experiments/constraint_uptake/audit.py",
+      "sha256": "189da49f176d04f370b4313c0a0e04309b2381bc4e540af4b480b1fc8d5c00e4",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5936
+    },
+    {
+      "path": "experiments/constraint_uptake/capture.py",
+      "sha256": "f341efb82c2c94e01fe0a8338b0b014f2dbb10598f4237c0971d17f567cc21e3",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5868
+    },
+    {
+      "path": "experiments/constraint_uptake/data.py",
+      "sha256": "9b5a01cfac17901743ecf3ca1c459c24cc70c3b3687cd5d9503a3bea58e44f0b",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3993
+    },
+    {
+      "path": "experiments/constraint_uptake/dense.py",
+      "sha256": "217580ad32e46662b149bcb626562d030bdb8839f07eb5354388c10ed10cc197",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2846
+    },
+    {
+      "path": "experiments/constraint_uptake/finite.py",
+      "sha256": "e476baa5a3392a7d66fbb017346a30c93473a619e9187b98abf8900be950efb3",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5623
+    },
+    {
+      "path": "experiments/constraint_uptake/interactions.py",
+      "sha256": "4590f0a55bff39a93fd0589eabcc8f36ececea3758070687ae82d680ae11378c",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8798
+    },
+    {
+      "path": "experiments/constraint_uptake/reweight.py",
+      "sha256": "52e6af459211788b07c641804c68d2a6d155be965c50de818b16dbd30773f401",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3257
+    },
+    {
+      "path": "experiments/constraint_uptake/same_value.py",
+      "sha256": "27169219bdc09156cfb4e71c0e05ebd156c5b6bcadca63138f30b99df3f0d3c9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4825
+    },
+    {
+      "path": "experiments/constraint_uptake/sink_center.py",
+      "sha256": "1c0735f52163c495227ddd3c22bcf11c90020898399ff81764a39e3e41730d87",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4744
+    },
+    {
+      "path": "experiments/context_response/conditional.py",
+      "sha256": "1694dceae77f6a87a4e63b41c0974f20a40c1c67b3f70e46aa9010e9faf5ffa6",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4263
+    },
+    {
+      "path": "experiments/context_response/conditional_full.py",
+      "sha256": "d7afded2deeb3cbe7d4b4bcaa6cdcd2015972e01dd8f4869699efbd67386127b",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4542
+    },
+    {
+      "path": "experiments/context_response/diagnostics.py",
+      "sha256": "5d51b652fc14ae05a76feb29424f94f1abb4b2b70b012251703dbe9435bd4e3d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3944
+    },
+    {
+      "path": "experiments/context_response/finite.py",
+      "sha256": "0a9f0a4bc530db592565f1d465230f270749eecf306a530788727998529bb0c4",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5017
+    },
+    {
+      "path": "experiments/context_response/full_analysis.py",
+      "sha256": "a78e2fe6af00291be10fd773f886dd70f3068369e9efddf2093be03cbad5b921",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8585
+    },
+    {
+      "path": "experiments/context_response/full_audit.py",
+      "sha256": "9a990409aad0fe740a86f37643a610baa10a37a1a1b65918a520fc36d270753f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5197
+    },
+    {
+      "path": "experiments/context_response/recurrence_audit.py",
+      "sha256": "e7eb35c64a809ff587d66b61cbe0ca34603870df212d253530b84ea4e52126ec",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5754
+    },
+    {
+      "path": "experiments/context_response/recurrence_original.py",
+      "sha256": "929a51fbb0bffa6ba31c3e4238b93eda5d033eb42944ec8f3ee70bfe7b10a8bb",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6717
+    },
+    {
+      "path": "experiments/context_response/recurrence_paths.py",
+      "sha256": "2107e812142e192dd28454777a4454c50aa1db961226856cbf755cb250dcd954",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3373
+    },
+    {
+      "path": "experiments/context_response/report.py",
+      "sha256": "01f3a5997113a46e7271eba4cb5baaa4d4e3735499c5ed31bea6c100f2e97790",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6370
+    },
+    {
+      "path": "experiments/context_response/request_anchor.py",
+      "sha256": "1b89fcef30c6c8052f62eb2055d1533a50d55b40821c130a09c08d8a7083a271",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8084
+    },
+    {
+      "path": "experiments/context_response/request_audit.py",
+      "sha256": "38a89d6ff15873d416496026b2e94f8d60ad93a1a9ec2970c68473e132f2a954",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6774
+    },
+    {
+      "path": "experiments/context_response/verify_restore.py",
+      "sha256": "70e89bc2e06e647f06b0432b7e5f67ac6b80f6b13dd00aaf2fad6c83120dd888",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3275
+    },
+    {
+      "path": "experiments/decision_risk_flow/evaluate.py",
+      "sha256": "d1be5282bea7e107a4e05db0495f4f229d47757d9a780b7791dd7781a175263e",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11681
+    },
+    {
+      "path": "experiments/decision_risk_flow/geometry.py",
+      "sha256": "295b5e9e65565cd67ed73893120769c1717c74bf6ad0648d5dc2cf67513114a6",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4106
+    },
+    {
+      "path": "experiments/decision_risk_flow/responses.py",
+      "sha256": "1e8b555bc05098cc68e89da2b6afb2cdc1f2650566b1cbc39dd4349a93178887",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4148
+    },
+    {
+      "path": "experiments/decision_risk_flow/train.py",
+      "sha256": "ebabe5e6e0fe2f7a921b74c1140e3e08fb0fc9517842bd2f83e9a3f6a67e9f8f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5820
+    },
+    {
+      "path": "experiments/decision_risk_flow/validation.py",
+      "sha256": "8d22e79bffe1b08fb08f516cb795638349fd79c854b18dfe7525a20d90ac7ba3",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3583
+    },
+    {
+      "path": "experiments/entropy_detection/__init__.py",
+      "sha256": "073a482e0609387b31e2414a6d66bb1257d8bb71c87fabd300eb48bcbf0d90bd",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 72
+    },
+    {
+      "path": "experiments/entropy_detection/features.py",
+      "sha256": "a5052477d0148f04f96e9f543a8416c9a940236aee9186bfbfe78f1467196970",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2812
+    },
+    {
+      "path": "experiments/entropy_detection/fusion.py",
+      "sha256": "5bf5408c8ecf97739fce2f900168e4b3160367aeec231e3ea13d0f6e9a9cba10",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3767
+    },
+    {
+      "path": "experiments/entropy_detection/layer_cases.py",
+      "sha256": "a91452fe97cd82bdcf908faf167f4572d74e389e4e088f0656492e700c69f996",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2305
+    },
+    {
+      "path": "experiments/entropy_detection/layer_readout.py",
+      "sha256": "48fdb03f7d36e366895f9aa439bd22e270c9f4f1166f83898faff2259e241658",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6078
+    },
+    {
+      "path": "experiments/entropy_detection/layers.py",
+      "sha256": "c21f0cbcba3026a51dda62ce37b4753dec0bc07fa81a589c7c5d6fbaa929ef47",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6211
+    },
+    {
+      "path": "experiments/entropy_detection/natural.py",
+      "sha256": "a5e760c812ec51143073cdaf3bcf60bf1b9f72ad01cd61502bf40d9fd2cc1364",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3645
+    },
+    {
+      "path": "experiments/entropy_detection/run.py",
+      "sha256": "beaf021b4757ffaa1b7a357d5f43a4db409d19b095b76f5a3b0ae140e4a54d3d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8822
+    },
+    {
+      "path": "experiments/entropy_detection/verify.py",
+      "sha256": "a8d87ebbe7e4f3aaadb563e80a8a4259aeab7ff8bcd1ae6f04e5e376e51ef320",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2314
+    },
+    {
+      "path": "experiments/flowtracer/__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 0
+    },
+    {
+      "path": "experiments/flowtracer/attention.py",
+      "sha256": "14205d30635dda34f76ce232c3f9dfc829100e6734349892ed848d898758eb4f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1903
+    },
+    {
+      "path": "experiments/flowtracer/data.py",
+      "sha256": "c458a17cda1f444cc484bde793c10768f7dbde0c7bae6c689c7b73d4a5f2181a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3083
+    },
+    {
+      "path": "experiments/flowtracer/flow.py",
+      "sha256": "d7efd1b530f8fb426c256abc43ad78fd28b93de5defc3240ea0fa0597761f961",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3327
+    },
+    {
+      "path": "experiments/flowtracer/graph.py",
+      "sha256": "3f2bf520d6e6fae5fd5cf3bde3e42459fb319dfd903accf3b8a719c217d747d5",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2527
+    },
+    {
+      "path": "experiments/flowtracer/io.py",
+      "sha256": "5b661ae306e55955f420e81e9dee3a62acfb87b05b3ed6a40b75683dcb721498",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 442
+    },
+    {
+      "path": "experiments/flowtracer/run.py",
+      "sha256": "c16d1868a4606f079e08964511f4405fd256336019112ce4f7d63275d88c4b67",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1685
+    },
+    {
+      "path": "experiments/flowtracer/visualize.py",
+      "sha256": "9fb0b91fadc44dd78bafc0556b47ca63e5b9d1776cc5e9f95350b989e363eac9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1100
+    },
+    {
+      "path": "experiments/head_interactions/__init__.py",
+      "sha256": "b2add8a8ca21bbf57dcea202e219f6d2ee838593b52c1800762ca0f7233e914f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 92
+    },
+    {
+      "path": "experiments/head_interactions/controlled.py",
+      "sha256": "9b42a9fe774f48f910e74030044458a05e902ce09d580b482d05f715b127f119",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3917
+    },
+    {
+      "path": "experiments/head_interactions/inputs.py",
+      "sha256": "bd80293a75ce837b7df659c58964bf4bcc34935312e0faf283f7c9e3475f6803",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8833
+    },
+    {
+      "path": "experiments/head_interactions/protocol.py",
+      "sha256": "1f5c46bf364f7b84e969bd2f7c6fe11327a5c5f36dfd179b5962f4401a8355fc",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7048
+    },
+    {
+      "path": "experiments/head_interactions/report.py",
+      "sha256": "ab258f1470dda7d626179697b0700fbe99bc01b4d43e8d72929d3a78d02f0e42",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 12921
+    },
+    {
+      "path": "experiments/head_interactions/run.py",
+      "sha256": "bac2e4b26b0f04f4eb1975b45549aee09215776cc8f36d264be3860aed0c9ef4",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7280
+    },
+    {
+      "path": "experiments/head_interactions/trials.py",
+      "sha256": "39b0b9106e076450a8a3301950474d59687a1376a2fdf56f34e6ec8bd84704cf",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3614
+    },
+    {
+      "path": "experiments/head_state_readout/addresses.py",
+      "sha256": "38569945157d4370100dbb392c6aeb4c36d2a8da8d4b2536cc1f25ec203f32be",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2754
+    },
+    {
+      "path": "experiments/head_state_readout/association.py",
+      "sha256": "21bed315151e5e51f9ecab68a505734160c08859212173536e9547f9efe53912",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7448
+    },
+    {
+      "path": "experiments/head_state_readout/boundary.py",
+      "sha256": "9a2f36dd03a4fcd89da1805f26bf45cc60e0860983fc7266251f615c48189321",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4197
+    },
+    {
+      "path": "experiments/head_state_readout/budget.py",
+      "sha256": "500b3901f13eaed84eb8ca76d0a5db42963506ba914887d8dde7d85ee1b0b942",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2577
+    },
+    {
+      "path": "experiments/head_state_readout/pair_diagnostic.py",
+      "sha256": "4567d32ea2c96ee204aeb67e9d47b8ee72d6471d73a0acd5d885ce1eb3bed728",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2786
+    },
+    {
+      "path": "experiments/head_state_readout/plot.py",
+      "sha256": "1d8af8649896cfbb0a3e55299507ef0b6617b7cf097ece3b2abcace0b18528af",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3746
+    },
+    {
+      "path": "experiments/head_state_readout/run.py",
+      "sha256": "cf93be70db7ea8d8fcefac7c6a5295e4a589f05ad37829890ead28a98cae5a53",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2076
+    },
+    {
+      "path": "experiments/head_state_readout/verify.py",
+      "sha256": "4fae937413012f49d697542e28fb62a31b033aaa3e2a36322e4303af7507c0b9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3969
+    },
+    {
+      "path": "experiments/internal_flow/__init__.py",
+      "sha256": "2c9a856143ba1d1e87dc23ad975c9281181161cb3adaff7b8b7743e4e16fa051",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 80
+    },
+    {
+      "path": "experiments/internal_flow/audit_candidates.py",
+      "sha256": "8e6fef2ebd54fc8bc9851934e0024f82a2a5ff46431ea80606477b6563fff7bf",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6885
+    },
+    {
+      "path": "experiments/internal_flow/audit_capture.py",
+      "sha256": "145391a29bfa599af5bcc2200aec80ce5b36589ddddd4f32f3fb4e6445c8eaf7",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 10953
+    },
+    {
+      "path": "experiments/internal_flow/audit_decisions.py",
+      "sha256": "3c22d2b7637687a9bfcd96581dc20d7c717b80222e4ab9a28a98b7ef9a4ae35c",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2450
+    },
+    {
+      "path": "experiments/internal_flow/audit_inputs.py",
+      "sha256": "78260acc9928aa9493af5b3e753579ed0bbaf168d2e145a2113aa6a7f76e62fb",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8156
+    },
+    {
+      "path": "experiments/internal_flow/audit_precision.py",
+      "sha256": "59cddc7f179372d9b225710b7bceb964c9d1e8bf3fd348ac832f9f497a5e273f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3669
+    },
+    {
+      "path": "experiments/internal_flow/audit_prefix.py",
+      "sha256": "6cd44872803a149e93f51537b9342dd74be363a04881899bbf975207f6872e81",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2918
+    },
+    {
+      "path": "experiments/internal_flow/audit_reanchor_run.py",
+      "sha256": "318a1ec3b96712d8d975af5e45da6bf8b0ed6aa2a8719e3fa1777e7321ad8e4e",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3434
+    },
+    {
+      "path": "experiments/internal_flow/audit_reanchors.py",
+      "sha256": "e1971221c3597e15db67e17cabc40f2c184de8ef06a14db1153cbb488fcdfc9a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1911
+    },
+    {
+      "path": "experiments/internal_flow/audit_report.py",
+      "sha256": "3c28d6e708b88a6bad78e831379b7bc3f43875542b6cb05ce00bc03f4ef23d32",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8725
+    },
+    {
+      "path": "experiments/internal_flow/audit_run.py",
+      "sha256": "fe3e6ba4bd5b3f3162c79ac1204c8aae7fac367aaa855cc7e8175e7a64dd75f1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6985
+    },
+    {
+      "path": "experiments/internal_flow/capture.py",
+      "sha256": "7ddf11d4ca331bd19a8cea3154af18fe7a9939d53418d7223298c629f5c8d95d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6452
+    },
+    {
+      "path": "experiments/internal_flow/inputs.py",
+      "sha256": "166c09a11d88b15bc909150b54b55ad8fa14b27be048e5fc04000950bbc83cb9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5100
+    },
+    {
+      "path": "experiments/internal_flow/report.py",
+      "sha256": "0a9e6a9d00fa45d210aebdfe7725054340331d2beb4b7fc300520c364489df88",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5234
+    },
+    {
+      "path": "experiments/internal_flow/run.py",
+      "sha256": "89c9c9cc25ff0a11d3f1f58987a15b947a220328e269b1ffa36b2897cb12c853",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7261
+    },
+    {
+      "path": "experiments/internal_flow/trace_keys.py",
+      "sha256": "6b07106ee40da961e7dd4ce08e89a5f88d818955ac91c4b5c446146af3794b02",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2734
+    },
+    {
+      "path": "experiments/native_support/calibration.py",
+      "sha256": "d6a615d8eb78dc2396b03a6cb97a2b6126518bbda9830ac507488829602036e1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5901
+    },
+    {
+      "path": "experiments/native_support/choice_state.py",
+      "sha256": "bc23d9a9e20f8125e81811fa3b0919215ec58f1771e12db62c7243f867edae8c",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7281
+    },
+    {
+      "path": "experiments/native_support/choice_state_audit.py",
+      "sha256": "51dc8bde3185031a444dec9c55ae5db7a60528206bba0368efdf792e9df16a23",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2796
+    },
+    {
+      "path": "experiments/native_support/choice_state_pack.py",
+      "sha256": "ef4be30657d69d8de511a47d63013c2dc5f8917de7feeabb5ca94790f39f28a6",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7281
+    },
+    {
+      "path": "experiments/native_support/choice_state_run.py",
+      "sha256": "d18ff6555f283475a365d87c503f890d8434b2ce83a20940cb9b184c5c7114c7",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11099
+    },
+    {
+      "path": "experiments/native_support/claim_verification/__init__.py",
+      "sha256": "9139963f8263d3733dfbefa12f1becd77afe524d0c4d4783d6da6cb609bc1269",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 82
+    },
+    {
+      "path": "experiments/native_support/claim_verification/blind.py",
+      "sha256": "6d59382bbaf761153a00386d522aad3010e506e67f84033b0f1a3ceecc0d6f74",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8090
+    },
+    {
+      "path": "experiments/native_support/claim_verification/evaluate.py",
+      "sha256": "91033c533afc7a1d1dd00dbee3adb2894a102e529eca33224306c3fbaa9817be",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 10564
+    },
+    {
+      "path": "experiments/native_support/claim_verification/focused.py",
+      "sha256": "119cc60cabbf2cbfea22150265588014bbaa2f936df7361b3b82a36df876add6",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7710
+    },
+    {
+      "path": "experiments/native_support/claim_verification/focused_eval.py",
+      "sha256": "22e6894855222a1a92755a4add1614a38b2bbc25eaa4c9273ac95f865bed99b8",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3648
+    },
+    {
+      "path": "experiments/native_support/claim_verification/isolate.py",
+      "sha256": "aee8e9661b3abd670fd58b3fb0242b69f7b605e916e3eeecbe3a80db64fac318",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2393
+    },
+    {
+      "path": "experiments/native_support/claim_verification/prompts.py",
+      "sha256": "6f7b8178db5e1ddbe7bee34840023ea8a2153f941f11279d475c6a280f512f4a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2612
+    },
+    {
+      "path": "experiments/native_support/claim_verification/run.py",
+      "sha256": "507c7f3f483a270328e4f82c603e93c8aa2a7281b87dc1c33ee51626ccbee088",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9272
+    },
+    {
+      "path": "experiments/native_support/claim_verification/runtime.py",
+      "sha256": "146b2c2eb4c866aafd54b4bdf19750a9d1ba677f1c5c9f8c6d4b253aa996753e",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3170
+    },
+    {
+      "path": "experiments/native_support/claim_verification/text.py",
+      "sha256": "e27760e4140151bda44576542aae276e91702845b2e2479b41cceabefbeed64d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3220
+    },
+    {
+      "path": "experiments/native_support/comparison.py",
+      "sha256": "e0e99fd1bcaf40d92347090407e9a8f6b8af69830fa6fa5c00e2ede046b4fe07",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6636
+    },
+    {
+      "path": "experiments/native_support/comparison_deltas.py",
+      "sha256": "9fa3935aa673658ee7284b218e0036df35e92b1e8372afe073a82f5080e16e7f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2852
+    },
+    {
+      "path": "experiments/native_support/comparison_evaluation.py",
+      "sha256": "c87577603149743179a7c5eebdd92cc96415db02d651a9d974ebcaa2b4211256",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5342
+    },
+    {
+      "path": "experiments/native_support/dual_state/data.py",
+      "sha256": "3ff20606b0dfdb54002c8c469b21c82b96a3db1d575049a188305e6db84aafe3",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3876
+    },
+    {
+      "path": "experiments/native_support/dual_state/report.py",
+      "sha256": "6aeaf92afdbede03c87d51583fa8b7d7fcd70bc7275f3e0283799cd392911cc8",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7026
+    },
+    {
+      "path": "experiments/native_support/dual_state/run.py",
+      "sha256": "199010b3cd76377af6309f7de0a197e836978dc774c5dd77e9f364b3bfba9f3f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6847
+    },
+    {
+      "path": "experiments/native_support/dynamics.py",
+      "sha256": "461873a078128572c17dfd164926a1f0fb470ff3e67dcb7404e2a3db29b1c7c2",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 20780
+    },
+    {
+      "path": "experiments/native_support/dynamics_audit.py",
+      "sha256": "70e5db831dbbf3751a8438a4618a1eb644876f31d6c6122acf5f95095f9a4798",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 15303
+    },
+    {
+      "path": "experiments/native_support/dynamics_audit_features.py",
+      "sha256": "4132a6800c0aa0976c6f979a2c83fd14ac9ca99c92c190eba33f9c7da58b0bb4",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8143
+    },
+    {
+      "path": "experiments/native_support/dynamics_audit_rank.py",
+      "sha256": "ab62cb55de8965292c3dc84d26b76d7295b20451478cd1b2c27b5108267e7e3a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11030
+    },
+    {
+      "path": "experiments/native_support/dynamics_core.py",
+      "sha256": "6b27d73310c3430a54ed1dfeb6e3698869cc13468ee0ff8e75c90493f14fc539",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7172
+    },
+    {
+      "path": "experiments/native_support/dynamics_fit.py",
+      "sha256": "d5b8227c308974bd89b7aa6153c7fc3f124e10268525e946212d06b22569e2d2",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 10636
+    },
+    {
+      "path": "experiments/native_support/dynamics_normals.py",
+      "sha256": "549c7289c21dbc84d7decd7fee4fd42148efdf47dd8516af4df1648337bac6b1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5511
+    },
+    {
+      "path": "experiments/native_support/dynamics_observations.py",
+      "sha256": "d039a5aba56af1e961f1f71db845b441cc25424f87d802974e5f56506b17673a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9197
+    },
+    {
+      "path": "experiments/native_support/dynamics_report.py",
+      "sha256": "f752fdec537f62668e9b5cac3aa421a6d29a381c4043a749770725b68ccc167a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3367
+    },
+    {
+      "path": "experiments/native_support/evidence_contrast/analyze.py",
+      "sha256": "27c501c0723e9106fedec54644620d0a67a01ddfa183e7cab428d65d5288625e",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2736
+    },
+    {
+      "path": "experiments/native_support/evidence_contrast/bootstrap.py",
+      "sha256": "13ab96e510439ed40e78f2d6f58ef458e0b8990963fbfcb147351b58c43d30da",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2186
+    },
+    {
+      "path": "experiments/native_support/evidence_contrast/capture.py",
+      "sha256": "4520059cd9cb976fcbdf3bfd064a59d8fe2f34a989b9c58724f9d47d88fb2fc5",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2347
+    },
+    {
+      "path": "experiments/native_support/evidence_contrast/data.py",
+      "sha256": "69197aa67a28be243a479f7ee2adb93aee8d5f42a2cc4162a12ce8e67ab0eeae",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3589
+    },
+    {
+      "path": "experiments/native_support/evidence_contrast/report.py",
+      "sha256": "d79814088ac83c9c1cc75b0fc805d53fc6e275b52e6b9585d871c0243f0864ac",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6786
+    },
+    {
+      "path": "experiments/native_support/evidence_contrast/run.py",
+      "sha256": "a721d1d085241a377d5da8b04ef3b8bdbb406324a2c29d055240573761107960",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7084
+    },
+    {
+      "path": "experiments/native_support/evidence_contrast/scoring.py",
+      "sha256": "cb529fbcd9e802457a0fe6b7eca8806b08451960e8bb7c0375cc021b47c96306",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2243
+    },
+    {
+      "path": "experiments/native_support/evidence_contrast/unit_budget.py",
+      "sha256": "61e50d1d7341e6be11b9168ea57def428a7283e9b9951ac7b04305112a1015ac",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4413
+    },
+    {
+      "path": "experiments/native_support/evidence_contrast/unit_report.py",
+      "sha256": "d41d5241d62a6fa7c9d0797423e246656aabbf2d6384daeb8f4c9c8c699f018f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7706
+    },
+    {
+      "path": "experiments/native_support/functional_report.py",
+      "sha256": "bce272d6b45698e1f8d81f3a9df249e582c49b1476b105751d07c6c0272f9da1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6546
+    },
+    {
+      "path": "experiments/native_support/functional_run.py",
+      "sha256": "54f32e1dd73771f0f31a8b1fe9bec89687e27da03e4369f58d573827a3adda74",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 10392
+    },
+    {
+      "path": "experiments/native_support/functional_units.py",
+      "sha256": "2ed38766d1b6148bb93bee39b8b38cbe39a7989ea2668a64fce2cf1b89b4e056",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1326
+    },
+    {
+      "path": "experiments/native_support/inputs.py",
+      "sha256": "58c1fa19034457dc8f590e110a9a74d20fc44bba655f7e38db93b1b08e31cc66",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1221
+    },
+    {
+      "path": "experiments/native_support/message_carriers/capture.py",
+      "sha256": "a1107cb1fb178b611fea9236dac717b49c435e223ec980388b5482b54c3e3067",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3447
+    },
+    {
+      "path": "experiments/native_support/message_carriers/data.py",
+      "sha256": "452204617e19d87a72653b0797d474732a32ad67f942678c96dec02a94a0dfab",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5611
+    },
+    {
+      "path": "experiments/native_support/message_carriers/position.py",
+      "sha256": "409769a4c24ea7a55124adfb3fc6654e146dd13cf14f19bd79017f4fd0fdfa26",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3561
+    },
+    {
+      "path": "experiments/native_support/message_carriers/report.py",
+      "sha256": "2994ba222031d180f77445996aa085c1a8f3f1a93fc1e8f44beb1ff887fe2219",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2698
+    },
+    {
+      "path": "experiments/native_support/message_carriers/run.py",
+      "sha256": "ec6609f8799db4b6aa65f17a45eb142eb4180ca28079d1fc2bc3e9f658e804d5",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7675
+    },
+    {
+      "path": "experiments/native_support/message_carriers/selection.py",
+      "sha256": "4e7df32316c44e8f7a50bfa63a007d324f4aae9f7a2ad86a0edd8a1eec33a165",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4649
+    },
+    {
+      "path": "experiments/native_support/message_carriers/token_capture.py",
+      "sha256": "a67f8131c4e1d6158a93e050923839eaf0b32426d17682771a5859979951c1ab",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2743
+    },
+    {
+      "path": "experiments/native_support/message_carriers/token_native.py",
+      "sha256": "5d4478f296525eca522c6a315284264f5ed19cb94a32ef5ef1733bf7092585c9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2942
+    },
+    {
+      "path": "experiments/native_support/message_carriers/token_report.py",
+      "sha256": "d0e92a1706f2fb22c1177fb09294dc19bc874c22678d3b9faf57395a75d4e4b1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4724
+    },
+    {
+      "path": "experiments/native_support/message_carriers/token_run.py",
+      "sha256": "92629fdef73be15e25ddf940d03ff1a35051bfd0af9dec2a3e564525f36ac6a3",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4988
+    },
+    {
+      "path": "experiments/native_support/message_carriers/token_selection.py",
+      "sha256": "aeec25aed341ecd79d83ded0a6d4036bd426c4256bbd888e4c80b03a8747d293",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5932
+    },
+    {
+      "path": "experiments/native_support/observable_pack.py",
+      "sha256": "3018a5c5cb90bf8f0d6a1ee3d0641c57088599fa2d2aa2375f98b7280b5493f2",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3419
+    },
+    {
+      "path": "experiments/native_support/observable_report.py",
+      "sha256": "91b0a1bfcdde0ea640895787e97868d5a09b1f1cea778021c68a6e026e443647",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3495
+    },
+    {
+      "path": "experiments/native_support/observable_run.py",
+      "sha256": "ff29e8c40dc6027331ebf582adc6d2d134b06a40a111eda6839b3392c04d2be5",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 15248
+    },
+    {
+      "path": "experiments/native_support/observable_state.py",
+      "sha256": "91f490f202533c67d02e5359129d01d8328627c46c4d0787dcdac9601545d301",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8914
+    },
+    {
+      "path": "experiments/native_support/pipeline.py",
+      "sha256": "b0897397c12eaed7395956699937c87024cbae329ce1e63d25c35d8eddd5194f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6338
+    },
+    {
+      "path": "experiments/native_support/ragtruth_benchmark/capture.py",
+      "sha256": "2ef2bde5c4139da5241faaae2541db287a29d253a925b6a527b9a2a09661e308",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6756
+    },
+    {
+      "path": "experiments/native_support/ragtruth_benchmark/report.py",
+      "sha256": "7ecf4613e722e3ae3ef1175559b0c621ee37c760508073842545ff5d627d92ea",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8011
+    },
+    {
+      "path": "experiments/native_support/ragtruth_benchmark/run.py",
+      "sha256": "a77fc08a00cc43ec04c1b2fc1cd6b2b6315033b74806bcbf48528ac80cb605aa",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6686
+    },
+    {
+      "path": "experiments/native_support/ragtruth_refine/__init__.py",
+      "sha256": "69701acff123d3b5756ef327ff1a60d44241c764790e39968c4e69525cf50e5a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 78
+    },
+    {
+      "path": "experiments/native_support/ragtruth_refine/data.py",
+      "sha256": "f64c3bfb91c8b566271527dd97d1a941636222e11f2421e8e8c6d158c58f50a9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4876
+    },
+    {
+      "path": "experiments/native_support/ragtruth_refine/packing.py",
+      "sha256": "146707b68700fad0d85cfa034c64f2a399dbc6db026e25c22e1bac238de1bdc0",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1860
+    },
+    {
+      "path": "experiments/native_support/ragtruth_refine/report.py",
+      "sha256": "2e6cb453c7670fcb72f6773a70b512ed92bdcb3a55f180fded97d80b98ca93a8",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7561
+    },
+    {
+      "path": "experiments/native_support/ragtruth_refine/run.py",
+      "sha256": "99d0f9f06bcc5e7034274a5bc6987ed1de7e1a79d4c8d288887093585394d589",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5696
+    },
+    {
+      "path": "experiments/native_support/ragtruth_refine/scoring.py",
+      "sha256": "714c67506159cf7550b116f2df1fb1220095385f75760dcf4fdd802e7885ab65",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3875
+    },
+    {
+      "path": "experiments/native_support/ragtruth_refine/selection.py",
+      "sha256": "c75ee13fc50105f9a67a34618b1e42655b1edd1a369bb4e6406f73b327236db3",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2784
+    },
+    {
+      "path": "experiments/native_support/readout/__init__.py",
+      "sha256": "7ff5dad9399a87f914c7b831289c5c6e13a08558d645ac9f7d46912bbdca3e25",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 93
+    },
+    {
+      "path": "experiments/native_support/readout/data.py",
+      "sha256": "0779837bd1403652b9bc66dc8288d70098ccb254abfce3d13790447d9180a7ea",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8549
+    },
+    {
+      "path": "experiments/native_support/readout/features.py",
+      "sha256": "e5a62f74bd7c5bec09f473a5bcc0602da4df49b85ac885147a1e1d66cff7a977",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5994
+    },
+    {
+      "path": "experiments/native_support/readout/models.py",
+      "sha256": "2ec5bce1f7dc7b55c85ab3be2a4a555fff8b471b8c94e9d4eb19b8303d72850c",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4830
+    },
+    {
+      "path": "experiments/native_support/readout/report.py",
+      "sha256": "2d8805b558a5fd4b8c4da8a2f4978e7b3b760e5fd1f58546514c2ee014220bc4",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4650
+    },
+    {
+      "path": "experiments/native_support/readout/run.py",
+      "sha256": "3e5f910137d69c16790d1c4383eb58d0dfc3072927c8dd6011677a285c24a3a9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4973
+    },
+    {
+      "path": "experiments/native_support/report.py",
+      "sha256": "9b4eb110ddb8a722116fff79995d2270d43db1572e3053bda579f1cfe3a9af5e",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5741
+    },
+    {
+      "path": "experiments/native_support/routes.py",
+      "sha256": "c3f3362cb0a8a2ba17846475120ae25b162568aa9c7c72c12182d776e85f7e88",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5650
+    },
+    {
+      "path": "experiments/native_support/run.py",
+      "sha256": "377bdb352733250d9b1ed9f80d54ac40c94e9c3c1225a43a2fdb18a6278451c2",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5645
+    },
+    {
+      "path": "experiments/native_support/score.py",
+      "sha256": "3452200632f722fa924996861d535909736dd88aa94e8d5b6aa2dcef6fad3292",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4729
+    },
+    {
+      "path": "experiments/native_support/source_mediation/__init__.py",
+      "sha256": "74f3edb786ff0f35e1430f569e135a40fdf648641b3fc10fba20bb26e11ad34f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 86
+    },
+    {
+      "path": "experiments/native_support/source_mediation/cached.py",
+      "sha256": "e21ee457bc41b4cf6e25cbe75843ca3b99c02f87763ca331b4f068db1054d3e4",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2635
+    },
+    {
+      "path": "experiments/native_support/source_mediation/decomposition.py",
+      "sha256": "ec6d318e28aab1582826a45fc06896bd07c710a6c66e29834bc21694cdafde51",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3212
+    },
+    {
+      "path": "experiments/native_support/source_mediation/native.py",
+      "sha256": "6ba48d7d6594031df0b8d4b8a63b0fc0796692d6f67dc66236e7fca8323a796f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8259
+    },
+    {
+      "path": "experiments/native_support/source_mediation/report.py",
+      "sha256": "b0791f9fa3854faaa265732b80572911d90fd68bb6d3db874b46912850256d89",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2418
+    },
+    {
+      "path": "experiments/native_support/source_mediation/run.py",
+      "sha256": "565829b43b93246d707717fe82067d1c9ee815ba68c28556f4f15bfcad23acd6",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11099
+    },
+    {
+      "path": "experiments/native_support/token_detection.py",
+      "sha256": "9d64a904aff14b138870c7bf1a85208a9c3f4f2f10d58c0921538a41a8f54195",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7035
+    },
+    {
+      "path": "experiments/native_support/token_features.py",
+      "sha256": "5b2a80b0bff4b8201eb04f8a51333b73fafb0d47a9a8074155a1ea3f8f4f5856",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2514
+    },
+    {
+      "path": "experiments/native_support/transport.py",
+      "sha256": "b1ef309d04e1036a0597af70419cc247ce78ceca1239fb28d6f386fa4aa48fcb",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11902
+    },
+    {
+      "path": "experiments/native_support/transport_audit.py",
+      "sha256": "792f8fe08b8a16b7be374e881135d5cf14da6e4464c38ce1954fd23a847f0607",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11141
+    },
+    {
+      "path": "experiments/native_support/transport_audit_bootstrap.py",
+      "sha256": "a27e9b764fd038cbbec99509d74393643b142b4ce5825e3f9d99dc997c9bc7d9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3920
+    },
+    {
+      "path": "experiments/native_support/transport_audit_rank.py",
+      "sha256": "70e0b69f954f472c0d9a80cbd693ce8c0efc9b6e41019a72076ae363ac771b68",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6839
+    },
+    {
+      "path": "experiments/native_support/transport_audit_state.py",
+      "sha256": "fb1b8d34eef60b110b9eedf5f125d46e6190fb0de0ae50db5d4b0d577137f3a9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6687
+    },
+    {
+      "path": "experiments/native_support/transport_pack.py",
+      "sha256": "f53f4b163948f149cc97f522b1bac3e597b688eb78ed8c3bdc5d74a14f571ee0",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5425
+    },
+    {
+      "path": "experiments/native_support/transport_readout.py",
+      "sha256": "2a2f95a30b8792cbb446a47095577ebcdee5cd435ae8b5386dea130aed58a569",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5181
+    },
+    {
+      "path": "experiments/native_support/transport_report.py",
+      "sha256": "1b8b1c061be8a1f42e7e7e8ed0760f5bbd8d93cddd6b97f55d3be552e7f0241c",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1952
+    },
+    {
+      "path": "experiments/native_support/unified/data.py",
+      "sha256": "e43ddff7a4851dbc37e3160bd1ad4a658e11a7d270604a0be04022791f5180b7",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3974
+    },
+    {
+      "path": "experiments/native_support/unified/graph.py",
+      "sha256": "4ffb150197afc1bac95e7a61c7849a47904c0ac533b6c7e4bc04f511e8089b1d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2825
+    },
+    {
+      "path": "experiments/native_support/unified/run.py",
+      "sha256": "b83995578a2fbbf032f25b637082e1a98b55df2b19775bcd24e183f0bd65893f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9746
+    },
+    {
+      "path": "experiments/native_support/unified/scoring.py",
+      "sha256": "c1e3585be25dca2b6d471b65b171fc924a026761b5e755590cc88ace1dd6dc94",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2254
+    },
+    {
+      "path": "experiments/native_support/unified/token_scoring.py",
+      "sha256": "d2100271ebc2a2abf222545e13fa873ad9ea5a1fe07d1c00f7dbd87669542d7d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2233
+    },
+    {
+      "path": "experiments/native_support/unified/token_solver.py",
+      "sha256": "e1ac7c0057adccd5115d369d3db64a8c93f81c1cc432270d3114bdf2c4b3d335",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4259
+    },
+    {
+      "path": "experiments/native_support/validation.py",
+      "sha256": "6393e09b9bcd341aaeb5543246119655d02945f75e300c261beb8f30ab89d3bb",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2884
+    },
+    {
+      "path": "experiments/native_trace_audit/__init__.py",
+      "sha256": "ee08d8fd7710ba5874732da92133aa50137237e93d7e86dd9711cce388a16e93",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 84
+    },
+    {
+      "path": "experiments/native_trace_audit/inputs.py",
+      "sha256": "547e88e592abc1e8b163ea63b641ed8e7d0cbf41e489fe6662c4740007ce1397",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8544
+    },
+    {
+      "path": "experiments/native_trace_audit/plots.py",
+      "sha256": "f9561b5ee886439a0a2772790ed57bd3f69acc98776162484cbd6b99ae7b6cec",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3793
+    },
+    {
+      "path": "experiments/native_trace_audit/report.py",
+      "sha256": "89c09b4e1d9be02bd387634e7d7df7da2dd53246cebaf6fd4c34d07cd6a2b4ed",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 10838
+    },
+    {
+      "path": "experiments/native_trace_audit/run.py",
+      "sha256": "8826b350e11148a99f2b2419402139b9a1703818cc7eb149984117285ef0ab35",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6061
+    },
+    {
+      "path": "experiments/native_trace_audit/tables.py",
+      "sha256": "33e4a44234794f38909dc11e4ba35c016481ba6002637f03f2a5b5eb3bd155af",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6893
+    },
+    {
+      "path": "experiments/native_trace_audit/timeline.py",
+      "sha256": "04111b17a6256275be603c02851e1d3b7519041b627226a8d92352de625aff16",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2619
+    },
+    {
+      "path": "experiments/path_conflict/binding_analysis.py",
+      "sha256": "6d303860c8ad2c672bce40c3eead9c0c13d847312167a6aef69b8d79bf9006d1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4831
+    },
+    {
+      "path": "experiments/path_conflict/cooperation.py",
+      "sha256": "92fcfd8de226c5a5109d331bf22edba72a361d45da2c02b99272843310ea7c09",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3921
+    },
+    {
+      "path": "experiments/path_conflict/flow.py",
+      "sha256": "b1e4bdfd65e1b1aad064885631b4bf22c655f2d9450e3ce3f7669a594145b473",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8809
+    },
+    {
+      "path": "experiments/path_conflict/flow_inputs.py",
+      "sha256": "3c82156ad4e5422f3cb578a54b85228278baadb148231f6884d301954ee02621",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 839
+    },
+    {
+      "path": "experiments/path_conflict/flow_plan.py",
+      "sha256": "8185eae0d2e7ad1260320e3ac3c9121067fbc41631178a045273e2494010948e",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1607
+    },
+    {
+      "path": "experiments/path_conflict/flow_report.py",
+      "sha256": "878f66ea63d67c7d8fe37f6901116e3d2b04532f78fe6815fcf81154e14d2587",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 13872
+    },
+    {
+      "path": "experiments/path_conflict/focused.py",
+      "sha256": "cf4a83c816ecdce7d111b6f4bbc7191a69195ea4e9c0d96c2ec41e348f955e92",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7280
+    },
+    {
+      "path": "experiments/path_conflict/focused_inputs.py",
+      "sha256": "70753d9f1459f962b07b802eeac87cd3f132183539df6cf7836f8165035ee18f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4001
+    },
+    {
+      "path": "experiments/path_conflict/focused_plan.py",
+      "sha256": "52b9acc8a66f1520bfee2bc1b161d83b6025420fb3550e3f846ada07ee491d8c",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4248
+    },
+    {
+      "path": "experiments/path_conflict/focused_report.py",
+      "sha256": "920471f9475e736ee8aab485ff518281763e0048e8085c87b5e7da029116efde",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 10282
+    },
+    {
+      "path": "experiments/path_conflict/main.py",
+      "sha256": "1ff90a551535a0f5bef10271ae1235219b20998d2f22417e20f33e727bd43a10",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9181
+    },
+    {
+      "path": "experiments/path_conflict/native.py",
+      "sha256": "0d6f91c333891383a801546f2e6414ec339076cd649da0a1adb836ce4a56e1d1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 16227
+    },
+    {
+      "path": "experiments/path_conflict/operators.py",
+      "sha256": "764131ca71b2c7abbed5a99cca0a03a91361d125c21d162611d669ff7a67df67",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3366
+    },
+    {
+      "path": "experiments/path_conflict/paired.py",
+      "sha256": "2529e39c1c90d0245e3eaef4a0ca70aa96e0d026e6c1658b7b00d8a08ba36691",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8570
+    },
+    {
+      "path": "experiments/path_conflict/paired_exports.py",
+      "sha256": "e0fd8313164454ac2ddc27762d477c61118234976affcc98a4ce66abd9303896",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2802
+    },
+    {
+      "path": "experiments/path_conflict/paired_plan.py",
+      "sha256": "306f08ef4a78c1e08e89bad94825668efc59866fbb354b5b55c6e6ae5dbfccf9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2995
+    },
+    {
+      "path": "experiments/path_conflict/paired_report.py",
+      "sha256": "320fa62153b057eb58149dade966587a7d7a9f00fc32978f4811df12ca8df533",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11166
+    },
+    {
+      "path": "experiments/path_conflict/paired_review.py",
+      "sha256": "fb17e579d2b97f3873ec0910dcd348dd2e4918db91fa3e0b6045a003f0b0555d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9015
+    },
+    {
+      "path": "experiments/path_conflict/paired_screen.py",
+      "sha256": "d884a4e46339baaf146bd4ba863699484db5d72f93764e2e264eb18d67eabd8f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4409
+    },
+    {
+      "path": "experiments/path_conflict/paired_trials.py",
+      "sha256": "cc220d81db14a44f2b74f5481432ccea288c1ccd22ae9af677f6b136fcd64f8e",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8360
+    },
+    {
+      "path": "experiments/path_conflict/report.py",
+      "sha256": "94a84df8d4271bf94a17080e710f552039b1fbdbf04c63a0f6ceeb9fd85e119b",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9144
+    },
+    {
+      "path": "experiments/path_conflict/scoring.py",
+      "sha256": "ae8207b9a0e6a25f85516b5337c70b765fc21dbf68201560898a0b566c270c21",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3331
+    },
+    {
+      "path": "experiments/path_conflict/target_gradients.py",
+      "sha256": "2eb00260cbbe1e70bac760394b8f638d4056b429f4f27004a9076bf498626722",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11718
+    },
+    {
+      "path": "experiments/path_conflict/transport.py",
+      "sha256": "d08f3f048d732da0eae51d40b7b89966e97bd32bc6ffaf37640fdc18ae06e01d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8634
+    },
+    {
+      "path": "experiments/path_conflict/transport_plan.py",
+      "sha256": "78cdf22bb2bf5ffb47908fa6c079e76a857d30c78a015e0b73246b3e7efb97d3",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2759
+    },
+    {
+      "path": "experiments/path_conflict/transport_report.py",
+      "sha256": "f5fc257d050cf04bd4408574dcc86100eb8004798c0c57298e34aebf208a6b3e",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3025
+    },
+    {
+      "path": "experiments/path_conflict/transport_trials.py",
+      "sha256": "e5ff85eb47f19d9e8b10431288fff9986866c909bf5eaa8bbcd712b45d25162f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6673
+    },
+    {
+      "path": "experiments/probabilistic_detection/cases.py",
+      "sha256": "443fde7a988788ae5ef148c64d41d3f1bb6ce0e649da35fb28059a2bbf39954b",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 18410
+    },
+    {
+      "path": "experiments/probabilistic_detection/iteration.py",
+      "sha256": "6040e4cbbaefee4872bdecf3b3e05445732c4afde5f892766addebb16c94818b",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5266
+    },
+    {
+      "path": "experiments/probabilistic_detection/model.py",
+      "sha256": "79eb2052487e1688dc1f95d035c740ef6ce5ec7e2f5be1ee6419df3c58b3e186",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8520
+    },
+    {
+      "path": "experiments/probabilistic_detection/readout.py",
+      "sha256": "34458f070fd74dc8ef398c92de039f23272b72e656d0ead3eaa6c6ec2f204a3a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2747
+    },
+    {
+      "path": "experiments/probabilistic_detection/report.py",
+      "sha256": "3aa4bffc5d17b0e246f7a23777284ad7201be4eabbdb9a3ca1864f38d2c16c50",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4617
+    },
+    {
+      "path": "experiments/probabilistic_detection/retest.py",
+      "sha256": "e2b8237ea79f7c6dd103f400f9021ec8d893e619443c7368659cfbb7955e3f3b",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5127
+    },
+    {
+      "path": "experiments/probabilistic_detection/run.py",
+      "sha256": "ac5bae78b27fce9e579c057367dd8343493de56ceacf07b48e834d6ac68a268c",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11972
+    },
+    {
+      "path": "experiments/ragtruth_flow/__init__.py",
+      "sha256": "65c5db408707778d22a9f2e004e202e181f2e62626ae94319bf2b2545851265a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 76
+    },
+    {
+      "path": "experiments/ragtruth_flow/confirm.py",
+      "sha256": "e02e6bd02bc1eb6322ef5d16c329883306ae0079659c68ffe4128543d2fff58f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8648
+    },
+    {
+      "path": "experiments/ragtruth_flow/grounding_dynamics.py",
+      "sha256": "2b1ef3e3129889882110384e55c98f58104846117283922dd39f82ec3aac6e3d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 24970
+    },
+    {
+      "path": "experiments/ragtruth_flow/grounding_report.py",
+      "sha256": "d058a9127eaf37b0663901d1e4d2e395b0d6c33472babd7ae66620741a7d86d2",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3792
+    },
+    {
+      "path": "experiments/ragtruth_flow/native.py",
+      "sha256": "af992eb0e48d652c347643bc12654acef58c7fa437208f28cc3381a0db114c99",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7257
+    },
+    {
+      "path": "experiments/ragtruth_flow/report.py",
+      "sha256": "d7e5d8c389e831393d5f7d1ee1936f7d81c803acf2c728d53732b820c6ebb612",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5490
+    },
+    {
+      "path": "experiments/ragtruth_flow/run.py",
+      "sha256": "0464a1c010d3adfe9caf25de1fa9affca5a2adb7efb8f59d14145aa43bf81ae9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3052
+    },
+    {
+      "path": "experiments/ragtruth_flow/screen.py",
+      "sha256": "73d769142bbfde0f1d45a23da5c1400440a5d1e39abdd0b886828c763635b231",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9338
+    },
+    {
+      "path": "experiments/reanchor_audit/__init__.py",
+      "sha256": "64aa158dda358bad3f10cda1e8ae9f4bed5b7447299d7dd60dc0c58de9881725",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 67
+    },
+    {
+      "path": "experiments/reanchor_audit/capture.py",
+      "sha256": "94a02f26a1ff71459e8dd40455b2c6130cb8c0bbb4a72783fd4dc2283becdc56",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4927
+    },
+    {
+      "path": "experiments/reanchor_audit/graph.py",
+      "sha256": "44621262ce9623ee7592415096f5cbf6de8ac563b6b3bac4ed800395babf83ea",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3346
+    },
+    {
+      "path": "experiments/reanchor_audit/inputs.py",
+      "sha256": "83289e1fcf26d66225539592ffcfdbc9a7188233c85ab9c2d0c4fafc080be254",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2945
+    },
+    {
+      "path": "experiments/reanchor_audit/report.py",
+      "sha256": "ab4735a90f9e8ecc8f6428673515139225b9919f70b2c6aad7c229fac3982283",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7305
+    },
+    {
+      "path": "experiments/reanchor_audit/review_results.py",
+      "sha256": "06da8d8990ab7230fe83face9ef1869adbfb600b385df8fe633fb0ea63c8f529",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8535
+    },
+    {
+      "path": "experiments/reanchor_audit/run.py",
+      "sha256": "0072c4470421a8de889e052fb7d5eda14d43239a2b96b4389c98ea4123a17851",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6618
+    },
+    {
+      "path": "experiments/reanchor_audit/selection.py",
+      "sha256": "9582f5f01214ea8a415b5e707bc365259db44240a0b333b1c918a0dafa53a689",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5489
+    },
+    {
+      "path": "experiments/reanchor_audit/trials.py",
+      "sha256": "59f791622cbaee48d8525f53d38bff158524283a97ea8c6a072522da5a955c61",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5992
+    },
+    {
+      "path": "experiments/reanchor_audit/views.py",
+      "sha256": "d38d1f00353ecb776d714dbf43cfd4ac03965be9833ec6398b045de9863396bf",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4886
+    },
+    {
+      "path": "experiments/receiver_graph/__init__.py",
+      "sha256": "6d5472bb288fa5ced9ede3565d7e2a6040cf274c9e200e29c08aee22a3d10c14",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 78
+    },
+    {
+      "path": "experiments/receiver_graph/audit.py",
+      "sha256": "a3b7fd3ebfb87585ada6bc33f2905ec28a48987784ac1e644ee2bf4c7e6c57c1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6642
+    },
+    {
+      "path": "experiments/receiver_graph/balance.py",
+      "sha256": "ea0c525a26854cb88165f9b911095caf0456bd29504b468febd67eadbc17fd7b",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4307
+    },
+    {
+      "path": "experiments/receiver_graph/finite.py",
+      "sha256": "e2c21d3422c86bc9309fee5153be53e0f349d93d086c44145f5aac53e33d0da4",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4817
+    },
+    {
+      "path": "experiments/receiver_graph/measure.py",
+      "sha256": "10046273dc3faa617f8b8a286ed62e9ba78d6ae349b3e5911b3b8c1ef9b2e1e0",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6996
+    },
+    {
+      "path": "experiments/receiver_graph/score.py",
+      "sha256": "2db90e39c868aa6266e37dd94bc444f0e9acabf04c0e55555603a4115bc8439c",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5026
+    },
+    {
+      "path": "experiments/role_free_flow/evaluate.py",
+      "sha256": "137841a8d48107db19f6aa90c6a656875946a63a3ba7421fabefd1960df7c8a1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3143
+    },
+    {
+      "path": "experiments/role_free_flow/messages.py",
+      "sha256": "066bb8ae450d932e64a1081d214019ad872cc574abe0feb907c14f48c3758723",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7428
+    },
+    {
+      "path": "experiments/role_free_flow/report.py",
+      "sha256": "f18b6749392d5f1eecaee5411f969e4491dc92339c8736d0af90f3112a43a1b9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5555
+    },
+    {
+      "path": "experiments/role_free_flow/risk_response.py",
+      "sha256": "190829b552ced94eb72b796965cd3143e1bff76b0ed47e2ca64ba6f1b1783542",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3744
+    },
+    {
+      "path": "experiments/route_complement/browser.py",
+      "sha256": "e0700cff04b262f628a9cd47a2e6fc638d86ed9b3729b34fef1a1c572e4a43c3",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4328
+    },
+    {
+      "path": "experiments/route_complement/diagnose.py",
+      "sha256": "5009fbbef6bc8c95e5918ab1411fad18a4110537223005c3180f2f5e553954f5",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7826
+    },
+    {
+      "path": "experiments/route_complement/head_null.py",
+      "sha256": "d090680e67398a516914dbba8809f808f26fc49eb6f04b539191a8b2f9d76051",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2064
+    },
+    {
+      "path": "experiments/route_complement/head_profiles.py",
+      "sha256": "a713440e0c64e2c841a92a03b65ffab1fec8089ba1935f2555eb419e701b5fbf",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3335
+    },
+    {
+      "path": "experiments/route_complement/run.py",
+      "sha256": "c928036f39207f708f61cd56b667939be46f0308dd0acfefa6f9e4d70e44f59a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1668
+    },
+    {
+      "path": "experiments/route_complement/score.py",
+      "sha256": "07dce7b65ee37cd88483d2e85e7795dc42c91885ed15c86adb805e97689ac746",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5625
+    },
+    {
+      "path": "experiments/route_complement/verify.py",
+      "sha256": "8f09da4794f560ea3d826bfd1b3f5ef3f028f71d82d43a962f770f0a736f250b",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3766
+    },
+    {
+      "path": "experiments/short_span_audit/__init__.py",
+      "sha256": "b97da633383dae225567a380d0a6802e5f65911818f54f862ef87f41312887df",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 88
+    },
+    {
+      "path": "experiments/short_span_audit/__main__.py",
+      "sha256": "5d49c4a13e2a21af00dc8390297a7f3f4d4eabc4dd317a3583570ff5257a0729",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2695
+    },
+    {
+      "path": "experiments/short_span_audit/capture.py",
+      "sha256": "28f01c38df7f177974c5a99f7297abf5fac555771b5846da9e97d09d97feb525",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11316
+    },
+    {
+      "path": "experiments/short_span_audit/capture_reporting.py",
+      "sha256": "4913c2e15219f323c84386d0962c24160a1a4a30075521b0d98385b893ae8675",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11634
+    },
+    {
+      "path": "experiments/short_span_audit/comparisons.py",
+      "sha256": "5cfe61388f22f20a8a739101b6af12ca89fbd824ccf73c911a7bcf596f20ef09",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5485
+    },
+    {
+      "path": "experiments/short_span_audit/inputs.py",
+      "sha256": "0fcf2a8b3da4045b77c2dfdec8950184125517774c1be2c19c5736be16ddb0c4",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5286
+    },
+    {
+      "path": "experiments/short_span_audit/lifecycle.py",
+      "sha256": "5f93c184bb8f7a90caecdfc15c6f08cdb1b1f1a23895362db4259d9d6601fbca",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5070
+    },
+    {
+      "path": "experiments/short_span_audit/metrics.py",
+      "sha256": "7eba7ded0e5c1ff50654096d24f522c35dadea9e08c77ae5375c9acdc8ed052c",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11961
+    },
+    {
+      "path": "experiments/short_span_audit/reanchor.py",
+      "sha256": "215685ec5a1574e5a6cf1ab53ac6e242174f5bc77e0e9aee573d7d2103a13442",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2102
+    },
+    {
+      "path": "experiments/short_span_audit/reporting.py",
+      "sha256": "b0d2397efb6c8dbb1b802f436c1adf3f2fc149117fa637d9acfc62cf3433f597",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7894
+    },
+    {
+      "path": "experiments/span_maintenance/audit.py",
+      "sha256": "29cfcb90537e860bc1dd1a63317c961b61ac399a02a42e612b44201b43b74b54",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5867
+    },
+    {
+      "path": "experiments/span_maintenance/boundary.py",
+      "sha256": "2d1bb977990d13bc81b5981898a2a594622b977617e97594cb18dcf34297785e",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5088
+    },
+    {
+      "path": "experiments/span_maintenance/evaluate.py",
+      "sha256": "5f9aaf1d44d14be4817d34848be1c864960f89954b32a4b98ac66d9bcb60d20d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 10685
+    },
+    {
+      "path": "experiments/span_maintenance/payload.py",
+      "sha256": "4338d34344417dd8eb870c6b4b166a3395fc33499dd4c55dd75e694196ea7cb4",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3293
+    },
+    {
+      "path": "experiments/span_maintenance/pipeline.py",
+      "sha256": "663fae8c756212a67ddbc1aac327c44794961030a4a706a936aefe94af712ad1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1254
+    },
+    {
+      "path": "experiments/span_maintenance/run.py",
+      "sha256": "6ac69ee97d0fe8d51d30418b3615e4d5055012177742dbbc6cfc6e17256d513a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4935
+    },
+    {
+      "path": "experiments/span_source_control/diagnostics.py",
+      "sha256": "1c73a077272fc667bbdecd31527febad443aac931b9318c7956202dabfc025e6",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2942
+    },
+    {
+      "path": "experiments/span_source_control/evaluate.py",
+      "sha256": "7d94212fcc44b54e9c5230ca566a11d3f1cbcd4cb7b51f08ea857cac554dc4d5",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9714
+    },
+    {
+      "path": "experiments/span_source_control/finite.py",
+      "sha256": "3255941bf17452e17df1142fb986b37eb64ffb9c7a25ed9c4f152ccaa6b79ee5",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4184
+    },
+    {
+      "path": "experiments/span_source_control/memory.py",
+      "sha256": "a7afe9f00c190c359ec2c1defabc082b2b13162951d4523c38c3a019886b856f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3028
+    },
+    {
+      "path": "experiments/span_source_control/native.py",
+      "sha256": "47e5818bf28d2bdd68f38c9d5aa0b70e8d94951cd8390437b3a1921c8a63fcb2",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3135
+    },
+    {
+      "path": "experiments/span_source_control/report.py",
+      "sha256": "d8161e2647344e97914a0fd2a2b03896af3501afdce7e46b9360ca141ad61acb",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5087
+    },
+    {
+      "path": "experiments/span_source_control/run.py",
+      "sha256": "9d3e89eea78d361643a00d18fce5a67faf55c45faafc5d40a63c107fea4408ee",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 825
+    },
+    {
+      "path": "experiments/token_evidence/prepare.py",
+      "sha256": "2a1797583d5a74869311638690be7b8ba028466212b0c6e1c1b5b07ffb499044",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3224
+    },
+    {
+      "path": "experiments/token_evidence/report.py",
+      "sha256": "827ca682d94675f674f83d005bccd8c231c57165c989841011b908b6a29f3560",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4422
+    },
+    {
+      "path": "experiments/token_evidence/run.py",
+      "sha256": "039fa004bc69d6cdcff91f75f286d04186cd9c3cc79a3f79303ecfd3d3734368",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 805
+    },
+    {
+      "path": "experiments/unsupervised_graph/model.py",
+      "sha256": "9d057e6ae15e49fb1504502614ab4aa4ebcf1f4c71e23fbbe598bc2afce47960",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4550
+    },
+    {
+      "path": "experiments/unsupervised_graph/refine_report.py",
+      "sha256": "e842f7073d1d514842835f951f06a39549afdac2810f6fefdb06f2cddc62daf8",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3190
+    },
+    {
+      "path": "experiments/unsupervised_graph/refine_run.py",
+      "sha256": "fa88838042cfa19fe2349c7584a060d3f7e0fdbc1a55d059b5d0d0beedc11eb9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8880
+    },
+    {
+      "path": "experiments/unsupervised_graph/refinement.py",
+      "sha256": "9a42d155786173582291e697bb1cecf703e2ae9ac120dae0f0be3f727dd722c9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3729
+    },
+    {
+      "path": "experiments/unsupervised_graph/report.py",
+      "sha256": "e140d61abd90e12e30b0dd5f99171e9b941afc3c2c97eca361ff7fa2a1ac6cd7",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3322
+    },
+    {
+      "path": "experiments/unsupervised_graph/run.py",
+      "sha256": "2fa5b46166f510b9c322b203e13fef077995d7dd496b264a22965f3c49de5df9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8606
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/autoencoder_run.py",
+      "sha256": "ed4cb237b20590df580c7b987dbdcbc8df6e84c9600a37e2b844d2f5c225b6ff",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4041
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/cache_index.py",
+      "sha256": "4a83b468a84a72847695c8a97b4cd5f585fb118263a4dc5334ef2a2f2fb18636",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6572
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/config.py",
+      "sha256": "927fa7fb17268ac9ccd9042b11de6d4078fcebc7bc6543f32da8d7a461171b97",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 369
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/data.py",
+      "sha256": "7efc3071d0c8b80ce465b65a890e5481eef7db6f8f9e724807f6bc9efe7f25d1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4028
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/evaluate.py",
+      "sha256": "2d5871a0fb0197822e9db363bb14772a2087bfddd2acbd3908a3397837ebdd1c",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5423
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/evaluation_data.py",
+      "sha256": "a5096a1d0b0b5e80d4e670388fba7001e75fc27222a71046008e58c8fcf7de6b",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8994
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/fixed_graph/__init__.py",
+      "sha256": "61b7d5bdbb399d37480ee85e183e7eecd533398f65523c617e75f2a753edce8f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 76
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/fixed_graph/__main__.py",
+      "sha256": "e6a5b8a9b0f5bc30f863a0f88db0d1acf6a56ac41415d9dfd346748a63a015be",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 30
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/fixed_graph/evaluation.py",
+      "sha256": "41d644e79db437f4a8c304322deb29f129ac420898b1f4272210514d3292a682",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6206
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/fixed_graph/inputs.py",
+      "sha256": "77b1df6c7f246f91d02b53744756c57275cff2ea9f84270478ff1d5403de98a0",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4437
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/fixed_graph/operators.py",
+      "sha256": "9fc9d2980625a4798dbcf4a2f9014a55e50bfe3ef6fa59782b58527ba58c4c0f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7372
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/fixed_graph/pipeline.py",
+      "sha256": "a5f79affce545ebfcbf4f848b04c66a6c4b1b531d30c6d8c4b9fd20ce5e209d3",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9202
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/fixed_graph/reference.py",
+      "sha256": "af9c1cda2c40eee0eb4533e9a54620f34482f7519c9fab3e9b7707680e513f82",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5953
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/fixed_graph/run.py",
+      "sha256": "78f1f138bac9f2322b4345503bcc249f921899cede089735f1301a35bfe032b5",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3782
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/graph.py",
+      "sha256": "e9d235071a2c76b4521d964ad63aeac35d9e7279fd0411879b875122d2200254",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4264
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/__init__.py",
+      "sha256": "f9fb215afcf99d1e58c32e0ebc543de9eb2c45e6dab3be914a07279e1bc5f199",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 77
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/__main__.py",
+      "sha256": "e6a5b8a9b0f5bc30f863a0f88db0d1acf6a56ac41415d9dfd346748a63a015be",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 30
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/continuity.py",
+      "sha256": "01785e7f92e685cabf0ce4651d3084940dc5e92b153083e4d3477dba6763d1d3",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11649
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/continuity_decomposition.py",
+      "sha256": "1ba16fc55b857f7f66ac8e805c4cb8d039f33ca20eaa5b9293b7f94645d42bd0",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5204
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/continuity_matching.py",
+      "sha256": "9a503a4ef60595fb505e35f5ec21f7038c62ca4c17201134eee0da764fa23f91",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6784
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/continuity_metrics.py",
+      "sha256": "93c3abdcca17713aee344e00d53193d902a519c672d625d54f5d44043ac0769f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 12114
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/continuity_order.py",
+      "sha256": "dba509d291938c1adf498d0005293f9254dee3d138f1d14aabc2f00461fb3838",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3518
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/continuity_reporting.py",
+      "sha256": "b0173c3af8e5f80a71502a10db46156fdf15ae12b2ced676d061dfe4aaf78957",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9541
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/cross_terms.py",
+      "sha256": "a90368c334e365e773b5148b2b0c9dda8358fc121ffaf0cec8ee0464ce7aba94",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8801
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/evaluation.py",
+      "sha256": "c268e7b9acaa9e42bfa708237ee97372dea24a7950b5a34973e0adeeac56ad1d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9906
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/geometry.py",
+      "sha256": "7599dddf321426bde99d476d87362050505f23ea48f1c3158be30efeaaf44bb7",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9178
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/inputs.py",
+      "sha256": "0e8d80d9ee617f0b102df1d9d2b3d58a3ac20e805313d11b3f5863909384ed3a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5666
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/pipeline.py",
+      "sha256": "bb6c9199e93bfa2cd1cedcaae2dffa01c422cf38e846b790409bac5b4ad334aa",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9445
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/reporting.py",
+      "sha256": "40f142f613129f9fcf83f2cecd7b1844ea2701ff3799f7d14205577e2c32e7f9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6651
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/reuse.py",
+      "sha256": "be2b21117f0da9c1191c01f5edc943f1df55ab1ed4ec3b90fc63b5af7c5fd6a9",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1569
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/run.py",
+      "sha256": "401bdaeb03cdd43dc95a0fb7edffe6472d203a35c5f0e10c4e9f9186dd9683ae",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5376
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/__init__.py",
+      "sha256": "c8dab4dbb77dc3bdac3d72314a4fa3873be2dbb9468faec508a19310ec28b832",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 74
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/__main__.py",
+      "sha256": "e6a5b8a9b0f5bc30f863a0f88db0d1acf6a56ac41415d9dfd346748a63a015be",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 30
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/binding.py",
+      "sha256": "69c5d80649cde9243e6dd237154852839d53d4fd21903a8d38e1d678a188ec85",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6180
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/blocks.py",
+      "sha256": "60b940cd08d3b3795ffa72d6bedbbb1e2d85fdac9e92ba3aaef45195fe17e052",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1110
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/diagnostic.py",
+      "sha256": "6c580389bb236e373a2f9a105728ab00e41a8eb14a5790ecd97ed84dd55d0b40",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5039
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/evaluation.py",
+      "sha256": "aef75606cb6a71bb5ebea36e4fdd35d90df518e78f4354765551db585b611ce4",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3217
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/inputs.py",
+      "sha256": "7dae1c017aa107fa544f548c984724cedeb29d26869debcec8648a8fa7d77fc1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4973
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/metrics.py",
+      "sha256": "b39c047e9d8969a6d441775be530d40707d256ee0d5b452289494108e58d9c08",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3065
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/native.py",
+      "sha256": "ec1d741779f27c02366ecebdd5117c98521461cd5ea0a86b78b8dae095c2af5a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4689
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/pipeline.py",
+      "sha256": "8218153af7c7ee6dcb47f1c8eb8a1d222a141ab4473cd0ed86004f7db8aecafa",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7136
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/profile.py",
+      "sha256": "0aedc52b2b881f7a9c4d5d979a7f9e0abdc3048b3acf7fe3fa446cc941f59e9e",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8029
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/run.py",
+      "sha256": "5941c2c8d93e1dadb8fb6523eb33be8239e7731b5f7ecf9fe57aa838c1be7158",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5518
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/latent_regime/__init__.py",
+      "sha256": "f23302a77828f280a97f7975f67302797c9513c027fa69ef3fb96b492ee4bbe7",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 76
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/latent_regime/__main__.py",
+      "sha256": "e6a5b8a9b0f5bc30f863a0f88db0d1acf6a56ac41415d9dfd346748a63a015be",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 30
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/latent_regime/evaluation.py",
+      "sha256": "17c72dced45c96f094ee2ba8f5d69255d2973f8d823aa0dc47ccc3908457fdcd",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 10672
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/latent_regime/inputs.py",
+      "sha256": "4f7ddbc01387f3bd4d98de71d9ad9b7875be7875f0d949922c24306083275c13",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4045
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/latent_regime/model.py",
+      "sha256": "417d76d7a7e8ee0d7f1c378801e428bc3cbce23ad970d1fa117010dae166a5ca",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9291
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/latent_regime/pipeline.py",
+      "sha256": "3201e31b546de1e1dfdc311976acf1cad045c0d3a4528cdc344952875d5e1173",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 12862
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/latent_regime/run.py",
+      "sha256": "becd0250a86076e9969a295511eb630d9dcc31e54245206627277bff8a5f5d7d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3996
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/model.py",
+      "sha256": "9decd8d4d2edba4035d183bf4989b4dd4c88edc24533c23695266bc40230ae2a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2998
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/offline_span/__init__.py",
+      "sha256": "87fec85fe8dd9df17d9074b69eb2029b8a735a2e211f8ba7fbe38d8952debaca",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 93
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/offline_span/__main__.py",
+      "sha256": "e6a5b8a9b0f5bc30f863a0f88db0d1acf6a56ac41415d9dfd346748a63a015be",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 30
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/offline_span/data.py",
+      "sha256": "4a4a1a7daef3db4ccfac83c6be7b29e3b787aac58891b105a1cb6b40403ec5e1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8987
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/offline_span/evaluation.py",
+      "sha256": "e7ca00b600f267e5b8993d99ddd57b4281a2ed3d1bc9e79e9eac745a5664629a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8562
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/offline_span/metadata.py",
+      "sha256": "8feced689e6d49a1c482e0db1fb7e56933bca558054ab92444b031001dd3dd03",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3294
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/offline_span/run.py",
+      "sha256": "a7453b3eda36cf7ff88db8c7fbf7d31b4634025d355cb629f777ec6f955b0f44",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 385
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/reanchor.py",
+      "sha256": "8e932160b112e19f87b152f345dab9270b8f86e4c5a68652b9146230303339e8",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6534
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/reanchor_evaluate.py",
+      "sha256": "4f213270fcfb938f76adadc3bb510a414f1a5a6e2ef63ddbc49c26a14fd8452f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 14628
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/reanchor_run.py",
+      "sha256": "5164c12448b1384b0559948d00c8456a3da12cdd035c28d3ae91dc5bd53e5443",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 8684
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/run.py",
+      "sha256": "4162e26f10bb693e053cc25045f5c1e9a001191a26d8adeeb85c2769d1bea402",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 968
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/s10_reanchor.py",
+      "sha256": "daf523aaedd8e72e6eaf96458bd63cfdc469ed54c3f3f9995de2a6df905a7a51",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5076
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/score.py",
+      "sha256": "099a8c3faf6fed69c232f4e75406063378ae8d5008db09d60782cd0444c6cc7b",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1134
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/__init__.py",
+      "sha256": "70947df9a91724c708c101d25724927e50b725e43a1a3e35b3991b2d794dd860",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 94
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/__main__.py",
+      "sha256": "e6a5b8a9b0f5bc30f863a0f88db0d1acf6a56ac41415d9dfd346748a63a015be",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 30
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/experiment.py",
+      "sha256": "a66427dc2e9fd6ac55da4de1319db9dff43d2ab2e322fc53d712879f770940ac",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1407
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/inputs.py",
+      "sha256": "06d9d5e70f6c425a4a752e0be725c9c17259bcf9858aab01e3fd75f46ee647b5",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6737
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/matching.py",
+      "sha256": "36b5cd2f81d994a513550178574588348a0e8caae4c5e570b151378ad3c0a8fa",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4178
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/measurements.py",
+      "sha256": "a8ed019a4ae7e31967934b16bd7628bf486c6b239393d10b1466533879ddb5a8",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3807
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/onset_archive.py",
+      "sha256": "540eb65a839ad278b7d03f41aade1a7ef593d77021c1e665713a9e4ecc1b5b3d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5659
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/onset_changes.py",
+      "sha256": "912952111b74c80a6b4769557b768a34a2bd2d1cc4f22ba1fe60e17cbab64873",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5390
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/onset_detection.py",
+      "sha256": "bf66e5de00b040a37b61c5d52a7c0f89426501c9cf87d66bf4aecc3c67169500",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5259
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/onset_report.py",
+      "sha256": "3707491b15b5e62e9d98efa3b591fa62abf1da187c16a4d0a538fd9b3238774b",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 7061
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/onset_run.py",
+      "sha256": "00b223c4f571253fc1aadd11b123b78eb91a14810d01bcf49e691cddd15e454d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 6591
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/onset_windows.py",
+      "sha256": "00e2ba7e422d62f0d8ed428f70d5e13d96d75464a5116bcc38bb7509ab079646",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3917
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/readings.py",
+      "sha256": "c257514d14be1c64945ce39de3cdb7117a428983d60b35df72ede50a617d0019",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3271
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/report.py",
+      "sha256": "faa0e2804f8eb97c94efdb9f3fa31d08bb6a180277e11aa726da86d335c62260",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5253
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/run.py",
+      "sha256": "c016a873d3e0a31a883057cb3021f1952aa0ee614ea537fa9c4c9e511da856f3",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3412
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/statistics.py",
+      "sha256": "9b7dee4b7cf0e1e45868dcc3102468e04bb6e4adb7ae109c1a1f2f39c77a5476",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1923
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/units.py",
+      "sha256": "2546e65bd1e5f14614da64240b831e29bb191fabdc4739ecb2beaff1a0886abc",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1866
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/structured_compatibility/__init__.py",
+      "sha256": "cd67d767b5e40300dc51e0c8b786e84a48d994b53f9570166d53fea511f2a62a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 88
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/structured_compatibility/__main__.py",
+      "sha256": "e6a5b8a9b0f5bc30f863a0f88db0d1acf6a56ac41415d9dfd346748a63a015be",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 30
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/structured_compatibility/evaluation.py",
+      "sha256": "9a48a38d64c897219fd9dfcde20ce07729461a13d4ef446d329c59bad8e76109",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9953
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/structured_compatibility/inputs.py",
+      "sha256": "3d85186296b7193a00b839418a531d14a44987b6a0abb8094210e7ba56d8fffb",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3869
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/structured_compatibility/model.py",
+      "sha256": "755eec35d46f713d8471595a22a1d9ce934953ed6ca512f29819aee8577ddce5",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 4659
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/structured_compatibility/pipeline.py",
+      "sha256": "f101c592e71af54e426133d3314d791b617ac1a26090a232cd8f370a124fccba",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 12248
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/structured_compatibility/run.py",
+      "sha256": "ea5f2214c50a3d7be467c34ebc56da91e1be878535fcf6088ce86147393a2c9a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3907
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/structured_compatibility/source_tokens.py",
+      "sha256": "65866ef012ee06dd49810c9c5619ec3932ffeac7a7b2a2e4fdb8038b38918ece",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1438
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/structured_compatibility/training.py",
+      "sha256": "3898a4e1d785e57279c17d2f4f8ea3c2ebb8c91a839e0c079f35b33f4043ac1c",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 10508
+    },
+    {
+      "path": "reuse_detector/__init__.py",
+      "sha256": "dc5475c006303002f7b6c7bfe461b9ad8ed944e90dafc706942b238a762c86aa",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 93
+    },
+    {
+      "path": "reuse_detector/capture.py",
+      "sha256": "640c1f8bd96265a53b2c6521cdacc9c0d5274a5d30b39250007e9aa72f3c6adf",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9422
+    },
+    {
+      "path": "reuse_detector/core.py",
+      "sha256": "c75d28d19d2636f1e498f9213f96cc8f3f32c23871b015c010cf7c7c223e6ac1",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 10617
+    },
+    {
+      "path": "reuse_detector/evaluation.py",
+      "sha256": "afc9d1c88eac7558391d9b00399f2f279fd05b1bc9bd6e179dc6d3908a298768",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9291
+    },
+    {
+      "path": "reuse_detector/run.py",
+      "sha256": "c4349cbec1f25d552b458515cb82d5bd3e96cd0a296f55f527cbe32d1749961f",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 13882
+    },
+    {
+      "path": "scripts/review_convergence.py",
+      "sha256": "270d23abe69df530968a559b0e1c55b18d4040b48ced21fa6aa52c6e2a4dd25d",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2955
+    },
+    {
+      "path": "structural_detector/__init__.py",
+      "sha256": "f975362420d86c68ad1dbb6c86ffb99e902bee574612ec462089b67e30effe8a",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 78
+    },
+    {
+      "path": "structural_detector/audit.py",
+      "sha256": "25f58e02db77d7047ce1cb1cb4df5f4c4f2ebce2891460002741f1cd68018945",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 5343
+    },
+    {
+      "path": "structural_detector/experiment.py",
+      "sha256": "1cfe7a6ac99fe0d2fd2dce39d7c33653d25aa7a782ff6943226d7ac1662d55b6",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 11027
+    },
+    {
+      "path": "structural_detector/features.py",
+      "sha256": "289998ae353d238f37cc826c02bf06655ed1784ec78950a9acb15e017d88ac13",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 1734
+    },
+    {
+      "path": "structural_detector/local_capture.py",
+      "sha256": "f8bf8a66c2ab6311b100872e599fe87c8971d82c7c19b89251e57d915214b9be",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 9209
+    },
+    {
+      "path": "structural_detector/transport.py",
+      "sha256": "13a46509b724aeb59536911f8aa8ff0396621543575ec79a6383ffa8e02534b7",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 3826
+    },
+    {
+      "path": "structural_detector/transport_run.py",
+      "sha256": "bdfa82eb3b1df44f74e5af7d81be70e7396fa5fa3e51c521b191db08157012bf",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 2558
+    },
+    {
+      "path": "structural_detector/two_stage.py",
+      "sha256": "c84ca3db6655201350ee0186637e36e8846c82b6b462f54a8767daf44c01d74c",
+      "reason": "Retired experiment outside retained token/native/fixed-JS-MMD/GSM dependency closure",
+      "bytes": 16272
+    },
+    {
+      "path": "experiments/head_interactions/run_all.sh",
+      "sha256": "b3dcb3f36263ac752caf14170efc8f960784d3d62ab902fded401455d28e3fae",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 255
+    },
+    {
+      "path": "experiments/native_support/run.sh",
+      "sha256": "0213330ef853a7db136cb2b9fac52fd9110aa6a43100cec64fadb11a65e62207",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 271
+    },
+    {
+      "path": "experiments/native_support/run_carriers.sh",
+      "sha256": "0ee4dbf3d6e2c919d653fc63f8baf2c8294e60f5c492fe4e46103726b9743d32",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 292
+    },
+    {
+      "path": "experiments/native_support/run_carriers_position.sh",
+      "sha256": "80b1f4c42bec958801399f643490c7864250f11ee7186e894e1b1f991753cab1",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 323
+    },
+    {
+      "path": "experiments/native_support/run_carriers_token.sh",
+      "sha256": "f2266075011fc89e7330b473189b67551c8d5fb6f9faaa2f0a5be8b05b2bd74d",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 356
+    },
+    {
+      "path": "experiments/native_support/run_contrast.sh",
+      "sha256": "436364d6286092d6434cda7bb68b402e1a6b4e78cce24aab4235d9b1d9af0888",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 332
+    },
+    {
+      "path": "experiments/native_support/run_contrast_analysis.sh",
+      "sha256": "5420302e5ff7bd5fc8d7e07892e18486937649c84564e058dbedef6d74dc9e9e",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 338
+    },
+    {
+      "path": "experiments/native_support/run_dual.sh",
+      "sha256": "aeb286eaf9f1249ade0f13053ce9d4d9dbeaa5ed5cdf5e5dd6bf7fdad42eefb8",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 319
+    },
+    {
+      "path": "experiments/native_support/run_dynamics.sh",
+      "sha256": "d96bbe35c6dd9dad15514b498513951535ad9d2e8a6e96db9d00f4df69069243",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 709
+    },
+    {
+      "path": "experiments/native_support/run_functions.sh",
+      "sha256": "605976cbc9b2c00506d427635bf899eeba750fdc4819fc5c8c6585c40713c145",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 516
+    },
+    {
+      "path": "experiments/native_support/run_observable.sh",
+      "sha256": "ed7b942d6abf19f5ad3314b7c4146440e51c91d981e953a07ed4179be8497614",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 302
+    },
+    {
+      "path": "experiments/native_support/run_ragtruth_all.sh",
+      "sha256": "fff2294e741c8c529c72fef17388978e8cb52490933e14b6d5c9f553fa4fa6b7",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 474
+    },
+    {
+      "path": "experiments/native_support/run_ragtruth_refine.sh",
+      "sha256": "6a2048b4849d75f2fcb4455cdd71dc268a972231f67a223e11e196fe47052c03",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 373
+    },
+    {
+      "path": "experiments/native_support/run_readout.sh",
+      "sha256": "da5fbe116b26d8129cac59514cc0fafc67d00a392abce1d0ce7282041f29e14c",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 330
+    },
+    {
+      "path": "experiments/native_support/run_source_mediation.sh",
+      "sha256": "fe358e894fa32bbe02180287eb9fa0d39cf9b4d2c5956e13fe8c003c05799c06",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 313
+    },
+    {
+      "path": "experiments/native_support/run_unified.sh",
+      "sha256": "4f90d651bcdade94025a2151b86579752af668fd334b56b097a58b4fa62d7223",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 299
+    },
+    {
+      "path": "experiments/native_support/run_unified_token.sh",
+      "sha256": "349f8fa4443cd948e93f641681dada73b44c9649b9f76ba3c9ef81fb07aa812f",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 376
+    },
+    {
+      "path": "experiments/native_trace_audit/run.sh",
+      "sha256": "bdbaab77128d7f8264037ca73378a5fc4190fb3e1e24a8c55ba8f082c425ba7c",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 275
+    },
+    {
+      "path": "experiments/short_span_audit/run.sh",
+      "sha256": "870108983f38cad8fe90d8bf87ece5aff26c79d673228e0f2193b0611b1e16b7",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 253
+    },
+    {
+      "path": "experiments/short_span_audit/run_capture.sh",
+      "sha256": "7039d00f02156ada368591375eaf010db5108f85e8f59bbe7cc77ce9d4ae35ed",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 309
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/evaluate.sh",
+      "sha256": "8db4015c07b3722e4580d15013faf783858236fda294217b167502e41290d666",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 1646
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/run_all.sh",
+      "sha256": "ef74c1f242d41aa4ff06acb73dbdebe230f9a5c57bbebe7d163bf5379a58f405",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 216
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/run_continuity.sh",
+      "sha256": "c35e058f574299ee6dba9c86d57e5fb2288c98e7580cd6c8f15c339b61200c19",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 236
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/run_cross_terms.sh",
+      "sha256": "ba8d1704fbf816e9b73430972941a0569a7b61aa87fe3edd4da888992f0eef85",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 355
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/run_middle.sh",
+      "sha256": "50e515e79972c12aa8beac2615ec1f0fd209c0a56f3e32e28110c6035e5b7bd3",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 438
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/run_all.sh",
+      "sha256": "a18e54def4423c244f1ed200f359dee0130562a7c52fbb841dff180fc5d1d482",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 199
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/run_all.sh",
+      "sha256": "40a4374ffb8c150206dbfe62cf2fea173cbf397d63c5eeaa7bc26b77a94d86e0",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 2668
+    },
+    {
+      "path": "scripts/run_structural_fusion.sh",
+      "sha256": "25d8a03fac910c68cf89a4a3eb293e6e5d860e03092a1105ffe78f279d0faf6a",
+      "reason": "Shell entrypoint exclusively launches retired experiment commands",
+      "bytes": 543
+    },
+    {
+      "path": "experiments/head_interactions/tests/test_head_interaction_workflow.py",
+      "sha256": "f02045201b2d8897936caca4a8bc0876873d83a4da2b3ea78e4da8e4611ba2be",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 7902
+    },
+    {
+      "path": "experiments/receiver_graph/test_graph.py",
+      "sha256": "cc03dc4035d05a7b8955aa9c5d050e74e76c148b38a9efad8b607f63aa7ee070",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 1595
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/fixed_graph/tests/test_fixed_graph.py",
+      "sha256": "8565503525e0772f4b54ce618b2603668642ecaef13d7be1bdaa4c42c44b81cc",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 16912
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/tests/test_continuity_decomposition.py",
+      "sha256": "8809c207014509946fbcb04161917875ba2b062392fe5e3044f1180e22ec00bc",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 4204
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/tests/test_continuity_matching.py",
+      "sha256": "159b08bfe44cfc40417b14cc3af85089cd5d5b2b85ca8bc10f47fbf3b399019c",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 4943
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/tests/test_continuity_metrics.py",
+      "sha256": "4feb9616afd062b7c145d556248e23344802912e9fdaf7b0499aca6a3fcca991",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 7081
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/tests/test_continuity_order.py",
+      "sha256": "c03f351f7236440ef062d2828def96cae8b7723bf42d634c8796fa3df9f3d75e",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 1431
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/tests/test_continuity_pipeline.py",
+      "sha256": "4fd694d78b6062e00f2069b2f0c9f6dceb026efca23c02708337600bd92cc91c",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 4877
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/tests/test_cross_pipeline.py",
+      "sha256": "23074ccd0d66b942cd7f5557ce17e33b3579b4e1105a746075d2600b5f5e8e57",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 4682
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/tests/test_cross_terms.py",
+      "sha256": "c26f8fd2b31e507a29f4d7e8c28761a32888a6df24aa4aeaf20ca2f9a88000d1",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 7203
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/tests/test_geometry.py",
+      "sha256": "17a85759c403be1c9f4ef8c8d0e2bec4aeda0cc0dbe0818ebc36707ce0993d42",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 9764
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_geometry/tests/test_pipeline.py",
+      "sha256": "11b480851132c7b36028898f43407f59570694c259299f14f670a598ed560b42",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 7275
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/tests/test_binding.py",
+      "sha256": "d1307b017f9964e1424e6da10cce9a385b40e0a0c7578e3f4eb0092fe51403a4",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 2407
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/tests/test_inputs.py",
+      "sha256": "534654947b5663ef4b32bd3ee50b3e805235fca6bfa67d942996effb062c823d",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 1605
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/tests/test_role_pipeline.py",
+      "sha256": "069b190fd29c2011e640212c275d0052b64fcd521494cab7a8d00b97ccbec448",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 3927
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/head_roles/tests/test_roles.py",
+      "sha256": "a92a0511095e5a02926d0523cc50f4d82ec6e4269e38f4da8bee707d27cc5fa6",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 7613
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/latent_regime/tests/test_inputs.py",
+      "sha256": "8d6313329827471127e400ddc240f55e0821cea18c75c5636614025c4d037386",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 558
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/latent_regime/tests/test_model.py",
+      "sha256": "91540f64c79a764805ff33300409fe08daf26c4d6d7b0c889d4887416b639fd1",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 2426
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/tests/test_alignment.py",
+      "sha256": "945b7cbd62fd7a6cad5e0b0fe3f6c69d13a13b9692b16ce0964a2374d5c394a0",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 7510
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/span_audit/tests/test_audit.py",
+      "sha256": "a0944d68e1dd099c9ce99c306a3486155891004bd48229e3da088d6822ba9fd4",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 11942
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/structured_compatibility/tests/test_evaluation.py",
+      "sha256": "326948b196282a5a6f7d3723138e3c33258ec69a9ec46e31c358be8fe60c8b3d",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 2184
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/structured_compatibility/tests/test_inputs.py",
+      "sha256": "bd1189d048952f414180cbfd4545290b21d54eb4275e66e1585791a9c781a773",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 564
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/structured_compatibility/tests/test_model.py",
+      "sha256": "90da35d73ffc86a1b063887e9428d208a2ec1e5b9f0677536eac5a8c3ac2cc96",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 1945
+    },
+    {
+      "path": "experiments/unsupervised_token_graph/structured_compatibility/tests/test_training.py",
+      "sha256": "2aca5b614d9b2efff57d6dd117088b15fb696de2eb2ce278f9d14ef8afb8205c",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 992
+    },
+    {
+      "path": "tests/test_annotation_path.py",
+      "sha256": "04cb13fbeb39334040a24d4d4ccd78934d253c9de3d97a1682d71c2c43b73765",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 7054
+    },
+    {
+      "path": "tests/test_attention_cache_dtypes.py",
+      "sha256": "263d1d272a19e6c7a882bd218252cee5913962ed3bd473a5ac049842703ec175",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 5020
+    },
+    {
+      "path": "tests/test_binding_projection.py",
+      "sha256": "2ae835403bb055ee9c200e1fc0512366dd93bba7587acdeb721fe3341440e50f",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 15275
+    },
+    {
+      "path": "tests/test_boundary_transition_audit.py",
+      "sha256": "d6a4b3866527158be9b20e4df1104918d4b3730a0ae373a33eff91a4522158a7",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 1401
+    },
+    {
+      "path": "tests/test_charm_circuit.py",
+      "sha256": "2db705d4ec6d17f24fc3d733482476bd723e94423cf2a44cb9dfb7d0d89cb9a2",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 5819
+    },
+    {
+      "path": "tests/test_charm_history_controls.py",
+      "sha256": "f6bceb1f3191bd6e9618e47cc7e316a4f14a5e1e8fac78cb6be8880c74c2267e",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 14641
+    },
+    {
+      "path": "tests/test_charm_lda_audit.py",
+      "sha256": "54e5773825e234519425e13e58e74cf02a6c5673cacdf80ae76639e745b64d2d",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 12042
+    },
+    {
+      "path": "tests/test_charm_lockin.py",
+      "sha256": "a3775b08edf48b21185d5fc009bca1007d29bbbf51b19da1758dff5b2f5e255d",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 11918
+    },
+    {
+      "path": "tests/test_charm_node_signal.py",
+      "sha256": "33139bcd0534f9bb605b97a5baf28ee4d1b5dcf0a21df6a22543b950526a6adf",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 9746
+    },
+    {
+      "path": "tests/test_charm_prediction_memory.py",
+      "sha256": "99b569cbce94fe47cf947ec1181cf2c8b4e18429d6df7d9422e491369eb4bc27",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 874
+    },
+    {
+      "path": "tests/test_charm_structure_audit.py",
+      "sha256": "08eea7dda5321248528e2d12109659c674049bbbdc8b4502270716a01710d267",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 13460
+    },
+    {
+      "path": "tests/test_charm_whitebox.py",
+      "sha256": "088ac661f1e26fa281fccb5feffa61be4ed8811b9c183acbb1d2d20a929b34bd",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 12477
+    },
+    {
+      "path": "tests/test_choice_state_pack.py",
+      "sha256": "a9f5ed29dc63b8fc2fe8737ee302637145d6d0679840ee92b409948af706eddf",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 6702
+    },
+    {
+      "path": "tests/test_claim_verification.py",
+      "sha256": "f008e391ebf3ce8f12eebefe9750b0c5c8e867530571bcff6f7ad1dce7f48d8c",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 5103
+    },
+    {
+      "path": "tests/test_continuity_units.py",
+      "sha256": "79fe1cf5282632acf23e1ec778cff2074e7f0c2a5541c76f89add66f8a12d4d2",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 4019
+    },
+    {
+      "path": "tests/test_dynamics_audit.py",
+      "sha256": "e810956e0b36897ddf9dc96a14d05370d02707e49cbbafe2a518ba1ec6d7dafa",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 4769
+    },
+    {
+      "path": "tests/test_dynamics_normals.py",
+      "sha256": "3ea3f1327660d3e1a769c0e25b1b3c4d33f2eabb6b9421ac674c92c16abb7222",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 1475
+    },
+    {
+      "path": "tests/test_dynamics_pipeline.py",
+      "sha256": "34ed11c0ac85008c5a2bdc00bf1943340467f7d4165f7e47efe81bbad7a74d4b",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 10598
+    },
+    {
+      "path": "tests/test_entropy_detection.py",
+      "sha256": "074d8118bddf8e54ad2956d43f2ba66ec3634aff6618bc20538fcae58b958471",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 2525
+    },
+    {
+      "path": "tests/test_flow_audit.py",
+      "sha256": "ed216fb5d6cc30431fbe8e1d8a91095e572ae8097032f4dfb91bf7b619c2a75f",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 3690
+    },
+    {
+      "path": "tests/test_focused_verification.py",
+      "sha256": "271828b8442215eec5788cac84efdf221e7ff8687ffd189e0522dfa3caf75e7d",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 2565
+    },
+    {
+      "path": "tests/test_grounding_dynamics.py",
+      "sha256": "32d601a9c64c518bece825321ce21909e09aa12c342b16fcf56b87d2accbea2f",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 3044
+    },
+    {
+      "path": "tests/test_grounding_report.py",
+      "sha256": "d9573306a56311f4d60d2d789067b132b8ab0aa692805ed3a2c777a92d7dc196",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 1425
+    },
+    {
+      "path": "tests/test_internal_flow.py",
+      "sha256": "9fc6af5b1c85916dfcc25985714225d1527f02bb104a147144259fcbe28b0f1d",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 3210
+    },
+    {
+      "path": "tests/test_message_carriers.py",
+      "sha256": "00eceb721d63940aaabc86cfc76560dc138180013bde844036a43d685bfb16cd",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 12374
+    },
+    {
+      "path": "tests/test_native_routes.py",
+      "sha256": "3774f140ff1e14c12e9f4326385febb270c469f24420d6d13d09376fa10a6622",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 8125
+    },
+    {
+      "path": "tests/test_native_trace_audit.py",
+      "sha256": "108fd73907ebdaf34325131129099af9a6838bdaa0d3ba3b7944a03ee15dff2a",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 9995
+    },
+    {
+      "path": "tests/test_npz_inputs.py",
+      "sha256": "95eb40c18f4cc154698cbf4995d5c5c3de70bc0b5faeaedc137bf00f00c942d4",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 11589
+    },
+    {
+      "path": "tests/test_observable_pack.py",
+      "sha256": "270a05ea43680849ee744b3822083cab9a6e2b78b4397fad27d5e35739ed5ec3",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 3248
+    },
+    {
+      "path": "tests/test_paired_exports.py",
+      "sha256": "60974f737dbfb6d6505780541a006fd2817396ab2e8301d7b27823717a05c87e",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 2313
+    },
+    {
+      "path": "tests/test_paired_report.py",
+      "sha256": "bd2b9a3d9f225c088affbfae5daf9f3b8764dabf470ae403939061b19bb652c1",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 2083
+    },
+    {
+      "path": "tests/test_paired_screen.py",
+      "sha256": "e089fff779c7e55b5e1c007c56f43c38eb1f7e749584a8b3446727205439e960",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 4965
+    },
+    {
+      "path": "tests/test_path_conflict_flow.py",
+      "sha256": "00cf9e34af6727da7f4457a598ca38fd0ab4393f9dbd61d9f40cccd6f2e4718c",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 8039
+    },
+    {
+      "path": "tests/test_path_conflict_focused.py",
+      "sha256": "60e06b7b330efb53bc4ab1a82cfd9cdda1873e80fcded0f1eb72d8f7c2ce0e36",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 11845
+    },
+    {
+      "path": "tests/test_pre_onset_audit.py",
+      "sha256": "8bbee6d8d25b2c1992958c7c55ff72e1acdab8a68d60d7a2f7e69c8681aa7fd9",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 8354
+    },
+    {
+      "path": "tests/test_probabilistic_cases.py",
+      "sha256": "618af538e283dd46072d19f299296e8d46905315bfedfae290d046e0e55883ee",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 7901
+    },
+    {
+      "path": "tests/test_probabilistic_model.py",
+      "sha256": "e89ab67c3e5547b53a2ee72a09732c803cf2ef5e9b9d2aefd8069b905143e444",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 6232
+    },
+    {
+      "path": "tests/test_probabilistic_readout.py",
+      "sha256": "b151fcef3c29ba7f3702c54839ab0e5a8faa2a6b501bf50f01c59b06a1053eee",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 2395
+    },
+    {
+      "path": "tests/test_probabilistic_selection.py",
+      "sha256": "cd6c4b94f291f42e1f7d644e7fa81f7cdf4ff7646eefc8b8c52ffa1054bdc4c8",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 1545
+    },
+    {
+      "path": "tests/test_ragtruth_flow.py",
+      "sha256": "2b5f86589aa71ed5776bc7c8ebe25d65bffc4c6e66d01f04c50fe864c5cb4d10",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 4383
+    },
+    {
+      "path": "tests/test_ragtruth_refine.py",
+      "sha256": "45d14539abdaf0c97e5eb600d37e3bbcc00d35863126c62a7d2f17aeef940567",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 10841
+    },
+    {
+      "path": "tests/test_reanchor_audit.py",
+      "sha256": "90571a34b14b57caeb1c04264e61c224920763e8d3b8ab11aad37cb26bc5312d",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 10738
+    },
+    {
+      "path": "tests/test_reanchor_pipeline.py",
+      "sha256": "c9403a77d4479d29751d65cfccf481eafa17884e5dad70f40b8fbc874940e79f",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 4285
+    },
+    {
+      "path": "tests/test_reanchor_saved_review.py",
+      "sha256": "b2f21904e4497f0b8c3303609ffbc6e4e9a32ffe6845067e431642d9749e70fc",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 1447
+    },
+    {
+      "path": "tests/test_risk_response.py",
+      "sha256": "0319864cc20eb654668499fde875a15bfdabee12ef2d7a7ecd644268fc582c72",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 3721
+    },
+    {
+      "path": "tests/test_short_span_capture.py",
+      "sha256": "eb6b9d4181fc53fc7dde47471913a40ce43c11a8f48dde291a36264b5c5323f5",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 11518
+    },
+    {
+      "path": "tests/test_short_span_lifecycle.py",
+      "sha256": "5e1fafaedc80904c39af511478e668ec7433bc18875cf54c73787649dc43769f",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 4126
+    },
+    {
+      "path": "tests/test_short_span_metrics.py",
+      "sha256": "07544d4017d22a0771c5aca5febb736f76c94bc81696a61ed9e91c142313b7a2",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 9155
+    },
+    {
+      "path": "tests/test_short_span_pipeline.py",
+      "sha256": "9bf999a798179bb203f5ad473ab6da6c2254cc6a523606c5ff9826ecee4cc0c5",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 3509
+    },
+    {
+      "path": "tests/test_source_mediation.py",
+      "sha256": "4f765203f0f54776997d5ae22dfc3e97e725c12360a79ca23139fe58dfeec297",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 11193
+    },
+    {
+      "path": "tests/test_state_context_audit.py",
+      "sha256": "2bf126e7f4eab29fd99bad7ee23b764c2d797ec9261a4b99487ae70a75079846",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 947
+    },
+    {
+      "path": "tests/test_structural_detector.py",
+      "sha256": "b4ca7fa832ea83d405b13b849864ba94d40305ce02ca8c164b8cb47f61068c05",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 2467
+    },
+    {
+      "path": "tests/test_supervised_readout.py",
+      "sha256": "2b50dbf4bbf8f716f8110b521d6efa86f81c0053da42eb8b21f38772027f65b4",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 7892
+    },
+    {
+      "path": "tests/test_target_transport.py",
+      "sha256": "0ff33d4373d9aa4f667ae02f7d31f229f284ac0f8e8f44a587db0c9c2fdcf380",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 11836
+    },
+    {
+      "path": "tests/test_token_detection.py",
+      "sha256": "c3bbb0adc91161b50e26fd742dfcb4999fbc313e06dc28b774564018752311c1",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 3765
+    },
+    {
+      "path": "tests/test_transport_audit.py",
+      "sha256": "c47c91e25435183a9a3444fa5b799226e8cd6d6cebd575b2285c222439bcbbca",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 9851
+    },
+    {
+      "path": "tests/test_transport_evaluation.py",
+      "sha256": "39ba6732900265ec1d661c50dea7e383cfcf1fbb32ac634ffcd7acdf7d1be4eb",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 2452
+    },
+    {
+      "path": "tests/test_transport_pipeline.py",
+      "sha256": "6eaf67ab1e4426ac28fd5237c87a269da210fb1965f658db92f52bea5173674c",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 8000
+    },
+    {
+      "path": "tests/test_transport_refactor.py",
+      "sha256": "c646d7881bda4b5ef8a1efa48593de8f3b874136b26b9a985acf55ada85afa19",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 6234
+    },
+    {
+      "path": "tests/test_two_stage.py",
+      "sha256": "cf432e8e2ebd3e9b5f958100b9827422a3a5bd17f1818577027d0bbf8a06a54c",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 12583
+    },
+    {
+      "path": "tests/test_unified_token.py",
+      "sha256": "bae23a1c84f170c9f0ce65ee874301d32a18a4f02623e9b7f64dcfe9d7371256",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 3766
+    },
+    {
+      "path": "tests/test_unsupervised_token_graph.py",
+      "sha256": "1f30277d14f8e4c99472c65833f83c0ab8ba1bac4339ff754e3a4abd46d671a5",
+      "reason": "Tests exclusively depend on retired experiment implementations",
+      "bytes": 3124
+    },
+    {
+      "path": "tests/test_dataset_script_paths.py",
+      "sha256": "d64ecc348736528b9ad0b0f626d045d5360d70fb37917c17d2cba25a0c68dc41",
+      "reason": "Tests forwarding only for retired unsupervised_token_graph shell launchers",
+      "bytes": 2600
+    },
+    {
+      "path": "tests/test_charm_circuit_export.py",
+      "sha256": "920ee505069d3e039263c8383fbb221acd18ae95f2f6aa5e15533accc632c2a9",
+      "reason": "Dynamic shell/CLI invocation or theory test belongs only to retired experiments",
+      "bytes": 3889
+    },
+    {
+      "path": "tests/test_charm_continuity.py",
+      "sha256": "459f2f202ad6e4e5e5fca0e4bc0ef7324a3f326050b9b906f00c9ae7e807012a",
+      "reason": "Dynamic shell/CLI invocation or theory test belongs only to retired experiments",
+      "bytes": 8815
+    },
+    {
+      "path": "tests/test_charm_highlow.py",
+      "sha256": "ca2b454494a3b20233a868d38be5d207c501acd7c9af45a887a13bf5627a2625",
+      "reason": "Dynamic shell/CLI invocation or theory test belongs only to retired experiments",
+      "bytes": 6817
+    },
+    {
+      "path": "tests/test_charm_localization_routes.py",
+      "sha256": "40eaff73021f2b8a2067d59dd0c7a77727b462a52aa9d70cd3e11e577d1d81cc",
+      "reason": "Dynamic shell/CLI invocation or theory test belongs only to retired experiments",
+      "bytes": 16019
+    },
+    {
+      "path": "tests/test_charm_mixture.py",
+      "sha256": "2f7fa5f8c6b9f15f2f970f0ec5ca89cd2d755fd609560a6fb959bd16532e814e",
+      "reason": "Dynamic shell/CLI invocation or theory test belongs only to retired experiments",
+      "bytes": 10128
+    },
+    {
+      "path": "tests/test_completed_preview.py",
+      "sha256": "808555e7b1760fad344d0c423acfe57da9ae1335126dea9cc687e7577ab12a30",
+      "reason": "Dynamic shell/CLI invocation or theory test belongs only to retired experiments",
+      "bytes": 10748
+    },
+    {
+      "path": "tests/test_legacy_split_binding.py",
+      "sha256": "d6bec9c092d7f517d88935bd2b4290e8e7816c0cd92975287e4a68cc9319d79a",
+      "reason": "Dynamic shell/CLI invocation or theory test belongs only to retired experiments",
+      "bytes": 14606
+    },
+    {
+      "path": "tests/test_transport_pack.py",
+      "sha256": "3030606691320580cbf59a3aa553e1e7b9958c1c4304bca1d7714bd6c5049748",
+      "reason": "Dynamic shell/CLI invocation or theory test belongs only to retired experiments",
+      "bytes": 5073
+    },
+    {
+      "path": "tests/test_unsupervised_reuse.py",
+      "sha256": "902c2b64b34a29369846a0bf4402348a36a8e039cb6f32a72268a44511c05d67",
+      "reason": "Dynamic shell/CLI invocation or theory test belongs only to retired experiments",
+      "bytes": 18041
+    },
+    {
+      "path": "tests/test_source_refinement.py",
+      "sha256": "7c5539e140fe908836fee5f14664a3111394f58bc8e5fa487dc410a283bd6430",
+      "reason": "Dynamic shell/CLI invocation or theory test belongs only to retired experiments",
+      "bytes": 3106
+    }
+  ]
+}

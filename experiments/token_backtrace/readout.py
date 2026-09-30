@@ -47,13 +47,6 @@ def score_contrasts(values, scales):
             for name in METHODS}
 
 
-GRAPH_METHODS = ('node_ridge', 'node_iforest', 'graph_ridge', 'temporal_ridge',
-                 'shuffled_17', 'shuffled_29', 'shuffled_43')
-HIDDEN_WIDTH = 32
-MASS_METHODS = ('graph_mass', 'temporal_mass', 'shuffled_mass_17',
-                'shuffled_mass_29', 'shuffled_mass_43')
-
-
 def history_weights(root_effect, prompt_length):
     """Signed total root responses, not direct neural edges for path rollout."""
     count = len(root_effect)
@@ -95,112 +88,120 @@ def signed_context(weights, attributes, expected=False, token_ids=None, preserve
     return np.column_stack(contexts)
 
 
-def graph_attributes(row, trace, hidden):
-    """Fixed random hidden projection plus six native, label-free attributes."""
-    rng = np.random.default_rng(17)
-    projection = rng.standard_normal((hidden.shape[1], HIDDEN_WIDTH)) / np.sqrt(HIDDEN_WIDTH)
-    projected = hidden.astype(float) @ projection
-    source = np.asarray(row['source']['source_mask'], dtype=bool)
-    effect = trace['root_effect'].astype(float)
-    total = np.maximum(np.abs(effect).sum(-1), 1e-30)
-    source_effect = effect[:, :len(source)][:, source]
-    scalars = np.column_stack((-trace['logp'], trace['entropy'], -trace['margin'],
-        np.log1p(np.linalg.norm(trace['root_norm'].astype(float), axis=1)),
-        np.maximum(source_effect, 0).sum(-1) / total,
-        np.maximum(-source_effect, 0).sum(-1) / total))
-    return np.column_stack((projected, scalars))
+def attribution_lineage(root_effect, prompt_length):
+    """CAGE-style positive lineage B + L C, not native causal message edges.
+
+    Rows are output targets; prompt columns are original roots and L columns
+    are strictly earlier answer tokens. Absolute total root derivatives are
+    normalized once for this explanatory decomposition, never reinterpreted
+    as local Jacobians or fed into the native graph detector.
+    """
+    roots = np.asarray(root_effect, dtype=float)
+    count = len(roots)
+    if roots.shape != (count, prompt_length + max(count - 1, 0)):
+        raise ValueError('root_effect must have shape [T, prompt_length + T - 1]')
+    if not np.isfinite(roots).all():
+        raise ValueError('lineage requires completed finite root measurements')
+    prompt = np.abs(roots[:, :prompt_length])
+    history = np.abs(history_weights(roots, prompt_length))
+    mass = prompt.sum(axis=1) + history.sum(axis=1)
+    denominator = mass[:, None]
+    prompt = np.divide(prompt, denominator, out=np.zeros_like(prompt), where=denominator > 0)
+    history = np.divide(history, denominator, out=np.zeros_like(history), where=denominator > 0)
+    lineage = prompt.copy()
+    for target in range(count):
+        lineage[target] += history[target, :target] @ lineage[:target]
+    return dict(B=prompt, L=history, C=lineage, root_mass=mass, resolved=mass > 0)
 
 
-def graph_covariates(row, weights):
-    """Same position, lexical-format and signed-mass controls in every model."""
-    count = len(weights)
-    position = np.arange(count)
-    texts = row['response']['token_text']
-    lexical = np.asarray([[any(c.isalpha() for c in word), any(c.isdigit() for c in word),
-        not any(c.isalnum() for c in word), len(word)] for word in texts], dtype=float)
-    task = np.tile([row['task'] == name for name in ('QA', 'Summary', 'Data2txt')], (count, 1))
-    return np.column_stack((position / max(count - 1, 1), np.log1p(position),
-        np.full(count, np.log1p(count)), np.full(count, np.log1p(len(row['prompt']))),
-        lexical, task, np.log1p(np.maximum(weights, 0).sum(-1)),
-        np.log1p(np.maximum(-weights, 0).sum(-1))))
+def _native_statistic_inputs(eta, selection, aligned, valid):
+    eta = np.asarray(eta, dtype=float)
+    selection = np.asarray(selection)
+    if not np.issubdtype(selection.dtype, np.integer) or np.any(selection < 0):
+        raise ValueError('physical layer/head addresses must be nonnegative integers')
+    if not np.isin(aligned, [0, 1]).all() or not np.isin(valid, [0, 1]).all():
+        raise ValueError('alignment/measurement masks require exact booleans or 0/1')
+    selection = selection.astype(int)
+    aligned = np.asarray(aligned, dtype=bool)
+    valid = np.asarray(valid, dtype=bool)
+    count = len(aligned)
+    if selection.ndim != 3 or selection.shape[0] != count or selection.shape[2] != 2:
+        raise ValueError('selection must have shape [T, K, (layer, head)]')
+    width = selection.shape[1]
+    if eta.shape != (3, 3, count, width, count) or valid.shape != (count, width, count):
+        raise ValueError('eta must have shape [3,3,T,K,T]; valid must have shape [T,K,T]')
+    if width == 0 or any(len(set(map(tuple, row))) != width for row in selection):
+        raise ValueError('each carrier requires a nonempty selection of distinct physical heads')
+    causal = np.triu(np.ones((count, count), dtype=bool), 1)
+    eligible = causal & aligned[:, None] & aligned[None, :]
+    return eta, selection, aligned, valid, causal, eligible
 
 
-def graph_designs(row, trace, hidden, preserve_mass=False):
-    attributes = graph_attributes(row, trace, hidden)
-    weights = history_weights(trace['root_effect'], len(row['prompt']))
-    controls = graph_covariates(row, weights)
-    token_ids = np.asarray(row['response']['answer_ids'])
-    suffix = 'mass' if preserve_mass else 'ridge'
-    designs = dict(node_ridge=controls)
-    designs['graph_' + suffix] = np.column_stack(
-        (controls, signed_context(weights, attributes, preserve_mass=preserve_mass)))
-    designs['temporal_' + suffix] = np.column_stack((controls,
-        signed_context(weights, attributes, expected=True, token_ids=token_ids,
-                       preserve_mass=preserve_mass)))
-    for seed in (17, 29, 43):
-        shuffled = matched_history(weights, token_ids, seed)
-        name = f'shuffled_mass_{seed}' if preserve_mass else f'shuffled_{seed}'
-        designs[name] = np.column_stack((controls,
-            signed_context(shuffled, attributes, preserve_mass=preserve_mass)))
-    return attributes, designs, weights
+def _directional_excess(eta, valid, causal, eligible):
+    # Each P uses its own output direction. E/U are not projections under R.
+    excess = np.full((3,) + eta.shape[2:], np.nan)
+    complete = np.zeros_like(excess, dtype=bool)
+    for direction in range(3):
+        other = [donor for donor in range(3) if donor != direction]
+        competitor = np.maximum(0., np.max(eta[direction, other], axis=0))
+        current = np.maximum(eta[direction, direction] - competitor, 0.)
+        measured = valid & np.isfinite(eta[direction]).all(axis=0)
+        complete[direction] = ~eligible[:, None, :] | measured
+        excess[direction] = np.where(eligible[:, None, :] & measured, current, np.nan)
+        excess[direction] = np.where(causal[:, None, :], excess[direction], 0.)
+    return excess, complete
 
 
-def weighted_standardize(train, evaluation, weights):
-    mean = np.average(train, axis=0, weights=weights)
-    scale = np.sqrt(np.average((train - mean) ** 2, axis=0, weights=weights))
-    scale = np.where(scale > 1e-8, scale, 1.)
-    return (train - mean) / scale, (evaluation - mean) / scale
+def _pair_statistics(excess, selection, eligible):
+    count = selection.shape[0]
+    pair = np.zeros((3, count))
+    complete = np.ones((3, count), dtype=bool)
+    pair_eligible = np.zeros(count, dtype=bool)
+    winner_target = np.full((3, count), -1, dtype=int)
+    winner_head = np.full((3, count, 2), -1, dtype=int)
+    for token in range(1, count):
+        left = {tuple(head): index for index, head in enumerate(selection[token - 1])}
+        right = {tuple(head): index for index, head in enumerate(selection[token])}
+        heads = sorted(left.keys() & right.keys())
+        targets = np.flatnonzero(eligible[token - 1] & eligible[token])
+        if not heads or not len(targets):
+            continue
+        pair_eligible[token] = True
+        candidates = np.stack([np.minimum(excess[:, token - 1, left[head]][:, targets],
+                                          excess[:, token, right[head]][:, targets])
+                               for head in heads], axis=-1)  # [P, future target, head]
+        complete[:, token] = np.isfinite(candidates).all(axis=(1, 2))
+        pair[:, token] = candidates.max(axis=(1, 2))
+        for direction in np.flatnonzero(complete[:, token]):
+            target_index, head_index = np.unravel_index(
+                candidates[direction].argmax(), candidates.shape[1:])
+            winner_target[direction, token] = targets[target_index]
+            winner_head[direction, token] = heads[head_index]
+    return pair, complete, pair_eligible, winner_target, winner_head
 
 
-def graph_reconstruction(train, evaluation, method):
-    """Fit one source-excluded model. No gold labels or score direction search."""
-    from sklearn.ensemble import IsolationForest
+def selected_statistics(eta, selection, aligned, valid, donor_names=('R', 'E', 'U')):
+    """Raw self-aligned R/E/U max/min statistics, before empirical scaling.
 
-    weights = np.concatenate([np.full(row['valid'].sum(), 1 / row['valid'].sum()) for row in train])
-    weights /= weights.sum()
-    target = np.concatenate([row['attributes'][row['valid']] for row in train])
-    target, observed = weighted_standardize(target, evaluation['attributes'], weights)
-    if method == 'node_iforest':
-        # Source-balanced resampling avoids giving long answers more fit weight.
-        rng = np.random.default_rng(17)
-        indices = rng.choice(len(target), len(target), p=weights)
-        model = IsolationForest(n_estimators=100, max_samples=min(256, len(target)),
-                                random_state=17, n_jobs=1).fit(target[indices])
-        return -model.score_samples(observed)
-    predictors = np.concatenate([row['designs'][method][row['valid']] for row in train])
-    predictors, query = weighted_standardize(predictors, evaluation['designs'][method], weights)
-    predictors = np.column_stack((np.ones(len(predictors)), predictors))
-    query = np.column_stack((np.ones(len(query)), query))
-    penalty = np.eye(predictors.shape[1])
-    penalty[0, 0] = 0.
-    coefficients = np.linalg.solve(predictors.T @ (weights[:, None] * predictors) + penalty,
-                                   predictors.T @ (weights[:, None] * target))
-    error = (observed - query @ coefficients) ** 2
-    return .5 * error[:, :HIDDEN_WIDTH].mean(-1) + .5 * error[:, HIDDEN_WIDTH:].mean(-1)
-
-
-def crossfit_graph(records, method):
-    """Outer source exclusion plus inner held-source calibration predictions."""
-    from experiments.native_support.unified.calibration import fit_distribution
-
-    result, folds = {}, {}
-    cache = {}
-    for held in records:
-        training = [row for row in records if row['source_id'] != held['source_id']]
-        calibration, sources = [], []
-        for inner in training:
-            fitted = [row for row in training if row['source_id'] != inner['source_id']]
-            identity = (tuple(row['key'] for row in fitted), inner['key'])
-            if identity not in cache:
-                cache[identity] = graph_reconstruction(fitted, inner, method)
-            values = cache[identity][inner['valid']]
-            calibration.append(values)
-            sources.extend([inner['source_id']] * len(values))
-        reference = fit_distribution(np.concatenate(calibration), sources)
-        raw = graph_reconstruction(training, held, method)
-        result[held['key']] = dict(raw=raw, score=transform(raw, reference))
-        folds[held['key']] = dict(held_source=held['source_id'],
-            fit_sources=[row['source_id'] for row in training],
-            calibration_sources=sorted(set(sources)),
-            values=reference['values'].tolist(), cumulative=reference['cumulative'].tolist())
-    return result, folds
+    eta[P, donor, q, selected_head, target] contains native signed effects.
+    Outputs node[P,q], edge[P,q,t], pair[P,q] use physical-head identities.
+    Missing eligible measurements remain NaN through the selected maximum;
+    eligibility and completion are separate, so unaligned entries cannot be
+    reported as measured zero effects. Noncausal entries are structural zeros.
+    """
+    if tuple(donor_names) != ('R', 'E', 'U'):
+        raise ValueError('both eta direction/donor axes must be ordered R, E, U')
+    eta, selection, aligned, valid, causal, eligible = _native_statistic_inputs(
+        eta, selection, aligned, valid)
+    excess, complete = _directional_excess(eta, valid, causal, eligible)
+    edge = excess.max(axis=2)
+    edge_complete = complete.all(axis=2)
+    node = np.where(eligible[None], edge, 0.).max(axis=2)
+    pair, pair_complete, pair_eligible, target, head = _pair_statistics(excess, selection, eligible)
+    return dict(directions=('R', 'E', 'U'), excess=excess, node=node, edge=edge, pair=pair,
+                edge_eligible=eligible, node_eligible=eligible.any(axis=1),
+                pair_eligible=pair_eligible, aligned=aligned,
+                structural_zero=~causal, edge_complete=edge_complete,
+                node_complete=edge_complete.all(axis=2), pair_complete=pair_complete,
+                pair_target=target, pair_head=head,
+                complete=bool(complete.all()))

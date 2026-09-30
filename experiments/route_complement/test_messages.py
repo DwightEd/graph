@@ -1,9 +1,6 @@
-import numpy as np
 import torch
-from itertools import combinations, product
 
 from .messages import projected_norm, group_messages, norm_route
-from .head_null import identity_overlap
 
 
 def test_native_factorization_equals_explicit_output_messages_and_gram():
@@ -33,18 +30,3 @@ def test_opposite_messages_reveal_cancellation_without_changing_attention():
     assert float(norm_route(masses[None])) < 0
     assert float(norm_route(net[None])) > 0
     assert float(net[0, 0, 0]) == 0
-
-
-def test_conditional_head_overlap_matches_exhaustive_identity_null():
-    first = np.array([[True, True, False, False], [True, False, False, False]])
-    second = np.array([[True, True, False, False], [True, True, False, False]])
-    result = identity_overlap(first, second)
-    overlaps = []
-    for choices in product(*(list(combinations(range(4), int(row.sum()))) for row in second)):
-        shuffled = np.zeros_like(second)
-        for layer, chosen in enumerate(choices):
-            shuffled[layer, list(chosen)] = True
-        overlaps.append(int((first & shuffled).sum()))
-    assert result['observed'] == 3
-    assert np.isclose(result['expected_under_within_layer_identity_shuffle'], np.mean(overlaps))
-    assert np.isclose(result['upper_tail_probability'], np.mean(np.array(overlaps) >= 3))

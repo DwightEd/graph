@@ -76,3 +76,5 @@
 新增route_graph/audit_*.py、causal_groups.py、frozen_reader.py、evidence_anchor.py及真实native后端。入口audit_runner，调度experiments/interleave_native_audit.py。自然36条清单outputs/native_audit_design_20260913；审查native_{validation,pipeline,scheduler}_engineering_20260913.md。此时未启动GPU，部署前复审尚未关闭。
 
 Native audit 2026-09-13T04:47:53+08:00: docs/NATIVE_METHOD_MODEL_20260913.md, docs/NATIVE_AUDIT_RUN_20260913.md, outputs/native_audit_v1_20260913/settings.json, experiments/evaluate_native_audit.py, experiments/summarize_native_audit.py; full36 launch preflight, no empirical result claimed.
+
+| 2026-09-30 | experiment-bridge | docs/ARCHITECTURE.md | implementation | Native message/VJP and exact token graph-cut primitives; no new detector efficacy claim |

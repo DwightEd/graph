@@ -52,12 +52,3 @@ def test_large_innovation_does_not_exceed_bound_under_tv():
     answer,gap = solve_correction(rng.normal(size=30),rng.uniform(size=29))
     assert max(abs(answer))<=.1
     assert gap<1e-6
-
-
-def test_matched_null_preserves_entire_edge_weight_distribution():
-    from .controls import match_weights
-    native = np.array([.9,.2,.6,.3])
-    shuffled = np.array([.1,.3,.2,.4])
-    result = match_weights(native,shuffled)
-    np.testing.assert_array_equal(np.sort(result),np.sort(native))
-    np.testing.assert_array_equal(np.argsort(result),np.argsort(shuffled))

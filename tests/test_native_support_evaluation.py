@@ -2,7 +2,6 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -16,7 +15,6 @@ from experiments.native_support.ragtruth import (
     prepare_official,
     select_responses,
 )
-from experiments.native_support.run import main
 
 
 @pytest.fixture
@@ -51,15 +49,6 @@ def test_absent_default_annotations_are_unavailable_not_zero_labels(tmp_path):
     assert result["auroc"] is None and result["ap"] is None
     assert not (tmp_path / "annotations.json").exists()
     assert read_json(tmp_path / "evaluation.json") == previous
-
-
-def test_original_placeholder_command_has_no_traceback_or_model_load(tmp_path, capsys):
-    with patch("state_audit.model.load_model", side_effect=AssertionError("GPU load forbidden")):
-        main(["--stage", "evaluate", "--output", str(tmp_path),
-              "--annotations", str(tmp_path / "token_labels.json")])
-    result = json.loads(capsys.readouterr().out)
-    assert result["status"] == "unavailable"
-    assert result["reason"] == "missing_token_annotations"
 
 
 def test_official_answer_preparation_has_real_aligned_labels(official_fixture):
@@ -110,44 +99,6 @@ def test_balanced_selection_is_explicit_and_cannot_invent_missing_class(official
                          generator="llama-2-7b-chat", limit=4, balanced=True)
     result = ranking(np.array([0, 0]), np.array([0.1, 0.4]))
     assert result["auroc"] is None and result["auroc_status"] == "requires_both_classes"
-
-
-def test_prepare_does_not_overwrite_existing_different_cache(official_fixture, tmp_path):
-    args, model, _, _ = official_fixture
-    output = tmp_path / "output"
-    write_json(output / "settings.json", {"original": "keep"})
-    with pytest.raises(ValueError, match="settings changed"):
-        main(["--stage", "prepare", "--dataset", str(args.dataset), "--model", str(model),
-              "--balanced", "--output", str(output), "--resume"])
-    assert read_json(output / "settings.json") == {"original": "keep"}
-    assert not (output / "annotations.json").exists()
-
-
-def test_real_cli_prepares_scores_and_evaluates_without_placeholder(official_fixture, tmp_path, capsys):
-    import torch
-
-    torch.set_num_threads(1)
-    args, model, _, _ = official_fixture
-    output = tmp_path / "pilot"
-    command = ["--dataset", str(args.dataset), "--model", str(model), "--balanced",
-               "--limit", "4", "--output", str(output), "--device", "cpu", "--dtype", "float32",
-               "--prefill-chunk-size", "8", "--resume"]
-    main(command)
-    result = json.loads(capsys.readouterr().out)
-    evaluated = result["evaluation"]
-    assert result["evaluation_performed_by_this_stage"] is True
-    assert evaluated["status"] == "evaluated"
-    assert evaluated["methods"]["routing_imbalance"]["all_error"]["positives"] == 2
-    assert evaluated["methods"]["routing_imbalance"]["all_error"]["auroc"] is not None
-    assert set(evaluated["methods"]) == {"routing_imbalance", "attention_displacement", "entropy"}
-    assert result["state_fitting"] is False
-    assert (output / "annotations.json").is_file()
-    with patch("state_audit.model.load_model", side_effect=AssertionError("GPU load forbidden")):
-        main(command + ["--query-chunk-size", "3", "--compress-cache"])
-        assert json.loads(capsys.readouterr().out) == result
-        main(["--stage", "evaluate", "--output", str(output)])
-    repeated = json.loads(capsys.readouterr().out)
-    assert repeated == evaluated
 
 
 def test_valid_token_mask_excludes_controls_and_keeps_annotation_onsets(tmp_path):

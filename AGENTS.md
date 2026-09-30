@@ -2,6 +2,12 @@
 
 每次修改代码、重构或运行实验前，先阅读本文件及适用的项目规范。
 
+## 2026-09-30 当前架构（优先于下文历史实验入口）
+
+当前代码地图和公式契约见 `docs/ARCHITECTURE.md`；共享研究入口为 `/share/home/tm902089733300000/a903202310/lys/codex/research/README.md`。用户本轮明确授权清理未使用代码。旧 supervised、reconstruction、transport 等入口已退役，下文提及它们的命令/默认方法是历史协议记录，不是恢复旧代码的要求。历史原始结果、现有未跟踪代码和用户改动继续保留。
+
+主路径在原 `experiments/token_backtrace` 内实现：`messages` 原生测量、`readout` 作用统计/谱系、`global_graph` 精确图割、`pipeline` 缓存阶段；复用 `teaching/state_audit`。自然标签只用于评分冻结后的评价。已实现的是测量/求解原语，不得宣称自动语义提案和8B全量新方法已完成。旧 fixed/JS/MMD 作为冻结强对照。根目录 `main.py --help` 是当前可运行入口的权威列表。
+
 ## 默认交付：直接合并并推送 main
 
 用户已授权本项目代码任务默认直接提交到 `DwightEd/graph` 的 `main`。除非用户另有指示，完成当前授权范围的修改和测试后，合并到最新 `main` 并直接推送；不另建分支或 PR，不反复询问是否推送，不以下载补丁或让用户手动应用代替正常交付。

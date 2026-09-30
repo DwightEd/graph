@@ -1,126 +1,48 @@
-"""Explicit entry points for mechanism measurement and detector baselines."""
+"""Explicit, label-free measurement/scoring stages and separate evaluation."""
 
+import argparse
+from pathlib import Path
+import runpy
 import sys
 
-HELP = """Usage: python main.py COMMAND [arguments]
 
-  flow             Resampled claim pairs: head interactions, repair and persistence
-  support          Per-token routing and entropy detection; score cached data, evaluate once
-  dynamics         Offline head/source responses, unlabelled state fitting and token AUROC/AP
-  transport        Signed source provenance through native attention, residual and FFN value paths
-  transport-pack   Compact existing value-path captures for head and temporal audit; CPU only
-  transport-state  Score/evaluate cached choice states and auto-pack; --stage pack reuses completed results
-  transport-functions  Original-answer native FFN/RMS audit; no generated banks; coverage + auto-pack
-  transport-observable  Native cumulative distribution response and conditional structured anomaly
-  transport-readout  Supervised source-held-out probes of cached responses; no model forward
-  transport-dual    Unlabelled current/persistent head readout; cache only, causal and offline
-  transport-contrast  Frozen source/history four-condition likelihood; no truth-label training
-  transport-carriers  Select history messages, measure conditional deletion, save per-token vectors
-  transport-unified  Source/routing graph readout; optional soft token readout with --token-readout; CPU only
-  transport-benchmark  Full RAGTruth source-first token detection; all tasks/generators, grouped evaluation
-  transport-refine  Refine cached source scores with token/window signals; CPU train-selection and test evaluation
-  probabilistic    Supervised conditional likelihood ratios on frozen native caches; CPU only
-  probabilistic-test  One-command full test of frozen legacy supervised models; not risk_response
-  entropy-detect   Entropy events and supervised temporal readouts; exposed sources excluded
-  source-refine    CPU source-first token refinement; fixed and dev-selected scores
-  graph-anomaly    Unlabelled 123D temporal-graph contrast; explicit dev selection and frozen test
-  transport-mediation  Test cached head interactions or native prompt/history-KV factorial effects
-  flow-edges       Earlier final-target edge experiment with branch-correct restoration
-  population       RAGTruth screen/confirm; --phase grounding is a forecast baseline
-  regime           Existing unlabeled head-covariance HMM; direction remains a hypothesis
-  unsupervised     Existing entropy/local-reuse baseline; no semantic binding readout
-  supervised-s10   Historical supervised baseline
-  supervised-s11   Historical supervised baseline
+# Reuse the existing native adapter package when running from a source checkout.
+sys.path.insert(0, str(Path(__file__).parent / 'teaching/state_audit/src'))
 
-Read experiments/native_support/README.md for detector inputs and execution costs.
-No command starts an experiment automatically. Each command accepts --help.
-"""
+COMMANDS = {
+    'graph': {'lineage': 'token_backtrace.pipeline', 'score': 'token_backtrace.pipeline'},
+    'token': {'trace': 'token_backtrace.trace', 'validate': 'token_backtrace.validate',
+              'baseline': 'token_backtrace.benchmark', 'evaluate': 'token_backtrace.diagnose'},
+    'evidence': {'prepare': 'automatic_evidence.prepare', 'capture': 'automatic_evidence.capture',
+                 'score': 'automatic_evidence.score', 'evaluate': 'automatic_evidence.evaluate'},
+    'baseline': {'fixed': 'unsupervised_graph.fixed', 'source-capture': 'source_relation.capture',
+                 'js': 'source_relation.measure', 'mmd': 'source_relation.kernel',
+                 'score': 'source_relation.score', 'evaluate': 'message_js.evaluate'},
+    'history': {'capture': 'choice_feedback.run', 'verify': 'choice_feedback.verify',
+                'evaluate': 'choice_feedback.analyze'},
+}
 
 
 def main(argv=None):
-    argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv or argv[0] in ("-h", "--help"):
-        print(HELP)
-        return
-    command, arguments = argv[0], argv[1:]
-    if command == "entropy-detect":
-        from experiments.entropy_detection.run import main as run
-        run(arguments)
-    elif command == "source-refine":
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
-        from experiments.unsupervised_graph.refine_run import main as run
-        run(arguments)
-    elif command == "graph-anomaly":
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
-        from experiments.unsupervised_graph.run import main as run
-        run(arguments)
-    elif command in ("probabilistic", "probabilistic-test"):
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
-        if command == "probabilistic-test":
-            from experiments.probabilistic_detection.retest import main as run
-        else:
-            from experiments.probabilistic_detection.run import main as run
-        run(arguments)
-    elif command == "transport-pack":
-        from experiments.native_support.transport_pack import main as run
-        run(arguments)
-    elif command in ("support", "dynamics", "transport", "transport-state", "transport-functions", "transport-observable", "transport-readout", "transport-dual", "transport-contrast", "transport-carriers", "transport-unified", "transport-benchmark", "transport-refine", "transport-mediation"):
-        from pathlib import Path
-        sys.path.insert(0, str(Path(__file__).parent / "teaching/state_audit/src"))
-        if command == "transport-refine":
-            from experiments.native_support.ragtruth_refine.run import main as run
-        elif command == "transport-mediation":
-            from experiments.native_support.source_mediation.run import main as run
-        elif command == "transport-benchmark":
-            from experiments.native_support.ragtruth_benchmark.run import main as run
-        elif command == "transport-unified":
-            from experiments.native_support.unified.run import main as run
-        elif command == "transport-carriers":
-            from experiments.native_support.message_carriers.run import main as run
-        elif command == "transport-contrast":
-            from experiments.native_support.evidence_contrast.run import main as run
-        elif command == "transport-dual":
-            from experiments.native_support.dual_state.run import main as run
-        elif command == "transport-readout":
-            from experiments.native_support.readout.run import main as run
-        elif command == "transport-observable":
-            from experiments.native_support.observable_run import main as run
-        elif command == "transport-functions":
-            from experiments.native_support.functional_run import main as run
-        elif command == "transport-state":
-            from experiments.native_support.choice_state_run import main as run
-        elif command == "transport":
-            from experiments.native_support.transport import main as run
-        elif command == "dynamics":
-            from experiments.native_support.dynamics import main as run
-        else:
-            from experiments.native_support.run import main as run
-        run(arguments)
-    elif command == "flow":
-        from experiments.path_conflict.paired import cli
-        cli(arguments)
-    elif command == "flow-edges":
-        from experiments.path_conflict.transport import cli
-        cli(arguments)
-    elif command == "population":
-        from experiments.ragtruth_flow.run import main as run
-        run(arguments)
-    elif command == "supervised-s11":
-        from structural_detector.transport_run import main as run
-        run(arguments)
-    elif command in ("unsupervised", "supervised-s10", "regime"):
-        import runpy
-        modules = {"unsupervised": "reuse_detector.run",
-                   "supervised-s10": "structural_detector.experiment",
-                   "regime": "experiments.unsupervised_token_graph.latent_regime"}
-        sys.argv = [sys.argv[0], *arguments]
-        runpy.run_module(modules[command], run_name="__main__")
-    else:
-        raise SystemExit(f"Unknown command: {command}. Use --help; S11 requires supervised-s11.")
+    parser = argparse.ArgumentParser(description=__doc__, epilog=
+        'Use GROUP STAGE --help for inputs. Graph scoring consumes frozen measured '
+        'events; semantic proposal generation and real-model validation remain research work.')
+    groups = parser.add_subparsers(dest='group', required=True)
+    for group, stages in COMMANDS.items():
+        command = groups.add_parser(group, help=', '.join(stages))
+        command.add_argument('stage', choices=stages)
+        command.add_argument('arguments', nargs=argparse.REMAINDER)
+    args = parser.parse_args(argv)
+    arguments = args.arguments
+    if args.group == 'graph':
+        arguments = [args.stage, *arguments]
+    original = sys.argv
+    try:
+        sys.argv = [original[0], *arguments]
+        runpy.run_module('experiments.' + COMMANDS[args.group][args.stage], run_name='__main__')
+    finally:
+        sys.argv = original
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

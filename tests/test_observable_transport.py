@@ -2,8 +2,6 @@
 
 from contextlib import closing
 from itertools import product
-from unittest.mock import patch
-from zipfile import ZipFile
 
 import numpy as np
 import pytest
@@ -16,9 +14,6 @@ from state_audit.model.replay import attention_backend
 from state_audit.observable_transport import (
     fisher_seeds, iter_observable_transport, message_groups, output_probes,
 )
-from state_audit.storage import read_arrays, read_json, write_json
-from experiments.native_support.observable_run import join_reference, main
-from experiments.native_support.observable_state import matrix_distance, state_features
 
 
 @pytest.fixture
@@ -82,78 +77,3 @@ def test_independent_queries_are_prefix_invariant_and_restore_hooks(model):
     with closing(iter_observable_transport(model, ids, 4, [0, 1], groups, 2, rank=2)) as stream:
         next(stream)
     assert not model.layers[0].post_attention_layernorm._forward_pre_hooks
-
-
-def test_gram_metric_matches_dense_and_retains_head_identity():
-    torch.manual_seed(2)
-    left, right = torch.randn(2, 12, 4), torch.randn(2, 12, 4)
-    expected = ((left @ left.transpose(-1, -2) - right @ right.transpose(-1, -2)) ** 2).sum((-1, -2)).mean() / 2
-    torch.testing.assert_close(matrix_distance(left, right), expected)
-    rotation, _ = torch.linalg.qr(torch.randn(4, 4))
-    assert matrix_distance(left, left @ rotation) < 1e-4
-    assert matrix_distance(left, left.flip(-2)) > 1
-
-
-def test_joint_channels_keep_cancellation_instead_of_opposition_labels():
-    direct = np.ones((2, 2, 6, 4), dtype=np.float32)
-    row = dict(response_residual=direct, response_ffn=-direct,
-               response_total=np.zeros_like(direct), read_mass=np.ones((2, 2, 6), dtype=np.float32) / 6)
-    features = state_features(row, 2)
-    gram = features["matrix"] @ features["matrix"].transpose(0, 2, 1)
-    assert np.any(gram < 0)
-    assert features["observable_route"] == 0
-    assert np.isfinite(features["matrix"]).all()
-
-
-def test_source_exclusion_includes_other_answers_from_same_source():
-    def item(source, answer):
-        return dict(source=np.repeat(source, 2), response=np.repeat(answer, 2),
-                    target=np.arange(2), previous=np.array([-1, 0]))
-    rows = [item("a", "a1"), item("a", "a2"), item("b", "b1"), item("c", "c1")]
-    joined = join_reference(rows, "a")
-    assert joined["source"].tolist() == ["b", "b", "c", "c"]
-    assert joined["previous"].tolist() == [-1, 0, -1, 2]
-
-
-def test_one_command_capture_score_evaluate_and_pack(model, tmp_path):
-    source, destination = tmp_path / "input", tmp_path / "observable"
-    responses, labels = [], {}
-    for index in range(3):
-        identity = str(index)
-        ids = [1, 3 + index, 5, 7, 9 + index, 13, 15]
-        response = dict(id=identity, source_id="source" + identity, token_ids=ids,
-                        token_text=[str(token) for token in ids], prompt_length=4)
-        responses.append(response)
-        labels[identity] = dict(token_ids=ids[4:], labels=[0, 1, 1])
-        write_json(source / "value_transport" / "capture" / f"{index:04d}" / "sources.json",
-                   dict(blocks=[{}, {}], group_ids=[0, 0, 1, 1, 2, 2, 2]))
-    settings = dict(model="tiny", responses=responses)
-    write_json(source / "settings.json", settings)
-    write_json(source / "value_transport" / "capture_settings.json", {**settings, "source_scope": "available"})
-    write_json(source / "annotations.json", labels)
-    arguments = ["--input", str(source), "--output", str(destination), "--device", "cpu",
-                 "--dtype", "float32", "--rank", "2", "--chunk-tokens", "2", "--neighbors", "2"]
-    with patch("state_audit.model.load_model", return_value=(model, None)), \
-            patch("experiments.native_support.observable_run.validate_tokenizer"):
-        main(arguments)
-    summary = read_json(destination / "summary.json")
-    assert summary["scored_tokens"] == 9
-    assert summary["evaluation"]["status"] == "evaluated"
-    assert len(summary["evaluation"]["methods"]) == 7
-    scores = read_arrays(destination / "responses" / "0000" / "scores.npz")
-    np.testing.assert_array_equal(scores["risk"], scores["raw_route"])
-    neighbors = read_json(destination / "responses" / "0000" / "neighbors.json")
-    assert all("0" not in row["reference_response"] for row in neighbors)
-    with ZipFile(destination.with_name("observable_review_light.zip")) as archive:
-        assert "evaluation.json" in archive.namelist()
-        assert "responses/0000/scores.npz" in archive.namelist()
-        assert "responses/0000/neighbors.json" in archive.namelist()
-        assert "responses/0000/token_000000.npz" not in archive.namelist()
-        assert "responses/0000/state.npz" not in archive.namelist()
-    # Changing truth labels cannot change already captured/scored observations.
-    for annotation in labels.values():
-        annotation["labels"] = [1, 0, 0]
-    write_json(source / "annotations.json", labels)
-    main([*arguments, "--stage", "score", "--resume"])
-    repeated = read_arrays(destination / "responses" / "0000" / "scores.npz")
-    np.testing.assert_array_equal(scores["transport_conditional"], repeated["transport_conditional"])

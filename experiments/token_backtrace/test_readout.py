@@ -105,17 +105,132 @@ def test_mass_context_retains_weak_edge_magnitude():
                               1e-8 * signed_context(weights, attributes, preserve_mass=True))
 
 
-def test_crossfit_calibration_excludes_held_source_features():
-    from .readout import crossfit_graph
+def test_lineage_solves_triangular_equation_without_changing_root_signs_in_place():
+    from .readout import attribution_lineage
 
-    rng = np.random.default_rng(2)
-    records = [dict(key=str(i), source_id=str(i), valid=np.ones(6, bool),
-        attributes=rng.normal(size=(6, 38)), designs={'node_ridge': rng.normal(size=(6, 3))})
-        for i in range(4)]
-    _, before = crossfit_graph(records, 'node_ridge')
-    records[0]['attributes'] *= 100
-    records[0]['designs']['node_ridge'] += 50
-    _, after = crossfit_graph(records, 'node_ridge')
-    np.testing.assert_array_equal(before['0']['values'], after['0']['values'])
-    assert '0' not in after['0']['fit_sources']
-    assert '0' not in after['0']['calibration_sources']
+    # Two prompt roots, four targets and three previous-answer root columns.
+    roots = np.array([[-1., 0., 50., 50., 50.], [0., 1., -1., 50., 50.],
+                      [0., 0., 0., -2., 50.], [0., 0., 0., 0., 0.]])
+    original = roots.copy()
+    result = attribution_lineage(roots, 2)
+    np.testing.assert_array_equal(roots, original)
+    np.testing.assert_array_equal(result['L'], np.tril(result['L'], -1))
+    np.testing.assert_allclose(result['C'], result['B'] + result['L'] @ result['C'])
+    np.testing.assert_allclose(result['C'][:3], [[1., 0.], [.5, .5], [.5, .5]])
+    assert not result['resolved'][3]
+    np.testing.assert_array_equal(result['C'][3], [0., 0.])
+
+
+def native_effects(count=4, width=2):
+    causal = np.triu(np.ones((count, count), bool), 1)
+    valid = np.broadcast_to(causal[:, None, :], (count, width, count)).copy()
+    eta = np.broadcast_to(np.where(valid, 0., np.nan), (3, 3, count, width, count)).copy()
+    selection = np.tile(np.array([(0, head) for head in range(width)]), (count, 1, 1))
+    return eta, selection, np.ones(count, bool), valid
+
+
+def test_pair_statistic_matches_physical_heads_after_selection_order_changes():
+    from .readout import selected_statistics
+
+    eta, heads, aligned, valid = native_effects()
+    heads[1] = heads[1, ::-1]
+    eta[0, 0, 0, :, 3] = [8., 2.]
+    eta[0, 0, 1, :, 3] = [7., 4.]
+    result = selected_statistics(eta, heads, aligned, valid)
+    assert result['pair'][0, 1] == 4.
+    assert result['pair_target'][0, 1] == 3
+    np.testing.assert_array_equal(result['pair_head'][0, 1], [0, 0])
+    np.testing.assert_array_equal(result['node'][0], [8., 7., 0., 0.])
+    assert result['edge'][0, 1, 3] == 7.
+
+
+def test_no_shared_physical_head_has_zero_pair_statistic_not_fake_slot_matching():
+    from .readout import selected_statistics
+
+    eta, heads, aligned, valid = native_effects()
+    heads[1, :, 0] = 1
+    eta[0, 0, :2, :, 3] = 10.
+    result = selected_statistics(eta, heads, aligned, valid)
+    assert result['pair'][0, 1] == 0.
+    assert not result['pair_eligible'][1]
+    assert result['pair_target'][0, 1] == -1
+
+
+def test_equivalent_and_unrelated_controls_use_their_own_directions():
+    from .readout import selected_statistics
+
+    eta, heads, aligned, valid = native_effects()
+    eta[0, :, 0, 0, 1] = [1., 10., 0.]
+    eta[1, :, 0, 0, 1] = [2., 5., 0.]
+    eta[2, :, 0, 0, 1] = [1., 4., 6.]
+    result = selected_statistics(eta, heads, aligned, valid)
+    np.testing.assert_array_equal(result['edge'][:, 0, 1], [0., 3., 2.])
+
+
+def test_missing_expected_effect_propagates_nan_instead_of_biased_maximum():
+    from .readout import selected_statistics
+
+    eta, heads, aligned, valid = native_effects()
+    eta[0, 0, 0, 0, 3] = 10.
+    eta[0, 1, 0, 1, 3] = np.nan  # One uncompleted donor comparison under R.
+    result = selected_statistics(eta, heads, aligned, valid)
+    assert np.isnan(result['edge'][0, 0, 3])
+    assert np.isnan(result['node'][0, 0])
+    assert np.isnan(result['pair'][0, 1])
+    assert not result['node_complete'][0, 0]
+    assert not result['complete']
+    assert result['node_complete'][1, 0]
+    valid[0, 0, 2] = False
+    result = selected_statistics(eta, heads, aligned, valid)
+    assert np.isnan(result['edge'][:, 0, 2]).all()
+
+
+def test_alignment_gaps_and_noncausal_entries_are_separately_marked():
+    from .readout import selected_statistics
+
+    eta, heads, aligned, valid = native_effects()
+    eta[:, :, 3, :, 0] = 999.  # Forbidden backward-in-time state cannot enter a max.
+    eta[0, 0, 0, :, 3] = 2.
+    aligned[1] = False
+    result = selected_statistics(eta, heads, aligned, valid)
+    assert np.isnan(result['edge'][:, 0, 1]).all()
+    assert not result['edge_eligible'][0, 1]
+    assert not result['structural_zero'][0, 1]
+    assert result['structural_zero'][3, 0]
+    np.testing.assert_array_equal(result['edge'][:, 3, 0], [0., 0., 0.])
+    np.testing.assert_array_equal(result['node'][:, -1], [0., 0., 0.])
+    assert result['node'][0, 0] == 2.
+
+
+def test_pair_winner_ties_choose_earliest_target_then_lexical_physical_head():
+    from .readout import selected_statistics
+
+    eta, heads, aligned, valid = native_effects(count=5)
+    heads[0] = heads[0, ::-1]
+    eta[0, 0, :2, :, 2:] = 4.
+    result = selected_statistics(eta, heads, aligned, valid)
+    assert result['pair_target'][0, 1] == 2
+    np.testing.assert_array_equal(result['pair_head'][0, 1], [0, 0])
+
+
+def test_direction_order_is_an_explicit_contract():
+    import pytest
+
+    from .readout import selected_statistics
+
+    with pytest.raises(ValueError, match='ordered R, E, U'):
+        selected_statistics(*native_effects(), donor_names=('E', 'R', 'U'))
+
+
+def test_unknown_native_mask_and_fractional_head_identity_are_rejected():
+    import pytest
+
+    from .readout import selected_statistics
+
+    eta, heads, aligned, valid = native_effects()
+    invalid = aligned.astype(int)
+    invalid[1] = -1
+    with pytest.raises(ValueError, match='exact booleans'):
+        selected_statistics(eta, heads, invalid, valid)
+    with pytest.raises(ValueError, match='nonnegative integers'):
+        selected_statistics(eta, heads.astype(float) + .5, aligned, valid)

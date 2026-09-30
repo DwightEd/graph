@@ -2,8 +2,6 @@
 import numpy as np
 
 from .state import FIELDS, maintain_layer, signed_readout
-from .boundary import punctuation_boundaries, causal_punctuation_weights
-from .payload import adjacent_change
 
 
 def reading(mode, count=8):
@@ -75,24 +73,3 @@ def test_signs_are_not_cancelled_and_common_head_permutation_is_equivariant():
     permuted, swapped, _ = maintain_layer(attention[::-1], 2, list(range(8)))
     np.testing.assert_allclose(actual[::-1], permuted)
     np.testing.assert_allclose(weights, swapped)
-
-
-def test_punctuation_hint_uses_past_only_and_preserves_stable_soft_regime():
-    text = ['A', '.', ' ', 'Next', '\n', 'value', '.']
-    boundary = punctuation_boundaries(text)
-    np.testing.assert_array_equal(boundary, [False, False, True, False, False, True, False])
-    np.testing.assert_array_equal(boundary[:4], punctuation_boundaries(text[:4]))
-    cue = np.zeros(8, dtype=bool)
-    cue[5] = True
-    hard, _, _ = maintain_layer(reading('lag'), 2, list(range(8)), cue, 'hard')
-    soft, _, _ = maintain_layer(reading('lag'), 2, list(range(8)), cue, 'soft')
-    np.testing.assert_allclose(hard[:, 5, FIELDS.index('age')], 1)
-    assert np.all(soft[:, 5, FIELDS.index('age')] > 1)
-    weights = causal_punctuation_weights(cue)
-    assert np.count_nonzero(weights[5]) == 1
-
-
-def test_payload_magnitude_change_is_visible_and_zero_pair_is_unknown():
-    measured = adjacent_change(np.array([[1., 0.], [2., 0.], [0., 0.], [0., 0.]]))
-    np.testing.assert_allclose(measured[1:3], [1 / 3, 1])
-    assert np.isnan(measured[0]) and np.isnan(measured[3])

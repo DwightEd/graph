@@ -1,208 +1,53 @@
-## 2026-09-29：片段维持状态与标点对照两轮完成
+# Graph
 
-新增 [span_maintenance](experiments/span_maintenance/README.md)：18答4292 token、1024头逐token读取记忆与软成员权重，包含固定锚点/平移续写/地址刷新/距离控制，保留标点硬重置与软确认。内部连续性识别标点代理边界平均AUC .802，但新检测候选未胜旧base或简单标点分块；自然18错仍全漏、GSM首错0/3，不替换默认。8测试与真实前缀检查通过，无新模型前向。[完整结果](experiments/span_maintenance/RESULTS.md)。
+面向完整回答的逐 token 无监督幻觉检测研究。代码保留完整 prompt、来源与生成历史，测量原生内部消息对后续生成的作用，再研究来源条件下的图联合检测。
 
-## 2026-09-29：强基线回接与消息约束修正两轮完成
+**当前状态：架构重构和核心软件验证。** 原生消息/VJP、精确图割、逐 token min-marginal 已实现；自动语义提案、独立校准与真实 8B 检测验证仍待集成。不能把 CPU 图割通过或小模型导数通过当成新方法有效。
 
-新增 `experiments/anchored_flow`，补齐自然配对与GSM来源/全层路由观测，18个案例4292token完整消息边读出。官方8答旧基线逐元素一致；第二轮同阈值19TP/58FP→23TP/57FP，但AUROC .808717→.796963，GSM首错仍0/3，同权重分布打乱控制近似相同。局部有净收益，整体优化未通过；可达性检查表明受限修正无法覆盖自然18个错误及3个首错，不替换默认。见[方法与一键运行](experiments/anchored_flow/README.md)、[完整结果和具体失败](experiments/anchored_flow/RESULTS.md)。
+架构、公式推导、接口和待完成工作见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。研究主记录在共享的 `/share/home/tm902089733300000/a903202310/lys/codex/research/README.md`；历史结果保留在原来的 outputs/results/runs 与共享 tracker 中。
 
-## 2026-09-29：约束传播、零和地址交换与同值角色诊断
-
-新增 [constraint_uptake](experiments/constraint_uptake/README.md)：RAGTruth正负局部配对及六个GSM回答完成三轮读出、密集复验、真实消息干预和完整hidden路径。发现弱头比例/BOS混杂及正确中间值被错误复用的路径，统一检测仍未通过，不替换默认。[完整结果](experiments/constraint_uptake/RESULTS_20260929.md)。
-
-## 2026-09-29：GSM8K全层步骤状态与LDA错误定位
-
-新增 `experiments/gsm8k_states`，400答真实8B全32层状态重放、两轮首错步骤实验已完成。margin/JS/谱标量未胜attention；固定读取/选择组合AUC .6920但首错仍9/127，不能宣称解决。历史LDA高AUROC仍有边界漏检；全部具体错误及方法见 [结果报告](experiments/gsm8k_states/RESULTS_20260929.md)，[运行说明](experiments/gsm8k_states/README.md)。监督仅作独立诊断，原默认不变。
-
-# 原生来源传递检测与机制审计
-
-最新：[GSM8K步骤边界与attention重复实测](experiments/gsm8k_recurrence/RESULTS_20260929.md)。找到400份单层32头缓存并完成CPU试验；步骤内重复AUROC .6457低于无图.6736，未改善首错检测。
-
-最新：[实际消息边、无硬起点聚合与三轮小样本结果](experiments/receiver_graph/RESULTS_20260929.md)。48答完整头缓存审计＋288有限干预测量点已完成；新候选未胜旧双起点，养老金/时长仍漏，不替换默认、不重跑全量。
-
-最新：[完整三任务与重复模式实验结果](experiments/context_response/FULL_RESULTS_20260929.md)。9轮局部迭代、5套全量评价已完成（新8B采集为2700答/424408token一次）；重复模式可补部分span，但未统一提高AUROC，不替换原固定无监督基线。当前无活动实验。
-
-最新：[来源关系、消息几何与统一校准五轮实验](experiments/source_relation/README.md)，[具体错误状态与完整结果](experiments/source_relation/RESULTS_20260928.md)。新增36个prompt完整Q/K；来源JS融合40/134错、50/1353误报，消息MMD36/38，统一融合67/85。头饰反向关系局部AUC .9182但统一校准未保留报警；尚未达近乎全检，不替换默认。
-
-最新：[完整头JS/Jacobian四轮读出](experiments/head_state_readout/README.md)及[逐token误报、漏检实测](experiments/head_state_readout/RESULTS_20260928.md)。v3融合95/134错、147/1353误报，部分改善但头饰/养老金等仍漏；保留默认。
-
-最新：[完整逐头路由补充](experiments/route_complement/README.md)与[48答实测](experiments/route_complement/RESULTS_20260928.md)。保留全部头/key/V与Gram；net替换降低部分误报但AUROC下降，不替换原固定来源＋路由。逐头相反变化进入机制研究，未用于标签选头。
-
-最新无监督实验：[JS、残差/FFN 与完整输出响应](experiments/message_js/README.md)，
-见[三轮实际结果](experiments/message_js/RESULTS_20260928.md)。重算 84 答 JS、48 答原生算子，
-另对 16 条自然采样做历史消息干预；保留层/头/key、完整 4096 维输出状态响应。
-无标签条件机制组合在 8 答检出 40/134 错词、误报 320/1353，未达标，不替换默认检测。
-`python -m experiments.message_js.operator_run --output outputs/message_operator_new`
-复用已完成的 v1 测量，运行新算子、无标签校准、评价与数值复算；不是全测试入口。
-
-上一轮监督实验：[原生 Fisher 响应拓扑](experiments/decision_risk_flow/README.md)。
-完整保留 prompt，用原生消息门控导数构建 Fisher 核和功能相似图，
-配合来源交叉拟合的轻量监督读出；同来源排除的 8 个已暴露回答用于回归。
-`python -m experiments.decision_risk_flow.run --phase all --output outputs/transport_topology_new`
-从新目录运行准备、采集、训练、评价和数值复核；这不是旧模型的 2,700 答复跑。
-
-当前全量检测主线：[来源优先 token 检测](iclr/RAGTRUTH_SOURCE_FIRST.md)。
-`bash experiments/native_support/run_ragtruth_all.sh` 默认运行全部 QA/Summary/Data2txt、
-全部生成器、官方 train/test；直接采集四条件似然与消息范数路由，无反传或逐 token 删边链。
-固定主候选保留 `source_local_unit_mean`，另报告来源主导的路由收缩系列。
-用户已完成17,790答全量采集；train开发选择的test AUROC分别为
-Data2txt .784388、QA .878533、Summary .759659，三个任务均选中来源单元均值，内部AUROC=.5。
-可加 `--select-on-train`，按官方 train 来源留出开发集的 AUROC 选读出及权重；
-这是明确标记的标签选参结果，与固定无标签基线分开，不在 test 上选参。
-
-本轮优化：[来源排序与 token 内部细化](iclr/RAGTRUTH_TOKEN_REFINEMENT.md)。
-`bash experiments/native_support/run_ragtruth_refine.sh` 直接CPU复用上述完整缓存，
-比较local/full/pair锚点与token来源、窗口来源/路由；严格同分细化保留跨锚点排序，
-小幅残差候选允许跨单元修正。开发集选择后评价三个任务全部test，自动输出指标和便携测量包。
-支持逐回答断点；不覆盖source_first_v1，不重复大模型采集。新全量成绩尚待实际运行。
-
-新增方法试验：[来源与历史状态中介](iclr/SOURCE_HISTORY_MEDIATION.md)。
-`transport-mediation --mode cache` 已在上传v1四答检验Shapley来源分配和多头非加性交互，
-没有超过local来源均值；完整失败数字保留。`bash experiments/native_support/run_source_mediation.sh`
-采集保持位置的prompt×历史K/V四世界，按矩阵块重放目标，检验直接条件作用和历史状态作用。
-新中介仅完成软件验证，尚无真实8B自然检测成绩；它不替换全量强基线。
-
-逐 token 联合读出：[token 来源、软单元约束与 TV 连续性](iclr/UNIFIED_TOKEN_READOUT.md)。
-`bash experiments/native_support/run_unified_token.sh` 复用已完成的 carrier v2 缓存，
-保留逐 token 来源观测，允许单元均值移动与内部跳变，用稀疏矩阵联合求解，无新增大模型采集。
-上传 v1 四答实测 .8716/.3552（AUROC/AP），未胜过旧联合 .8775/.3563 或最强 local 来源均值；
-去图 .8799/.3573。用户随后返回 v2 输入：完整 .8667/.3413，去图 .8817/.3671；
-图正则未带来收益，保留失败结果，新全量主线不依赖该入口。
-旧硬约束入口 `run_unified.sh` 保留，用户已返回其 v2 输入成绩 .8792/.3420；
-协议见 [UNIFIED_ROUTE_SOURCE.md](iclr/UNIFIED_ROUTE_SOURCE.md)。
-
-最新历史消息候选：[逐 token 的条件选择回溯](iclr/TOKEN_CONDITIONAL_CARRIERS.md)。
-`bash experiments/native_support/run_carriers_token.sh` 为每个原 token 固定竞争词，
-按双来源选择梯度筛边，再做精确 query 的有限删除；保存7190维/token的固定层头表征（32×32模型）。
-`bash experiments/native_support/run_carriers_position.sh` 仅CPU比较现有缓存的普通均值与 exp 位置权重。
-上传四答的 exp(β=1) 结果有取舍，未替换主评分；用户已返回 token v2 单独检测成绩，
-selected source 逐 token .6445/.1499，单元均值 .8446/.4241，详见逐 token 协议。
-
-当前候选：[来源分解与最终选择](iclr/VALUE_PATH_TRANSPORT.md)。依据 DecompX、ALTI-Logit、
-AttnLRP 及 Information Flow 的具体算法思想，将 prompt 来源沿原生值路径传播到最终候选差，
-区分读取地址与输入根来源，并保留支持/抑制。FFN 使用明确的点态分解规则，不把负写入直接判错。
-这是指定归因规则下的检测候选，不是完整因果解释；当前没有新自然数据 AUROC。
-
-在已有四答输入目录中采集并评价：
+## 安装与验证
 
 ```bash
-python -u main.py transport --stage run --output outputs/native_support_ragtruth4 --resume
+python -m pip install -r requirements.txt
+python -m pytest -q
+python main.py --help
 ```
 
-结果在 `value_transport/`：`summary.json`、`evaluation.json`、`source_choices.csv`、
-`tokens.csv`、`high_risk_normals.csv`。原始路由、注意力、熵及同窗口均值独立比较。
-旧 detached-KV 缓存不能恢复输入根作用，首次需要新采集；之后 `--stage score` 只重算读出。
-使用 SDPA 和 FFN checkpoint，每答一次前向、每个目标/候选独立反向；8B 显存和速度尚未实测。
+项目内直接复用 `teaching/state_audit` 原生模型适配器；没有另建算法项目。新核心在原有 `experiments/token_backtrace` 中：
 
-原始逐 token R/A/H 基线仍用 `main.py support`。准备少量真实 RAGTruth 输入与自动标注时：
-
-```bash
-python -u main.py support --stage prepare \
-  --dataset /share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset \
-  --limit 4 --output outputs/native_support_new4
-```
-
-输入准备不运行模型，标签只在评分后评价。已有输入无需重新准备。
-全部入口见 [运行说明](experiments/native_support/README.md)，实际软件核验见
-[验证记录](experiments/native_support/VALIDATION.md)。
-
-旧标量滤波/切换/融合和共享预算图评分已退役，源码见 Git `9d4ba17`；历史结果未删除。
-`transport --stage audit --output ...` 仍只读审核旧 `source_transport/` 结果。
-用户报告的旧 32 答预算图 AUROC/AP 为 0.718068/0.191248，普通离线均值为
-0.731726/0.186802；这些不是当前候选的成绩。
-
-教学与独立复用入口：[State Audit](teaching/state_audit/README.md)。
-短错误检验：[短 span 审计](experiments/short_span_audit/README.md)，分别提供已有冻结分数的 CPU 评价和复用 teaching 的逐目标贡献采集。
-可单独安装，包含生成回答、准确 token 回放、逐层状态保存、离线审计和四世界消息干预；
-支持 Llama、Mistral、Qwen2，并提供无需下载模型的示例。
-
-两个项目的既有发现见[证据台账](docs/DETECTION_CONVERGENCE_20260919.md)。
-既有审计方案见[正负配对机制审计](docs/PAIRED_MECHANISM_20260920.md)：明确适用性、
-多头条件作用、下游补偿和时间持续性，再在同题重采样中逐项检验。
-文献包括前轮 [18 项核查](docs/LITERATURE_TRANSPORT_20260919.md) 及本轮 GoS、Saliency、RAUQ 方法复核。
-内部逐头模式可被监督读出；尚无已验证的通用无监督绑定检测器。
-
-历史配对机制审计入口（包含干预，不属于上面的检测流程）：
-
-```bash
-python -u main.py flow
-```
-
-默认写入 `outputs/paired_head_transport_v1`，重复命令复用逐 world 缓存。
-读取 reanchor 既有样本，以两侧 onset 的完整候选目标选出共同物理 head，
-在子句前、起点、后半段、子句后测量单删、四世界条件作用、下游恢复和起点影响传递。
-self 与更早历史分开；原值写回使用各候选分支自己的基线；另存严格只读前缀的置信度对照。
-目前只核验了两个局部事实对，属于标签辅助机制审计，尚无新协议 8B 结果或检测成绩。
-上传 v3 结果的实际重算见 [60 次单删与 24 组双删](results/paired_audit_20260920/README.md)。
-
-`--stage inventory` 仅核对配对，`--stage screen` 只读原始 NPZ，`--stage report` 只重建报告。
-原目标消息边实验改用 `python main.py flow-edges`，新运行写入 `outputs/target_transport_v4`；
-只查看旧 v3 结果用 `flow-edges --stage report --output <原v3目录>`。
-原 v2 局部 lens 实验用 `python -m experiments.path_conflict.flow` 显式运行。
-`python main.py`显示入口；历史无标签基线需显式使用`unsupervised`。
-现有无标签HMM保留为竞争对照：`python main.py regime --phase all --resume`。
-本轮未取得其自然成绩，不把较少占用的状态直接称为已发现的幻觉状态。
-
-旧grounding当前步回归存在互补质量恒等式，已改为过去路由预测基线。
-`python -u main.py population --phase grounding --resume`写新目录，
-不会覆盖旧成绩，也不再随population all自动运行。
-
-## 历史基线：entropy seeds → local token reuse
-
-显式 `main.py unsupervised`：无标签参考熵 → 疑似入口 → 实际局部 attention 多跳复用。
-不训练入口/延续分类器，不加载 S10/S11 监督权重，不用正常样本标签校准。
-标签只在全部预测冻结之后用于评价。**尚无新自然 RAGTruth 检测成绩。**
-
-## 一键运行
-
-在 graph 根目录及 research 环境：
-
-```bash
-python -m pytest tests/test_unsupervised_reuse.py -q
-python main.py unsupervised \
-  --population ../reanchor/outputs/ragtruth_population_20260912 \
-  --output outputs/unsupervised_local_reuse_v1 \
-  --tasks all --generators llama-2-7b-chat \
-  --device cuda:0 --query-chunk 16 --window 16 --resume
-```
-
-首轮每答一次 teacher-forced backbone 前向，按层分块重建 response-query attention，
-保留全部物理 layer/head 的局部端点。模型与数据路径从 population/settings.json 读取。
-之后复用逐样本 NPZ。完整上下文不裁剪；局部窗口仅限制被保存的历史边，不重归一化。
-这是 observer 回放与 attention 依赖代理，不是原生成器的 WV/WO 因果消息追踪。
-
-阶段：`--phase capture` 仅采集；`--phase score` 无标签评分；`--phase evaluate` 补评；
-默认 all。无监督允许最后用金标检验效果，不允许金标参与种子、传播、选头或阈值。
-旧 S11 的 `outputs/s11_local_attention_all` 与本版缓存结构不同，保留但不混用。
-
-| 文件 | 用途 |
+| 文件 | 职责 |
 |---|---|
-| reuse_detector/core.py | 无标签参考、种子、端点继承及同质量/距离对照 |
-| reuse_detector/capture.py | SDPA 正常前向 + 只读 Q/K/RoPE 重放及数值核验 |
-| reuse_detector/run.py | 全任务 roster、缓存续跑、混合校准来源异常预算、冻结 |
-| reuse_detector/evaluation.py | 首错、span 起点、延续、停止评价，完整来源固定权重 |
+| `trace.py` / `readout.py` | 全回答根归因、三角谱系、原 token 对比及有物理 head 身份的作用统计 |
+| `messages.py` | pre-WO 整头消息、原生方向 VJP、对齐与有限干预 |
+| `global_graph.py` | 来源/表达范围门控、精确图割、逐 token 分数、缺测台账 |
+| `pipeline.py` | 明确的缓存输入/输出；不读取自然真假标注 |
+| `span_metrics.py` | 冻结评分后按字符并集评价 RAGTruth span |
 
-[完整方法与边界](docs/UNSUPERVISED_LOCAL_REUSE.md)。评价重点比较 reuse 与 seed_only、
-single_hop、mass_matched_uniform、lag_group_permuted；特别看 continuation_vs_normal、
-strict_post_first 和错误结束后正常 token 的误报。高 attention 可能是纠正而非沿用，
-该方法不具备语义否定/绑定判定。高置信首错没有熵种子时也会漏检。
+## 运行入口
 
-## 旧监督基线保留，但必须显式选择
+所有阶段显式启动；先用 `GROUP STAGE --help` 查看参数。
 
-- `python main.py supervised-s11 ...`：入口+延续的监督读出，原参数不变。
-- `python main.py supervised-s10 ...` 或 `python -m structural_detector.experiment ...`：S10。
-- `python -m structural_detector.audit ...`：对已经冻结的 S10 分数补评，不重训。
+```bash
+# 原有有效无监督基线：从标量缓存重算，核对所有任务/分区的分数及阈值
+python main.py baseline fixed --report outputs/my_verification/fixed.json
 
-`main.py transport` 现为上面的值路径来源分解；旧监督 S11 必须使用 `supervised-s11`。
-[S10 结果](docs/S10_RESULTS_20260914.md) 的 .7492 是全错误、.7791 是**所有 span 起点**，
-不是每答第一次错误；这两项都不是新版无监督成绩。
+# 已有逐 token 对比基线，拟合和评价分开
+python main.py token baseline --stage fit --output outputs/my_token_run
+python main.py token baseline --stage pilot --output outputs/my_token_run
+python main.py token evaluate --output outputs/my_token_run
 
-## 信息论相关的另一个原型
+# 新图核心：输入已经冻结并校准的 measured_token_graph_v1 事件
+python main.py graph score --input measured_events.json --output scored_events.json
 
-`binding_detector/projection.py` 实现显式关系下的 `-log Q(合法绑定)`，需要可靠来源匹配
-和关系数据包；它不参与本默认流程，不能从五列统计中自动恢复事实图。
-旧复用基线使用熵和经验尾部，不估计真假两类密度、条件互信息或贝叶斯幻觉后验。
-率失真定理解释高置信碰撞的可能性，不为旧attention传播提供有效性保证。
+# 原完整回答根梯度缓存的解释谱系
+python main.py graph lineage --trace trace.npz --prompt-length 100 --output lineage.json
+```
 
-历史结果与归档均不删除。原 S11 说明见 docs/S11_LOCAL_PROPAGATION.md；
-其中旧 transport 命令需改成 supervised-s11 才会运行。
+另外保留 `evidence prepare/capture/score/evaluate`、`baseline source-capture/js/mmd/score/evaluate` 和 `history capture/verify/evaluate`。`evidence` 是既有自动来源实验；`history` 含已暴露样本的机制诊断。它们不冒充新方案的全自动语义提案器。旧监督、图重构、固定局部邻域训练入口已删除；对应的原始结果不删除。
+
+旧 fixed 基线保留历史 unit/window 聚合，仅作强对照。新核心没有把固定窗口风险平均作为逐 token 检测，也没有把 attention 重复、高秩或 hidden 重构误差当作真假。
+
+## 研究约束
+
+评分与校准不接收自然真假标签；RAGTruth 标签按字符 span 评价，重叠 token offset 按字符并集计数。GSM 只评价有定义的首错/前步标签，不制造首错之后的真值。预测端口 `P+t−1` 与生成后载体 `P+t` 分开。所有原 token 保留；无事件、未对齐、参考池不足和未完成测量均显式记录。归因影响不等于事实支持，经验尾秩不等于幻觉概率。
