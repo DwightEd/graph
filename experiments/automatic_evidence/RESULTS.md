@@ -154,4 +154,4 @@ v1/v2关系覆盖128/1487token（8.61%），仅13/134标注成员（9.70%），�
 
 未获得总体有效检测器。规则覆盖不足、自动来源/角色匹配错误、等价控制本身影响大、接近概率1时的赔率放大、幻觉span持续范围和无来源的烹饪条件均未解决。完整逐头消息已被测量和使用，但这轮没有检测增益。不能继续仅调JS阈值/状态平滑或在这8答上堆更多规则。保留默认基线，不跑新的昂贵全test、不挑一个局部赢家覆盖失败。
 
-原件在graph/outputs/automatic_evidence_20260930_v2/relation_v1和relation_v2。每轮tokens.csv/TOKEN_EVIDENCE.html可逐词看；第三轮为all_tokens.csv/all_TOKEN_EVIDENCE.html。方案与执行记录都在原共享automatic_evidence_20260930目录。独立审计另见RELATION_AUDIT.md/json（完成后记录最终裁决）。
+原件在graph/outputs/automatic_evidence_20260930_v2/relation_v1和relation_v2。每轮tokens.csv/TOKEN_EVIDENCE.html可逐词看；第三轮为all_tokens.csv/all_TOKEN_EVIDENCE.html。方案与执行记录都在原共享automatic_evidence_20260930目录。独立审计已完成，裁决WARN（同系列模型复核，provisional）：官方标注/偏移、三轮指标、执行记录和缓存复用均独立核对一致；总体检测改善不受支持。重复集合随机对照只用于展示和局部诊断，未进入repeat_set_odds分数，不能称该检测读出已经扣除了随机控制；共同预算包含零分弃权补足；报对token不等于来源语义归因正确。详见共享记录automatic_evidence_20260930/RELATION_AUDIT.md。
