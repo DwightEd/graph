@@ -102,8 +102,9 @@ are total root sensitivities; they are used for one-hop feature context,
 never recursively multiplied as if they were direct neural edges. Feature
 aggregation does not broadcast neighbouring risk scores.
 
-Controls use no graph (conditional ridge and Isolation Forest), expected
-endpoints within log2-lag/repeated-token-ID strata, and three randomized
+Controls omit endpoint identities: conditional ridge retains signed history
+mass covariates, and Isolation Forest uses node attributes only. Further
+controls use expected endpoints within log2-lag/repeated-token-ID strata and three randomized
 endpoint assignments (seeds 17/29/43). Nulls preserve receiver-stratum signed
 mass; randomization also preserves weight multisets, but not every sender's
 outgoing degree. They test endpoint identity beyond the retained lag/repetition
