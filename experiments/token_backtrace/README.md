@@ -1,5 +1,60 @@
 > 2026-09-30: Current implementation and status are in [the architecture document](../../docs/ARCHITECTURE.md). Reconstruction graph commands described below are retired; their cached results remain historical evidence. Current commands: `python main.py --help`.
 
+## Source-conditioned sequence controls
+
+`sequence.py` implements an unsupervised IOHMM with joint seven-channel
+Gaussian observations and ordered behavior/support states. Shared covariance
+is fixed from the fitting reference. State means solve a constrained
+Mahalanobis problem; transition rows learn separate boundary/persistence
+responses to lagged source and route changes. Exact forward-backward produces
+token and boundary marginals; Viterbi explains state segments. State support
+is an observational proxy, not a calibrated factual probability.
+
+`sequence_run.py` fits source-balanced references on official training sources
+with all 14 exposed control sources excluded. It selects checkpoints using
+unlabelled development likelihood, freezes scores and mixture-quantile alarm
+thresholds, then reads official annotations. Its comparisons include the
+historical full-reference fixed score, a newly isolated fixed reference,
+two-state HMM, homogeneous four-state HMM, no nuisance conditioning, and the
+selected model's IID emission readout. Historical fixed and new references
+have different exposure/sampling protocols and are reported separately.
+
+Run from the repository root in the research Python environment:
+
+```bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python main.py token sequence run-controls --output outputs/source_sequence_new
+```
+
+Individual `fit`, `score`, and `evaluate` stages use the same output directory;
+`fit` requires a fresh path. The default pilot uses 32 fitting and 16 development
+sources per task, three seeds for the main model and 12 iterations. The output
+includes every valid control token, all fitted models, source lists, optimizer
+history, frozen thresholds, per-case metrics and a complete token viewer.
+This is a development diagnostic on previously exposed examples, with no
+abstention or natural-label fitting, and does not change the default detector.
+
+The first pilot exposed a scientific distinction: ordering Gaussian means
+does not order their source likelihood ratios under a correlated covariance.
+`--anchored-emissions` restricts the means to
+`base + support * tau_source * Sigma * source_axis + behavior * tau_route * Sigma * route_axis`.
+Positive coefficients retain mean orders and force source emission log odds
+to increase along the source axis, with other emissions cancelling from that
+within-behavior contrast. This is a local evidence-direction guarantee with
+fixed neighboring messages, not a factual guarantee or monotonicity of the
+complete input-driven chain under a source intervention. Only source and route
+coordinates discriminate the anchored states; other channels contribute to
+the shared density/reference rather than independent truth evidence.
+
+`--unit-support` replaces the two raw source coordinates with existing
+full/local unit means. Those historical units include future information;
+they are observed preprocessing, not learned hallucination boundaries.
+The raw/unit anchored runs are explicitly posthoc development iterations:
+
+```bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python main.py token sequence run-controls --seeds 42 --anchored-emissions --output outputs/source_sequence_anchor_raw_new
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python main.py token sequence run-controls --seeds 42 --anchored-emissions --unit-support --output outputs/source_sequence_anchor_unit_new
+```
+
 ## 2026-10-06: typed-source interface pilots
 
 The existing modules now also expose sparse native `(layer, head, query, key,
