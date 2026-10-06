@@ -89,7 +89,8 @@ def score_test(previous, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stage', choices=('pilot', 'score-test', 'evaluate-test',
-                                           'typed-capture', 'typed-evaluate'), required=True)
+                                           'typed-capture', 'typed-evaluate',
+                                           'grounding-capture', 'grounding-evaluate', 'witness-capture'), required=True)
     parser.add_argument('--previous', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--model', default=MODEL)
@@ -98,8 +99,19 @@ def main():
     parser.add_argument('--max-new-tokens', type=int, default=1536)
     parser.add_argument('--case-limit', type=int)
     parser.add_argument('--constructed-only', action='store_true')
+    parser.add_argument('--keys', nargs='+')
+    parser.add_argument('--target-limit', type=int)
+    parser.add_argument('--grounding-version', choices=('direct', 'audit', 'pointer'), default='direct')
+    parser.add_argument('--reuse', type=Path)
+    parser.add_argument('--score-field', default='score', choices=('score', 'witness_score', 'strict_score', 'hybrid_score'))
     args = parser.parse_args()
-    if args.stage == 'typed-capture':
+    if args.stage == 'grounding-capture':
+        grounding_capture(args)
+    elif args.stage == 'grounding-evaluate':
+        grounding_evaluate(args.output, args.score_field)
+    elif args.stage == 'witness-capture':
+        witness_capture(args.previous, args.output)
+    elif args.stage == 'typed-capture':
         typed_capture(args)
     elif args.stage == 'typed-evaluate':
         typed_evaluate(args.output)
@@ -271,6 +283,277 @@ def typed_evaluate(output):
     write_json(output / 'token_relations.json', dict(constructed=cases, natural=natural))
     write_json(output / 'evaluation.json', summary)
     print(summary, flush=True)
+
+
+def grounding_batch(model, tokenizer, requests, system_prompt, assistant_prefix=''):
+    import torch
+    from .logic import grounding_probabilities
+
+    prompts = [tokenizer.apply_chat_template([
+        dict(role='system', content=system_prompt), dict(role='user', content=request)],
+        tokenize=False, add_generation_prompt=True) + assistant_prefix for request in requests]
+    encoded = tokenizer(prompts, padding=True, return_tensors='pt', add_special_tokens=False).to(model.device)
+    positions = (encoded.attention_mask.cumsum(-1) - 1).clamp_min(0)
+    with torch.no_grad():
+        hidden = model.model(**encoded, position_ids=positions, use_cache=False).last_hidden_state[:, -1]
+        logits = model.lm_head(hidden).float()
+        choice_ids = [tokenizer.encode(choice, add_special_tokens=False) for choice in ('A', 'B')]
+        assert all(len(ids) == 1 for ids in choice_ids)
+        score, choice_logp, mass = grounding_probabilities(logits, [ids[0] for ids in choice_ids])
+        top_logp, top_ids = logits.log_softmax(-1).topk(min(10, logits.shape[-1]), dim=-1)
+    return dict(score=score.cpu().numpy(), choice_logp=choice_logp.cpu().numpy(),
+                choice_logits=logits[:, [ids[0] for ids in choice_ids]].cpu().numpy(),
+                choice_mass=mass.cpu().numpy(), top_ids=top_ids.cpu().numpy(), top_logp=top_logp.cpu().numpy(),
+                input_tokens=encoded.attention_mask.sum(-1).cpu().numpy())
+
+
+def grounding_memo(model, tokenizer, source, answer, max_new_tokens):
+    from time import perf_counter
+    import torch
+    from .logic import GROUNDING_AUDIT_PROMPT
+
+    prompt = tokenizer.apply_chat_template([dict(role='system', content=GROUNDING_AUDIT_PROMPT),
+        dict(role='user', content=f'SOURCE:\n{source}\n\nRESPONSE:\n{answer}')],
+        tokenize=False, add_generation_prompt=True)
+    encoded = tokenizer(prompt, return_tensors='pt', add_special_tokens=False).to(model.device)
+    calls = dict(forward=0)
+
+    def count_forward(module, inputs):
+        calls['forward'] += 1
+
+    hook = model.register_forward_pre_hook(count_forward)
+    started = perf_counter()
+    try:
+        with torch.no_grad():
+            generated = model.generate(**encoded, do_sample=False, temperature=None, top_p=None,
+                max_new_tokens=max_new_tokens, pad_token_id=tokenizer.pad_token_id)
+    finally:
+        hook.remove()
+    tokens = generated[0, encoded.input_ids.shape[1]:]
+    complete = bool(torch.isin(tokens, torch.tensor(model.generation_config.eos_token_id,
+                                                  device=tokens.device)).any())
+    return dict(text=tokenizer.decode(tokens, skip_special_tokens=True), complete=complete,
+                generated_tokens=len(tokens), max_new_tokens=max_new_tokens, forward_calls=calls['forward'],
+                seconds=perf_counter()-started)
+
+
+def grounding_answer(model, tokenizer, row, output, batch_size, target_limit, version, max_new_tokens):
+    from time import perf_counter
+    import torch
+    from .logic import TOKEN_GROUNDING_PROMPT, TOKEN_GROUNDING_PROMPT_V2, grounding_request
+
+    source = source_text(tokenizer, row['source'])
+    response = row['response']
+    targets = list(range(len(response['answer_ids'])))
+    if target_limit is not None:
+        targets = targets[:target_limit]
+    directory = output / row['key']
+    directory.mkdir()
+    started = perf_counter()
+    memo = dict(text='', complete=True, generated_tokens=0, forward_calls=0)
+    if version == 'audit':
+        memo = grounding_memo(model, tokenizer, source, response['text'], max_new_tokens)
+        write_json(directory / 'memo.json', memo)
+        assert memo['complete'], 'Truncated analyst memo saved; answer scoring not complete'
+    requests = [grounding_request(source, response['text'], response['offsets'], target, version, memo['text'])
+                for target in targets]
+    system_prompt = TOKEN_GROUNDING_PROMPT if version == 'direct' else TOKEN_GROUNDING_PROMPT_V2
+    assistant_prefix = '' if version == 'direct' else '{"decision":"'
+    collected = {name: [] for name in ('score', 'choice_logits', 'choice_logp', 'choice_mass',
+                                      'top_ids', 'top_logp', 'input_tokens')}
+    for start in range(0, len(requests), batch_size):
+        values = grounding_batch(model, tokenizer, requests[start:start + batch_size], system_prompt, assistant_prefix)
+        for name in collected:
+            collected[name].append(values[name])
+        if start == 0:
+            single = grounding_batch(model, tokenizer, requests[:1], system_prompt, assistant_prefix)
+            batch_error = float(np.max(np.abs(values['choice_logp'][0] - single['choice_logp'][0])))
+            # BF16 prefill may change logits with batching; preserve measured error.
+            print(dict(key=row['key'], batch_single_choice_logp_max_error=batch_error), flush=True)
+        if start % 25 == 0 or start+batch_size >= len(targets):
+            print(dict(key=row['key'], measured=min(start+batch_size, len(targets)), total=len(targets)), flush=True)
+    values = {name: np.concatenate(parts) for name, parts in collected.items()}
+    np.savez_compressed(directory / 'scores.npz', **values, target=targets,
+                        token_ids=np.asarray(response['answer_ids'])[targets])
+    seconds = perf_counter()-started
+    write_json(directory / 'complete.json', dict(tokens=len(targets),
+        forward_calls=(len(targets)+batch_size-1)//batch_size+1+memo['forward_calls'],
+        new_forward_calls=(len(targets)+batch_size-1)//batch_size+1+memo['forward_calls'],
+        classification_forward_calls=(len(targets)+batch_size-1)//batch_size+1,
+        seconds=seconds, new_seconds=seconds, peak_cuda_bytes=torch.cuda.max_memory_allocated(),
+        batch_single_choice_logp_max_error=batch_error, memo_generate_calls=int(version=='audit'),
+        memo_generated_tokens=memo['generated_tokens'], labels_read=False))
+
+
+def grounding_reuse_records(previous, records, current, model, max_new_tokens):
+    old_protocol = read_json(previous / 'protocol.json')
+    for field in ('prompt', 'memo_prompt', 'batch_size', 'assistant_prefix', 'grounding_version', 'threshold'):
+        assert old_protocol[field] == current[field], field
+    assert max_new_tokens >= old_protocol['max_new_tokens']
+    old_manifest = read_json(previous / 'manifest.json')
+    assert old_manifest['model'] == model
+    assert old_manifest['records'] == records
+    return {row['key']: row for row in old_manifest['records']}
+
+
+def reuse_grounding_answer(previous, row, output, expect_memo=False):
+    import shutil
+
+    directory = previous / row['key']
+    if not (directory / 'complete.json').exists():
+        return False
+    complete = read_json(directory / 'complete.json')
+    assert complete['tokens'] == len(row['response']['answer_ids'])
+    with np.load(directory / 'scores.npz') as values:
+        np.testing.assert_array_equal(values['target'], np.arange(complete['tokens']))
+        np.testing.assert_array_equal(values['token_ids'], row['response']['answer_ids'])
+    if expect_memo:
+        assert (directory / 'memo.json').exists()
+        assert read_json(directory / 'memo.json')['complete']
+    shutil.copytree(directory, output / row['key'])
+    complete.update(reused_from=str(directory.resolve()), new_forward_calls=0, new_seconds=0.)
+    write_json(output / row['key'] / 'complete.json', complete)
+    print(dict(key=row['key'], reused_tokens=complete['tokens']), flush=True)
+    return True
+
+
+def grounding_capture(args):
+    from time import perf_counter
+    import torch
+    from transformers import AutoModelForCausalLM
+    from .logic import TOKEN_GROUNDING_PROMPT, TOKEN_GROUNDING_PROMPT_V2, GROUNDING_AUDIT_PROMPT
+
+    args.output.mkdir(parents=True, exist_ok=False)
+    manifest = read_json(args.manifest)
+    records = manifest['records']
+    if args.keys is not None:
+        records = [row for row in records if row['key'] in args.keys]
+        assert set(args.keys) == {row['key'] for row in records}
+    write_json(args.output / 'manifest.json', dict(records=records, model=args.model))
+    system_prompt = TOKEN_GROUNDING_PROMPT if args.grounding_version == 'direct' else TOKEN_GROUNDING_PROMPT_V2
+    write_json(args.output / 'protocol.json', dict(prompt=system_prompt, batch_size=args.batch_size,
+        grounding_version=args.grounding_version, memo_prompt=GROUNDING_AUDIT_PROMPT if args.grounding_version=='audit' else None,
+        max_new_tokens=args.max_new_tokens, assistant_prefix='' if args.grounding_version=='direct' else '{"decision":"',
+        target_limit=args.target_limit, primary='grounding_score', threshold=.5,
+        measurement='independent original-token external grounding; A/B conditional probability',
+        labels_used_for_scores=False, exposed_development=True, model_is_observer=True,
+        original_generator_causal_claim=False, token_risk_broadcast=False,
+        outside_knowledge=False, full_answer_visible=True, new_graph_score=False,
+        low_choice_mass_cutoff=.1, low_mass_rule='descriptive only; never remove targets or tune threshold',
+        top10_added_after_M0=True))
+    previous_records = {}
+    if args.reuse is not None:
+        assert args.target_limit is None, 'Only complete original answers can be reused'
+        current = read_json(args.output / 'protocol.json')
+        previous_records = grounding_reuse_records(args.reuse, records, current, args.model, args.max_new_tokens)
+        current['reuse'] = str(args.reuse.resolve())
+        current['reuse_policy'] = 'exact original records, protocol and complete EOS; larger cap affects only unfinished memos'
+        write_json(args.output / 'protocol.json', current)
+    torch.manual_seed(17)
+    torch.set_num_threads(4)
+    started = perf_counter()
+    tokenizer = AutoTokenizer.from_pretrained(args.model, local_files_only=True, padding_side='left')
+    tokenizer.pad_token = tokenizer.eos_token
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=torch.bfloat16,
+        attn_implementation='sdpa', local_files_only=True).to('cuda:0').eval()
+    for row in records:
+        if row['key'] in previous_records:
+            if reuse_grounding_answer(args.reuse, row, args.output, args.grounding_version == 'audit'):
+                continue
+        torch.cuda.reset_peak_memory_stats()
+        grounding_answer(model, tokenizer, row, args.output, args.batch_size, args.target_limit,
+                         args.grounding_version, args.max_new_tokens)
+    write_json(args.output / 'scores_frozen.json', dict(status='complete', answers=len(records),
+        complete_answers=args.target_limit is None, labels_read=False, seconds=perf_counter()-started))
+
+
+def grounding_evaluate(output, score_field='score'):
+    import csv
+    from experiments.decision_risk_flow.data import labels
+    from experiments.automatic_evidence.evaluate import metrics, annotated_span_metrics
+
+    freeze = read_json(output / 'scores_frozen.json')
+    records = read_json(output / 'manifest.json')['records']
+    truth = labels([row['original'] for row in records])
+    tokens = []
+    for row in records:
+        with np.load(output / row['key'] / 'scores.npz') as arrays:
+            if freeze['complete_answers']:
+                np.testing.assert_array_equal(arrays['target'], np.arange(len(row['response']['answer_ids'])))
+            for index, target in enumerate(arrays['target']):
+                start, stop = row['response']['offsets'][target]
+                assert arrays['token_ids'][index] == row['response']['answer_ids'][target]
+                tokens.append(dict(key=row['key'], target=int(target), start=start, stop=stop,
+                    text=row['response']['token_text'][target], gold=int(truth[row['key']][target]),
+                    valid=bool(stop > start and arrays['token_ids'][index] not in row['response']['special_ids']),
+                    grounding_score=float(arrays[score_field][index]),
+                    grounding_score_alarm=bool(arrays[score_field][index] > .5),
+                    choice_mass=float(arrays['choice_mass'][index])))
+    suffix = '' if score_field == 'score' else '_' + score_field
+    with (output / ('tokens' + suffix + '.csv')).open('w') as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(tokens[0]))
+        writer.writeheader()
+        writer.writerows(tokens)
+    def summarize(rows):
+        rows = [row for row in rows if row['valid']]
+        return metrics(np.array([row['gold'] for row in rows]),
+            np.array([row['grounding_score'] for row in rows]),
+            np.array([row['grounding_score_alarm'] for row in rows]))
+
+    result = dict(pooled=summarize(tokens), answers={row['key']: summarize([r for r in tokens if r['key']==row['key']])
+        for row in records}, threshold=.5, score_field=score_field,
+        scope='exposed development, external/symbolic check; not native graph detection',
+        choice_mass_scope='original model A/B mass, not symbolic score confidence',
+        low_choice_mass_tokens=sum(row['choice_mass'] < .1 for row in tokens),
+        low_choice_mass_fraction=sum(row['choice_mass'] < .1 for row in tokens)/len(tokens),
+        choice_mass_min=min(row['choice_mass'] for row in tokens),
+        choice_mass_median=float(np.median([row['choice_mass'] for row in tokens])))
+    if freeze['complete_answers']:
+        result['span_metrics'] = annotated_span_metrics(tokens, records, ['grounding_score'])
+    write_json(output / ('evaluation' + suffix + '.json'), result)
+    print(result, flush=True)
+
+
+def witness_capture(previous, output):
+    from .logic import witness_token_constraints
+
+    freeze = read_json(previous / 'scores_frozen.json')
+    protocol = read_json(previous / 'protocol.json')
+    manifest = read_json(previous / 'manifest.json')
+    assert freeze['status'] == 'complete' and freeze['complete_answers']
+    assert freeze['answers'] == len(manifest['records'])
+    assert protocol['grounding_version'] == 'pointer' and protocol['target_limit'] is None
+    output.mkdir(parents=True, exist_ok=False)
+    tokenizer = AutoTokenizer.from_pretrained(manifest['model'], local_files_only=True)
+    write_json(output / 'manifest.json', manifest)
+    write_json(output / 'protocol.json', dict(previous=str(previous.resolve()), threshold=.5,
+        schema_informed_by_exposed_annotations=True, labels_used_for_scores=False,
+        witness_only='unknown does not alarm; not proof of correctness',
+        strict_score='source contradiction only; disclaimer heuristic removed',
+        hybrid_score='explicit witness overrides pointer; unknown retains pointer',
+        scope_readout='symbolic assertion span overlap with original tokens; not internal token localization',
+        new_model_forwards=0, new_graph_score=False))
+    coverage = {}
+    for row in manifest['records']:
+        directory = output / row['key']
+        directory.mkdir()
+        with np.load(previous / row['key'] / 'scores.npz') as arrays:
+            values = dict(arrays)
+        np.testing.assert_array_equal(values['target'], np.arange(len(row['response']['answer_ids'])))
+        np.testing.assert_array_equal(values['token_ids'], row['response']['answer_ids'])
+        assert values['score'].shape == values['target'].shape and np.isfinite(values['score']).all()
+        status, strict, heuristic, claims = witness_token_constraints(source_text(tokenizer, row['source']),
+            row['response']['text'], row['response']['offsets'])
+        values.update(witness_score=(status == 1).astype(float), strict_score=strict.astype(float),
+            hybrid_score=apply_constraints(values['score'], status), witness_status=status,
+            heuristic_alarm=heuristic)
+        np.savez_compressed(directory / 'scores.npz', **values)
+        write_json(directory / 'claims.json', claims)
+        coverage[row['key']] = dict(tokens=len(status), recognized=int(np.count_nonzero(status)),
+            alarm=int(np.sum(status == 1)), strict=int(np.sum(strict)), heuristic=int(np.sum(heuristic)),
+            supported=int(np.sum(status == -1)), unknown=int(np.sum(status == 0)))
+    write_json(output / 'scores_frozen.json', dict(status='complete', answers=len(manifest['records']),
+        complete_answers=True, labels_read=False, new_model_forwards=0, coverage=coverage))
 
 
 if __name__ == '__main__':

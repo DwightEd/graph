@@ -219,3 +219,49 @@ official train and four official test). Source-held cross-fitting here is
 an exploratory protocol, not the official held-out benchmark. The baseline
 uses a larger historical calibration set; its comparison is same-token,
 not equal-training-budget. No new full-test run or default replacement.
+
+## 2026-10-06: source grounding and selective witnesses
+
+`main.py token relations` now supports `grounding-capture`,
+`grounding-evaluate`, and `witness-capture`. `--grounding-version pointer`
+keeps the entire original response intact and addresses each original token
+by character range. The Llama observer completes an A/B JSON decision;
+its conditional A/B score and full-vocabulary choice mass are saved separately.
+Use batch size 1: the BF16 batch-4 sanity changed choice log probabilities.
+This is an external verifier with the full answer visible, not an internal
+graph score, calibrated factual probability, or original-generator mechanism.
+
+```bash
+python main.py token relations --stage grounding-capture --grounding-version pointer --batch-size 1 --output outputs/token_grounding_20261006_pointer_v1
+python main.py token relations --stage grounding-evaluate --output outputs/token_grounding_20261006_pointer_v1
+python main.py token relations --stage witness-capture --previous outputs/token_grounding_20261006_pointer_v1 --output outputs/token_grounding_20261006_witness_v1
+python main.py token relations --stage grounding-evaluate --score-field witness_score --output outputs/token_grounding_20261006_witness_v1
+python main.py token relations --stage grounding-evaluate --score-field strict_score --output outputs/token_grounding_20261006_witness_v1
+python main.py token relations --stage grounding-evaluate --score-field hybrid_score --output outputs/token_grounding_20261006_witness_v1
+```
+
+Captures require new directories. Evaluation reads official token/span
+annotations only after a complete score freeze; repeated evaluation writes
+the same deterministic metric files. `direct` and `audit` preserve the failed
+historical prompt variants. Audit memos stop the capture if they reach the
+generation cap without EOS. Reuse only copies complete, aligned answers
+under an identical prompt/manifest, preserving the original raw scores and
+recording zero new forwards for copied answers.
+
+Selective witnesses extend the existing polarity/duration constraints with
+restricted single-business attributes and explicit day/hour ranges, plus a
+numbered-passage procedure denial check. Source fields, values, or exact
+source quotes are saved in `claims.json`. Malformed/missing evidence and
+unrecognized scope abstain. `witness_score` additionally alarms on numbered
+steps explicitly self-disclaimed as unspecified in passages; this is a
+heuristic, not an independent proof of missing source evidence.
+`strict_score` removes that heuristic. `hybrid_score` overrides the frozen
+pointer score only where a witness is recognized.
+
+These schemas were informed by exposed development annotations. Rule
+assertion spans are intersected with original token offsets; this is a
+symbolic scope readout. Unknown tokens do not alarm in witness-only mode
+and must not be described as verified correct. The preselected six-source
+extension is an expanded regression on previously exposed data. Shared
+plans, failures, reviews, costs, and results live under
+`lys/codex/research/refine-logs/token_controls_20261006/`.
