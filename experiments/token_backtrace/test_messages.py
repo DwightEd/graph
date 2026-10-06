@@ -5,7 +5,9 @@ from transformers import LlamaConfig, LlamaForCausalLM
 
 from .messages import (aligned_deltas, capture_messages, direction_vector,
                        directional_vjp, finite_effect, native_trace,
-                       patch_message, top_heads)
+                       patch_message, top_heads, native_edge_trace,
+                       sparse_edge_vjp, finite_edge_effect, capture_edge_inputs)
+from state_audit.model.adapter import ModelAdapter
 
 
 @pytest.fixture(params=('eager', 'sdpa'))
@@ -120,3 +122,47 @@ def test_dense_vjp_self_aligned_directions_match_small_finite_effects(model):
                 # Compare the complete response vector above that finite-difference floor.
                 relative_error = (finite[2:] / .01 - predicted).norm() / predicted.norm()
                 assert relative_error < .005
+
+
+def test_sparse_keys_reconstruct_head_and_keep_native_causal_addresses(model):
+    backend = model.config._attn_implementation
+    adapter = ModelAdapter(model)
+    model.set_attn_implementation(backend)
+    addresses = [(1, 2, 4, key, f'source-{key}') for key in range(5)]
+    addresses.append((1, 2, 7, 0, 'future-query'))
+    trace = native_edge_trace(adapter, [1, 2, 3], [4, 5, 6, 7, 8], addresses)
+    torch.testing.assert_close(trace.messages[:5].sum(0), trace.original.messages[1][0, 4, 16:24],
+                               rtol=2e-6, atol=1e-8)
+    result = sparse_edge_vjp(trace)
+    assert result['addresses'] == tuple(addresses)
+    assert result['backward_calls'] == 5
+    assert result['valid'][0].tolist() == [False, False, True, True, True]
+    assert not result['valid'][-1].any()
+    assert torch.isnan(result['delete_derivative'][-1]).all()
+    # Changing y_3 cannot affect predictions at targets <=3, including via Q/K.
+    replay = native_trace(model, [1, 2, 3], [4, 5, 6, 11, 8], gradients=False)
+    torch.testing.assert_close(trace.original.logits[:4], replay.logits[:4], rtol=0, atol=0)
+
+
+def test_sparse_native_derivatives_match_same_edge_finite_deletion(model):
+    backend = model.config._attn_implementation
+    adapter = ModelAdapter(model)
+    model.set_attn_implementation(backend)
+    trace = native_edge_trace(adapter, [1, 2, 3], [4, 5, 6, 7, 8],
+                              [(0, 1, 4, 1, 'prompt'), (1, 2, 4, 3, 'history')])
+    result = sparse_edge_vjp(trace)
+    for edge in range(2):
+        sham = finite_edge_effect(adapter, trace, edge, 0.)
+        torch.testing.assert_close(sham, torch.zeros_like(sham), rtol=0, atol=0)
+        epsilon = .01
+        slope = (finite_edge_effect(adapter, trace, edge, epsilon)
+                 - finite_edge_effect(adapter, trace, edge, -epsilon)) / (2 * epsilon)
+        assert torch.count_nonzero(slope[:2]) == 0
+        torch.testing.assert_close(slope[2:].float(), result['delete_derivative'][edge, 2:],
+                                   rtol=.006, atol=2e-6)
+    with pytest.raises(RuntimeError, match='intentional'):
+        with capture_edge_inputs(adapter, [0]):
+            raise RuntimeError('intentional')
+    attention = model.model.layers[0].self_attn
+    assert not attention.q_proj._forward_hooks
+    assert not attention._forward_pre_hooks

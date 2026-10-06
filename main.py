@@ -12,7 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent / 'teaching/state_audit/src'))
 COMMANDS = {
     'graph': {'lineage': 'token_backtrace.pipeline', 'score': 'token_backtrace.pipeline'},
     'token': {'trace': 'token_backtrace.trace', 'validate': 'token_backtrace.validate',
-              'baseline': 'token_backtrace.benchmark', 'evaluate': 'token_backtrace.diagnose'},
+              'baseline': 'token_backtrace.benchmark', 'evaluate': 'token_backtrace.diagnose',
+              'relations': 'token_backtrace.logic_benchmark'},
     'evidence': {'prepare': 'automatic_evidence.prepare', 'capture': 'automatic_evidence.capture',
                  'score': 'automatic_evidence.score', 'evaluate': 'automatic_evidence.evaluate'},
     'baseline': {'fixed': 'unsupervised_graph.fixed', 'source-capture': 'source_relation.capture',

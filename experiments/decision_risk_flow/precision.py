@@ -45,3 +45,18 @@ def enable_fp32_execution(model):
             module.forward = MethodType(linear_forward, module)
     model.model.embed_tokens.register_forward_hook(lambda module, args, output: output.float())
     return model
+
+
+def chunk_unembedding(model, rows=8192):
+    """Tile a frozen bias-free vocabulary projection, retaining every logit.
+
+    Each tile reuses FrozenLinear; its input backward casts only that slice of
+    the BF16 weight to FP32. This avoids the full ~2 GiB Llama vocabulary copy.
+    Summing tile input gradients can differ by FP32 roundoff from one GEMM.
+    Apply only to the pilot model instance; historical loader defaults stay intact.
+    """
+    def forward(module, inputs):
+        logits = [FrozenLinear.apply(inputs, weight) for weight in module.weight.split(rows)]
+        return torch.cat(logits, dim=-1)
+
+    model.lm_head.forward = MethodType(forward, model.lm_head)

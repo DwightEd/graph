@@ -1,5 +1,60 @@
 > 2026-09-30: Current implementation and status are in [the architecture document](../../docs/ARCHITECTURE.md). Reconstruction graph commands described below are retired; their cached results remain historical evidence. Current commands: `python main.py --help`.
 
+## 2026-10-06: typed-source interface pilots
+
+The existing modules now also expose sparse native `(layer, head, query, key,
+source_id, target)` amplitude-deletion derivatives. `messages.native_edge_trace`
+keeps native head-output autograd live; detached Q/K/V define the observed edge
+patch direction. `sparse_edge_vjp` computes an independent actual-token logp
+backward per target without collapsing heads or source keys. `finite_edge_effect`
+replays the same edge deletion through native descendants. These are influence
+measurements, with noncausal pairs stored as NaN plus validity, and do not assign
+factual truth. The physical grid pilot samples edges rather than all model edges.
+
+The experimental relation parser separately reads complete source and answer
+text. It saves raw greedy LM outputs, validates literal character quotes, keeps
+up to three interpretations, and conservatively reports unresolved bindings.
+Invalid records invalidate the document pair rather than silently dropping an
+alternative. Raw parser outputs are frozen before constructing fixture truth
+for evaluation. Natural unknown tokens remain in the full denominator. The
+parser uses a frozen LM's semantic ability, and its token scopes are candidate
+assertion scopes; they are not yet internally confirmed span members.
+
+Run in the existing research environment from the repository root, using fresh
+output paths (the historical outputs must remain intact):
+
+```bash
+python main.py token relations --stage typed-capture --output outputs/typed_parser_new
+python main.py token relations --stage typed-evaluate --output outputs/typed_parser_new
+python main.py token validate --stage sparse --keys 15604 9022 --output outputs/sparse_edges_new
+```
+
+The 2026-10-06 frozen parser pilot failed its gates: 18/32 controls correct,
+with 0/8 interval and 0/6 condition cases correct, and 0/1487 natural tokens
+nonunknown. Seven natural document pairs contain invalid/truncated parser
+records; the remaining pair is usable syntactically but unresolved semantically.
+Raw failures are retained in `outputs/typed_graph_20261006_v2`. No typed graph
+detection or new full-test score was produced. See the shared 2026-10-06 tracker
+for the next address/scoping interface proposal.
+
+The sparse pilot uses `--vocabulary-chunk 8192`: the complete frozen BF16
+unembedding is evaluated in FP32 output-row tiles via the existing FrozenLinear
+operator. This keeps every vocabulary logit and avoids the full ~2 GiB temporary
+FP32 vocabulary weight during backward. Input-gradient tile sums differ from
+one GEMM only by FP32 roundoff; CPU logits/gradient tests compare them. The
+historical loader default remains unchanged. All model-forward counts still
+refer to complete decoder replays, not individual vocabulary tiles.
+
+`typed-capture` defaults to 32 synthetic interface cases and all eight exposed
+natural answers. `--constructed-only --case-limit 2` is an I/O smoke. Greedy
+batch size and token cap are recorded. `typed-evaluate` reports case-family
+correctness, unknowns, rejected records and complete natural token coverage;
+it does not read natural hallucination labels or claim new detector AUROC.
+Equal-length opposite/equivalent edits remain unmeasured, so the complete TG1
+gate cannot pass yet. The sparse pilot measures all targets of each chosen
+answer, then checks finite doses on the largest measured edge per sampled layer;
+that selection is a fidelity diagnostic, not a representative stratum study.
+
 # Independent token backtraces and exposed-case iterations
 
 This experiment did **not** meet the detection objective. It preserves the

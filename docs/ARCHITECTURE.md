@@ -1,6 +1,6 @@
 # Graph: mechanism-grounded token detection
 
-Status: refactor plus tested measurement/optimization primitives. Automatic semantic proposals, independent reference pools, stratified 8B fidelity and new natural-data detection results are **not yet implemented/validated as a complete pipeline**. The measured-event CLI must not be presented as an end-to-end text detector.
+Status: tested measurement/optimization primitives plus an experimental independent-text relation parser and sparse key-address pilot. Automatic semantic proposals, independent reference pools, stratified 8B fidelity and new natural-data detection results are **not yet implemented/validated as a complete pipeline**. The measured-event CLI must not be presented as an end-to-end text detector.
 
 ## Module responsibilities
 
@@ -50,6 +50,30 @@ All three worlds define their **own** direction. For each P, the positive excess
 The E/U self-aligned statistics are empirical geometry references; semantic roles are not exchangeable, so they do not provide p-values or a false-positive guarantee. Unaligned/missing observations remain explicit, distinct from a measured zero. Alignment requires identical original token identities in a contiguous suffix and equal position displacement across donor worlds.
 
 `C = B + L C` is a triangular explanatory lineage from normalized total embedding-root responses. It is useful for source ancestry; its edges are not native local Jacobians and its row mass is not factual support. The original signed raw root responses stay in their trace cache.
+
+## Sparse physical source addresses (2026-10-06)
+
+`messages.native_edge_trace` additionally captures explicit `(layer, head, query,
+key, source_id)` coordinates. For each edge, the observed patch direction is
+`m_e = A[query,key] V[key]` before W_O. `sparse_edge_vjp` returns the signed
+amplitude-deletion derivative `-grad(log p(y_t)) dot m_e` for every independent
+target. Native head-output tensors retain autograd through downstream routing,
+RMS, residuals and MLPs. Detached Q/K/V captures define the fixed deletion
+direction; this does not differentiate an independent reconstructed attention
+program. `finite_edge_effect` uses the existing native edge-gate implementation
+and complete replay for the same amplitude deletion without renormalization.
+Addresses, target indices, attention, valid flags and signed derivatives remain
+separate. A sampled address table is not a complete all-edge graph.
+
+`logic_benchmark --stage typed-capture/typed-evaluate` pilots independent source
+and answer relation extraction. Literal quotes are mechanically grounded; every
+alternative contributes to conservative consensus. Potentially related records
+with mismatched parses stay unknown, and lexical exclusions are saved. Parser
+failure, unsupported content, quotation and unresolved scope are explicit. All
+natural original-token offsets stay in the denominator. This candidate parser
+is not a completed graph detector: matched edits, typed uptake versus parser-only
+and rewired controls, independent calibration and natural detection still need
+validation. See the shared TG tracker before expanding runs.
 
 ## Why the graph solver is exact, and what it does not prove
 
