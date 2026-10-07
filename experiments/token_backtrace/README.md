@@ -1,5 +1,57 @@
 > 2026-09-30: Current implementation and status are in [the architecture document](../../docs/ARCHITECTURE.md). Reconstruction graph commands described below are retired; their cached results remain historical evidence. Current commands: `python main.py --help`.
 
+## Repetition and channel dominance: natural mechanism diagnosis
+
+`repetition_run` reconstructs two frozen supervised 1024-self readouts, tests
+literal repetition, signed head patterns, cross-source labelled prototypes and
+unique within-answer token controls. These are supervised mechanism diagnostics,
+not a new unsupervised detector. `repetition_edges` checks local/remote reading
+and gold-onset excess over distance/lexical endpoint expectations on saved CSR.
+
+`dominance_run` keeps the exact cached prompt/answer IDs, separates actual
+source from instructions, and removes full native A*V messages at predictor
+positions. Each world independently replays the downstream query with past KV
+fixed. It measures fixed-candidate margins, quarter-dose deletion and per-head
+norm-matched random directions; `--all-layers` checks every layer rather than
+selecting layers after seeing an effect. Conditional channel necessity requires
+the actual token to be the native winner and to lose against the fixed rival
+after removal. This is not a percentage of whole-model causal responsibility.
+
+```bash
+export PYTHONPATH=.:teaching/state_audit/src
+python -m experiments.token_backtrace.repetition_run --output outputs/repetition_new
+python -m experiments.token_backtrace.repetition_edges --output outputs/repetition_new
+python -m experiments.token_backtrace.dominance_run --output outputs/repetition_new
+python -m experiments.token_backtrace.dominance_evaluate --output outputs/repetition_new
+python -m experiments.token_backtrace.dominance_run --output outputs/repetition_new --native-directory native_all_layers --all-layers
+python -m experiments.token_backtrace.dominance_evaluate --output outputs/repetition_new --native-directory native_all_layers
+python -m experiments.token_backtrace.repetition_profile --output outputs/repetition_new
+python -m experiments.token_backtrace.decision_positions --previous outputs/repetition_new --output outputs/decisions_new
+python -m experiments.token_backtrace.dominance_run --output outputs/decisions_new --native-directory native_all_layers --all-layers
+python -m experiments.token_backtrace.decision_positions --previous outputs/repetition_new --output outputs/passage3_new --passage3
+python -m experiments.token_backtrace.dominance_run --output outputs/passage3_new --native-directory native_all_layers --all-layers
+python -m pytest experiments/token_backtrace/test_repetition.py experiments/token_backtrace/test_grounded_projection.py -q
+```
+
+The last two cohorts are explicitly gold-assisted: five matched onsets and
+two audited error operators, with manual correct alternatives/Passage3 masks.
+They cannot be used as an automatic detection benchmark. Cached defaults are
+local research paths in `repetition_teacher` and `dominance_data`.
+
+2026-10-07 results:149 answers/30619 tokens; signed tangent AUROC .8447,
+literal repetition .5348 and whole-vector recent persistence .5491. Strict
+same-BPE matching yielded255 pairs/41 sources, teacher concordance .7832.
+141 eligible onset-edge pairs showed more local and less remote reading,
+but no confirmed onset excess after endpoint controls. All32 layers on12
+continuation pairs had no erroneous winner deletion flip. At12219's actual
+negation, deleting correct Passage3 atL13 increased not-vs-provide margin
+2.7528→3.7368; deleting history atL31 reduced it to1.0254. Evidence resisted
+the error but did not reverse the choice. At12297's citation the observer
+already preferred correct3; history supported it. History dependence therefore
+has no universal hallucination direction. Observer Llama3.1 differs from the
+Llama2 original generator. Raw artifacts are `outputs/repetition_dominance_20261007`,
+`repetition_decisions_20261007`, and `repetition_passage3_20261007`.
+
 ## Full-vector source projection: natural detection experiment
 
 `grounded_projection_run` projects each historical token's native V into a
