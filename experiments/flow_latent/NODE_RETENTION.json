@@ -1,0 +1,27 @@
+{
+  "fit": {
+    "tokens": 4120,
+    "raw_variance": 1005.263752867788,
+    "head16_variance": 600.7307183286765,
+    "final128_variance": 454.1465157474841,
+    "head16_fraction": 0.5975851776361467,
+    "final128_fraction": 0.45176851791572886
+  },
+  "reference": {
+    "tokens": 2030,
+    "raw_variance": 944.1220836682844,
+    "head16_variance": 428.2554688605075,
+    "final128_variance": 279.5837728172281,
+    "head16_fraction": 0.45360179183243665,
+    "final128_fraction": 0.29613095345777274
+  },
+  "regression": {
+    "tokens": 2968,
+    "raw_variance": 1025.034860291386,
+    "head16_variance": 479.7960207081237,
+    "final128_variance": 317.8492953363068,
+    "head16_fraction": 0.4680777593961365,
+    "final128_fraction": 0.3100863274503191
+  },
+  "message_retention": "unmeasured; node retention does not estimate source/history/root retention"
+}

@@ -1,0 +1,18 @@
+{
+  "12219": {
+    "relative_complete_predictor_to_previous_node": 0.00021400144926430418,
+    "raw_context_width": 32768
+  },
+  "12297": {
+    "relative_complete_predictor_to_previous_node": 0.00021954673209570149,
+    "raw_context_width": 32768
+  },
+  "12471": {
+    "relative_complete_predictor_to_previous_node": 0.00021821700590687765,
+    "raw_context_width": 32768
+  },
+  "17199": {
+    "relative_complete_predictor_to_previous_node": 0.00022059312984417306,
+    "raw_context_width": 32768
+  }
+}

@@ -1,0 +1,393 @@
+{
+  "audit_skill": "experiment-audit",
+  "verdict": "WARN",
+  "overall_verdict": "warn",
+  "integrity_status": "warn",
+  "reason_code": "claims_unsupported_and_retrospective_provenance_gaps",
+  "summary": "Natural labels, score freezing, raw metrics, cache contents, and bound-control reproduction validate. The evidence does not support graph necessity, multi-hop benefit, detector effectiveness, blind generalization, or an original-generator mechanism. Remaining integrity limitations are retrospective cache manifests, fitted-model/diagnostic files omitted from original score freezes, and nonconverged fixed-budget fits.",
+  "date": "2026-10-07",
+  "generated_at": "2026-10-07T21:56:59+08:00",
+  "agent_id": "/root/flow_latent_audit",
+  "verdict_id": "flow_latent_audit_fresh_20261007_final",
+  "auditor": "fresh-codex-same-family-provisional",
+  "reviewer_model_requested": "gpt-5.6-sol",
+  "reviewer_reasoning_requested": "ultra",
+  "reviewer_model": "gpt-5.6-sol (requested; runtime identity not independently attested)",
+  "reviewer_family": "openai",
+  "reviewer_runtime_attested": false,
+  "review_independence": "same-family",
+  "acceptance_status": "provisional",
+  "trace_path": ".aris/traces/experiment-audit/2026-10-07_run01/",
+  "supporting_reviewers": [
+    {
+      "task": "/root/flow_latent_audit/flow_math_code",
+      "model_requested": "gpt-5.6-sol",
+      "reasoning_requested": "ultra",
+      "scope": "mathematics, code, projection, and controls"
+    },
+    {
+      "task": "/root/flow_latent_audit/flow_results_data",
+      "model_requested": "gpt-5.6-sol",
+      "reasoning_requested": "ultra",
+      "scope": "data provenance, hashes, raw metrics, and results"
+    }
+  ],
+  "scope": {
+    "natural_cases": 53,
+    "fit_cases": 24,
+    "reference_cases": 12,
+    "regression_cases": 17,
+    "source_ids_unique": true,
+    "source_disjoint_across_cohorts": true,
+    "fit_tokens": 4120,
+    "reference_tokens": 2030,
+    "regression_tokens": 2968,
+    "positive_regression_tokens": 265,
+    "error_onsets": 16,
+    "reviewed_negative_answers": 6,
+    "scoring_directories": 27,
+    "original_scoring_runs": 9,
+    "corrected_map_scoring_runs": 9,
+    "head16_scoring_runs": 3,
+    "initial_lag_control_runs": 3,
+    "bound_lag_control_runs": 3,
+    "total_fitted_models": 69,
+    "coherent_map_models": 42,
+    "initial_inconsistent_models": 27,
+    "independent_metric_checks": 114,
+    "density_checks": 69,
+    "metric_count_includes_exact_control_reruns": true
+  },
+  "checks": {
+    "A_ground_truth_provenance": {
+      "status": "pass",
+      "details": "All 17 natural regression label arrays reproduce exactly from raw RAGTruth character spans, response text, token offsets, and valid-token masks. Labels enter only after score freezing. The 24/12/17 cohorts have 53 distinct source IDs. Reference is not normal truth, and the regression examples were previously label-selected.",
+      "raw_annotation_spans_present": {
+        "fit": "14/24",
+        "reference": "6/12"
+      },
+      "requested_dependency_path_error": "teaching/state_audit/src/state_audit/dataset.py is absent; the actual imported package is state_audit/dataset/{__init__,schema,jsonl}.py"
+    },
+    "B_score_normalization": {
+      "status": "pass",
+      "details": "Risk is raw negative marginal mixture log density. PCA and models use fit only, task thresholds are reference-only 95th percentiles, and no prediction-statistic self-normalization is used. Fresh tie-aware calculations reproduced every saved metric and threshold.",
+      "max_metric_error": 1.1102230246251565e-16,
+      "base_thresholds_reproduced": 252,
+      "lag_thresholds_reproduced": true
+    },
+    "C_results_and_provenance": {
+      "status": "warn",
+      "details": "Every requested and supplemental result exists and current hashes validate. RESULTS.json matches the raw metrics and diagnostics. Complete raw and derived cache manifests now validate, and all three bound controls enforce cache/input/base-model binding. The cache manifests were created after the original fits, and original/control freezes omit the newly fitted model pickle and optimization diagnostics, so contemporaneous immutability is incomplete.",
+      "valid_frozen_score_manifests": 27,
+      "raw_cache_manifest": {
+        "files": 271,
+        "bytes": 28863492208,
+        "verified": true,
+        "timing": "retrospective_after_original_fits"
+      },
+      "derived_cache_manifest": {
+        "files": 58,
+        "bytes": 5388910375,
+        "verified": true,
+        "timing": "retrospective_after_original_fits"
+      },
+      "artifact_index": {
+        "entries": 2197,
+        "unique": true,
+        "all_exist": true,
+        "all_sizes_match": true,
+        "bytes": 35382442750
+      },
+      "bound_control_base_arrays_identical": true,
+      "bound_vs_initial_control_scores_identical": true,
+      "bound_vs_initial_model_diagnostics_results_byte_identical": true,
+      "original_model_and_trace_pre_evaluation_freeze_complete": false
+    },
+    "D_dead_code_and_mathematics": {
+      "status": "warn",
+      "details": "The corrected MAP objective, M-step, categorical posterior, Gaussian factor posterior, causal offset, physical-head reconstruction, rooted recurrence, and parameter-shape control are implemented and reproduce. The 27 original models are not coherent MAP fits; saved posteriors are diagnostics unused by evaluation; fixed 30-step fitting does not establish convergence.",
+      "coherent_objective_traces_monotone": 42,
+      "original_inconsistent_models": 27,
+      "head16_seed44_native_last_objective_gain": 34.74882215651451,
+      "bound_lag_seed43_last_objective_gain": 0.12595917168026793,
+      "bound_lag_seed43_min_effective_tokens": 22.0,
+      "posteriors_used_by_evaluator": false,
+      "density_witness_capture_argument": "redundant; function reloads protocol raw_capture before feature access",
+      "wrong_cache_execution_observed": false
+    },
+    "E_scope_and_claim_support": {
+      "status": "warn",
+      "details": "Evaluation uses 17 repeatedly studied answers and three K-means initialization seeds. Head16 jointly changes representation and model capacity. The parameter-shape-matched lag-pair control removes the simple coefficient-count confound but not information-content differences. Native does not separate from rewired or lag-pair, and detector onset/alarm behavior remains poor.",
+      "blind_generalization": false,
+      "independent_data_seeds": false,
+      "observer_equals_response_generator": false,
+      "lag_control_parameter_shape_matched": true,
+      "lag_control_information_matched": false,
+      "rewire_changed_mass": {
+        "minimum": 0.018997,
+        "maximum": 0.062367,
+        "mean": 0.04214
+      }
+    },
+    "F_evaluation_classification": {
+      "status": "pass",
+      "details": "Natural metrics use RAGTruth real ground truth; density fitting and reference calibration are self-supervised proxies; matched rewiring and algebraic tests are simulation-only controls; reconstruction/hash checks are self-supervised integrity checks. No generated ground truth or new human evaluation is used."
+    }
+  },
+  "evaluation_classification": [
+    {
+      "evaluation": "natural regression metrics for the 21 base/head16 scoring runs",
+      "type": "real_gt"
+    },
+    {
+      "evaluation": "natural regression metrics for initial and bound lag-pair controls",
+      "type": "real_gt"
+    },
+    {
+      "evaluation": "fit density and reference alarm calibration",
+      "type": "self_supervised_proxy"
+    },
+    {
+      "evaluation": "native and lag-pair anomaly scores",
+      "type": "self_supervised_proxy"
+    },
+    {
+      "evaluation": "matched rewiring as a mechanism control",
+      "type": "simulation_only",
+      "outcome_labels": "real_gt"
+    },
+    {
+      "evaluation": "algebraic science-contract tests",
+      "type": "simulation_only"
+    },
+    {
+      "evaluation": "native reconstruction, lag-to-node alignment, hashes, and cache witnesses",
+      "type": "self_supervised_proxy"
+    }
+  ],
+  "corrected_condition_summary": {
+    "v1": {
+      "native_mean_auroc": 0.561305,
+      "native_mean_ap": 0.105496,
+      "mean_onset_hits_of_16": 1.33,
+      "normal_answers_alarmed": "6/6_each_seed"
+    },
+    "v2": {
+      "native_mean_auroc": 0.55816,
+      "native_mean_ap": 0.104174,
+      "mean_onset_hits_of_16": 1.33,
+      "normal_answers_alarmed": "6/6_each_seed"
+    },
+    "v3": {
+      "native_mean_auroc": 0.583895,
+      "native_mean_ap": 0.109789,
+      "mean_onset_hits_of_16": 0.33,
+      "normal_answers_alarmed": "6/6_each_seed"
+    }
+  },
+  "head16_summary": {
+    "additional_joint_input_and_capacity_check": true,
+    "mean_auroc": {
+      "node": 0.5220572529474587,
+      "native": 0.5988142687952124,
+      "rewired": 0.6005077051587219,
+      "nll": 0.563431267843556
+    },
+    "mean_ap": {
+      "node": 0.09445355136741584,
+      "native": 0.11353389923785406,
+      "rewired": 0.11317446447789635,
+      "nll": 0.10719540041044484
+    },
+    "native_minus_node_ci_positive_all_seeds": true,
+    "native_minus_rewired_ci": [
+      [-0.012731, 0.009557],
+      [-0.013932, 0.006629],
+      [-0.013797, 0.006453]
+    ],
+    "native_minus_rewired_ci_positive_any_seed": false,
+    "native_below_rewired_all_seeds": true,
+    "native_onset_hits_by_seed": [1, 1, 0],
+    "native_reviewed_negative_alarm_by_seed": [6, 6, 6]
+  },
+  "lag_pair_summary": {
+    "role": "parameter-shape-matched sequential-node control",
+    "raw_context_width": 32768,
+    "context_pca_dimensions": 128,
+    "mixture_components": 4,
+    "factor_rank": 8,
+    "target_dimensions": 128,
+    "iterations": 30,
+    "parameter_shapes": {
+      "coefficients": [4, 129, 128],
+      "covariances": [4, 128, 128],
+      "loadings": [4, 128, 8],
+      "weights": [4],
+      "noise": [4]
+    },
+    "seed42": {
+      "auroc": 0.58967,
+      "ap": 0.116563,
+      "native_minus_lag_ci": [-0.023061, 0.043619],
+      "onset_hits_of_16": 1,
+      "normal_answers_alarmed_of_6": 6
+    },
+    "seed43": {
+      "auroc": 0.571346,
+      "ap": 0.109527,
+      "native_minus_lag_ci": [-0.021782, 0.047505],
+      "onset_hits_of_16": 1,
+      "normal_answers_alarmed_of_6": 6
+    },
+    "seed44": {
+      "auroc": 0.582317,
+      "ap": 0.111792,
+      "native_minus_lag_ci": [-0.008258, 0.055524],
+      "onset_hits_of_16": 3,
+      "normal_answers_alarmed_of_6": 6
+    },
+    "mean_auroc": 0.581111,
+    "mean_ap": 0.112627,
+    "native_point_estimate_higher_all_seeds": true,
+    "native_minus_lag_ci_positive_any_seed": false,
+    "all_transition_node_alignment_relative_max": 0.000337,
+    "full_score_reconstruction_max_error": 1.99e-13,
+    "factor_mean_max_error": 1.42e-14,
+    "factor_covariance_max_error": 4.44e-16
+  },
+  "node_retention": {
+    "method": "axes-only, no whitening, token-weighted and centered independently within each cohort",
+    "formula": "V(Y)=(sum_i ||y_i||^2-||sum_i y_i||^2/N)/N; head16=V(z)/V(x); final128=V(u)/V(x)",
+    "implementation": "experiments/flow_latent/audit.py:126-154",
+    "artifact": "experiments/flow_latent/NODE_RETENTION.json",
+    "fit": {
+      "tokens": 4120,
+      "raw_variance": 1005.263752867788,
+      "head16_variance": 600.7307183286765,
+      "head16_fraction": 0.5975851776361467,
+      "final128_variance": 454.1465157474841,
+      "final128_fraction": 0.45176851791572886
+    },
+    "reference": {
+      "tokens": 2030,
+      "raw_variance": 944.1220836682844,
+      "head16_variance": 428.2554688605075,
+      "head16_fraction": 0.45360179183243665,
+      "final128_variance": 279.5837728172281,
+      "final128_fraction": 0.29613095345777274
+    },
+    "regression": {
+      "tokens": 2968,
+      "raw_variance": 1025.034860291386,
+      "head16_variance": 479.7960207081237,
+      "head16_fraction": 0.4680777593961365,
+      "final128_variance": 317.8492953363068,
+      "final128_fraction": 0.3100863274503191
+    },
+    "message_value_root_retention_measured": false
+  },
+  "claims": [
+    {
+      "id": "capture_identity_causal_indexing_and_future_mask",
+      "impact": "supported_with_float16_qualification"
+    },
+    {
+      "id": "corrected_map_and_posteriors",
+      "impact": "supported_without_convergence_claim"
+    },
+    {
+      "id": "C1_native_graph_increment",
+      "impact": "unsupported"
+    },
+    {
+      "id": "C2_multihop_onset_improvement",
+      "impact": "unsupported"
+    },
+    {
+      "id": "natural_token_detector_effectiveness",
+      "impact": "unsupported"
+    },
+    {
+      "id": "head16_conditional_vs_low_parameter_node",
+      "impact": "exploratory_only"
+    },
+    {
+      "id": "graph_necessity",
+      "impact": "unsupported"
+    },
+    {
+      "id": "graph_information_absent",
+      "impact": "unsupported"
+    },
+    {
+      "id": "complete_flowtracer_or_native_causal_flow",
+      "impact": "unsupported"
+    },
+    {
+      "id": "blind_generalization_or_original_generator_mechanism",
+      "impact": "unsupported"
+    }
+  ],
+  "actions": [
+    "Report C1, C2, detector effectiveness, graph necessity, generalization, and original-generator mechanism as unconfirmed.",
+    "Keep retrospective cache-manifest timing and the fitted-model/diagnostic freeze gap visible.",
+    "Describe lag-pair as parameter-shape matched rather than fully information matched.",
+    "Describe optimization as a monotone fixed-30-step fit rather than converged.",
+    "Preserve RAGTruth span-overlap semantics and reference-alarm-budget language.",
+    "Require a stronger graph perturbation, message/root retention, and a newly frozen blind set before a future graph/effectiveness claim."
+  ],
+  "verification": {
+    "science_contract_tests": {
+      "passed": 5,
+      "failed": 0
+    },
+    "max_metric_error": 1.1102230246251565e-16,
+    "max_saved_full_head_relative_error": 0.0003685735923974367,
+    "max_all_transition_lag_node_relative_error": 0.000337,
+    "results_json_raw_comparison_issues": 0,
+    "all_bound_links_valid": true,
+    "all_base_graph_arrays_unchanged": true,
+    "files_modified_outside_audit_reports_and_traces": false
+  },
+  "audited_input_hashes": {
+    "/share/home/tm902089733300000/a903202310/lys/codex/research/refine-logs/flow_latent_project_20261007/AUDIT_REQUEST.md": "sha256:751e1094b34e50d784ff0304b8b54e20d8870af29621a38eea67aa8d97b10b1f",
+    "experiments/flow_latent/RESULTS.md": "sha256:665397d48dfa230bc6f56d8eec101b4f48cfa09d4c76f100c6f7ddf87f0d7059",
+    "experiments/flow_latent/RESULTS.json": "sha256:a940c3636a1a44770bdd764e02a7d231b474974cfd840dc39602edaecbaf249c",
+    "experiments/flow_latent/NODE_RETENTION.json": "sha256:b991c4b749e4cce3304ced7aec0d8da3f0a7cd169296a32221ae23043596e3f0",
+    "experiments/flow_latent/RAW_CACHE_MANIFEST.json": "sha256:722ea4f0f9cdb8277cf1652f90dd3d2babb0e7213b2de7cccdbec36e04181f05",
+    "experiments/flow_latent/DERIVED_CACHE_MANIFEST.json": "sha256:103f48bb85c6da5fe61f004f809a550cee908263f80ae729f64b1093b01fa76a",
+    "experiments/flow_latent/NUMERIC_AUDIT.json": "sha256:ef732b9de800cc5c89f832f5233393816fabe71403fd14eb63c5f0c23320a98e",
+    "experiments/flow_latent/ARTIFACT_INDEX.md": "sha256:6e88828b267ee71aeeb43c4a59f37d8fded3fc21d4e5df218ffecf16596f825a",
+    "experiments/flow_latent/CAPACITY_CONTROL.md": "sha256:569ce974de458df635607466066868a545530f25c056dfffca9257021af8ef6e",
+    "outputs/flow_latent_20261007_map_cycles/summary.json": "sha256:a8591add3d64177e3de992d13ab950b0447508d756deb45c0e03842ff0e88396",
+    "outputs/flow_latent_20261007_map_cycles/MANIFEST.md": "sha256:fca5c5a2837d84aeb629d93173c123cd0b9a8a5729c538efe4990df7b4bfd8a1",
+    "outputs/flow_latent_20261007_map_cycles/cache_verification.log": "sha256:00feca8e9728c85366ea597cff44860543f5f25dc898fb7c985e8be2139dbdf4",
+    "outputs/flow_latent_20261007_map_cycles/numeric_audit_final.log": "sha256:d679cee1f153d9c97a868ce5ffaff2f658509778445cb4ca442fc1e72b7d3148"
+  },
+  "bound_control_hashes": {
+    "seed42": {
+      "protocol.json": "60c8794e33e9c33143924ad92becc8ce38deb9b5b27f367ed658a0a09ec61ee0",
+      "execution.json": "5190df8941f0f96a24772f27f3c63e45a43e0506b87eb3a44529f415d309756d",
+      "diagnostics.json": "09f5a36fbefc867cea84a9e96b51dbc63ae217669415c066d5dc9dcbecc41d20",
+      "frozen_scores.json": "dff67b4f541a58b8252edfb711fe79bb57e4652cad6f11c3dba5d85885651534",
+      "results.json": "f296d74b07d6142e28554bbd332d49580c5d429e7fe18339c888487a8768b5eb",
+      "lag_pair_model.pkl": "5b177107b75e7031ab1f93871d1c0facd33b55ca5efc7b866f962e8dfdef6738"
+    },
+    "seed43": {
+      "protocol.json": "447bf41917c0cdafcd489b11417c2d19cea2296fbcb5df314faca4595a6e55",
+      "execution.json": "bda95191c5ffc77e1416759d8cef70fc359be38fb7d779ec91558af6768bff3a",
+      "diagnostics.json": "6aefce88cc7f8b5d875b484df43b6e1a4bcc8f157abef29836796929edd6d837",
+      "frozen_scores.json": "faca0553672385ad3a400fd5c738dcc7bc2c6e202f8552886235c125bdaf3e18",
+      "results.json": "7dbad0ed543806f75c9ac2857e5f1a7d8dcdf9a7703e9d3f68f3ce78c023e642",
+      "lag_pair_model.pkl": "838d3e54938ef46936a37a96638cb8531efef422d205e2d1330c9b2c07dd479f"
+    },
+    "seed44": {
+      "protocol.json": "53c3b874ae61bc1ddcc0b6ab8309325a0d31a27c585a031afef44552a69c97eb",
+      "execution.json": "99c925388a73fad76831681b68f1b7cba3f793a8221be4f008aa7567a7f3254b",
+      "diagnostics.json": "966875d98250d3501c757a6e242f649068104bac164d6c8e9db5c39d9514721f",
+      "frozen_scores.json": "d2bd47b1d3dc11eb8a01073ecbbfdfc3cb18eb40fcbd273538b36d1e209a01e0",
+      "results.json": "3271fa50fc1d83401e126a2edc3a5e9ffd2611bdf414c10375f600eff9048773",
+      "lag_pair_model.pkl": "a9fe8ca9300b8dc13c95ce4a38c82a1bda0aa670cd34e66997ace47b9e66163e"
+    }
+  }
+}

@@ -1,0 +1,1125 @@
+{
+  "status": "PASS",
+  "source_disjoint": true,
+  "cohorts": {
+    "fit": 24,
+    "reference": 12,
+    "regression": 17
+  },
+  "raw_witnesses": {
+    "15604": {
+      "relative_source_message_max": 0.0001993284969486439,
+      "relative_full_head_max": 0.0003685735923974367,
+      "future_mass_max": 0.0
+    },
+    "12219": {
+      "relative_source_message_max": 0.00022497926759813865,
+      "relative_full_head_max": 0.0003399359768903579,
+      "future_mass_max": 0.0
+    },
+    "9022": {
+      "relative_source_message_max": 0.00024476727534968154,
+      "relative_full_head_max": 0.0003324296895546536,
+      "future_mass_max": 0.0
+    },
+    "12297": {
+      "relative_source_message_max": 0.0003377038970038348,
+      "relative_full_head_max": 0.0003414849828771817,
+      "future_mass_max": 0.0
+    }
+  },
+  "control_contracts": {
+    "outputs/flow_latent_20261007_head16_control_bound_seed42": {
+      "base_scores_identical": true,
+      "base_model_bound": true,
+      "derived_cache_bound": true,
+      "capacity_matched": true
+    },
+    "outputs/flow_latent_20261007_head16_control_bound_seed43": {
+      "base_scores_identical": true,
+      "base_model_bound": true,
+      "derived_cache_bound": true,
+      "capacity_matched": true
+    },
+    "outputs/flow_latent_20261007_head16_control_bound_seed44": {
+      "base_scores_identical": true,
+      "base_model_bound": true,
+      "derived_cache_bound": true,
+      "capacity_matched": true
+    },
+    "outputs/flow_latent_20261007_head16_control_seed42": {
+      "binding": "initial control before provenance fix; preserved"
+    },
+    "outputs/flow_latent_20261007_head16_control_seed43": {
+      "binding": "initial control before provenance fix; preserved"
+    },
+    "outputs/flow_latent_20261007_head16_control_seed44": {
+      "binding": "initial control before provenance fix; preserved"
+    }
+  },
+  "independent_metric_checks": [
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3",
+      "method": "node",
+      "auroc": 0.5046887106569221,
+      "ap": 0.09187655193223354
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3",
+      "method": "native",
+      "auroc": 0.5987574951660978,
+      "ap": 0.1168445510356732
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3",
+      "method": "rewired",
+      "auroc": 0.5999539295960463,
+      "ap": 0.11664868998952509
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3_seed43",
+      "method": "node",
+      "auroc": 0.5284261372758431,
+      "ap": 0.09541465757238568
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3_seed43",
+      "method": "native",
+      "auroc": 0.5880356557005144,
+      "ap": 0.10773065480107079
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3_seed43",
+      "method": "rewired",
+      "auroc": 0.5901534982095366,
+      "ap": 0.10782745405441271
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3_seed43",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3_seed44",
+      "method": "node",
+      "auroc": 0.5330569109096113,
+      "ap": 0.09606944459762831
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3_seed44",
+      "method": "native",
+      "auroc": 0.609649655519025,
+      "ap": 0.11602649187681817
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3_seed44",
+      "method": "rewired",
+      "auroc": 0.6114156876705826,
+      "ap": 0.11504724938975125
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3_seed44",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1",
+      "method": "node",
+      "auroc": 0.5628030350623695,
+      "ap": 0.10662208722825009
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1",
+      "method": "native",
+      "auroc": 0.5608904152618683,
+      "ap": 0.10646794136903127
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1",
+      "method": "rewired",
+      "auroc": 0.5583816723556635,
+      "ap": 0.09857419853619787
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1_seed43",
+      "method": "node",
+      "auroc": 0.5370636399807341,
+      "ap": 0.10584745917705166
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1_seed43",
+      "method": "native",
+      "auroc": 0.5624903147446234,
+      "ap": 0.10675592237111962
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1_seed43",
+      "method": "rewired",
+      "auroc": 0.5637118784858194,
+      "ap": 0.1045624207057217
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1_seed43",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1_seed44",
+      "method": "node",
+      "auroc": 0.5564648643366211,
+      "ap": 0.10512391916027342
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1_seed44",
+      "method": "native",
+      "auroc": 0.5605330206130156,
+      "ap": 0.10326497889948436
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1_seed44",
+      "method": "rewired",
+      "auroc": 0.561055151857824,
+      "ap": 0.10283197339658218
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1_seed44",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2",
+      "method": "node",
+      "auroc": 0.5628030350623695,
+      "ap": 0.10662208722825009
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2",
+      "method": "native",
+      "auroc": 0.5548677569995603,
+      "ap": 0.1019243251562961
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2",
+      "method": "rewired",
+      "auroc": 0.5519611333319373,
+      "ap": 0.09810131002185105
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2_seed43",
+      "method": "node",
+      "auroc": 0.5370636399807341,
+      "ap": 0.10584745917705166
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2_seed43",
+      "method": "native",
+      "auroc": 0.5608792466790917,
+      "ap": 0.10715636637892338
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2_seed43",
+      "method": "rewired",
+      "auroc": 0.5632302333535764,
+      "ap": 0.1065691176673439
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2_seed43",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2_seed44",
+      "method": "node",
+      "auroc": 0.5564648643366211,
+      "ap": 0.10512391916027342
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2_seed44",
+      "method": "native",
+      "auroc": 0.5587320866402808,
+      "ap": 0.10344226999075905
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2_seed44",
+      "method": "rewired",
+      "auroc": 0.5609853482154699,
+      "ap": 0.10248880157229687
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2_seed44",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3",
+      "method": "node",
+      "auroc": 0.5628030350623695,
+      "ap": 0.10662208722825009
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3",
+      "method": "native",
+      "auroc": 0.5817463475244138,
+      "ap": 0.10878403269372533
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3",
+      "method": "rewired",
+      "auroc": 0.580597379571266,
+      "ap": 0.10652395319477201
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3_seed43",
+      "method": "node",
+      "auroc": 0.5370636399807341,
+      "ap": 0.10584745917705166
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3_seed43",
+      "method": "native",
+      "auroc": 0.5630194263536671,
+      "ap": 0.10543866600384222
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3_seed43",
+      "method": "rewired",
+      "auroc": 0.5527568948547735,
+      "ap": 0.10300007345577075
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3_seed43",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3_seed44",
+      "method": "node",
+      "auroc": 0.5564648643366211,
+      "ap": 0.10512391916027342
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3_seed44",
+      "method": "native",
+      "auroc": 0.6069203331029813,
+      "ap": 0.11514345132782865
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3_seed44",
+      "method": "rewired",
+      "auroc": 0.5973739869746404,
+      "ap": 0.11022840711080878
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3_seed44",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1",
+      "method": "node",
+      "auroc": 0.5628030350623695,
+      "ap": 0.10662208722825009
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1",
+      "method": "native",
+      "auroc": 0.55471000076784,
+      "ap": 0.10097296794193761
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1",
+      "method": "rewired",
+      "auroc": 0.5612994646060632,
+      "ap": 0.10012595042264961
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1_seed43",
+      "method": "node",
+      "auroc": 0.5370636399807341,
+      "ap": 0.10584745917705166
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1_seed43",
+      "method": "native",
+      "auroc": 0.559733070871638,
+      "ap": 0.10624995333187423
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1_seed43",
+      "method": "rewired",
+      "auroc": 0.5633391270356487,
+      "ap": 0.1045730433168762
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1_seed43",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1_seed44",
+      "method": "node",
+      "auroc": 0.5564648643366211,
+      "ap": 0.10512391916027342
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1_seed44",
+      "method": "native",
+      "auroc": 0.5640916103002255,
+      "ap": 0.10555883164555858
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1_seed44",
+      "method": "rewired",
+      "auroc": 0.5585170914218304,
+      "ap": 0.10331788311640305
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1_seed44",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2",
+      "method": "node",
+      "auroc": 0.5628030350623695,
+      "ap": 0.10662208722825009
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2",
+      "method": "native",
+      "auroc": 0.5539281999734746,
+      "ap": 0.10192908131106027
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2",
+      "method": "rewired",
+      "auroc": 0.5578148667797486,
+      "ap": 0.10044250730471418
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2_seed43",
+      "method": "node",
+      "auroc": 0.5370636399807341,
+      "ap": 0.10584745917705166
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2_seed43",
+      "method": "native",
+      "auroc": 0.5557109849991972,
+      "ap": 0.10535767551024505
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2_seed43",
+      "method": "rewired",
+      "auroc": 0.5614600129834775,
+      "ap": 0.10622359796339373
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2_seed43",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2_seed44",
+      "method": "node",
+      "auroc": 0.5564648643366211,
+      "ap": 0.10512391916027342
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2_seed44",
+      "method": "native",
+      "auroc": 0.5589680229514377,
+      "ap": 0.10362692416334168
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2_seed44",
+      "method": "rewired",
+      "auroc": 0.5587237102031984,
+      "ap": 0.10232404763603176
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2_seed44",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3",
+      "method": "node",
+      "auroc": 0.5628030350623695,
+      "ap": 0.10662208722825009
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3",
+      "method": "native",
+      "auroc": 0.5826733398948757,
+      "ap": 0.10921548511936574
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3",
+      "method": "rewired",
+      "auroc": 0.5842788236690191,
+      "ap": 0.10958812220702066
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3_seed43",
+      "method": "node",
+      "auroc": 0.5370636399807341,
+      "ap": 0.10584745917705166
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3_seed43",
+      "method": "native",
+      "auroc": 0.5605958438911343,
+      "ap": 0.1041845458867395
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3_seed43",
+      "method": "rewired",
+      "auroc": 0.5531589638347328,
+      "ap": 0.10265828724914691
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3_seed43",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3_seed44",
+      "method": "node",
+      "auroc": 0.5564648643366211,
+      "ap": 0.10512391916027342
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3_seed44",
+      "method": "native",
+      "auroc": 0.6008167026155424,
+      "ap": 0.11296266756508343
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3_seed44",
+      "method": "rewired",
+      "auroc": 0.5939396477708206,
+      "ap": 0.10917185688665747
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3_seed44",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed42",
+      "method": "node",
+      "auroc": 0.5046887106569221,
+      "ap": 0.09187655193223354
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed42",
+      "method": "native",
+      "auroc": 0.5987574951660978,
+      "ap": 0.1168445510356732
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed42",
+      "method": "rewired",
+      "auroc": 0.5999539295960463,
+      "ap": 0.11664868998952509
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed42",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed42",
+      "method": "lag_pair",
+      "auroc": 0.5896704570044465,
+      "ap": 0.11656284290141342
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed43",
+      "method": "node",
+      "auroc": 0.5284261372758431,
+      "ap": 0.09541465757238568
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed43",
+      "method": "native",
+      "auroc": 0.5880356557005144,
+      "ap": 0.10773065480107079
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed43",
+      "method": "rewired",
+      "auroc": 0.5901534982095366,
+      "ap": 0.10782745405441271
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed43",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed43",
+      "method": "lag_pair",
+      "auroc": 0.5713456048136591,
+      "ap": 0.10952689163639293
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed44",
+      "method": "node",
+      "auroc": 0.5330569109096113,
+      "ap": 0.09606944459762831
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed44",
+      "method": "native",
+      "auroc": 0.609649655519025,
+      "ap": 0.11602649187681817
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed44",
+      "method": "rewired",
+      "auroc": 0.6114156876705826,
+      "ap": 0.11504724938975125
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed44",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed44",
+      "method": "lag_pair",
+      "auroc": 0.58231734131887,
+      "ap": 0.11179163425381701
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed42",
+      "method": "node",
+      "auroc": 0.5046887106569221,
+      "ap": 0.09187655193223354
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed42",
+      "method": "native",
+      "auroc": 0.5987574951660978,
+      "ap": 0.1168445510356732
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed42",
+      "method": "rewired",
+      "auroc": 0.5999539295960463,
+      "ap": 0.11664868998952509
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed42",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed42",
+      "method": "lag_pair",
+      "auroc": 0.5896704570044465,
+      "ap": 0.11656284290141342
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed43",
+      "method": "node",
+      "auroc": 0.5284261372758431,
+      "ap": 0.09541465757238568
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed43",
+      "method": "native",
+      "auroc": 0.5880356557005144,
+      "ap": 0.10773065480107079
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed43",
+      "method": "rewired",
+      "auroc": 0.5901534982095366,
+      "ap": 0.10782745405441271
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed43",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed43",
+      "method": "lag_pair",
+      "auroc": 0.5713456048136591,
+      "ap": 0.10952689163639293
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed44",
+      "method": "node",
+      "auroc": 0.5330569109096113,
+      "ap": 0.09606944459762831
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed44",
+      "method": "native",
+      "auroc": 0.609649655519025,
+      "ap": 0.11602649187681817
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed44",
+      "method": "rewired",
+      "auroc": 0.6114156876705826,
+      "ap": 0.11504724938975125
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed44",
+      "method": "nll",
+      "auroc": 0.5634312678435561,
+      "ap": 0.10719540041044484
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed44",
+      "method": "lag_pair",
+      "auroc": 0.58231734131887,
+      "ap": 0.11179163425381701
+    }
+  ],
+  "independent_fitted_density_checks": [
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3",
+      "method": "node",
+      "max_error": 5.684341886080802e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3",
+      "method": "native",
+      "max_error": 1.1368683772161603e-13
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3",
+      "method": "rewired",
+      "max_error": 1.7053025658242404e-13
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3_seed43",
+      "method": "node",
+      "max_error": 6.252776074688882e-13
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3_seed43",
+      "method": "native",
+      "max_error": 1.1368683772161603e-13
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3_seed43",
+      "method": "rewired",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3_seed44",
+      "method": "node",
+      "max_error": 5.684341886080802e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3_seed44",
+      "method": "native",
+      "max_error": 1.9895196601282805e-13
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_v3_seed44",
+      "method": "rewired",
+      "max_error": 1.1368683772161603e-13
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1",
+      "method": "node",
+      "max_error": 3.552713678800501e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1",
+      "method": "native",
+      "max_error": 2.842170943040401e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1",
+      "method": "rewired",
+      "max_error": 1.0658141036401503e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1_seed43",
+      "method": "node",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1_seed43",
+      "method": "native",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1_seed43",
+      "method": "rewired",
+      "max_error": 7.105427357601002e-15
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1_seed44",
+      "method": "node",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1_seed44",
+      "method": "native",
+      "max_error": 7.105427357601002e-15
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v1_seed44",
+      "method": "rewired",
+      "max_error": 2.842170943040401e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2",
+      "method": "node",
+      "max_error": 3.552713678800501e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2",
+      "method": "native",
+      "max_error": 5.684341886080802e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2",
+      "method": "rewired",
+      "max_error": 4.263256414560601e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2_seed43",
+      "method": "node",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2_seed43",
+      "method": "native",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2_seed43",
+      "method": "rewired",
+      "max_error": 3.552713678800501e-15
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2_seed44",
+      "method": "node",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2_seed44",
+      "method": "native",
+      "max_error": 2.1316282072803006e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v2_seed44",
+      "method": "rewired",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3",
+      "method": "node",
+      "max_error": 3.552713678800501e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3",
+      "method": "native",
+      "max_error": 8.526512829121202e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3",
+      "method": "rewired",
+      "max_error": 2.1316282072803006e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3_seed43",
+      "method": "node",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3_seed43",
+      "method": "native",
+      "max_error": 2.842170943040401e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3_seed43",
+      "method": "rewired",
+      "max_error": 2.842170943040401e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3_seed44",
+      "method": "node",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3_seed44",
+      "method": "native",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_map_v3_seed44",
+      "method": "rewired",
+      "max_error": 8.526512829121202e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1",
+      "method": "node",
+      "max_error": 7.105427357601002e-15
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1",
+      "method": "native",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1",
+      "method": "rewired",
+      "max_error": 7.105427357601002e-15
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1_seed43",
+      "method": "node",
+      "max_error": 2.842170943040401e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1_seed43",
+      "method": "native",
+      "max_error": 4.263256414560601e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1_seed43",
+      "method": "rewired",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1_seed44",
+      "method": "node",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1_seed44",
+      "method": "native",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v1_seed44",
+      "method": "rewired",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2",
+      "method": "node",
+      "max_error": 7.105427357601002e-15
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2",
+      "method": "native",
+      "max_error": 4.263256414560601e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2",
+      "method": "rewired",
+      "max_error": 2.1316282072803006e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2_seed43",
+      "method": "node",
+      "max_error": 2.842170943040401e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2_seed43",
+      "method": "native",
+      "max_error": 7.105427357601002e-15
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2_seed43",
+      "method": "rewired",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2_seed44",
+      "method": "node",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2_seed44",
+      "method": "native",
+      "max_error": 7.105427357601002e-15
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v2_seed44",
+      "method": "rewired",
+      "max_error": 4.263256414560601e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3",
+      "method": "node",
+      "max_error": 7.105427357601002e-15
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3",
+      "method": "native",
+      "max_error": 5.684341886080802e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3",
+      "method": "rewired",
+      "max_error": 2.1316282072803006e-13
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3_seed43",
+      "method": "node",
+      "max_error": 2.842170943040401e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3_seed43",
+      "method": "native",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3_seed43",
+      "method": "rewired",
+      "max_error": 8.526512829121202e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3_seed44",
+      "method": "node",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3_seed44",
+      "method": "native",
+      "max_error": 1.4210854715202004e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_v3_seed44",
+      "method": "rewired",
+      "max_error": 2.1316282072803006e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed42",
+      "method": "lag_pair",
+      "max_error": 1.7053025658242404e-13
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed43",
+      "method": "lag_pair",
+      "max_error": 5.684341886080802e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_bound_seed44",
+      "method": "lag_pair",
+      "max_error": 8.526512829121202e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed42",
+      "method": "lag_pair",
+      "max_error": 1.7053025658242404e-13
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed43",
+      "method": "lag_pair",
+      "max_error": 5.684341886080802e-14
+    },
+    {
+      "output": "outputs/flow_latent_20261007_head16_control_seed44",
+      "method": "lag_pair",
+      "max_error": 8.526512829121202e-14
+    }
+  ],
+  "derived_witness": {
+    "projection_orthogonal": true,
+    "source_message_relative_max": 3.9671017186896596e-07,
+    "finite_path_relative_max": 4.84456290683516e-08
+  },
+  "cohort_node_retention": {
+    "fit": {
+      "tokens": 4120,
+      "raw_variance": 1005.263752867788,
+      "head16_variance": 600.7307183286765,
+      "final128_variance": 454.1465157474841,
+      "head16_fraction": 0.5975851776361467,
+      "final128_fraction": 0.45176851791572886
+    },
+    "reference": {
+      "tokens": 2030,
+      "raw_variance": 944.1220836682844,
+      "head16_variance": 428.2554688605075,
+      "final128_variance": 279.5837728172281,
+      "head16_fraction": 0.45360179183243665,
+      "final128_fraction": 0.29613095345777274
+    },
+    "regression": {
+      "tokens": 2968,
+      "raw_variance": 1025.034860291386,
+      "head16_variance": 479.7960207081237,
+      "final128_variance": 317.8492953363068,
+      "head16_fraction": 0.4680777593961365,
+      "final128_fraction": 0.3100863274503191
+    },
+    "message_retention": "unmeasured; node retention does not estimate source/history/root retention"
+  }
+}
