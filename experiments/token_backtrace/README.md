@@ -1,5 +1,35 @@
 > 2026-09-30: Current implementation and status are in [the architecture document](../../docs/ARCHITECTURE.md). Reconstruction graph commands described below are retired; their cached results remain historical evidence. Current commands: `python main.py --help`.
 
+## Content-fixed binding verification
+
+`binding_run` measures source7 value vectors and native edge messages in every
+physical head, then replaces one edge before W_O with base Q/K/A fixed. Entity
+names are disjoint across fit/dev/test; owner and fact-order conditions are
+balanced. Use `--reverse-participants` to balance queried ownership for each name:
+
+```bash
+PYTHONPATH=.:teaching/state_audit/src OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 python -m experiments.token_backtrace.binding_run --model /path/to/Meta-Llama-3.1-8B-Instruct --output outputs/binding_new --reverse-participants
+PYTHONPATH=.:teaching/state_audit/src python -m experiments.token_backtrace.binding_analyze --output outputs/binding_new
+PYTHONPATH=.:teaching/state_audit/src OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 python -m experiments.token_backtrace.binding_controls --output outputs/binding_new --query-controls
+```
+
+`binding_controls` separates vector direction, norm/position, and attention.
+Its query swaps keep all source tokens fixed: V7 must remain identical although
+the queried-owner label reverses. This separates source-owner encoding from
+source/query alignment in AV. If query observations already exist, resume CPU
+fitting with `--cached-query-controls`; it performs no new model forwards.
+
+The 2026-10-07 balanced experiment captured384 owner/order/style inputs and384
+fixed-source query controls, then832 finite patches. Held-out source-owner
+readability from full V and unit V was100% across both styles; norm/position was
+81.25%/70.31%. Fixed-source query alignment was100% from AV across both styles;
+V-only cannot exceed50% on those paired labels. A selected single head affected
+candidate log-odds but never flipped the answer, and the effect was asymmetric.
+These are auxiliary-supervised mechanism probes on synthetic facts, not natural
+hallucination detection, an unsupervised classifier, or a new binding theory.
+Raw results are retained under `outputs/binding_message_20261007_*`; canonical
+plans, limitations and execution tracker are in shared research `refine-logs/binding_message_20261007/`.
+
 ## Source-conditioned sequence controls
 
 `sequence.py` implements an unsupervised IOHMM with joint seven-channel
