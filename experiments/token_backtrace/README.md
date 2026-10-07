@@ -1,5 +1,49 @@
 > 2026-09-30: Current implementation and status are in [the architecture document](../../docs/ARCHITECTURE.md). Reconstruction graph commands described below are retired; their cached results remain historical evidence. Current commands: `python main.py --help`.
 
+## Full-vector source projection: natural detection experiment
+
+`grounded_projection_run` projects each historical token's native V into a
+content-matched source V bank and transports the displacement through actual
+attention edges. `grounded_projection_cycle_run` conditions each edge's source
+projection on both the current query and historical carrier. All physical head
+coordinates enter native W_O and downstream query replay. Independent token
+worlds keep earlier KV fixed and update current self KV; tokens never share an
+edited history. Four structural layer cuts are fixed without label selection.
+
+```bash
+PYTHONPATH=.:teaching/state_audit/src python -m experiments.token_backtrace.grounded_projection_run --output outputs/projection_new
+PYTHONPATH=.:teaching/state_audit/src python -m experiments.token_backtrace.grounded_projection_cycle_run --previous outputs/projection_new --output outputs/projection_cycle_new
+PYTHONPATH=.:teaching/state_audit/src python -m experiments.token_backtrace.grounded_projection_evaluate --output outputs/projection_new
+PYTHONPATH=.:teaching/state_audit/src python -m experiments.token_backtrace.grounded_projection_evaluate --output outputs/projection_cycle_new
+PYTHONPATH=.:teaching/state_audit/src python -m experiments.token_backtrace.grounded_projection_diagnostics --output outputs/projection_cycle_new
+```
+
+The local model/dataset defaults are in `grounded_projection_data`. Run both
+predefined operators before reading annotations. Inputs strip annotation fields;
+previously exposed controls remain regression cases. A source-disjoint mixed
+reference calibrates token tails and a 95th-percentile budget, not normal FPR.
+Fisher tail combination is a ranking rule, not a calibrated probability/p-value.
+Frozen code/input changes require a fresh output directory.
+
+Both 2026-10-07 experiments are negative: 17 regression answers,2968 valid
+tokens/265 wrong,12 unlabelled reference answers. Joint graph AUROC/AP were
+0.5642/0.1127 and0.5683/0.1152 after matched zero-dose readout; node-only0.5748/0.1256. Both missed all16
+span onsets and alarmed on all6 normal answers. Query cycles detected1/49 wrong
+tokens in12297 and0/13 in12219; graph-vs-rewire uncertainty includes zero.
+On the original14-answer subset, frozen isolated fixed scoring achieved0.8072
+AUROC versus0.6140 for query cycles. Source projection is **not a verified
+semantic correction** and this experiment does not establish a graph mainline.
+Raw outputs: `outputs/grounded_projection_20261007_v1` and`_v2_cycle`.
+Final matched arrays are in`outputs/grounded_projection_20261007_matched/{v1,v2}`.
+The matching utility recomputes only zero-dose baselines; original finite
+interventions remain frozen. The delivered runners use matched baselines by
+default. RAGTruth12297 annotates a whole49-token claim for citing Passage2
+instead of Passage3, although its factual content occurs in Passage3. This
+distinguishes attribution errors from absent source content and prevents
+interpreting every labelled word as an independently false fact.
+Canonical plan/literature/results are in shared research
+`refine-logs/grounded_projection_20261007/`.
+
 ## Content-fixed binding verification
 
 `binding_run` measures source7 value vectors and native edge messages in every
