@@ -1,0 +1,2010 @@
+{
+  "measurement": {
+    "status": "DONE",
+    "cases": 53,
+    "seconds": 288.3376638889313,
+    "peak_memory": 19958561792,
+    "full_forwards": 106,
+    "no_natural_label_fit": true
+  },
+  "pilot": {
+    "status": "DONE",
+    "cases": 8,
+    "seconds": 28.667737007141113,
+    "peak_memory": 19399217152,
+    "full_forwards": 16,
+    "no_natural_label_fit": true
+  },
+  "pilot_checks": {
+    "tokens": 256,
+    "quarter_pearson": 0.9926037035471882,
+    "sign_agreement": 0.984375,
+    "identity_max": 5.7220458984375e-05
+  },
+  "runs": {
+    "v1": {
+      "execution": {
+        "status": "DONE",
+        "selected_rank": 8,
+        "fitted_models": 15,
+        "seconds": 867.5434288978577,
+        "labels_used": false
+      },
+      "metrics": {
+        "source_raw": {
+          "auroc": 0.5208684969181692,
+          "ap": 0.11112381460217588,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 24,
+          "fp": 126,
+          "recall": 0.09056603773584905,
+          "precision": 0.16,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "source_local": {
+          "auroc": 0.6456962564306605,
+          "ap": 0.21844979169677434,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 65,
+          "fp": 161,
+          "recall": 0.24528301886792453,
+          "precision": 0.28761061946902655,
+          "onset_hits": 5,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "source_unit": {
+          "auroc": 0.6440349297426339,
+          "ap": 0.1609353877257811,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 58,
+          "fp": 247,
+          "recall": 0.2188679245283019,
+          "precision": 0.1901639344262295,
+          "onset_hits": 2,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 4
+        },
+        "nll": {
+          "auroc": 0.5776502697910777,
+          "ap": 0.11129448333986293,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 15,
+          "fp": 117,
+          "recall": 0.05660377358490566,
+          "precision": 0.11363636363636363,
+          "onset_hits": 2,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "node": {
+          "auroc": 0.455852686393176,
+          "ap": 0.07680928826342734,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 6,
+          "fp": 197,
+          "recall": 0.022641509433962263,
+          "precision": 0.029556650246305417,
+          "onset_hits": 0,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 5
+        },
+        "chain": {
+          "auroc": 0.45659679322067026,
+          "ap": 0.07691207346974921,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 6,
+          "fp": 199,
+          "recall": 0.022641509433962263,
+          "precision": 0.02926829268292683,
+          "onset_hits": 0,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 5
+        },
+        "native": {
+          "auroc": 0.4588737880342596,
+          "ap": 0.07716251690644288,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 9,
+          "fp": 193,
+          "recall": 0.033962264150943396,
+          "precision": 0.04455445544554455,
+          "onset_hits": 0,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 5
+        },
+        "rewired": {
+          "auroc": 0.45847451119999444,
+          "ap": 0.07712781563500844,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 9,
+          "fp": 194,
+          "recall": 0.033962264150943396,
+          "precision": 0.04433497536945813,
+          "onset_hits": 0,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 5
+        },
+        "legacy_fixed": {
+          "auroc": 0.6701903545326996,
+          "ap": 0.1686151292483614,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 53,
+          "fp": 201,
+          "recall": 0.2,
+          "precision": 0.20866141732283464,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 3
+        }
+      },
+      "comparisons": [
+        {
+          "first": "native",
+          "second": "node",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.00851488316496456,
+            0.018923992415673642
+          ],
+          "ap_ci95": [
+            -0.0015551459052776172,
+            0.00449470002348577
+          ]
+        },
+        {
+          "first": "native",
+          "second": "chain",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.006842396466227063,
+            0.014320460895870846
+          ],
+          "ap_ci95": [
+            -0.0013527307702933624,
+            0.00338110181906615
+          ]
+        },
+        {
+          "first": "native",
+          "second": "rewired",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.00031921579764238874,
+            0.0012117974976802212
+          ],
+          "ap_ci95": [
+            -0.00018193363879059622,
+            0.0004304275529323092
+          ]
+        },
+        {
+          "first": "native",
+          "second": "source_raw",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.16443374801218044,
+            0.08301207430177833
+          ],
+          "ap_ci95": [
+            -0.07005617971936645,
+            -0.004669457721498392
+          ]
+        },
+        {
+          "first": "native",
+          "second": "source_unit",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.34733306329338887,
+            0.04212871785250748
+          ],
+          "ap_ci95": [
+            -0.2268450230856976,
+            -0.01669074444688272
+          ]
+        },
+        {
+          "first": "native",
+          "second": "legacy_fixed",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.3954957128635079,
+            0.01610997360788295
+          ],
+          "ap_ci95": [
+            -0.2592706701148396,
+            -0.009850692513653874
+          ]
+        }
+      ],
+      "within_answer": {
+        "source_raw": {
+          "mean": 0.5124326156158993,
+          "mixed_answers": 11
+        },
+        "source_local": {
+          "mean": 0.6798443286643479,
+          "mixed_answers": 11
+        },
+        "source_unit": {
+          "mean": 0.6801053192822236,
+          "mixed_answers": 11
+        },
+        "nll": {
+          "mean": 0.5632671534093439,
+          "mixed_answers": 11
+        },
+        "node": {
+          "mean": 0.4518128123890385,
+          "mixed_answers": 11
+        },
+        "chain": {
+          "mean": 0.45420815961410876,
+          "mixed_answers": 11
+        },
+        "native": {
+          "mean": 0.4580729832508775,
+          "mixed_answers": 11
+        },
+        "rewired": {
+          "mean": 0.45747756811784746,
+          "mixed_answers": 11
+        },
+        "legacy_fixed": {
+          "mean": 0.702380597367815,
+          "mixed_answers": 11
+        }
+      },
+      "seeds": {
+        "42": {
+          "node": {
+            "auroc": 0.4557605455852687,
+            "ap": 0.07679150750142008,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 197,
+            "recall": 0.022641509433962263,
+            "precision": 0.029556650246305417,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "chain": {
+            "auroc": 0.4565325738697046,
+            "ap": 0.07689312665662465,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 199,
+            "recall": 0.022641509433962263,
+            "precision": 0.02926829268292683,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "native": {
+            "auroc": 0.4587027691104922,
+            "ap": 0.07714256697621014,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 9,
+            "fp": 193,
+            "recall": 0.033962264150943396,
+            "precision": 0.04455445544554455,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "rewired": {
+            "auroc": 0.4584577583258294,
+            "ap": 0.07709306497617908,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 9,
+            "fp": 194,
+            "recall": 0.033962264150943396,
+            "precision": 0.04433497536945813,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          }
+        },
+        "43": {
+          "node": {
+            "auroc": 0.4556579342310082,
+            "ap": 0.07681402954725958,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 198,
+            "recall": 0.022641509433962263,
+            "precision": 0.029411764705882353,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "chain": {
+            "auroc": 0.45658283249219944,
+            "ap": 0.07692306959072884,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 199,
+            "recall": 0.022641509433962263,
+            "precision": 0.02926829268292683,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "native": {
+            "auroc": 0.45872999253101027,
+            "ap": 0.07714296232063146,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 9,
+            "fp": 193,
+            "recall": 0.033962264150943396,
+            "precision": 0.04455445544554455,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "rewired": {
+            "auroc": 0.45830907656761527,
+            "ap": 0.07712805556643268,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 9,
+            "fp": 193,
+            "recall": 0.033962264150943396,
+            "precision": 0.04455445544554455,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          }
+        },
+        "44": {
+          "node": {
+            "auroc": 0.45613678721755707,
+            "ap": 0.07689116865874814,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 196,
+            "recall": 0.022641509433962263,
+            "precision": 0.0297029702970297,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "chain": {
+            "auroc": 0.4568438981146036,
+            "ap": 0.0769426955143371,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 199,
+            "recall": 0.022641509433962263,
+            "precision": 0.02926829268292683,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "native": {
+            "auroc": 0.45914323009374625,
+            "ap": 0.0772184950691786,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 9,
+            "fp": 194,
+            "recall": 0.033962264150943396,
+            "precision": 0.04433497536945813,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "rewired": {
+            "auroc": 0.458879372325648,
+            "ap": 0.07717588208917428,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 9,
+            "fp": 195,
+            "recall": 0.033962264150943396,
+            "precision": 0.04411764705882353,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          }
+        }
+      },
+      "null_strength": {
+        "valid_cases": 63,
+        "total": 159,
+        "adopted_mass_reassigned_mean": 0.24665400030752208,
+        "adopted_mass_reassigned_range": [
+          0.22188690462474578,
+          0.26516312846537515
+        ]
+      }
+    },
+    "v2": {
+      "execution": {
+        "status": "DONE",
+        "selected_rank": 8,
+        "fitted_models": 10,
+        "reused_models": 6,
+        "seconds": 720.0828483104706,
+        "labels_used": false
+      },
+      "metrics": {
+        "source_raw": {
+          "auroc": 0.5208684969181692,
+          "ap": 0.11112381460217588,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 24,
+          "fp": 126,
+          "recall": 0.09056603773584905,
+          "precision": 0.16,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "source_local": {
+          "auroc": 0.6456962564306605,
+          "ap": 0.21844979169677434,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 65,
+          "fp": 161,
+          "recall": 0.24528301886792453,
+          "precision": 0.28761061946902655,
+          "onset_hits": 5,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "source_unit": {
+          "auroc": 0.6440349297426339,
+          "ap": 0.1609353877257811,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 58,
+          "fp": 247,
+          "recall": 0.2188679245283019,
+          "precision": 0.1901639344262295,
+          "onset_hits": 2,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 4
+        },
+        "nll": {
+          "auroc": 0.5776502697910777,
+          "ap": 0.11129448333986293,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 15,
+          "fp": 117,
+          "recall": 0.05660377358490566,
+          "precision": 0.11363636363636363,
+          "onset_hits": 2,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "node": {
+          "auroc": 0.455852686393176,
+          "ap": 0.07680928826342734,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 6,
+          "fp": 197,
+          "recall": 0.022641509433962263,
+          "precision": 0.029556650246305417,
+          "onset_hits": 0,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 5
+        },
+        "chain": {
+          "auroc": 0.45659679322067026,
+          "ap": 0.07691207346974921,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 6,
+          "fp": 199,
+          "recall": 0.022641509433962263,
+          "precision": 0.02926829268292683,
+          "onset_hits": 0,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 5
+        },
+        "native": {
+          "auroc": 0.4546541578539568,
+          "ap": 0.07640984213752519,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 6,
+          "fp": 210,
+          "recall": 0.022641509433962263,
+          "precision": 0.027777777777777776,
+          "onset_hits": 0,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 5
+        },
+        "rewired": {
+          "auroc": 0.45794888977306836,
+          "ap": 0.07695960831306617,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 7,
+          "fp": 212,
+          "recall": 0.026415094339622643,
+          "precision": 0.0319634703196347,
+          "onset_hits": 0,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 5
+        },
+        "edge_node": {
+          "auroc": 0.48317313397413075,
+          "ap": 0.08501637541184776,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 11,
+          "fp": 132,
+          "recall": 0.04150943396226415,
+          "precision": 0.07692307692307693,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "legacy_fixed": {
+          "auroc": 0.6701903545326996,
+          "ap": 0.1686151292483614,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 53,
+          "fp": 201,
+          "recall": 0.2,
+          "precision": 0.20866141732283464,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 3
+        }
+      },
+      "comparisons": [
+        {
+          "first": "native",
+          "second": "node",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.008257579557399725,
+            0.01105605352664958
+          ],
+          "ap_ci95": [
+            -0.0018987758841003833,
+            0.001293454493177029
+          ]
+        },
+        {
+          "first": "native",
+          "second": "chain",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.00753317014633137,
+            0.006204438948278345
+          ],
+          "ap_ci95": [
+            -0.002091270799930214,
+            0.0006536789427388251
+          ]
+        },
+        {
+          "first": "native",
+          "second": "rewired",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.010716262082777567,
+            0.0014081345558840394
+          ],
+          "ap_ci95": [
+            -0.002692397560951267,
+            0.00019664027938065472
+          ]
+        },
+        {
+          "first": "native",
+          "second": "source_raw",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.16140756834061673,
+            0.06782560543990253
+          ],
+          "ap_ci95": [
+            -0.07017548251648241,
+            -0.007967642742688663
+          ]
+        },
+        {
+          "first": "native",
+          "second": "source_unit",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.3460483835568182,
+            0.026069894695085218
+          ],
+          "ap_ci95": [
+            -0.2266376255756848,
+            -0.019577570265823463
+          ]
+        },
+        {
+          "first": "native",
+          "second": "legacy_fixed",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.39440880134435125,
+            0.0009969976796234323
+          ],
+          "ap_ci95": [
+            -0.2605976956667904,
+            -0.012932588557551965
+          ]
+        },
+        {
+          "first": "native",
+          "second": "edge_node",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.07740766022173133,
+            0.046294192628349766
+          ],
+          "ap_ci95": [
+            -0.024336784579393624,
+            0.0038322510129991717
+          ]
+        }
+      ],
+      "within_answer": {
+        "source_raw": {
+          "mean": 0.5124326156158993,
+          "mixed_answers": 11
+        },
+        "source_local": {
+          "mean": 0.6798443286643479,
+          "mixed_answers": 11
+        },
+        "source_unit": {
+          "mean": 0.6801053192822236,
+          "mixed_answers": 11
+        },
+        "nll": {
+          "mean": 0.5632671534093439,
+          "mixed_answers": 11
+        },
+        "node": {
+          "mean": 0.4518128123890385,
+          "mixed_answers": 11
+        },
+        "chain": {
+          "mean": 0.45420815961410876,
+          "mixed_answers": 11
+        },
+        "native": {
+          "mean": 0.45647718030797635,
+          "mixed_answers": 11
+        },
+        "rewired": {
+          "mean": 0.4593066448425903,
+          "mixed_answers": 11
+        },
+        "edge_node": {
+          "mean": 0.4492145748631345,
+          "mixed_answers": 11
+        },
+        "legacy_fixed": {
+          "mean": 0.702380597367815,
+          "mixed_answers": 11
+        }
+      },
+      "seeds": {
+        "42": {
+          "node": {
+            "auroc": 0.4557605455852687,
+            "ap": 0.07679150750142008,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 197,
+            "recall": 0.022641509433962263,
+            "precision": 0.029556650246305417,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "chain": {
+            "auroc": 0.4565325738697046,
+            "ap": 0.07689312665662465,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 199,
+            "recall": 0.022641509433962263,
+            "precision": 0.02926829268292683,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "native": {
+            "auroc": 0.45453060540699014,
+            "ap": 0.07640983701087185,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 210,
+            "recall": 0.022641509433962263,
+            "precision": 0.027777777777777776,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "rewired": {
+            "auroc": 0.4587788550806581,
+            "ap": 0.07704718156632663,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 7,
+            "fp": 204,
+            "recall": 0.026415094339622643,
+            "precision": 0.03317535545023697,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "edge_node": {
+            "auroc": 0.4829197467523855,
+            "ap": 0.08489452056465133,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 11,
+            "fp": 133,
+            "recall": 0.04150943396226415,
+            "precision": 0.0763888888888889,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          }
+        },
+        "43": {
+          "node": {
+            "auroc": 0.4556579342310082,
+            "ap": 0.07681402954725958,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 198,
+            "recall": 0.022641509433962263,
+            "precision": 0.029411764705882353,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "chain": {
+            "auroc": 0.45658283249219944,
+            "ap": 0.07692306959072884,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 199,
+            "recall": 0.022641509433962263,
+            "precision": 0.02926829268292683,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "native": {
+            "auroc": 0.45450757020501326,
+            "ap": 0.07637749780223714,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 209,
+            "recall": 0.022641509433962263,
+            "precision": 0.027906976744186046,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "rewired": {
+            "auroc": 0.4603340802323065,
+            "ap": 0.07746526008128914,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 193,
+            "recall": 0.022641509433962263,
+            "precision": 0.03015075376884422,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "edge_node": {
+            "auroc": 0.48328551783832074,
+            "ap": 0.08502495351492678,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 11,
+            "fp": 132,
+            "recall": 0.04150943396226415,
+            "precision": 0.07692307692307693,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          }
+        },
+        "44": {
+          "node": {
+            "auroc": 0.45613678721755707,
+            "ap": 0.07689116865874814,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 196,
+            "recall": 0.022641509433962263,
+            "precision": 0.0297029702970297,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "chain": {
+            "auroc": 0.4568438981146036,
+            "ap": 0.0769426955143371,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 199,
+            "recall": 0.022641509433962263,
+            "precision": 0.02926829268292683,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "native": {
+            "auroc": 0.4548551923439365,
+            "ap": 0.07639957436854321,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 210,
+            "recall": 0.022641509433962263,
+            "precision": 0.027777777777777776,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "rewired": {
+            "auroc": 0.45515395193321184,
+            "ap": 0.07640292969779269,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 6,
+            "fp": 214,
+            "recall": 0.022641509433962263,
+            "precision": 0.02727272727272727,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 5
+          },
+          "edge_node": {
+            "auroc": 0.4832464277986025,
+            "ap": 0.0849661345521848,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 11,
+            "fp": 134,
+            "recall": 0.04150943396226415,
+            "precision": 0.07586206896551724,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          }
+        }
+      },
+      "null_strength": {
+        "valid_cases": 63,
+        "total": 159,
+        "adopted_mass_reassigned_mean": 0.24665400030752208,
+        "adopted_mass_reassigned_range": [
+          0.22188690462474578,
+          0.26516312846537515
+        ]
+      }
+    },
+    "v3": {
+      "execution": {
+        "status": "DONE",
+        "selected_rank": 2,
+        "fitted_models": 17,
+        "reused_models": 0,
+        "seconds": 332.96497893333435,
+        "labels_used": false
+      },
+      "metrics": {
+        "source_raw": {
+          "auroc": 0.5417698015482448,
+          "ap": 0.10899374107409517,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 21,
+          "fp": 117,
+          "recall": 0.07924528301886792,
+          "precision": 0.15217391304347827,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "source_local": {
+          "auroc": 0.6472926657312978,
+          "ap": 0.23353247549930678,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 49,
+          "fp": 118,
+          "recall": 0.18490566037735848,
+          "precision": 0.2934131736526946,
+          "onset_hits": 4,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 5
+        },
+        "source_unit": {
+          "auroc": 0.6714761376248615,
+          "ap": 0.18343217532187167,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 50,
+          "fp": 169,
+          "recall": 0.18867924528301888,
+          "precision": 0.228310502283105,
+          "onset_hits": 3,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 5
+        },
+        "nll": {
+          "auroc": 0.5776502697910777,
+          "ap": 0.11129448333986293,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 15,
+          "fp": 117,
+          "recall": 0.05660377358490566,
+          "precision": 0.11363636363636363,
+          "onset_hits": 2,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "node": {
+          "auroc": 0.5404819243468124,
+          "ap": 0.10900202883018144,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 20,
+          "fp": 117,
+          "recall": 0.07547169811320754,
+          "precision": 0.145985401459854,
+          "onset_hits": 0,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "chain": {
+          "auroc": 0.564985794958781,
+          "ap": 0.11907843588228811,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 26,
+          "fp": 127,
+          "recall": 0.09811320754716982,
+          "precision": 0.16993464052287582,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "native": {
+          "auroc": 0.5661340648755052,
+          "ap": 0.12116441843410748,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 25,
+          "fp": 137,
+          "recall": 0.09433962264150944,
+          "precision": 0.15432098765432098,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "rewired": {
+          "auroc": 0.5680515709309711,
+          "ap": 0.12139849977253013,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 26,
+          "fp": 137,
+          "recall": 0.09811320754716982,
+          "precision": 0.15950920245398773,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "edge_node": {
+          "auroc": 0.5407283312043222,
+          "ap": 0.10912480734688032,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 21,
+          "fp": 117,
+          "recall": 0.07924528301886792,
+          "precision": 0.15217391304347827,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "legacy_fixed": {
+          "auroc": 0.6701903545326996,
+          "ap": 0.1686151292483614,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 53,
+          "fp": 201,
+          "recall": 0.2,
+          "precision": 0.20866141732283464,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 3
+        }
+      },
+      "comparisons": [
+        {
+          "first": "native",
+          "second": "node",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.0019132715579444235,
+            0.047224424845134394
+          ],
+          "ap_ci95": [
+            0.004449430891948167,
+            0.02463008422570138
+          ]
+        },
+        {
+          "first": "native",
+          "second": "chain",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.01219813748438473,
+            0.015234009667526076
+          ],
+          "ap_ci95": [
+            -0.008664244887072505,
+            0.011814252037364083
+          ]
+        },
+        {
+          "first": "native",
+          "second": "rewired",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.0049140862171764745,
+            0.0015415795658301078
+          ],
+          "ap_ci95": [
+            -0.0012815751104853338,
+            0.0012711871994207885
+          ]
+        },
+        {
+          "first": "native",
+          "second": "source_raw",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.0006416463526767709,
+            0.0441147628121052
+          ],
+          "ap_ci95": [
+            0.004997949308231485,
+            0.024743931148181082
+          ]
+        },
+        {
+          "first": "native",
+          "second": "source_unit",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.18325823965863092,
+            -0.00937797258669527
+          ],
+          "ap_ci95": [
+            -0.16541943394966527,
+            -0.011220187050085532
+          ]
+        },
+        {
+          "first": "native",
+          "second": "legacy_fixed",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.20092840933738762,
+            -0.002584177475603414
+          ],
+          "ap_ci95": [
+            -0.17888178578265188,
+            0.006254166410710725
+          ]
+        },
+        {
+          "first": "native",
+          "second": "edge_node",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.0020859663919644764,
+            0.04724064581678575
+          ],
+          "ap_ci95": [
+            0.0043286214583928865,
+            0.02455240751584024
+          ]
+        }
+      ],
+      "within_answer": {
+        "source_raw": {
+          "mean": 0.5297653481256436,
+          "mixed_answers": 11
+        },
+        "source_local": {
+          "mean": 0.6498630691319142,
+          "mixed_answers": 11
+        },
+        "source_unit": {
+          "mean": 0.7124248655013526,
+          "mixed_answers": 11
+        },
+        "nll": {
+          "mean": 0.5632671534093439,
+          "mixed_answers": 11
+        },
+        "node": {
+          "mean": 0.5272852028604176,
+          "mixed_answers": 11
+        },
+        "chain": {
+          "mean": 0.5456327207387598,
+          "mixed_answers": 11
+        },
+        "native": {
+          "mean": 0.551202065701459,
+          "mixed_answers": 11
+        },
+        "rewired": {
+          "mean": 0.5527611783211867,
+          "mixed_answers": 11
+        },
+        "edge_node": {
+          "mean": 0.527181758728248,
+          "mixed_answers": 11
+        },
+        "legacy_fixed": {
+          "mean": 0.702380597367815,
+          "mixed_answers": 11
+        }
+      },
+      "seeds": {
+        "42": {
+          "node": {
+            "auroc": 0.5404819243468124,
+            "ap": 0.10900202883018144,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 20,
+            "fp": 117,
+            "recall": 0.07547169811320754,
+            "precision": 0.145985401459854,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "chain": {
+            "auroc": 0.564985794958781,
+            "ap": 0.11907843588228811,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 26,
+            "fp": 127,
+            "recall": 0.09811320754716982,
+            "precision": 0.16993464052287582,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "native": {
+            "auroc": 0.5661340648755052,
+            "ap": 0.12116441843410748,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 25,
+            "fp": 137,
+            "recall": 0.09433962264150944,
+            "precision": 0.15432098765432098,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "rewired": {
+            "auroc": 0.5670359279347197,
+            "ap": 0.12161421393374443,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 25,
+            "fp": 137,
+            "recall": 0.09433962264150944,
+            "precision": 0.15432098765432098,
+            "onset_hits": 2,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "edge_node": {
+            "auroc": 0.5407283312043222,
+            "ap": 0.10912480734688032,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 21,
+            "fp": 117,
+            "recall": 0.07924528301886792,
+            "precision": 0.15217391304347827,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          }
+        },
+        "43": {
+          "node": {
+            "auroc": 0.5404819243468124,
+            "ap": 0.10900202883018144,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 20,
+            "fp": 117,
+            "recall": 0.07547169811320754,
+            "precision": 0.145985401459854,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "chain": {
+            "auroc": 0.564985794958781,
+            "ap": 0.11907843588228811,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 26,
+            "fp": 127,
+            "recall": 0.09811320754716982,
+            "precision": 0.16993464052287582,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "native": {
+            "auroc": 0.5661340648755052,
+            "ap": 0.12116441843410748,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 25,
+            "fp": 137,
+            "recall": 0.09433962264150944,
+            "precision": 0.15432098765432098,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "rewired": {
+            "auroc": 0.5693380520595566,
+            "ap": 0.12266620741350286,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 27,
+            "fp": 139,
+            "recall": 0.1018867924528302,
+            "precision": 0.16265060240963855,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "edge_node": {
+            "auroc": 0.5407283312043222,
+            "ap": 0.10912480734688032,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 21,
+            "fp": 117,
+            "recall": 0.07924528301886792,
+            "precision": 0.15217391304347827,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          }
+        },
+        "44": {
+          "node": {
+            "auroc": 0.5404819243468124,
+            "ap": 0.10900202883018144,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 20,
+            "fp": 117,
+            "recall": 0.07547169811320754,
+            "precision": 0.145985401459854,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "chain": {
+            "auroc": 0.564985794958781,
+            "ap": 0.11907843588228811,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 26,
+            "fp": 127,
+            "recall": 0.09811320754716982,
+            "precision": 0.16993464052287582,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "native": {
+            "auroc": 0.5661340648755052,
+            "ap": 0.12116441843410748,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 25,
+            "fp": 137,
+            "recall": 0.09433962264150944,
+            "precision": 0.15432098765432098,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "rewired": {
+            "auroc": 0.567653690169553,
+            "ap": 0.12109997648021574,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 27,
+            "fp": 135,
+            "recall": 0.1018867924528302,
+            "precision": 0.16666666666666666,
+            "onset_hits": 2,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "edge_node": {
+            "auroc": 0.5407283312043222,
+            "ap": 0.10912480734688032,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 21,
+            "fp": 117,
+            "recall": 0.07924528301886792,
+            "precision": 0.15217391304347827,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          }
+        }
+      },
+      "null_strength": {
+        "valid_cases": 63,
+        "total": 159,
+        "adopted_mass_reassigned_mean": 0.24665400030752208,
+        "adopted_mass_reassigned_range": [
+          0.22188690462474578,
+          0.26516312846537515
+        ]
+      }
+    },
+    "v4_converged": {
+      "execution": {
+        "status": "DONE",
+        "selected_rank": 2,
+        "fitted_models": 10,
+        "reused_models": 6,
+        "seconds": 288.1812298297882,
+        "labels_used": false
+      },
+      "metrics": {
+        "source_raw": {
+          "auroc": 0.5417698015482448,
+          "ap": 0.10899374107409517,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 21,
+          "fp": 117,
+          "recall": 0.07924528301886792,
+          "precision": 0.15217391304347827,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "source_local": {
+          "auroc": 0.6472926657312978,
+          "ap": 0.23353247549930678,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 49,
+          "fp": 118,
+          "recall": 0.18490566037735848,
+          "precision": 0.2934131736526946,
+          "onset_hits": 4,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 5
+        },
+        "source_unit": {
+          "auroc": 0.6714761376248615,
+          "ap": 0.18343217532187167,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 50,
+          "fp": 169,
+          "recall": 0.18867924528301888,
+          "precision": 0.228310502283105,
+          "onset_hits": 3,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 5
+        },
+        "nll": {
+          "auroc": 0.5776502697910777,
+          "ap": 0.11129448333986293,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 15,
+          "fp": 117,
+          "recall": 0.05660377358490566,
+          "precision": 0.11363636363636363,
+          "onset_hits": 2,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "node": {
+          "auroc": 0.5404819243468124,
+          "ap": 0.10900202883018144,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 20,
+          "fp": 117,
+          "recall": 0.07547169811320754,
+          "precision": 0.145985401459854,
+          "onset_hits": 0,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "chain": {
+          "auroc": 0.5593931271333739,
+          "ap": 0.11590795148602719,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 25,
+          "fp": 121,
+          "recall": 0.09433962264150944,
+          "precision": 0.17123287671232876,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "native": {
+          "auroc": 0.563584835856735,
+          "ap": 0.11923935718358328,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 23,
+          "fp": 132,
+          "recall": 0.08679245283018867,
+          "precision": 0.14838709677419354,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "rewired": {
+          "auroc": 0.5650653711110646,
+          "ap": 0.11989941042631365,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 24,
+          "fp": 131,
+          "recall": 0.09056603773584905,
+          "precision": 0.15483870967741936,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "edge_node": {
+          "auroc": 0.5407283312043222,
+          "ap": 0.10912480734688032,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 21,
+          "fp": 117,
+          "recall": 0.07924528301886792,
+          "precision": 0.15217391304347827,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 6
+        },
+        "legacy_fixed": {
+          "auroc": 0.6701903545326996,
+          "ap": 0.1686151292483614,
+          "tokens": 2968,
+          "wrong": 265,
+          "tp": 53,
+          "fp": 201,
+          "recall": 0.2,
+          "precision": 0.20866141732283464,
+          "onset_hits": 1,
+          "onsets": 16,
+          "normal_answers": 6,
+          "normal_alarm": 3
+        }
+      },
+      "comparisons": [
+        {
+          "first": "native",
+          "second": "node",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.00031993411114633174,
+            0.04149665956007782
+          ],
+          "ap_ci95": [
+            0.0034161237902935885,
+            0.02116648802261693
+          ]
+        },
+        {
+          "first": "native",
+          "second": "chain",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.0031375828518450306,
+            0.012102038083953326
+          ],
+          "ap_ci95": [
+            -0.0021724344424444804,
+            0.011172324321981411
+          ]
+        },
+        {
+          "first": "native",
+          "second": "rewired",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.004275805543600386,
+            0.0017190387911460512
+          ],
+          "ap_ci95": [
+            -0.002161388818388598,
+            0.00027095199423281496
+          ]
+        },
+        {
+          "first": "native",
+          "second": "source_raw",
+          "draws": 1000,
+          "auroc_ci95": [
+            0.0012247809662585152,
+            0.03851331130216256
+          ],
+          "ap_ci95": [
+            0.0041906009127304945,
+            0.021162366926650925
+          ]
+        },
+        {
+          "first": "native",
+          "second": "source_unit",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.18798602298830525,
+            -0.00783296219627433
+          ],
+          "ap_ci95": [
+            -0.16710226868612676,
+            -0.01283225393212372
+          ]
+        },
+        {
+          "first": "native",
+          "second": "legacy_fixed",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.20579103388388525,
+            -0.0017875696591744224
+          ],
+          "ap_ci95": [
+            -0.18051415825390565,
+            0.0038288350663944807
+          ]
+        },
+        {
+          "first": "native",
+          "second": "edge_node",
+          "draws": 1000,
+          "auroc_ci95": [
+            -0.0004174300676827891,
+            0.041419789618699784
+          ],
+          "ap_ci95": [
+            0.0032907459992262246,
+            0.02113290182935318
+          ]
+        }
+      ],
+      "within_answer": {
+        "source_raw": {
+          "mean": 0.5297653481256436,
+          "mixed_answers": 11
+        },
+        "source_local": {
+          "mean": 0.6498630691319142,
+          "mixed_answers": 11
+        },
+        "source_unit": {
+          "mean": 0.7124248655013526,
+          "mixed_answers": 11
+        },
+        "nll": {
+          "mean": 0.5632671534093439,
+          "mixed_answers": 11
+        },
+        "node": {
+          "mean": 0.5272852028604176,
+          "mixed_answers": 11
+        },
+        "chain": {
+          "mean": 0.5409812920109791,
+          "mixed_answers": 11
+        },
+        "native": {
+          "mean": 0.5479247412704543,
+          "mixed_answers": 11
+        },
+        "rewired": {
+          "mean": 0.5494626988683554,
+          "mixed_answers": 11
+        },
+        "edge_node": {
+          "mean": 0.527181758728248,
+          "mixed_answers": 11
+        },
+        "legacy_fixed": {
+          "mean": 0.702380597367815,
+          "mixed_answers": 11
+        }
+      },
+      "seeds": {
+        "42": {
+          "node": {
+            "auroc": 0.5404819243468124,
+            "ap": 0.10900202883018144,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 20,
+            "fp": 117,
+            "recall": 0.07547169811320754,
+            "precision": 0.145985401459854,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "chain": {
+            "auroc": 0.5593931271333739,
+            "ap": 0.11590795148602719,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 25,
+            "fp": 121,
+            "recall": 0.09433962264150944,
+            "precision": 0.17123287671232876,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "native": {
+            "auroc": 0.563584835856735,
+            "ap": 0.11923935718358328,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 23,
+            "fp": 132,
+            "recall": 0.08679245283018867,
+            "precision": 0.14838709677419354,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "rewired": {
+            "auroc": 0.5631262259264689,
+            "ap": 0.1191902770190282,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 24,
+            "fp": 131,
+            "recall": 0.09056603773584905,
+            "precision": 0.15483870967741936,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "edge_node": {
+            "auroc": 0.5407283312043222,
+            "ap": 0.10912480734688032,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 21,
+            "fp": 117,
+            "recall": 0.07924528301886792,
+            "precision": 0.15217391304347827,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          }
+        },
+        "43": {
+          "node": {
+            "auroc": 0.5404819243468124,
+            "ap": 0.10900202883018144,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 20,
+            "fp": 117,
+            "recall": 0.07547169811320754,
+            "precision": 0.145985401459854,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "chain": {
+            "auroc": 0.5593931271333739,
+            "ap": 0.11590795148602719,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 25,
+            "fp": 121,
+            "recall": 0.09433962264150944,
+            "precision": 0.17123287671232876,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "native": {
+            "auroc": 0.563584835856735,
+            "ap": 0.11923935718358328,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 23,
+            "fp": 132,
+            "recall": 0.08679245283018867,
+            "precision": 0.14838709677419354,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "rewired": {
+            "auroc": 0.5658506620875478,
+            "ap": 0.12020925098917475,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 24,
+            "fp": 130,
+            "recall": 0.09056603773584905,
+            "precision": 0.15584415584415584,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "edge_node": {
+            "auroc": 0.5407283312043222,
+            "ap": 0.10912480734688032,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 21,
+            "fp": 117,
+            "recall": 0.07924528301886792,
+            "precision": 0.15217391304347827,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          }
+        },
+        "44": {
+          "node": {
+            "auroc": 0.5404819243468124,
+            "ap": 0.10900202883018144,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 20,
+            "fp": 117,
+            "recall": 0.07547169811320754,
+            "precision": 0.145985401459854,
+            "onset_hits": 0,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "chain": {
+            "auroc": 0.5593931271333739,
+            "ap": 0.11590795148602719,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 25,
+            "fp": 121,
+            "recall": 0.09433962264150944,
+            "precision": 0.17123287671232876,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "native": {
+            "auroc": 0.563584835856735,
+            "ap": 0.11923935718358328,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 23,
+            "fp": 132,
+            "recall": 0.08679245283018867,
+            "precision": 0.14838709677419354,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "rewired": {
+            "auroc": 0.5655826161009082,
+            "ap": 0.12025106804410875,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 22,
+            "fp": 132,
+            "recall": 0.0830188679245283,
+            "precision": 0.14285714285714285,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          },
+          "edge_node": {
+            "auroc": 0.5407283312043222,
+            "ap": 0.10912480734688032,
+            "tokens": 2968,
+            "wrong": 265,
+            "tp": 21,
+            "fp": 117,
+            "recall": 0.07924528301886792,
+            "precision": 0.15217391304347827,
+            "onset_hits": 1,
+            "onsets": 16,
+            "normal_answers": 6,
+            "normal_alarm": 6
+          }
+        }
+      },
+      "null_strength": {
+        "valid_cases": 63,
+        "total": 159,
+        "adopted_mass_reassigned_mean": 0.24665400030752208,
+        "adopted_mass_reassigned_range": [
+          0.22188690462474578,
+          0.26516312846537515
+        ]
+      }
+    }
+  },
+  "scope": "exploratory previously exposed sources; no blind confirmation",
+  "effective_detector_established": false
+}

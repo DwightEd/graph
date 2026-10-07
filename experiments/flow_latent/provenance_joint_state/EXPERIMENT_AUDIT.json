@@ -1,0 +1,477 @@
+{
+  "audit_skill": "experiment-audit",
+  "verdict": "WARN",
+  "reason_code": "exposed_exploratory_scope_no_blind_confirmation",
+  "summary": "Artifacts, labels, hashes, and reported numbers verify, but efficacy and generalization claims are capped by a 17-answer previously exposed regression cohort and PJ005 being unrun.",
+  "date": "2026-10-08",
+  "generated_at": "2026-10-08T00:31:58+08:00",
+  "auditor": "gpt-5.6-sol-ultra (requested; runtime unattested)",
+  "reviewer_model": "gpt-5.6-sol",
+  "reviewer_family": "openai",
+  "reviewer_reasoning": "ultra",
+  "review_independence": "same-family",
+  "acceptance_status": "provisional",
+  "runtime_attestation": "unavailable",
+  "reviewer_agent": "/root/provenance_integrity",
+  "trace_path": ".aris/traces/experiment-audit/2026-10-08_provenance_joint_state/",
+  "overall_verdict": "WARN",
+  "integrity_status": "warn",
+  "checks": {
+    "A_ground_truth_provenance": {
+      "status": "PASS",
+      "details": "Final metrics use dataset-provided RAGTruth character spans. All 17 regression responses and source IDs match response.jsonl, and independently reconstructed token labels match all saved annotations. Observer-derived source_gap is used only as an explicitly declared self-supervised proxy for fitting/rank selection. The label-trained probe is diagnostic-only and its weights are not transferred.",
+      "evidence": [
+        "graph/experiments/token_backtrace/grounded_projection_evaluate.py:39",
+        "graph/experiments/native_support/ragtruth.py:53",
+        "graph/experiments/flow_latent/provenance_joint_state/measure.py:46",
+        "graph/experiments/flow_latent/provenance_joint_state/run.py:55",
+        "graph/experiments/flow_latent/provenance_joint_state/METHOD_IMPLEMENTATION.md:45",
+        "graph/outputs/provenance_joint_state_20261008_v1/supervised_diagnostic.json:2",
+        "/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/response.jsonl:12220",
+        "/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/response.jsonl:12298"
+      ]
+    },
+    "B_metric_normalization": {
+      "status": "PASS",
+      "details": "No evaluation metric is divided by a model's own max/min/mean. Scores are calibrated by task-specific reference-cohort empirical mid-ranks, raw scores are retained, and raw-scale AUROC/AP is reported for the new methods. Reference percentiles are explicitly not presented as probabilities or guaranteed FPR calibration.",
+      "evidence": [
+        "graph/experiments/flow_latent/provenance_joint_state/run.py:113",
+        "graph/experiments/flow_latent/provenance_joint_state/evaluate.py:149",
+        "graph/experiments/token_backtrace/grounded_projection_evaluate.py:57",
+        "graph/experiments/flow_latent/provenance_joint_state/RESULTS.md:35",
+        "graph/experiments/flow_latent/provenance_joint_state/METHOD_IMPLEMENTATION.md:53"
+      ]
+    },
+    "C_result_existence": {
+      "status": "PASS",
+      "details": "All requested result files exist. Four execution files are DONE, exact headline numbers match raw results and aggregate reports, tracker statuses are truthful, all supplied freeze/protocol/raw-manifest hashes verify, and independent metric/posterior replay succeeds.",
+      "evidence": [
+        "graph/outputs/provenance_joint_state_20261008_v4_converged/execution.json:2",
+        "graph/outputs/provenance_joint_state_20261008_v4_converged/protocol.json:67",
+        "graph/outputs/provenance_joint_state_20261008_v4_converged/results.json:19",
+        "graph/outputs/provenance_joint_state_20261008_v4_converged/results.json:89",
+        "graph/outputs/provenance_joint_state_20261008_v4_converged/results.json:2129",
+        "graph/experiments/flow_latent/provenance_joint_state/EXPERIMENT_TRACKER.md:5",
+        "graph/experiments/flow_latent/provenance_joint_state/NUMERIC_AUDIT.json:2",
+        "graph/outputs/provenance_joint_state_20261008_raw_artifact_manifest.json:2",
+        "graph/experiments/flow_latent/provenance_joint_state/VERIFICATION.json:2"
+      ],
+      "provenance_note": "results.json and evaluation_annotations.json are post-score-freeze outputs rather than members of frozen_scores.json; this audit hashes and independently reproduces them. A separate post-evaluation manifest is recommended."
+    },
+    "D_metric_dead_code": {
+      "status": "PASS",
+      "details": "Every metric-producing function used by reported claims is called and its output appears in results or the numeric audit. No claimed number traces to an uncalled metric function.",
+      "evidence": [
+        "graph/experiments/flow_latent/provenance_joint_state/evaluate.py:19",
+        "graph/experiments/flow_latent/provenance_joint_state/evaluate.py:140",
+        "graph/experiments/flow_latent/provenance_joint_state/audit_numeric.py:19",
+        "graph/experiments/flow_latent/provenance_joint_state/audit_numeric.py:67",
+        "graph/experiments/token_backtrace/grounded_projection_evaluate.py:57",
+        "graph/experiments/token_backtrace/grounded_projection_evaluate.py:130"
+      ]
+    },
+    "E_scope_and_seeds": {
+      "status": "WARN",
+      "details": "Scope is 24 fit, 12 reference, and 17 regression answers across 53 source-disjoint sources and three tasks. Seeds 42/43/44 are optimization/control seeds on one fixed cohort. Regression examples were previously label-selected, all sources were historically exposed, native catches 1/16 onsets and alarms on 6/6 normal answers, and PJ005 blind confirmation is NOT RUN. Current prose discloses these limits accurately.",
+      "evidence": [
+        "graph/experiments/flow_latent/provenance_joint_state/RESULTS.md:3",
+        "graph/experiments/flow_latent/provenance_joint_state/RESULTS.md:7",
+        "graph/experiments/flow_latent/provenance_joint_state/RESULTS.md:72",
+        "graph/outputs/provenance_joint_state_20261008_v4_converged/inputs.json:135747",
+        "graph/outputs/provenance_joint_state_20261008_v4_converged/protocol.json:70",
+        "graph/outputs/provenance_joint_state_20261008_v4_converged/results.json:89",
+        "graph/experiments/flow_latent/provenance_joint_state/EXPERIMENT_TRACKER.md:11"
+      ]
+    },
+    "F_evaluation_type": {
+      "status": "PASS",
+      "classifications": [
+        {
+          "component": "final hallucination metrics",
+          "type": "real_gt",
+          "claim_ceiling": "descriptive performance on the saved exposed cohort"
+        },
+        {
+          "component": "unlabeled fitting and rank selection",
+          "type": "self_supervised_proxy",
+          "claim_ceiling": "proxy prediction/model fitting, not factual correctness"
+        },
+        {
+          "component": "source blocking, replay, and native-gradient canary",
+          "type": "self_supervised_proxy",
+          "claim_ceiling": "measurement fidelity at checked points"
+        },
+        {
+          "component": "synthetic Gaussian and tiny-model tests",
+          "type": "simulation_only",
+          "claim_ceiling": "implementation contracts"
+        },
+        {
+          "component": "supervised logistic diagnostic",
+          "type": "real_gt",
+          "claim_ceiling": "diagnostic association only; no detector-weight transfer"
+        }
+      ],
+      "absent_types": [
+        "synthetic_proxy_as_final_ground_truth",
+        "human_eval"
+      ],
+      "evidence": [
+        "graph/experiments/token_backtrace/grounded_projection_evaluate.py:39",
+        "graph/experiments/flow_latent/provenance_joint_state/run.py:75",
+        "graph/experiments/flow_latent/provenance_joint_state/canary.py:13",
+        "graph/experiments/flow_latent/provenance_joint_state/test_science.py:13",
+        "graph/experiments/flow_latent/provenance_joint_state/evaluate.py:62"
+      ]
+    }
+  },
+  "verified_evidence": {
+    "dataset": {
+      "parsed_rows": 17790,
+      "unique_ids": 17790,
+      "duplicate_ids": 0,
+      "regression_rows_found": 17,
+      "exact_response_matches": 17,
+      "exact_source_id_matches": 17,
+      "token_annotation_mismatches": 0
+    },
+    "cohort": {
+      "fit_answers": 24,
+      "reference_answers": 12,
+      "regression_answers": 17,
+      "unique_sources": 53,
+      "source_overlap_counts": {
+        "fit_reference": 0,
+        "fit_regression": 0,
+        "reference_regression": 0
+      },
+      "measured_response_tokens": 9118,
+      "evaluated_valid_tokens": 2968,
+      "evaluated_wrong_tokens": 265,
+      "evaluated_onsets": 16,
+      "normal_answers": 6
+    },
+    "configurations": {
+      "tasks": [
+        "QA",
+        "Summary",
+        "Data2txt"
+      ],
+      "seeds": [
+        42,
+        43,
+        44
+      ],
+      "v4_model_kinds": [
+        "node",
+        "chain",
+        "native",
+        "rewired",
+        "edge_node"
+      ],
+      "v4_saved_models": 15,
+      "v4_converged_models": 15
+    },
+    "hash_and_numeric_checks": {
+      "supplied_numeric_audit_status": "PASS",
+      "rerun_numeric_audit_status": "PASS",
+      "frozen_and_protocol_hashes_checked": 488,
+      "metric_pairs_checked": 131,
+      "posterior_replays": 228,
+      "posterior_max_error": 0,
+      "raw_manifest_entries_checked": 159,
+      "raw_manifest_bytes_checked": 7861316942,
+      "raw_manifest_missing": 0,
+      "raw_manifest_mismatches": 0,
+      "legacy_freeze_manifests_checked": 5,
+      "legacy_freeze_entries_each": 22,
+      "current_science_tests": "6 passed in 13.94s"
+    },
+    "v4_metrics": {
+      "source_raw": {
+        "auroc": 0.5417698015482448,
+        "ap": 0.10899374107409517
+      },
+      "source_local": {
+        "auroc": 0.6472926657312978,
+        "ap": 0.23353247549930678
+      },
+      "source_unit": {
+        "auroc": 0.6714761376248615,
+        "ap": 0.18343217532187167
+      },
+      "nll": {
+        "auroc": 0.5776502697910777,
+        "ap": 0.11129448333986293
+      },
+      "node": {
+        "auroc": 0.5404819243468124,
+        "ap": 0.10900202883018144
+      },
+      "chain": {
+        "auroc": 0.5593931271333739,
+        "ap": 0.11590795148602719
+      },
+      "native": {
+        "auroc": 0.563584835856735,
+        "ap": 0.11923935718358328
+      },
+      "rewired": {
+        "auroc": 0.5650653711110646,
+        "ap": 0.11989941042631365
+      },
+      "edge_node": {
+        "auroc": 0.5407283312043222,
+        "ap": 0.10912480734688032
+      },
+      "legacy_fixed": {
+        "auroc": 0.6701903545326996,
+        "ap": 0.1686151292483614
+      }
+    }
+  },
+  "claims": [
+    {
+      "id": "C1",
+      "claim": "The exact four-round metrics and saved-cohort comparisons are correct.",
+      "impact": "supported"
+    },
+    {
+      "id": "C2",
+      "claim": "The main detector fit does not read natural labels.",
+      "impact": "supported_with_qualifier",
+      "qualifier": "The separate diagnostic uses labels, and the development/evaluation roster is historically exposed."
+    },
+    {
+      "id": "C3",
+      "claim": "Native improves over raw source in v4.",
+      "impact": "needs_qualifier",
+      "qualifier": "Exploratory on the exposed cohort; native remains below source-local/source-unit and alarms on every normal answer."
+    },
+    {
+      "id": "C4",
+      "claim": "True native edges outperform chain, rewired, and edge-node controls.",
+      "impact": "unsupported"
+    },
+    {
+      "id": "C5",
+      "claim": "An effective or generalizable detector is established.",
+      "impact": "unsupported"
+    },
+    {
+      "id": "C6",
+      "claim": "The replay/measurement implementation is faithful.",
+      "impact": "partially_supported",
+      "qualifier": "Tests, four native-gradient checks, and posterior replay pass; the planned physical endpoint replay gate remains incomplete."
+    },
+    {
+      "id": "C7",
+      "claim": "The method provides online onset warning.",
+      "impact": "unsupported"
+    }
+  ],
+  "action_items": [
+    "Run PJ005 once on a preregistered, previously unexposed, source-disjoint cohort with v4 parameters, score direction, thresholds, and comparisons frozen before labels are joined.",
+    "Describe seeds 42/43/44 as optimization/control seeds; add independent cohorts or model replications before robustness/generalization claims.",
+    "Complete the physical endpoint replay gate and a stronger BPE/content-matched null before graph-endpoint or causal-message claims.",
+    "Add a post-evaluation manifest for evaluation_annotations.json, results.json, visualizations, and the exact evaluation-code snapshot.",
+    "Keep source-gap prediction explicitly labeled self_supervised_proxy and retain the observer-model limitation."
+  ],
+  "audited_input_hashes": {
+    "algorithm": "sha256",
+    "direct_file_count": 124,
+    "aggregate_scheme": "sha256 over sorted records: path + NUL + hexadecimal file sha256 + LF",
+    "aggregate_sha256": "sha256:0ae252b0e1b861a6014744956bfc2b175b404a3cc483624be4969d337acd8821",
+    "direct_files": {
+      "/share/home/tm902089733300000/a903202310/lys/data/RAGTruth/dataset/response.jsonl": "sha256:e4c2e4ac24fff676d8984cc61c35d791612fadc58015335d97dd632375e18073",
+      "graph/experiments/flow_latent/data.py": "sha256:3d9b033b740222c906ddd24289dec4f43dd6c71f2377ceefca53846201590d4b",
+      "graph/experiments/flow_latent/evaluate.py": "sha256:f168494d1e9f9355c0f418e818c733239b236aebee39fbbbefd4e2408819627c",
+      "graph/experiments/flow_latent/provenance_joint_state/EXPERIMENT_TRACKER.md": "sha256:ec0aecf27ee67133e83795446a06573731c3972d3917670e54322e1d64af403a",
+      "graph/experiments/flow_latent/provenance_joint_state/METHOD_IMPLEMENTATION.md": "sha256:a5198e68f8e9d7ae3bc4b3370b515fbe6d88c5fbb06081c6e3686f4228decd14",
+      "graph/experiments/flow_latent/provenance_joint_state/NUMERIC_AUDIT.json": "sha256:0a4ab532b56140d92deb6139ac13a5aa904210630036a2a7e5581e419c865aac",
+      "graph/experiments/flow_latent/provenance_joint_state/README.md": "sha256:281605991a563b4e4d3c351b4e5029ca96645e1f01df32b65442e2eae643da10",
+      "graph/experiments/flow_latent/provenance_joint_state/RESULTS.json": "sha256:f0090af642b8bc034561865c54e1762ef25c5ea65c6bd10cabcdc3d5cd8bcf24",
+      "graph/experiments/flow_latent/provenance_joint_state/RESULTS.md": "sha256:886f6f21e34a1c216e913f9f2c8086e41f348f7060aa3234a560faebea29c9b8",
+      "graph/experiments/flow_latent/provenance_joint_state/VERIFICATION.json": "sha256:6a49e50363b6f5e714effd84d96f7b472441c501824cfdcf095f0292c7d79399",
+      "graph/experiments/flow_latent/provenance_joint_state/audit_numeric.py": "sha256:efc7c274c7a16a69b714c21630e4432e7d0a213044877b6c494e2821bfe09e11",
+      "graph/experiments/flow_latent/provenance_joint_state/canary.py": "sha256:ae65aa7500e383d99aa870aca2fb5e80f8801a9484b8c8b1a9f6c5b99c3542cd",
+      "graph/experiments/flow_latent/provenance_joint_state/evaluate.py": "sha256:c28ea15a968c411b3f7438024156cf6eacbcc791821d0ca2fd64aa49fb7d84df",
+      "graph/experiments/flow_latent/provenance_joint_state/features.py": "sha256:d47daa2ff6b018dbdac3108fea373c750a68dbe5ca69bedb166ea89da6410999",
+      "graph/experiments/flow_latent/provenance_joint_state/gaussian.py": "sha256:801ae6f57a27a55acd2c9f85edaf0f6ebc6f0ca86e751fe094942055744fc92a",
+      "graph/experiments/flow_latent/provenance_joint_state/legacy.py": "sha256:3154deb63484c70f0258a955dba0d93170a1299a59402205093c70c0103b1937",
+      "graph/experiments/flow_latent/provenance_joint_state/measure.py": "sha256:df32ae3415496f3c95a525cbb499d6822cd3beac3a1106a83de9dfa81941bdaf",
+      "graph/experiments/flow_latent/provenance_joint_state/run.py": "sha256:6423e23b94551060619bbd3cf4e70efd332c19ebe96f701c5d029a5f3abe51be",
+      "graph/experiments/flow_latent/provenance_joint_state/test_science.py": "sha256:ac18c9f4e4cad469bf8acb0d49a206e5ec361c257cfe9efc9cc36c33db6091c8",
+      "graph/experiments/native_support/ragtruth.py": "sha256:0c0e6d630f49af00c14a0e55387c9ae51cd2179c0987e30c7d05299a3797e1f9",
+      "graph/experiments/token_backtrace/grounded_projection.py": "sha256:0fe957e5a2fd3c5c6274e1a724d6585eab3790fda90c7ac5c6d86ad1a3fe5527",
+      "graph/experiments/token_backtrace/grounded_projection_data.py": "sha256:4fd5ddec4a56720ae1ea6ac4ac893abd0902b52fce0218a9054ff455876323fe",
+      "graph/experiments/token_backtrace/grounded_projection_evaluate.py": "sha256:3e2b39a4227dc0d2fa0829d6f1506109fc950ca6583db605a0d2a7fcf310218e",
+      "graph/outputs/provenance_joint_state_20261008_measure/code_snapshot/grounded_projection.py": "sha256:0fe957e5a2fd3c5c6274e1a724d6585eab3790fda90c7ac5c6d86ad1a3fe5527",
+      "graph/outputs/provenance_joint_state_20261008_measure/code_snapshot/measure.py": "sha256:df32ae3415496f3c95a525cbb499d6822cd3beac3a1106a83de9dfa81941bdaf",
+      "graph/outputs/provenance_joint_state_20261008_measure/code_snapshot/precision.py": "sha256:12c4804f48ecf4dbe7bc3280e8170ce2151e30c6868d533a81d7f6dc2d97be35",
+      "graph/outputs/provenance_joint_state_20261008_measure/code_snapshot/run.py": "sha256:52bcf875eff0df0385f7a225c1d2e63bc9888ab8e85c83defd08a21b690a8fb6",
+      "graph/outputs/provenance_joint_state_20261008_measure/execution.json": "sha256:645e455480bbef4b9addd5422f1a4f758d057558ed9aa718ba2babadafbf583f",
+      "graph/outputs/provenance_joint_state_20261008_measure/inputs.json": "sha256:b93d1672ab327fec1c46c7e5db9a10e459ed94a248176ff5783db48e86a5f2ed",
+      "graph/outputs/provenance_joint_state_20261008_measure/measurement_freeze.json": "sha256:1aa2bc59eadb3b45288f03143117441285eaeafc1209d89ce2be906226fff8d5",
+      "graph/outputs/provenance_joint_state_20261008_native_canary.json": "sha256:90282ee3d432b64c1532e86b87945a6bfe6b005dc2b9c171879e9c6ac476fd4a",
+      "graph/outputs/provenance_joint_state_20261008_numeric_audit.json": "sha256:0a4ab532b56140d92deb6139ac13a5aa904210630036a2a7e5581e419c865aac",
+      "graph/outputs/provenance_joint_state_20261008_pilot/code_snapshot/__init__.py": "sha256:f9b218bb5d4865d7f9066e3216f067c2e988fe28eddbab30f8f92a208a05cf36",
+      "graph/outputs/provenance_joint_state_20261008_pilot/code_snapshot/measure.py": "sha256:5c88972a38f68466b4faa5476e85719eaf8c13d1aa6adde4adc6e1754c6cf963",
+      "graph/outputs/provenance_joint_state_20261008_pilot/execution.json": "sha256:4a04a32014b74cbdeda2ce072a0ba6f2092b43dc670ca8acb811e15e0333e01b",
+      "graph/outputs/provenance_joint_state_20261008_pilot/inputs.json": "sha256:4f605af7a32d869f66cafff3d1e4f0565d9a68232ef48c4d5d0ef882ff4da651",
+      "graph/outputs/provenance_joint_state_20261008_pilot/measurement_freeze.json": "sha256:4ee2b9db7ea2db1b9da33cc1ca28a6e253bf3e782f3ff64257d22a7403436977",
+      "graph/outputs/provenance_joint_state_20261008_raw_artifact_manifest.json": "sha256:9e0a6348be52910d8ad79f015e90d9b1d208ea167a6371a11d9924f3c120590c",
+      "graph/outputs/provenance_joint_state_20261008_v1/code_snapshot/__init__.py": "sha256:f9b218bb5d4865d7f9066e3216f067c2e988fe28eddbab30f8f92a208a05cf36",
+      "graph/outputs/provenance_joint_state_20261008_v1/code_snapshot/features.py": "sha256:580cbee1e2376b7a7dc606a6004f961f2f17bf44ba025cbc14be1d8033c0a021",
+      "graph/outputs/provenance_joint_state_20261008_v1/code_snapshot/gaussian.py": "sha256:aa81ebf0c35575b90edc104ec635f4020a69b0906926c03a6abbd8b329494c04",
+      "graph/outputs/provenance_joint_state_20261008_v1/code_snapshot/measure.py": "sha256:df32ae3415496f3c95a525cbb499d6822cd3beac3a1106a83de9dfa81941bdaf",
+      "graph/outputs/provenance_joint_state_20261008_v1/code_snapshot/run.py": "sha256:a428d68613b0990e51b82974262777c6221b8e8078121ad76b0fc933be9e47d1",
+      "graph/outputs/provenance_joint_state_20261008_v1/code_snapshot/test_science.py": "sha256:8d339efabd5dd078debee9ad6a841c0581645a5723f2d8cb34d4a0f6b6daeadb",
+      "graph/outputs/provenance_joint_state_20261008_v1/evaluation_annotations.json": "sha256:1f9b06fac1f8cf0d6e1ac76a7370b920ce04b58826b710b1cffce1f8e9945198",
+      "graph/outputs/provenance_joint_state_20261008_v1/execution.json": "sha256:afe2cc8465c558d226334fbc64737a27c2b4bf3d1b803f4716a0492ea3e3706c",
+      "graph/outputs/provenance_joint_state_20261008_v1/fitting.json": "sha256:99e0a84eaf59fbcd9bc1aab0bd7935d9dfad2673177bbe88449175da1d905390",
+      "graph/outputs/provenance_joint_state_20261008_v1/frozen_scores.json": "sha256:ade71c8e42fed2e4ca7027a19e5db8275c77c83e027b2a5379f9df08d8534653",
+      "graph/outputs/provenance_joint_state_20261008_v1/inputs.json": "sha256:b93d1672ab327fec1c46c7e5db9a10e459ed94a248176ff5783db48e86a5f2ed",
+      "graph/outputs/provenance_joint_state_20261008_v1/legacy_baseline.npz": "sha256:595c5e6ac8562fd1da3889224233773cd7393c7ef133ed9a7a99f5671d18aa4a",
+      "graph/outputs/provenance_joint_state_20261008_v1/legacy_baseline_freeze.json": "sha256:a25a3a623448b48e8cb5da3cd42cbbf6aca38d4f341913fa47de0a59572df7a7",
+      "graph/outputs/provenance_joint_state_20261008_v1/legacy_source_gaps.npz": "sha256:12a90a2766391a95df5bfe49386ddbd68517db9c5136e7aefce0da3f91f53084",
+      "graph/outputs/provenance_joint_state_20261008_v1/legacy_source_gaps_freeze.json": "sha256:36b9be97de1fc90e9b41114d97a99b20453a67460f9b118e58cb9d41bef1527c",
+      "graph/outputs/provenance_joint_state_20261008_v1/models.pkl": "sha256:77e469dc48bfaf859eadc1d03707d6bd3dcdddb8c693697f2670a329b064edcf",
+      "graph/outputs/provenance_joint_state_20261008_v1/protocol.json": "sha256:423925629ecac0c82e34288344144a4d89ec6c96e86fb8ed749e9194eb8d23ce",
+      "graph/outputs/provenance_joint_state_20261008_v1/rank_selection.json": "sha256:04e72347eb51a1242c764e3908284e2bcc050e6c2223f53be5cb18b4ac39e1cf",
+      "graph/outputs/provenance_joint_state_20261008_v1/results.json": "sha256:7003a5d31583b2caa39b9ee19227ee1fdac02e8d84417c2f5c57fe63df6eb43e",
+      "graph/outputs/provenance_joint_state_20261008_v1/rewire.json": "sha256:6d1ff4563b18f2ac9ffcc1ac20c856729a2d7b4ee179183dc0dddac0401e1f7a",
+      "graph/outputs/provenance_joint_state_20261008_v1/supervised_diagnostic.json": "sha256:f37d088f3aeefdba33164b17529e676416ab0f0aa59574a9209cfc523359d003",
+      "graph/outputs/provenance_joint_state_20261008_v1/thresholds.json": "sha256:6fadac7fd06f3a292854d6cb8f01c972db66e5f835372044c7cd65625d6655f7",
+      "graph/outputs/provenance_joint_state_20261008_v2/code_snapshot/__init__.py": "sha256:f9b218bb5d4865d7f9066e3216f067c2e988fe28eddbab30f8f92a208a05cf36",
+      "graph/outputs/provenance_joint_state_20261008_v2/code_snapshot/evaluate.py": "sha256:c28ea15a968c411b3f7438024156cf6eacbcc791821d0ca2fd64aa49fb7d84df",
+      "graph/outputs/provenance_joint_state_20261008_v2/code_snapshot/features.py": "sha256:6ac113d777a89f1a52c1475481017e42c4d62d2f9a07cb13442c03fef0a022b4",
+      "graph/outputs/provenance_joint_state_20261008_v2/code_snapshot/gaussian.py": "sha256:aa81ebf0c35575b90edc104ec635f4020a69b0906926c03a6abbd8b329494c04",
+      "graph/outputs/provenance_joint_state_20261008_v2/code_snapshot/legacy.py": "sha256:56a079ef0d4d6f4851e1cea3c91a6541ed9188e959863c24af7a2fdc17d274b9",
+      "graph/outputs/provenance_joint_state_20261008_v2/code_snapshot/measure.py": "sha256:df32ae3415496f3c95a525cbb499d6822cd3beac3a1106a83de9dfa81941bdaf",
+      "graph/outputs/provenance_joint_state_20261008_v2/code_snapshot/run.py": "sha256:b97f2a1f44e81655c36eec70e39ab5fa267c8136278a36c6a143c3ab2c463db8",
+      "graph/outputs/provenance_joint_state_20261008_v2/code_snapshot/test_science.py": "sha256:8d339efabd5dd078debee9ad6a841c0581645a5723f2d8cb34d4a0f6b6daeadb",
+      "graph/outputs/provenance_joint_state_20261008_v2/evaluation_annotations.json": "sha256:1f9b06fac1f8cf0d6e1ac76a7370b920ce04b58826b710b1cffce1f8e9945198",
+      "graph/outputs/provenance_joint_state_20261008_v2/execution.json": "sha256:b6a7427dbe63b81f4d57b05ddd2b7301f900cf64e5a538ad09ffe5eecd310dfd",
+      "graph/outputs/provenance_joint_state_20261008_v2/fitting.json": "sha256:773a13e53c41a8fb95e4563795c8b629ba949720e4721822f320b8f5c0fffcb7",
+      "graph/outputs/provenance_joint_state_20261008_v2/frozen_scores.json": "sha256:e205f5c9a0721621dcbe5e8ed49212c4f2ebea9a42cf839482a372056d08ed98",
+      "graph/outputs/provenance_joint_state_20261008_v2/inputs.json": "sha256:b93d1672ab327fec1c46c7e5db9a10e459ed94a248176ff5783db48e86a5f2ed",
+      "graph/outputs/provenance_joint_state_20261008_v2/legacy_baseline.npz": "sha256:595c5e6ac8562fd1da3889224233773cd7393c7ef133ed9a7a99f5671d18aa4a",
+      "graph/outputs/provenance_joint_state_20261008_v2/legacy_baseline_freeze.json": "sha256:f12ceed08ce4e00eec53b00d0271007aa1238b7c16b6e66e6ef2ef8220f5129e",
+      "graph/outputs/provenance_joint_state_20261008_v2/models.pkl": "sha256:9976bacfbf020665e1e62a0ed271e3da815169c4506f7fc0f541f994d211f5b3",
+      "graph/outputs/provenance_joint_state_20261008_v2/protocol.json": "sha256:4f70292625f19337227ecc1687e4baab39069b0c5d5449f8ce45a202bd47555c",
+      "graph/outputs/provenance_joint_state_20261008_v2/rank_selection.json": "sha256:be0314333c750c246734a88112811955314894992ad2c07b0ff7fe5e21444e7d",
+      "graph/outputs/provenance_joint_state_20261008_v2/results.json": "sha256:e8e20e8f81cdcfdfb3834d1ddff11177f2f7f311d755e7347ec07f945b65e575",
+      "graph/outputs/provenance_joint_state_20261008_v2/rewire.json": "sha256:f1a1a3d45b138642722dfb18376582e8228b83a5a0bc2fd0b77563daae1bb9f7",
+      "graph/outputs/provenance_joint_state_20261008_v2/thresholds.json": "sha256:5ac07c1ef5f6976a7268f3720f743342eda5670bcb4f1a097e035d8b1a9efbdd",
+      "graph/outputs/provenance_joint_state_20261008_v3/code_snapshot/__init__.py": "sha256:f9b218bb5d4865d7f9066e3216f067c2e988fe28eddbab30f8f92a208a05cf36",
+      "graph/outputs/provenance_joint_state_20261008_v3/code_snapshot/evaluate.py": "sha256:c28ea15a968c411b3f7438024156cf6eacbcc791821d0ca2fd64aa49fb7d84df",
+      "graph/outputs/provenance_joint_state_20261008_v3/code_snapshot/features.py": "sha256:d47daa2ff6b018dbdac3108fea373c750a68dbe5ca69bedb166ea89da6410999",
+      "graph/outputs/provenance_joint_state_20261008_v3/code_snapshot/gaussian.py": "sha256:801ae6f57a27a55acd2c9f85edaf0f6ebc6f0ca86e751fe094942055744fc92a",
+      "graph/outputs/provenance_joint_state_20261008_v3/code_snapshot/legacy.py": "sha256:3154deb63484c70f0258a955dba0d93170a1299a59402205093c70c0103b1937",
+      "graph/outputs/provenance_joint_state_20261008_v3/code_snapshot/measure.py": "sha256:df32ae3415496f3c95a525cbb499d6822cd3beac3a1106a83de9dfa81941bdaf",
+      "graph/outputs/provenance_joint_state_20261008_v3/code_snapshot/run.py": "sha256:c33de3c8a87c6d9fabdd9d1817d6b95bd47159b6e771a936df326446e4eebb5f",
+      "graph/outputs/provenance_joint_state_20261008_v3/code_snapshot/test_science.py": "sha256:ac18c9f4e4cad469bf8acb0d49a206e5ec361c257cfe9efc9cc36c33db6091c8",
+      "graph/outputs/provenance_joint_state_20261008_v3/evaluation_annotations.json": "sha256:1f9b06fac1f8cf0d6e1ac76a7370b920ce04b58826b710b1cffce1f8e9945198",
+      "graph/outputs/provenance_joint_state_20261008_v3/execution.json": "sha256:bba1e71d0a6f4e3d3efd00c6fe0cc2e280e5fe5d7d938e6b53b92bb27fa0f75b",
+      "graph/outputs/provenance_joint_state_20261008_v3/fitting.json": "sha256:843ca53428f0626959e3493e0f91b10985ea9ab0747e8efa5b0cd3ed3e1de796",
+      "graph/outputs/provenance_joint_state_20261008_v3/frozen_scores.json": "sha256:3324a85783a43f78f2b2051d2c1d489f8a7acb1c491d0115373dddc738e406cc",
+      "graph/outputs/provenance_joint_state_20261008_v3/inputs.json": "sha256:b93d1672ab327fec1c46c7e5db9a10e459ed94a248176ff5783db48e86a5f2ed",
+      "graph/outputs/provenance_joint_state_20261008_v3/legacy_baseline.npz": "sha256:595c5e6ac8562fd1da3889224233773cd7393c7ef133ed9a7a99f5671d18aa4a",
+      "graph/outputs/provenance_joint_state_20261008_v3/legacy_baseline_freeze.json": "sha256:ddef8a683aa9c1a1150055fee8c8198bdfd3dec83f663243c81a929c827e4136",
+      "graph/outputs/provenance_joint_state_20261008_v3/models.pkl": "sha256:7ca7a5514f1e7881239b569d95ee3241e7b27c9a33dda7366bdff3fedf46f422",
+      "graph/outputs/provenance_joint_state_20261008_v3/protocol.json": "sha256:bee47509ee21d39841b9b9f176b926e0f55110aeadc25c0cce6fc5eeaeee2911",
+      "graph/outputs/provenance_joint_state_20261008_v3/rank_selection.json": "sha256:6ff0f12f457968a1deb49357b72c80e63656fc2070da14b697332c2cd863ae20",
+      "graph/outputs/provenance_joint_state_20261008_v3/results.json": "sha256:3735b5af179f87ad92b7126be83ca9b72bc8ce9661f06e7b50631b7c3f29823e",
+      "graph/outputs/provenance_joint_state_20261008_v3/rewire.json": "sha256:f1a1a3d45b138642722dfb18376582e8228b83a5a0bc2fd0b77563daae1bb9f7",
+      "graph/outputs/provenance_joint_state_20261008_v3/thresholds.json": "sha256:477b2843b024caf54ee9042477a806649601af5a6aad436405b2101087b26f69",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/code_snapshot/__init__.py": "sha256:f9b218bb5d4865d7f9066e3216f067c2e988fe28eddbab30f8f92a208a05cf36",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/code_snapshot/evaluate.py": "sha256:c28ea15a968c411b3f7438024156cf6eacbcc791821d0ca2fd64aa49fb7d84df",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/code_snapshot/features.py": "sha256:d47daa2ff6b018dbdac3108fea373c750a68dbe5ca69bedb166ea89da6410999",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/code_snapshot/gaussian.py": "sha256:801ae6f57a27a55acd2c9f85edaf0f6ebc6f0ca86e751fe094942055744fc92a",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/code_snapshot/legacy.py": "sha256:3154deb63484c70f0258a955dba0d93170a1299a59402205093c70c0103b1937",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/code_snapshot/measure.py": "sha256:df32ae3415496f3c95a525cbb499d6822cd3beac3a1106a83de9dfa81941bdaf",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/code_snapshot/run.py": "sha256:d02547189516432b7b8cfd06adc2cced448c87dd5a3b8fabfac7567fc3b36207",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/code_snapshot/test_science.py": "sha256:ac18c9f4e4cad469bf8acb0d49a206e5ec361c257cfe9efc9cc36c33db6091c8",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/evaluation_annotations.json": "sha256:1f9b06fac1f8cf0d6e1ac76a7370b920ce04b58826b710b1cffce1f8e9945198",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/execution.json": "sha256:cacb945d014e69eaed2dbc7ef9b88378df7c426fac843fbb3d4dbd768e30635f",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/fitting.json": "sha256:c40a26ef4974b92fcfe74b88202f65625fd3ff0c2ccbf54402751f8b18f53680",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/frozen_scores.json": "sha256:595f6a6d54551f3488b4a87a50438adc5497a2412c36d14ceb3328decbb0de6d",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/inputs.json": "sha256:b93d1672ab327fec1c46c7e5db9a10e459ed94a248176ff5783db48e86a5f2ed",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/legacy_baseline.npz": "sha256:595c5e6ac8562fd1da3889224233773cd7393c7ef133ed9a7a99f5671d18aa4a",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/legacy_baseline_freeze.json": "sha256:9d560f897ebff17598102db6ad432fb2dae47bbf34d99fc2072cdb98af45d726",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/models.pkl": "sha256:ed5c2f1bcd606b302e246ceabb1bd469fc94f580ecdf6aacd2f5cf6131b4a732",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/protocol.json": "sha256:45da3c1691b4acf590ab51ebf04117799d05189832ee70701e07ce894700a460",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/rank_selection.json": "sha256:032366377ab74183e8c747c51e447ca293fe485a71ed992cebd953c47d2ad0e2",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/results.json": "sha256:1a819796c56867022d76ebc05c53415450d6b6fd64edae72433bbbd3d296cb7e",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/rewire.json": "sha256:f1a1a3d45b138642722dfb18376582e8228b83a5a0bc2fd0b77563daae1bb9f7",
+      "graph/outputs/provenance_joint_state_20261008_v4_converged/thresholds.json": "sha256:477b2843b024caf54ee9042477a806649601af5a6aad436405b2101087b26f69",
+      "graph/teaching/state_audit/src/state_audit/analysis/annotations.py": "sha256:14d84b5c487b9164ed94a2f8e0b1cf551f3fd4f993076b019cedb1263464cd1e"
+    },
+    "bundle_sha256": {
+      "current_target_scripts_9": "sha256:1b4c17c109955f48305e0c0f468b13b7d8220dac5ebaea08404342cc7ec17cac",
+      "reports_and_verification_7": "sha256:e46d155f45775d6b598535cef547c57031c99c56666468920c8698bb3a593758",
+      "dependency_scripts_7": "sha256:1e11b1edabda6fb2bec1dad5b69d7ec44e49c5747f75a0e107002f0b7b3848b1",
+      "pilot_code_snapshot_2": "sha256:922d30bb624a85c03bc6423c190545c2189cc5599883a6155fa3518c3176f191",
+      "measure_code_snapshot_4": "sha256:f2b7b4d9ac609910b7acf0dd52f92da0cd20d64a5e9074360c447b70fb35413e",
+      "v1_code_snapshot_6": "sha256:23d9c975ee4131bcd87e154464b2972c8ce6eb1f30d4854230e8fc792d2ae0d0",
+      "v2_code_snapshot_8": "sha256:18904ddb0d5af0145b6f59028793b75bc5f79ca20a8695cec78f1271cdb77067",
+      "v3_code_snapshot_8": "sha256:a8372601d8483286b0cb31a5dc0cf8f5ae0e94fde1f1c7d742cc40f6b3a9444e",
+      "v4_code_snapshot_8": "sha256:22c8097edc7c17e556635aee5fc2c0890d7071af417a8dbedd404fd5580ad1cf",
+      "v1_listed_artifacts_16": "sha256:28150772d781924062400962a7c3da9e46e304fe75e672b8713270b6412aa043",
+      "v2_listed_artifacts_13": "sha256:16144dcf6aba68202d7cfcd2a7e65276845c963b99a274aaebcbbd6c5c1750fd",
+      "v3_listed_artifacts_13": "sha256:6b243dcd90cdb5b4cfa57d47d649e71c4c907ca2ca99d9ec66ffc5bf88b84a05",
+      "v4_listed_artifacts_13": "sha256:bee8b8b5cfe620af3d9fa126cf38850f1d67cd272f7a1144abad6d83a2823a9f",
+      "pilot_listed_artifacts_3": "sha256:2b522af8a65863c1ed03ef23a36485718a12c4fc415d2ce637a1a13631df72e0",
+      "measure_listed_artifacts_3": "sha256:111808b07c5399e42a06f39a79ae9c03b9d580622e96722dda246b79498f756e"
+    },
+    "manifest_verification": {
+      "v1_frozen_scores": {
+        "entries": 60,
+        "missing": 0,
+        "mismatches": 0
+      },
+      "v2_frozen_scores": {
+        "entries": 60,
+        "missing": 0,
+        "mismatches": 0
+      },
+      "v3_frozen_scores": {
+        "entries": 60,
+        "missing": 0,
+        "mismatches": 0
+      },
+      "v4_frozen_scores": {
+        "entries": 60,
+        "missing": 0,
+        "mismatches": 0
+      },
+      "v1_protocol": {
+        "entries": 60,
+        "missing": 0,
+        "mismatches": 0
+      },
+      "v2_protocol": {
+        "entries": 62,
+        "missing": 0,
+        "mismatches": 0
+      },
+      "v3_protocol": {
+        "entries": 63,
+        "missing": 0,
+        "mismatches": 0
+      },
+      "v4_protocol": {
+        "entries": 63,
+        "missing": 0,
+        "mismatches": 0
+      },
+      "raw_artifact_manifest": {
+        "entries": 159,
+        "missing": 0,
+        "mismatches": 0,
+        "bytes": 7861316942
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "status": "PASS",
+  "metric_implementation": "independent tie groups; no sklearn metric calls",
+  "runs": {
+    "provenance_joint_state_20261008_v1": {
+      "frozen_hashes_checked": 120,
+      "metric_pairs_checked": 29,
+      "posterior_replays": 48,
+      "posterior_max_error": 0.0,
+      "all_models_converged": true
+    },
+    "provenance_joint_state_20261008_v2": {
+      "frozen_hashes_checked": 122,
+      "metric_pairs_checked": 34,
+      "posterior_replays": 60,
+      "posterior_max_error": 0.0,
+      "all_models_converged": true
+    },
+    "provenance_joint_state_20261008_v3": {
+      "frozen_hashes_checked": 123,
+      "metric_pairs_checked": 34,
+      "posterior_replays": 60,
+      "posterior_max_error": 0.0,
+      "all_models_converged": false
+    },
+    "provenance_joint_state_20261008_v4_converged": {
+      "frozen_hashes_checked": 123,
+      "metric_pairs_checked": 34,
+      "posterior_replays": 60,
+      "posterior_max_error": 0.0,
+      "all_models_converged": true
+    }
+  },
+  "continuation": {
+    "binding": "PASS",
+    "modified_measurement_rejected": true
+  }
+}

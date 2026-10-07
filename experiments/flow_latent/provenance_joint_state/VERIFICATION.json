@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-10-07T16:26:31.538997+00:00",
+  "test_command": "PYTHONPATH=.:teaching/state_audit/src OMP_NUM_THREADS=4 /share/home/tm902089733300000/a903202310/lys/conda_envs/research/bin/python -m pytest experiments/flow_latent/provenance_joint_state/test_science.py -q",
+  "observed_result": "6 passed in 14.64s",
+  "exit_code": 0,
+  "numeric_audit": "outputs/provenance_joint_state_20261008_numeric_audit.json",
+  "native_canary": "outputs/provenance_joint_state_20261008_native_canary.json",
+  "source_hashes": {
+    "experiments/flow_latent/provenance_joint_state/__init__.py": "f9b218bb5d4865d7f9066e3216f067c2e988fe28eddbab30f8f92a208a05cf36",
+    "experiments/flow_latent/provenance_joint_state/audit_numeric.py": "efc7c274c7a16a69b714c21630e4432e7d0a213044877b6c494e2821bfe09e11",
+    "experiments/flow_latent/provenance_joint_state/canary.py": "ae65aa7500e383d99aa870aca2fb5e80f8801a9484b8c8b1a9f6c5b99c3542cd",
+    "experiments/flow_latent/provenance_joint_state/evaluate.py": "c28ea15a968c411b3f7438024156cf6eacbcc791821d0ca2fd64aa49fb7d84df",
+    "experiments/flow_latent/provenance_joint_state/features.py": "d47daa2ff6b018dbdac3108fea373c750a68dbe5ca69bedb166ea89da6410999",
+    "experiments/flow_latent/provenance_joint_state/gaussian.py": "801ae6f57a27a55acd2c9f85edaf0f6ebc6f0ca86e751fe094942055744fc92a",
+    "experiments/flow_latent/provenance_joint_state/legacy.py": "3154deb63484c70f0258a955dba0d93170a1299a59402205093c70c0103b1937",
+    "experiments/flow_latent/provenance_joint_state/measure.py": "df32ae3415496f3c95a525cbb499d6822cd3beac3a1106a83de9dfa81941bdaf",
+    "experiments/flow_latent/provenance_joint_state/run.py": "6423e23b94551060619bbd3cf4e70efd332c19ebe96f701c5d029a5f3abe51be",
+    "experiments/flow_latent/provenance_joint_state/test_science.py": "ac18c9f4e4cad469bf8acb0d49a206e5ec361c257cfe9efc9cc36c33db6091c8"
+  },
+  "code_cleanup": "Reuse/continuation responsibilities extracted; same observations/weight identities and full continuation feature-map binding strengthened. Frozen posteriors reproduced unchanged.",
+  "runtime_environment": "existing research env; no installs, model changes or environment rebuild",
+  "gpu_after_work": "1 MiB, 0% utilization (observed nvidia-smi)",
+  "claim_boundary": "verification of numerical/scientific contracts, not detector efficacy"
+}
