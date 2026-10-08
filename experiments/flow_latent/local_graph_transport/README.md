@@ -1,5 +1,18 @@
 # Full-coordinate local graph transport primitives
 
+## 2026-10-08 measured reader validation
+
+Collector and source-self-supervised token readers have now been implemented
+and run. [Actual results and commands](../../../docs/SOURCE_TRANSFER_VALIDATION_20261008.md)
+separate source-program performance from natural QA hallucination detection.
+Three-seed first postcandidate program AUROC is 0.996755, but the frozen natural
+QA ensemble is 0.677372, below the previous fixed source/route score 0.779725.
+No new default detector has been selected. Candidate-conditioned compatibility
+and source influence alone are not certified factual support.
+
+The following primitive-only description records the earlier implementation
+scope; its statements about absent collectors/fits are historical.
+
 This folder implements **mechanism measurements, not a hallucination detector**.
 It contains independent Torch functions and CPU science checks. It has no model
 collector, natural-label reader, training, density estimator, risk score, or
